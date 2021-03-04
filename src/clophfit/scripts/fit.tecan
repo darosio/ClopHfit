@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+#
+
+mkdir png;
+for i in *.dat; 
+    do fit_titration_global.py $i png --boot 99 > png/$i.txt; 
+    done
