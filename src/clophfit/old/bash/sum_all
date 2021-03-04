@@ -1,0 +1,9 @@
+#!/usr/bin/bash
+#
+
+for i in *.dat.txt;
+    do
+        echo $i|cut -d '.' -f 1;
+        grep " K" $i | awk 'BEGIN{getline}{print $3,$4,$5}';
+    done | awk 'BEGIN{print "well lower pKa upper"}{a=$1; getline; print a, $0}'
+

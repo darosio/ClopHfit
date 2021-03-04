@@ -1,0 +1,1144 @@
+#+PROPERTY: header-args:python :pandoc t :session py1
+#+PROPERTY: header-args:python+ :kernel cloph36
+#+PROPERTY: header-args:jupyter-python+ :kernel clophfit-39
+#+PROPERTY: header-args:jupyter+ :output-dir ./jupyter_images
+
+numdifftols can be removed; mpi4py too.
+
+Conventions:
+- S0 Signal for unbound state
+- S1 Signal for bound state
+- K equilibrium constant (Kd or pKa) 
+- order data from unbound to bound (e.g. cl: 0–>150 mM; pH 9–>5)
+
+ Summary:
+- lmfit.Model has very convenient results plot functionalities and the unique possibility to estimate upper lower fitting curves.
+- R nls and nlsboot seems very convenient (Q-Q plt) and fast; nls can perform global fit but nlstools can not. 
+- 
+
+  
+* lmfit, bootstrap and rpy2
+#+begin_src jupyter-python
+import numpy as np
+import scipy
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sb
+import rpy2
+from rpy2.robjects import r
+from rpy2.robjects.packages import importr
+from rpy2.robjects import globalenv
+from rpy2.robjects import pandas2ri
+import lmfit
+
+pandas2ri.activate()
+%load_ext rpy2.ipython
+
+MASS = importr('MASS')
+#r('library(MASS)')
+#+end_src
+
+Single Cl titration.
+
+#+begin_src jupyter-python :pandoc t
+df = pd.read_table("tests/data/copyIP.txt")
+sb.scatterplot(data=df, x="cl", y="F", hue="F")
+#+end_src
+
+** rpy2
+
+
+#+begin_src jupyter-python :pandoc t
+globalenv['Rdf'] = df
+
+fit = rpy2.robjects.r('nls(F ~ (S0 + S1 * cl / Kd)/ (1 + cl / Kd), start = list(S0=7e7, S1=0, Kd=12), data=Rdf) ')
+globalenv['rfit'] = fit
+print(r.summary(fit))
+print(r.confint(fit))
+%R print("")
+%R print(confint(rfit))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+print(MASS.confint_nls(fit, 'Kd'))
+print(rpy2.robjects.r('summary(rfit)'))
+#+end_src
+
+#+begin_src jupyter-python
+nlstools = importr('nlstools')
+nb = nlstools.nlsBoot(fit, niter=999)
+globalenv['nb'] = nb
+globalenv['fit'] = fit
+#+end_src
+
+#+begin_src jupyter-python
+%%R
+plot(nb)
+summary(nb)
+#+end_src
+
+** lmfit
+#+begin_src jupyter-python :pandoc t
+import lmfit
+
+def residual(pars, x, y=None):
+    S0 =  pars['S0']
+    S1 =  pars['S1']
+    Kd = pars['Kd']
+    model = (S0 + S1 * x / Kd) / (1 + x / Kd)
+    if y is None:
+        return model
+    return (y - model)
+
+params = lmfit.Parameters()
+params.add('S0', value=df.F[0])
+params.add('S1', value=100)
+params.add('Kd', value=50, vary=True)
+
+out = lmfit.minimize(residual, params, args=(df.cl, df.F,))
+
+xdelta = (df.cl.max() - df.cl.min()) / 500
+xfit = np.arange(df.cl.min() - xdelta, df.cl.max() + xdelta, xdelta)
+yfit = residual(out.params, xfit)
+print(lmfit.fit_report(out.params))
+plt.plot(df.cl, df.F, "o", xfit, yfit, "-")
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+import lmfit
+def residuals(p):
+    S0 =  p['S0']
+    S1 =  p['S1']
+    Kd = p['Kd']       
+    model = (S0 + S1 * df.cl / Kd) / (1 + df.cl / Kd)
+    return (model - df.F)
+
+mini = lmfit.Minimizer(residuals, params)
+res = mini.minimize()
+ci, tr = lmfit.conf_interval(mini, res, sigmas=[.68, .95], trace=True)
+print(lmfit.ci_report(ci, with_offset=False, ndigits=2))
+print(lmfit.fit_report(res, show_correl=False, sort_pars=True))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+names = res.params.keys()
+i = 0
+gs = plt.GridSpec(4, 4)
+sx = {}
+sy = {}
+for fixed in names:
+    j = 0
+    for free in names:
+        if j in sx and i in sy:
+            ax = plt.subplot(gs[i, j], sharex=sx[j], sharey=sy[i])
+        elif i in sy:
+            ax = plt.subplot(gs[i, j], sharey=sy[i])
+            sx[j] = ax
+        elif j in sx:
+            ax = plt.subplot(gs[i, j], sharex=sx[j])
+            sy[i] = ax
+        else:
+            ax = plt.subplot(gs[i, j])
+            sy[i] = ax
+            sx[j] = ax
+        if i < 3:
+            plt.setp(ax.get_xticklabels(), visible=True)
+        else:
+            ax.set_xlabel(free)
+
+        if j > 0:
+            plt.setp(ax.get_yticklabels(), visible=False)
+        else:
+            ax.set_ylabel(fixed)
+
+        rest = tr[fixed]
+        prob = rest['prob']
+        f = prob < 0.96
+
+        x, y = rest[free], rest[fixed]
+        ax.scatter(x[f], y[f], c=1-prob[f], s=25*(1-prob[f]+0.5))
+        ax.autoscale(1, 1)
+        j += 1
+    i += 1
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+names = list(res.params.keys())
+
+plt.figure()
+for i in range(3):
+    for j in range(3):
+        indx = 9-j*3-i
+        ax = plt.subplot(3, 3, indx)
+        ax.ticklabel_format(style='sci', scilimits=(-2, 2), axis='y')
+
+        # set-up labels and tick marks
+        ax.tick_params(labelleft=False, labelbottom=False)
+        if indx in (1, 4, 7):
+            plt.ylabel(names[j])
+            ax.tick_params(labelleft=True)
+        if indx == 1:
+            ax.tick_params(labelleft=True)
+        if indx in (7, 8, 9):
+            plt.xlabel(names[i])
+            ax.tick_params(labelbottom=True)
+            [label.set_rotation(45) for label in ax.get_xticklabels()]
+
+        if i != j:
+            x, y, m = lmfit.conf_interval2d(mini, res, names[i], names[j], 20, 20)
+            plt.contourf(x, y, m, np.linspace(0, 1, 10))
+
+            x = tr[names[i]][names[i]]
+            y = tr[names[i]][names[j]]
+            pr = tr[names[i]]['prob']
+            s = np.argsort(x)
+            plt.scatter(x[s], y[s], c=pr[s], s=30, lw=1)
+
+        else:
+            x = tr[names[i]][names[i]]
+            y = tr[names[i]]['prob']
+
+            t, s = np.unique(x, True)
+            f = scipy.interpolate.interp1d(t, y[s], 'slinear')
+            xn = np.linspace(x.min(), x.max(), 50)
+            plt.plot(xn, f(xn), lw=1)
+            plt.ylabel('prob')
+            ax.tick_params(labelleft=True)
+
+plt.tight_layout()
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+lmfit.report_fit(out.params, min_correl=0.25)
+
+ci, trace = lmfit.conf_interval(mini, res, sigmas=[1, 2], trace=True)
+lmfit.printfuncs.report_ci(ci)
+
+fig, axes = plt.subplots(2, 2, figsize=(12.8, 9.6), sharey=True)
+cx1, cy1, prob = trace['S0']['S0'], trace['S0']['Kd'], trace['S0']['prob']
+cx2, cy2, prob2 = trace['S1']['S1'], trace['S1']['Kd'], trace['S1']['prob']
+
+axes[0][0].scatter(cx1, cy1, c=prob, s=30)
+axes[0][0].set_xlabel('S0')
+axes[0][0].set_ylabel('Kd')
+
+axes[0][1].scatter(cx2, cy2, c=prob2, s=30)
+axes[0][1].set_xlabel('S1')
+
+cx, cy, grid = lmfit.conf_interval2d(mini, res, 'S0', 'Kd', 30, 30)
+ctp = axes[1][0].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[1][0])
+axes[1][0].set_xlabel('S0')
+axes[1][0].set_ylabel('Kd')
+
+cx, cy, grid = lmfit.conf_interval2d(mini, res, 'S1', 'Kd', 30, 30)
+ctp = axes[1][1].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[1][1])
+axes[1][1].set_xlabel('S1')
+axes[1][1].set_ylabel('Kd')
+#+end_src
+
+#+begin_src jupyter-python
+  x, y, grid = lmfit.conf_interval2d(mini, res, 'S0','S1', 30, 30)
+  plt.contourf(x, y, grid, np.linspace(0,1,11))
+  plt.xlabel('S0')
+  plt.colorbar()
+  plt.ylabel('S1')
+#+end_src
+
+** Notes
+You could implement global fitting using scipy.leastq but will sometime fail in bootstraping.
+lmfit resulted much more robust
+
+#+begin_src python
+def fit_pH_global(fz, x, dy1, dy2):                                                                                                               
+    """Fit 2 dataset (x, y1, y2) with a single protonation site model
+    """ 
+    y1 = np.array(dy1)               
+    y2 = np.array(dy2)
+
+    def ssq(p, x, y1, y2):                                                      
+        return np.r_[y1 - fz(p[0], p[1:3], x), y2 - fz(p[0], p[3:5], x)]
+    p0 = np.r_[x[2], y1[0], y1[-1], y2[0], y2[-1]]
+    p, cov, info, msg, success = optimize.leastsq(ssq, p0, args=(x, y1, y2),    
+                                                  full_output=True, xtol=1e-11) 
+    res = namedtuple("Result", "success msg df chisqr K sK SA_1 sSA_1 \
+                     SB_1 sSB_1 SA_2 sSA_2 SB_2 sSB_2")                                  
+    res.msg = msg
+    res.success = success
+    if 1 <= success <= 4:
+        chisq = sum(info['fvec'] * info['fvec'])
+        res.df = len(y1) + len(y2) - len(p)
+        res.chisqr = chisq / res.df
+        res.K = p[0]
+        #res.sK = np.sqrt(cov[0][0] * res.chisqr)
+        res.SA_1 = p[1]
+        #res.sSA_1 = np.sqrt(cov[1][1] * res.chisqr)
+        res.SB_1 = p[2]
+        #res.sSB_1 = np.sqrt(cov[2][2] * res.chisqr)
+        res.SA_2 = p[3]
+        #res.sSA_2 = np.sqrt(cov[3][3] * res.chisqr)                             
+        res.SB_2 = p[4]
+        #res.sSB_2 = np.sqrt(cov[4][4] * res.chisqr)
+    return res
+    
+result = fit_pH_global(fz, df.x, df.y1, df.y2)
+#+end_src
+
+** R babel
+With older versions Rpy2 output looked nicer
+
+#+begin_src  R  :results output   :exports both :session "global"
+d <- read.delim("./tests/data/copyIP.txt")
+fit = nls(F ~ (S0 + S1 * cl / Kd)/ (1 + cl / Kd), start = list(S0=7e7, S1=0, Kd=12), data=d) 
+summary(fit)
+confint(fit)
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file bs.png
+library(nlstools)
+nb = nlsBoot(fit, niter=999)
+plot(nb)
+#+end_src
+
+#+begin_src R :results output :exports both :session "global"
+summary(nb)
+#+end_src
+
+* A01 towards global fitting
+pH titration with y1 and y2.
+
+#+begin_src jupyter-python :pandoc t
+df = pd.read_csv('./tests/data/A01.dat', sep=' ', names=['x', 'y1', 'y2'])
+df = df[::-1].reset_index(drop=True)
+df
+#+end_src
+
+** lmfit and emcee
+#+begin_src jupyter-python :pandoc t :exports both
+import sympy
+# from sympy import init_printing
+# init_printing()
+x, S0_1, S1_1, K = sympy.symbols('x S0_1 S1_1 K')
+f = (S0_1 + S1_1 * 10 ** (K - x)) / (1 + 10 ** (K - x))
+# f2 = (S0_1 + S1_1 * x / K) / (1 + x / K)
+print(sympy.diff(f, S0_1))
+print(sympy.diff(f, S1_1))
+print(sympy.diff(f, K))
+# print(sympy.diff(f2, S0_1))
+# print(sympy.diff(f2, S1_1))
+# print(sympy.diff(f2, K))
+#+end_src
+
+#+begin_src jupyter-python
+def residual(pars, x, data):
+    S0 =  pars['S0']
+    S1 =  pars['S1']
+    K = pars['K']
+    #model = (S0 + S1 * x / Kd) / (1 + x / Kd)
+    x = np.array(x)
+    y = np.array(data)
+    model = (S0 + S1 * 10 ** (K - x)) / (1 + 10 ** (K - x))
+    if data is None:
+        return model
+    return (y - model)
+
+# Try Jacobian
+def dfunc(pars, x, data=None):
+    print(pars)
+    S0_1 =  pars['S0']
+    S1_1 =  pars['S1']
+    K = pars['K']
+    kx = np.array(10**(K - x))
+    return np.array([1 / (kx + 1),
+                     kx / (kx + 1),
+                     kx * np.log(10) * (S1_1 / (kx + 1) - (kx * S1_1 + S0_1) / (kx + 1)**2)])
+                     # kx * S1_1 * np.log(10) / (kx + 1) - kx * (kx * S1_1 + S0_1) * np.log(10) / (kx + 1)**2])
+
+params = lmfit.Parameters()
+params.add('S0', value=25000, min=0.0)
+params.add('S1', value=50000, min=0.0)
+params.add('K', value=7, min=2.0, max=12.0)
+
+# out = lmfit.minimize(residual, params, args=(df.x,), kws={'data':df.y1})
+# mini = lmfit.Minimizer(residual, params, fcn_args=(df.x, df.y2))
+mini = lmfit.Minimizer(residual, params, fcn_args=(df.x,), fcn_kws={'data':df.y1})
+# res= mini.minimize()
+res= mini.leastsq(Dfun=dfunc, col_deriv=True, ftol=1e-8)
+
+fit = residual(params, df.x, None)
+print(lmfit.report_fit(res))
+
+ci = lmfit.conf_interval(mini, res, sigmas=[1, 2, 3])
+lmfit.printfuncs.report_ci(ci)
+#+end_src
+
+#+begin_src jupyter-python
+print(lmfit.ci_report(ci, with_offset=False, ndigits=3))
+#+end_src
+
+#+begin_src jupyter-python
+res.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(1e4))
+resMC = lmfit.minimize(residual, method='emcee', steps=3000,
+                        nan_policy='omit', is_weighted=False, burn=300, thin=1,
+                       params=res.params, args=(df.x, df.y1), progress=True)
+
+#+end_src
+
+#+begin_src jupyter-python
+plt.plot(resMC.acceptance_fraction, 'o')
+plt.xlabel('walker')
+plt.ylabel('acceptance frac')
+#+end_src
+
+#+begin_src jupyter-python
+import corner
+import arviz
+
+tr = [v for v in resMC.params.valuesdict().values()]
+emcee_plot = corner.corner(resMC.flatchain, labels=resMC.var_names,
+                            truths=list(resMC.params.valuesdict().values()))
+                            # truths=tr[:-1])
+
+#+end_src
+
+** global
+I believe I was using scipy.optimize.
+
+*** using lmfit with np.r_ trick
+
+#+begin_src jupyter-python :pandoc t
+# %%timeit #62ms
+def residual2(pars, x, data=None):
+    K = pars['K']
+    S0_1 =  pars['S0_1']
+    S1_1 =  pars['S1_1']
+    S0_2 =  pars['S0_2']
+    S1_2 =  pars['S1_2']
+    model_0 = (S0_1 + S1_1 * 10 ** (K - x[0])) / (1 + 10 ** (K - x[0]))
+    model_1 = (S0_2 + S1_2 * 10 ** (K - x[1])) / (1 + 10 ** (K - x[1]))
+    if data is None:
+        return np.r_[model_0, model_1]
+    return np.r_[data[0] - model_0, data[1] - model_1]
+
+
+params2 = lmfit.Parameters()
+params2.add('K', value=7.0, min=2.0, max=12.0)
+params2.add('S0_1', value=df.y1[0], min=0.0)
+params2.add('S0_2', value=df.y2[0], min=0.0)
+params2.add('S1_1', value=df.y1.iloc[-1], min=0.0)
+params2.add('S1_2', value=df.y2.iloc[-1], min=0.0)
+mini2 = lmfit.Minimizer(residual2, params2, fcn_args=([df.x, df.x],), fcn_kws={'data': [df.y1, df.y2]})
+res2 = mini2.minimize()
+print(lmfit.fit_report(res2))
+
+ci2, tr2 = lmfit.conf_interval(mini2, res2, sigmas=[.68, .95], trace=True)
+print(lmfit.ci_report(ci2, with_offset=False, ndigits=2))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+xfit = np.linspace(df.x.min(), df.x.max(), 100)
+yfit0 = residual2(params2, [xfit, xfit])
+yfit0 = yfit0.reshape(2, 100)
+yfit = residual2(res2.params, [xfit, xfit])
+yfit = yfit.reshape(2, 100)
+plt.plot(df.x, df.y1, 'o', df.x, df.y2, 's', xfit, yfit[0], '-', xfit, yfit[1], '-', xfit, yfit0[0], '--', xfit, yfit0[1], '--')
+plt.grid(True)
+#+end_src
+
+*** lmfit constraints aiming for generality
+I believe a name convention would be more robust than relying on OrderedDict Params object.
+#+begin_src jupyter-python
+"S0_1".split("_")[0]
+#+end_src
+
+#+begin_src jupyter-python
+def exception_fcn_handler(func):
+    def inner_function(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except TypeError:
+            print(f"{func.__name__} only takes (1D) vector as argument besides lmfit.Parameters.")
+    return inner_function
+
+@exception_fcn_handler
+def titration_pH(params, pH):
+    p = {k.split("_")[0]: v for k, v in params.items()}
+    return (p["S0"] + p["S1"] * 10 ** (p["K"] - pH)) / (1 + 10 ** (p["K"] - pH))
+
+def residues(params, x, y, fcn):
+    return y - fcn(params, x)
+
+
+p1 = lmfit.Parameters()
+p2 = lmfit.Parameters()
+p1.add("K_1", value=7., min=2.0, max=12.0)
+p2.add("K_2", value=7., min=2.0, max=12.0)
+p1.add("S0_1", value=df.y1.iloc[0], min=0.0)
+p2.add("S0_2", value=df.y2.iloc[0], min=0.0)
+p1.add("S1_1", value=df.y1.iloc[-1], min=0.0)
+p2.add("S1_2", value=df.y2.iloc[-1], min=0.0)
+
+print(residues(p1, np.array(df.x), [1.97, 1.8, 1.7, 0.1, 0.1, .16, .01], titration_pH))
+
+def gobjective(params, xl, yl, fcnl):
+    nset = len(xl)
+    res = []
+    for i in range(nset):
+        pi = {k: v for k, v in params.valuesdict().items() if k[-1]==f"{i+1}"}
+        res = np.r_[res, residues(pi, xl[i], yl[i], fcnl[i])]
+        # res = np.r_[res, yl[i] - fcnl[i](parsl[i], x[i])]
+    return res
+ 
+print(gobjective(p1+p2, [df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]))
+#+end_src
+
+Here single.
+#+begin_src jupyter-python :pandoc t
+mini = lmfit.Minimizer(residues, p1, fcn_args=(df.x, df.y1, titration_pH, ))
+res= mini.minimize()
+
+fit = titration_pH(res.params, df.x)
+print(lmfit.report_fit(res))
+plt.plot(df.x, df.y1, "o", df.x, fit, "--")
+ci = lmfit.conf_interval(mini, res, sigmas=[1, 2])
+lmfit.printfuncs.report_ci(ci)
+#+end_src
+
+Now global.
+#+begin_src jupyter-python :pandoc t
+# %%timeit #66ms
+pg = p1 + p2
+pg['K_2'].expr = 'K_1'
+# gmini = lmfit.Minimizer(gobjective, pg, fcn_args=([df.x[1:], df.x], [df.y1[1:], df.y2], [titration_pH, titration_pH]))
+gmini = lmfit.Minimizer(gobjective, pg, fcn_args=([df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]))
+gres= gmini.minimize()
+print(lmfit.fit_report(gres))
+
+pp1 = {k: v for k, v in gres.params.valuesdict().items() if k.split("_")[1]==f"{1}"}
+pp2 = {k: v for k, v in gres.params.valuesdict().items() if k.split("_")[1]==f"{2}"}
+xfit = np.linspace(df.x.min(), df.x.max(), 100)
+yfit1 = titration_pH(pp1, xfit)
+yfit2 = titration_pH(pp2, xfit)
+plt.plot(df.x, df.y1, "o", xfit, yfit1, "--")
+plt.plot(df.x, df.y2, "s", xfit, yfit2, "--")
+ci = lmfit.conf_interval(gmini, gres, sigmas=[1, 0.95])
+print(lmfit.ci_report(ci, with_offset=False, ndigits=2))
+#+end_src
+
+To plot ci for the 5 parameters. 
+
+#+begin_src jupyter-python :pandoc t
+fig, axes = plt.subplots(1, 4, figsize=(24.2, 4.8), sharey=True)
+cx, cy, grid = lmfit.conf_interval2d(gmini, gres, 'S0_1', 'K_1', 25, 25)
+ctp = axes[0].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[0])
+axes[0].set_xlabel('SA1')
+axes[0].set_ylabel('pK1')
+cx, cy, grid = lmfit.conf_interval2d(gmini, gres, 'S0_2', 'K_1', 25, 25)
+ctp = axes[1].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[1])
+axes[1].set_xlabel('SA2')
+axes[1].set_ylabel('pK1')
+cx, cy, grid = lmfit.conf_interval2d(gmini, gres, 'S1_1', 'K_1', 25, 25)
+ctp = axes[2].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[2])
+axes[2].set_xlabel('SB1')
+axes[2].set_ylabel('pK1')
+cx, cy, grid = lmfit.conf_interval2d(gmini, gres, 'S1_2', 'K_1', 25, 25)
+ctp = axes[3].contourf(cx, cy, grid, np.linspace(0, 1, 11))
+fig.colorbar(ctp, ax=axes[3])
+axes[3].set_xlabel('SB2')
+axes[3].set_ylabel('pK1')
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+plt.plot(np.r_[df.x, df.x], gres.residual, "o")
+#+end_src
+
+**** emcee
+#+begin_src jupyter-python :pandoc t
+# gmini.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(2))
+gresMC = lmfit.minimize(gobjective, method='emcee', steps=1800, #workers=8,
+                        nan_policy='omit', burn=300, is_weighted=False, #thin=20,
+                        params=gmini.params, args=([df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]), progress=True)
+
+#+end_src
+
+#+begin_src jupyter-python
+plt.plot(gresMC.acceptance_fraction, 'o')
+plt.xlabel('walker')
+plt.ylabel('acceptance frac')
+#+end_src
+
+#+begin_src jupyter-python
+import corner
+# import arviz
+
+tr = [v for v in gresMC.params.valuesdict().values()]
+emcee_plot = corner.corner(gresMC.flatchain, labels=gresMC.var_names,
+                            # truths=list(gresMC.params.valuesdict().values()))
+                            truths=tr[:-1])
+#+end_src
+
+#+begin_src jupyter-python
+lmfit.report_fit(gresMC.params)
+#+end_src
+
+#+begin_src jupyter-python
+highest_prob = np.argmax(gresMC.lnprob)
+hp_loc = np.unravel_index(highest_prob, gresMC.lnprob.shape)
+mle_soln = gresMC.chain[hp_loc]
+for i, par in enumerate(pg):
+    pg[par].value = mle_soln[i]
+
+print('\nMaximum Likelihood Estimation from emcee       ')
+print('-------------------------------------------------')
+print('Parameter  MLE Value   Median Value   Uncertainty')
+fmt = '  {:5s}  {:11.5f} {:11.5f}   {:11.5f}'.format
+for name, param in pg.items():
+    print(fmt(name, param.value, gresMC.params[name].value,
+              gresMC.params[name].stderr))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+print('\nError estimates from emcee:')
+print('------------------------------------------------------')
+print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')
+
+for name in pg.keys():
+    quantiles = np.percentile(gresMC.flatchain[name],
+                              [2.275, 15.865, 50, 84.135, 97.275])
+    median = quantiles[2]
+    err_m2 = quantiles[0] - median
+    err_m1 = quantiles[1] - median
+    err_p1 = quantiles[3] - median
+    err_p2 = quantiles[4] - median
+    fmt = '  {:5s}   {:8.4f} {:8.4f} {:8.4f} {:8.4f} {:8.4f}'.format
+    print(fmt(name, err_m2, err_m1, median, err_p1, err_p2))
+#+end_src
+
+*** bootstrap con pandas
+#+begin_src jupyter-python :pandoc t
+%%timeit
+for i in range(100):
+    tdf = pd.DataFrame([(j, i) for i in range(7) for j in range(2)]).sample(14, replace=True, ignore_index=False)
+    df1 = df[["x", "y1"]].iloc[np.array(tdf[tdf[0]==0][1])]
+    df2 = df[["x", "y2"]].iloc[np.array(tdf[tdf[0]==1][1])]
+#+end_src
+
+
+
+#+begin_src jupyter-python :pandoc t
+# %%timeit
+def idx_sample(npoints):
+    tidx = []
+    for i in range(npoints):
+        tidx.append((np.random.randint(2), np.random.randint(7)))
+    idx1 = []
+    idx2 = []
+    for t in tidx:
+        if t[0] == 0:
+            idx1.append(t[1])
+        elif t[0] == 1:
+            idx2.append(t[1])
+        else:
+            raise Exception("Must never occur")
+    return idx1, idx2
+
+for i in range(100):
+    idx1, idx2 = idx_sample(14)
+    df1 = df[["x", "y1"]].iloc[idx1].sort_values(by="x", ascending=False).reset_index(drop=True)
+    df2 = df[["x", "y2"]].iloc[idx2].sort_values(by="x", ascending=False).reset_index(drop=True)
+#+end_src
+
+
+#+begin_src jupyter-python :pandoc t
+# %%timeit  #5-6 s for nboot=7 now 0.4s
+n_points = len(df)
+nboot=999
+best = lmfit.minimize(gobjective, pg, args=([df.x[1:], df.x], [df.y1[1:], df.y2], [titration_pH, titration_pH]))
+nb = pd.DataFrame(columns=[k for k in best.params.keys()])
+
+for i in range(nboot):
+    idx1, idx2 = idx_sample(13)
+    df1 = df[["x", "y1"]].iloc[idx1].sort_values(by="x", ascending=False).reset_index(drop=True)
+    df2 = df[["x", "y2"]].iloc[idx2].sort_values(by="x", ascending=False).reset_index(drop=True)
+    # boot_idxs = np.random.randint(0, n_points, n_points)
+    # df2 = df.iloc[boot_idxs]
+    # df2=df2.sort_values(by="x", ascending=False).reset_index(drop=True)
+    # # df2.reset_index(drop=True, inplace=True)
+    # boot_idxs = np.random.randint(0, n_points, n_points)
+    # df3 = df.iloc[boot_idxs]
+    # # df3.reset_index(drop=True, inplace=True)
+    # df3=df3.sort_values(by="x", ascending=False).reset_index(drop=True)
+    try:
+        out = lmfit.minimize(gobjective, best.params, args=([df1.x, df2.x], [df1.y1, df2.y2], [titration_pH, titration_pH]), calc_covar=False, method='leastsq', scale_covar=False)
+        row = pd.Series({k: v.value for k,v in out.params.items()})
+        nb = nb.append(row, ignore_index=True)
+    except:
+        print(df1)
+        print(df2)
+
+print(nb)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+nb.K_1.quantile([0.025, 0.5, 0.975])
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+sb.kdeplot(data=nb, x="K_1", y="S1_2")
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+# %%timeit  #5-6 s for nboot=7
+n_points = len(df)
+nboot=7
+best = lmfit.minimize(gobjective, pg, args=([df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]))
+nb = pd.DataFrame(columns=[k for k in best.params.keys()])
+
+for i in range(nboot):
+    boot_idxs = np.random.randint(0, n_points, n_points)
+    df2 = df.iloc[boot_idxs]
+    df2=df2.sort_values(by="x", ascending=False).reset_index(drop=True)
+    # df2.reset_index(drop=True, inplace=True)
+    boot_idxs = np.random.randint(0, n_points, n_points)
+    df3 = df.iloc[boot_idxs]
+    # df3.reset_index(drop=True, inplace=True)
+    df3=df3.sort_values(by="x", ascending=False).reset_index(drop=True)
+    try:
+        out = lmfit.minimize(gobjective, best.params, args=([df.x, df.x], [df2.y1, df3.y2], [titration_pH, titration_pH]), calc_covar=False, method='leastsq', scale_covar=False)
+        row = pd.Series({k: v.value for k,v in out.params.items()})        
+        nb = nb.append(row, ignore_index=True)
+    except:
+        print(df2)
+        print(df3)
+boot_idxs
+# print(nb)
+#+end_src
+
+works
+
+#+begin_src jupyter-python :pandoc t
+# df2 = df.iloc[boot_idxs]
+boot_idxs
+#+end_src
+
+#+begin_src jupyter-python
+kds = []
+s0s = []
+s1s = []
+for i in range(999):
+    boot_idxs = np.random.randint(0, n_points - 0, n_points)
+    df2 = df.iloc[boot_idxs]
+    df2.reset_index(drop=True)
+    out = lmfit.minimize(residual, params, args=(df2.cl, df2.F,),)
+    kds.append(out.params["Kd"].value)
+    s0s.append(out.params["S0"].value)
+    s1s.append(out.params["S1"].value)
+dff = pd.DataFrame({ 'Kd': kds, 'S0': s0s, 'S1': s1s})
+dff.Kd.describe()
+    #+end_src
+
+#+begin_src jupyter-python :pandoc t
+# nb.drop("K_2", axis=1, inplace=True)
+# sns.set_style("darkgrid")
+with sb.axes_style("ticks"):
+    g = sb.PairGrid(nb, diag_sharey=False, vars=["K_1", "S1_1", "S1_2"])
+    g.map_upper(plt.hexbin, bins='log', gridsize=20, cmap="Blues", mincnt=2)
+    g.map_lower(sb.kdeplot, cmap="viridis_r", fill=True)
+    g.map_diag(sb.histplot, kde=True)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+sb.violinplot(data=nb, x="K_1", split=True)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+# sb.set_style("whitegrid")
+# sb.jointplot(y="S1_2", x="K_1", data=nb, kind="kde", color="#8805AA", marginal_ticks=True) #, hue="S0_2")
+g = sb.jointplot(y="S1_2", x="K_1", data=nb, marker="+", s=25, marginal_kws=dict(bins=25, fill=False, kde=True), color="#2075AA", marginal_ticks=True, height=5, ratio=2)
+g.plot_joint(sb.kdeplot, color="r", zorder=0, levels=5)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+g = sb.JointGrid(data=nb, x="K_1", y="S1_2")
+g.plot_joint(sb.histplot)
+g.plot_marginals(sb.boxplot)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+f, (ax_box, ax_hist) = plt.subplots(2, sharex=True, gridspec_kw={"height_ratios": (.25, .75)})
+ 
+sb.histplot(data=nb, x="K_1", kde=True, ax=ax_hist)
+ 
+sb.boxplot(x="K_1", data=nb, whis=[2.5, 97.5], ax=ax_box)
+sb.stripplot(x="K_1", data=nb, color=".3", alpha=0.2, ax=ax_box)
+ax_box.set(xlabel='')
+f.tight_layout()
+# ax = sb.violinplot(x="K_1", data=nb, inner=None, color="r")
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+import corner
+
+
+# tr = [v for v in resMC.params.valuesdict().values()]
+g = corner.corner(nb[["K_1", "S1_1", "S1_2", "S0_1", "S0_2"]])
+# , labels=resMC.var_names,
+#                             truths=list(resMC.params.valuesdict().values()))
+#                             # truths=tr[:-1])
+
+#+end_src
+
+*** babel R
+#+begin_src  R  :results output   :exports both :session "global"
+d <- read.table("./tests/data/A01.dat")
+fit = nls(V2 ~ (SB + SA * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)), start = list(SB=3e4, SA=3e5, pK=7), data=d) 
+summary(fit)
+confint(fit)
+#+end_src
+
+#+begin_src R :results output   :exports both :session "global"
+fz <- function(x, SA1, SB1, SA2, SB2, pK){
+  y1 <- (SB1 + SA1 * 10 **(pK - x))/ (1 + 10 ** (pK - x))
+  y2 <- (SB2 + SA2 * 10 **(pK - x))/ (1 + 10 ** (pK - x))
+  return(rbind(y1,y2))
+}
+## fitg = nls(rbind(V2, V3) ~ fz(V1, SA1, SB1, SA2, SB2, pK),         start = list(SB1=3e4, SA1=3e5, SB2=3e4, SA2=3e5, pK=7), data=d) 
+fitg = nls(c(V2, V3) ~ c((SB1 + SA1 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)), (SB2 + SA2 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1))),         start = list(SB1=3e4, SA1=3e5, SB2=3e4, SA2=3e5, pK=7), data=d) 
+  
+#+end_src
+
+
+https://stats.stackexchange.com/questions/44246/nls-curve-fitting-of-nested-shared-parameters
+
+#+begin_src R :results output   :exports both :session "global"
+
+n1 <- length(d$V2)
+n2 <- length(d$V3)
+
+# separate fits:  
+fit1 = nls(V2 ~ (SB1 + SA1 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)),
+           start = list(SB1=3e4, SA1=3e5, pK=7), data=d)
+fit2 = nls(V3 ~ (SB2 + SA2 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)),
+           start = list(SB2=3e4, SA2=3e5, pK=7), data=d)
+
+#set up stacked variables:
+## y <- c(y1,y2); x <- c(x1,x2)
+y <- c(d$V2,d$V3)
+
+lcon1 <- rep(c(1,0), c(n1,n2))
+lcon2 <- rep(c(0,1), c(n1,n2))
+mcon1 <- lcon1
+mcon2 <- lcon2
+
+# combined fit with common 'c' parameter, other parameters separate
+fitg = nls(y ~ mcon1*(SB1 + SA1 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)) + mcon2*(SB2 + SA2 * 10 **(pK - V1))/ (1 + 10 ** (pK - V1)),
+       start = list(SB1=3e4, SA1=3e5, SB2=3e4, SA2=3e5, pK=7), data=d)
+
+confint(fitg)
+#+end_src
+
+#+begin_src R :results output   :exports both :session "global"
+nlstools::confint2(fitg)
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file fit.png
+nlstools::plotfit(fit)
+#+end_src
+
+#+begin_src R :results output :exports both :session "global"
+nlstools::overview(fitg)
+nlstools::test.nlsResiduals(nlstools::nlsResiduals(fitg))
+plot(nlstools::nlsResiduals(fitg))
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file res0.png
+plot(nlsResiduals(fitg))
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file res.png
+plot(nlstools::nlsConfRegions(fit))
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file res2.png
+plot(nlstools::nlsContourRSS(fit))
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file bs.png
+library(nlstools)
+## nb = nlsBoot(fit, niter=999)
+nb = nlsBoot(fit)
+plot(nb)
+## plot(nb, type="boxplot")
+#+end_src
+
+#+begin_src R :results output graphics file :exports both :session "global" :file j.png
+plot(nlsJack(fit))
+#+end_src
+
+#+begin_src R :results output :exports both :session "global"
+summary(nlsJack(fit))
+#+end_src
+
+#+begin_src R :results output :exports both :session "global"
+summary(nb)
+#+end_src
+
+** lmfit.Model
+
+It took 9 vs 5 ms.
+It is not possible to do global fitting. In the documentation it is stressed the need to convert the output of the residue to be 1D vectors.
+
+#+begin_src jupyter-python
+mod = lmfit.models.ExpressionModel("(SB + SA * 10**(pK-x)) / (1 + 10**(pK-x))")
+result = mod.fit(np.array(df.y1), x=np.array(df.x), pK=7, SB=7e3, SA=10000)
+print(result.fit_report())
+#+end_src
+
+#+begin_src jupyter-python
+plt.plot(df.x, df.y1, 'o')
+plt.plot(df.x, result.init_fit, '--', label='initial fit')
+plt.plot(df.x, result.best_fit, '-', label='best fit')
+plt.legend()
+#+end_src
+
+#+begin_src jupyter-python
+print(result.ci_report())
+#+end_src
+
+#+begin_src jupyter-python
+mod1 = lmfit.models.ExpressionModel("(SB + SA * 10**(pK-x)) / (1 + 10**(pK-x))")
+result = mod.fit(np.array(df.y1), x=np.array(df.x), pK=7, SB=7e3, SA=10000)
+print(result.fit_report())
+#+end_src
+
+which is faster but still I failed to find the way to global fitting.
+
+#+begin_src jupyter-python
+def tit_pH(x, S0, S1, K):
+    return (S0 + S1 * 10 ** (K - x)) / (1 + 10 ** (K - x))
+
+tit_model1 = lmfit.Model(tit_pH, prefix="ds1_")
+tit_model2 = lmfit.Model(tit_pH, prefix="ds2_")
+print(f'parameter names: {tit_model1.param_names}')
+print(f'parameter names: {tit_model2.param_names}')
+print(f'independent variables: {tit_model1.independent_vars}')
+print(f'independent variables: {tit_model2.independent_vars}')
+
+tit_model1.set_param_hint('K', value=7.0, min=2.0, max=12.0)
+tit_model1.set_param_hint('S0', value=df.y1[0], min=0.0)
+tit_model1.set_param_hint('S1', value=df.y1.iloc[-1], min=0.0)
+tit_model2.set_param_hint('K', value=7.0, min=2.0, max=12.0)
+tit_model2.set_param_hint('S0', value=df.y1[0], min=0.0)
+tit_model2.set_param_hint('S1', value=df.y1.iloc[-1], min=0.0)
+pars1 = tit_model1.make_params()
+pars2 = tit_model2.make_params()
+# gmodel = tit_model1 + tit_model2
+# result = gmodel.fit(df.y1 + df.y2, pars, x=df.x)
+res1 = tit_model1.fit(df.y1, pars1, x=df.x)
+res2 = tit_model2.fit(df.y2, pars2, x=df.x)
+print(res1.fit_report())
+print(res2.fit_report())
+#+end_src
+
+
+#+begin_src jupyter-python
+xfit_delta = (df.x.max() - df.x.min()) / 100
+xfit = np.arange(df.x.min() - xfit_delta, df.x.max() + xfit_delta, xfit_delta)
+dely1 = res1.eval_uncertainty(x=xfit) * 1 
+dely2 = res2.eval_uncertainty(x=xfit) * 1 
+best_fit1 = res1.eval(x=xfit)
+best_fit2 = res2.eval(x=xfit)
+plt.plot(df.x, df.y1, "o")
+plt.plot(df.x, df.y2, "o")
+plt.plot(xfit, best_fit1,"-.")
+plt.plot(xfit, best_fit2,"-.")
+plt.fill_between(xfit, best_fit1 - dely1, best_fit1 + dely1, color='#FEDCBA', alpha=0.5)
+plt.fill_between(xfit, best_fit2 - dely2, best_fit2 + dely2, color='#FEDCBA', alpha=0.5)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+def tit_pH2(x, S0_1, S0_2, S1_1, S1_2, K):
+    y1 = (S0_1 + S1_1 * 10 **(K - x)) / (1 + 10 **(K - x))
+    y2 = (S0_2 + S1_2 * 10 **(K - x)) / (1 + 10 **(K - x))
+    # return y1, y2
+    return np.r_[y1, y2]
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+tit_model = lmfit.Model(tit_pH2)
+tit_model.set_param_hint('K', value=7.0, min=2.0, max=12.0)
+tit_model.set_param_hint('S0_1', value=df.y1[0], min=0.0)
+tit_model.set_param_hint('S0_2', value=df.y2[0], min=0.0)
+tit_model.set_param_hint('S1_1', value=df.y1.iloc[-1], min=0.0)
+tit_model.set_param_hint('S1_2', value=df.y2.iloc[-1], min=0.0)
+pars = tit_model.make_params()
+# res = tit_model.fit([df.y1, df.y2], pars, x=df.x)
+res = tit_model.fit(np.r_[df.y1, df.y2], pars, x=df.x)
+print(res.fit_report())
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+# dely = res.eval_uncertainty(x=xfit)
+res.plot()
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+def fit_pH(fp):
+    df = pd.read_csv(fp)
+
+    def tit_pH(x, SA, SB, pK):
+        return (SB + SA * 10 ** (pK - x)) / (1 + 10 ** (pK - x))
+
+    mod = lmfit.Model(tit_pH)
+    pars = mod.make_params(SA=10000, SB=7e3, pK=7)
+    result = mod.fit(df.y2, pars, x=df.x)
+    return result, df.y2, df.x, mod
+
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+r,y,x,model = fit_pH("./tests/data/H04.dat")
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+r,y,x,model = fit_pH("/home/dati/ibf/IBF/Database/Random mutag results/Liasan-analyses/2016-05-19/2014-02-20/pH/dat/C12.dat")
+xfit = np.linspace(x.min(),x.max(),50)
+dely = r.eval_uncertainty(x=xfit) * 1 
+best_fit = r.eval(x=xfit)
+plt.plot(x, y, "o")
+plt.plot(xfit, best_fit,"-.")
+plt.fill_between(xfit, best_fit-dely,
+                 best_fit+dely, color='#FEDCBA', alpha=0.5)
+r.conf_interval(sigmas=[2])
+print(r.ci_report(with_offset=False, ndigits=2))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+ci, tr = lmfit.conf_interval(r, mod, trace=True)
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+g = r.plot()
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+print(r.ci_report())
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+emcee_kws = dict(steps=5000, burn=500, thin=2, is_weighted=False,
+                 progress=True)
+emcee_params = r.params.copy()
+emcee_params.add('__lnsigma', value=np.log(0.1), min=np.log(0.001), max=np.log(2000.0))
+result_emcee = model.fit(data=y, x=x, params=emcee_params, method='emcee',
+                         nan_policy='omit', fit_kws=emcee_kws)
+
+lmfit.report_fit(result_emcee)
+
+
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+result_emcee.plot_fit()
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+emcee_corner = corner.corner(result_emcee.flatchain, labels=result_emcee.var_names,
+                             truths=list(result_emcee.params.valuesdict().values()))
+#+end_src
+
+#+begin_src jupyter-python :pandoc t
+highest_prob = np.argmax(result_emcee.lnprob)
+hp_loc = np.unravel_index(highest_prob, result_emcee.lnprob.shape)
+mle_soln = result_emcee.chain[hp_loc]
+print("\nMaximum Likelihood Estimation (MLE):")
+print('----------------------------------')
+for ix, param in enumerate(emcee_params):
+    print(f"{param}: {mle_soln[ix]:.3f}")
+
+quantiles = np.percentile(result_emcee.flatchain['pK'], [2.28, 15.9, 50, 84.2, 97.7])
+print(f"\n\n1 sigma spread = {0.5 * (quantiles[3] - quantiles[1]):.3f}")
+print(f"2 sigma spread = {0.5 * (quantiles[4] - quantiles[0]):.3f}")
+#+end_src
+
+** TODO https://www.astro.rug.nl/software/kapteyn/kmpfittutorial.html
+
+*** TODO jackknife to auto-reject
+*** TODO uncertainty estimate
+
+* Old usage
+*** fit_titration.py
+    input ← csvtable and note_file
+    output → pK spK and pdf of analysis
+
+    It is a unique script for pK and Cl and various methods:
+
+    1. svd
+    2. bands
+    3. single lambda
+
+    and bootstraping
+
+    i do not know how to unittest
+    TODO
+
+    - +average spectra+
+    - join spectra ['B', 'E', 'F']
+    - compute band integral (or sums)
+
+note_file
+|     | pH | Cl | mut |
+|-----+----+----+-----|
+| A01 | .  | .  | .   |
+| .   | .  | .  | .   |
+| .   | .  | .  | .   |
+| H12 | .  | .  | .   |
+
+csvtable
+|   \lambda | A01 | … | H12 |
+|-----+-----+---+-----|
+| 500 | .   |   | .   |
+|   . | .   |   | .   |
+| 650 | .   |   | .   |
+
+
+*** fit_titration_global.py
+    input ← x y1 y2 (file)
+    output → K SA1 SB1 SA2 SB2 , png and correl.png
+    uses lmfit confint and bootstrap
+
+**** use
+     for i in *.dat; do gfit $i png2 --boot 99 > png2/$i.txt; done
+
+     
+*** IBF database uses
+
+**** fit_ titration_ global
+it was probably moved into prtecan
+see [[./src/clophfit/scripts/fit.tecan]] and  [[./src/clophfit/scripts/fit.tecan.cl]]
+
+**** fit_ titration
+cd 2014-xx-xx
+(prparser) pr.enspire *.csv
+
+fit_titration.py meas/Copy_daniele00_893_A.csv A02_37_note.csv -d fit/37C | tee fit/svd_Copy_daniele00_893_A_A02_37_note.txt
+
+w_ave.sh > pKa.txt
+
+
+head pKa??/pKa.txt >> Readme.txt
+
+# fluorimeter data
+
+ls > list
+merge.py list
+
+fit_titration e*.csv fluo_note
+
+  [[/home/dati/ibf/IBF/Database/Data and protocols_Liaisan/library after Omnichange mutagenesis/Readme_howto.txt]]
+  
+

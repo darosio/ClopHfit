@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+#
+
+for i in ?02.dat.txt ?03.dat.txt ?04.dat.txt ?05.dat.txt ?06.dat.txt ?07.dat.txt ?08.dat.txt ?09.dat.txt ?10.dat.txt ?11.dat.txt;
+    do
+        echo $i|cut -d '.' -f 1;
+        grep " K " $i | awk '{print $2,$3,$4,$5,$6}';
+        if [ `grep ' K ' $i |wc | awk '{print $1}'` -le 0 ]; then echo '\n';
+        fi
+    done | awk 'BEGIN{print "well llower lower pKa upper uupper"}{a=$1; getline; print a, $0}'
+
