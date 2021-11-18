@@ -2,36 +2,47 @@
 name = "ClopHfit"
 version = "0.2.1"
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
-authors = ["daniele arosio <daniele.arosio@cnr.it>"]
+authors = [
+  "daniele arosio <daniele.arosio@cnr.it>"
+]
 license = "BSD-3-Clause"
 readme = "README.md"
-homepage = "https://bitbucket.org/darosio/clophfit/"
-repository = "https://bitbucket.org/darosio/clophfit/"
-keywords = ["svd", "ClopHensor", "data fitting", "pH", "macromolecule binding"]
+homepage = "https://github.com/darosio/ClopHfit"
+repository = "https://github.com/darosio/ClopHfit"
+keywords = [
+  "svd",
+  "ClopHensor",
+  "data fitting",
+  "pH",
+  "macromolecule binding",
+]
 classifiers = [
-    "Environment :: Console",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Unix Shell",
-    "Intended Audience :: Science/Research",
-    "Topic :: Scientific/Engineering",
-    "Development Status :: 1 - Planning",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Unix Shell",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering",
+  "Development Status :: 1 - Planning"
 ]
 include = [
-    "LICENSE.txt",
+  "LICENSE.txt"
 ]
 
 [tool.poetry.dependencies]
-python = "^3.5"
-pandas = "^0.18"
-rpy2 = "~2.3"
-lmfit = "~0.8"
-seaborn = "^0.7"
-numpy = "~1.10"
+python = "^3.6"
 matplotlib = "^1"
 scipy = "^0.18"
+pandas = "^0.18"
+lmfit = "^0.8"
+seaborn = "^0.7"
+numpy = "~1.10"
 
 [tool.poetry.dev-dependencies]
+pytest = "^4"
+
+[tool.poetry.scripts]
+"fit_rpy" = "clophfit.fit_rpy:main"
 
 [tool.black]
 line-length = 88
@@ -50,17 +61,17 @@ exclude = '''
 )/
 '''
 
-[tool.isort]
-profile = "black"
-# multi_line_output = 5
-# atomic = true
-# include_trailing_comma = true
-# lines_after_imports = 2
-# lines_between_types = 1
-# use_parentheses = true
-# src_paths = ["src", "tests"]
-# filter_files = true
-known_first_party = "prtecan"
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.2"
+tag_format = "$version"
+version_format = "$version"
+version_files = [
+  "pyproject.toml:version",
+  "src/clophfit/__init__.py:__version__",
+  "docs/conf.py:release",
+  "README.md:Version:",
+]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

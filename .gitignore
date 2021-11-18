@@ -48,3 +48,22 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Sphinx documentation
+docs/_build/
+
+# Jupyter notebooks
+.ipynb*
+
+# Emacs buffers
+.#*
+
+# Unit test / coverage reports
+htmlcov/
+.nox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+.hypothesis/
+
+tests/data/_tmpoutput
