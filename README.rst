@@ -1,11 +1,11 @@
-|Tests| |PyPI|
+|Tests| |PyPI| |RtD|
 
 ClopHfit
 ========
 
 -  Cli for fitting macromolecule pH titration or binding assays data
    e.g. fluorescence spectra.
--  Version: “0.3.0a0”
+-  Version: “0.3.0a1”
 
 
 Installation
@@ -93,6 +93,15 @@ I do not know how to unittest
 Development
 -----------
 
+Make sure this README passes https://pypi.org/project/readme-renderer/
+
+::
+
+   gh release create (--target devel) v0.3.0a0
+
+   gh workflow disable|enable|view|run|list
+
+
 TL;DR
 ~~~~~
 
@@ -166,8 +175,9 @@ What is missing to modernize_:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - coveralls/Codecov
-- automate triggering release to PYPI from github
+- release drafter
 - readthedocs or ghpages?
+  https://www.docslikecode.com/articles/github-pages-python-sphinx/ 
 
 
 
@@ -177,6 +187,8 @@ What is missing to modernize_:
    :target: https://github.com/darosio/ClopHfit/actions?workflow=Tests
 .. |PyPI| image:: https://img.shields.io/pypi/v/ClopHfit.svg
    :target: https://pypi.org/project/ClopHfit/
+.. |RtD| image:: https://readthedocs.org/projects/clophfit/badge/
+   :target: https://clophfit.readthedocs.io/
 
 .. _Commitizen: https://commitizen-tools.github.io/commitizen/
 
