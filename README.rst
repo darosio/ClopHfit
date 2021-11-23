@@ -5,7 +5,7 @@ ClopHfit
 
 -  Cli for fitting macromolecule pH titration or binding assays data
    e.g. fluorescence spectra.
--  Version: “0.3.0a1”
+-  Version: “0.3.0a2”
 
 
 Installation
@@ -149,7 +149,7 @@ Development environment
 
 * Commitizen_ also used to bump version::
 
-	cz bump --changelog --prerelease alpha --increment MINOR
+	cz bump --changelog-to-stdout --files-only --prerelease alpha --increment MINOR
 
   * need one-time initialization::
 
@@ -161,7 +161,7 @@ Development environment
 
 	mkdir docs; cd docs
 	sphinx-quickstart
-  
+
   Edit conf.py ["sphinx.ext.autodoc"] and index.rst [e.g. api/modules]::
 
     sphinx-apidoc -f -o docs/api/ src/clophfit/
@@ -177,7 +177,7 @@ What is missing to modernize_:
 - coveralls/Codecov
 - release drafter
 - readthedocs or ghpages?
-  https://www.docslikecode.com/articles/github-pages-python-sphinx/ 
+  https://www.docslikecode.com/articles/github-pages-python-sphinx/
 
 
 
