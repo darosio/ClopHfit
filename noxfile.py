@@ -48,7 +48,7 @@ def mypy(session: Session) -> None:
 def tests(session: Session) -> None:
     """Run the test suite."""
     args = session.posargs or ["--cov", "-v"]
-    session.run("poetry", "install", external=True)
+    session.install("coverage[toml]", "pytest", "pytest-cov", ".")
     session.run("pytest", *args)
 
 
@@ -56,8 +56,7 @@ def tests(session: Session) -> None:
 def xdoctest(session: Session) -> None:
     """Run examples with xdoctest."""
     args = session.posargs or ["all"]
-    session.run("poetry", "install", "--no-dev", external=True)
-    session.install("xdoctest", "pygments")
+    session.install("xdoctest", "pygments", ".")
     session.run("echo", "== Xdoctest is testing: ", package, "and", *args, "==")
     session.run("python", "-m", "xdoctest", package, *args)
 
@@ -65,13 +64,12 @@ def xdoctest(session: Session) -> None:
 @nox_poetry.session(python=["3.9"])
 def docs(session: Session) -> None:
     """Build the documentation."""
-    session.run("poetry", "install", external=True)  # MAYBE you remove this
-    # packages istallation
     session.install(
         "sphinx",
         # "sphinxcontrib-plantuml",
-        # "pydata-sphinx-theme",
-        # "sphinx-autodoc-typehints",
+        "pydata-sphinx-theme",
+        "sphinx-autodoc-typehints",
         # "nbsphinx",
+        # ".",
     )
     session.run("sphinx-build", "docs", "docs/_build")
