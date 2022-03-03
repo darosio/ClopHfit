@@ -23,7 +23,7 @@ copyright = '2021, Daniele Arosio'
 author = 'Daniele Arosio'
 
 # The full version, including alpha/beta/rc tags
-release = "0.3.0a2"
+release = "0.3.0a3"
 
 # -- General configuration ---------------------------------------------------
 
@@ -31,11 +31,21 @@ release = "0.3.0a2"
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
+    "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
+    "sphinxcontrib.plantuml",
+    "nbsphinx",
+    # 'IPython.sphinxext.ipython_console_highlighting',
 ]
-napoleon_google_docstring = False
+napoleon_include_init_with_doc = False
+napoleon_include_private_with_doc = True
+napoleon_include_special_with_doc = True
+napoleon_use_rtype = False
+
+# autodoc_default_options \= {}
+#     'members': True
+#     'member-order': 'bysource
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

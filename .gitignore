@@ -53,6 +53,7 @@ docs/_build/
 
 # Jupyter notebooks
 .ipynb*
+.ob-jupyter
 
 # Emacs buffers
 .#*

@@ -1,124 +1,96 @@
-|Tests| |PyPI| |RtD|
+|PyPI| |Tests| |RtD|
 
 ClopHfit
 ========
 
--  Cli for fitting macromolecule pH titration or binding assays data
-   e.g. fluorescence spectra.
--  Version: “0.3.0a2”
+Cli for fitting macromolecule pH titration or binding assay data, e.g.
+fluorescence spectra.
+
+- Version: “0.3.0a3”
+
+
+Features
+--------
+
+- Plate Reader data Parser.
+- Perform non-linear least square fitting.
+- Extract and fit pH and chloride titrations of GFP libraries.
+
+  - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
+  - Estimate uncertainty using  bootstrap.
+  - Subtract buffer for each titration point.
+  - Report controls e.g. S202N, E2 and V224Q.
+  - Correct for dilution of titration additions.
+  - Plot data when fitting fails and save txt file anyway.
+
+
+Usage
+-----
+
+- Extract and fit titrations from a list of tecan files collected at various
+  pH or chloride concentrations::
+
+   clop prtecan --help
+
+  For example::
+
+	clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm \
+	  --out prova2 --Klim 6.8,8.4 --sel 7.6,20
+
+  To reproduce older pr.tecan add `--no-weight` option::
+
+	clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
+	  --out 4old --Klim 6.8,8.4 --sel 7.6,20
+
+- Predict chloride dissociation constant :math:`K_d` at given pH::
+
+   clop eq1 --help
+
+To use clophfit in a project::
+
+  from clophfit import prtecan, binding
 
 
 Installation
 ------------
 
-At this stage few scripts are available in src/clophfit/old.
+You can get the library directly from |PyPI|::
 
-::
-
-   pyenv install 3.6.15
-   poetry install
-   poetry run pytest -v
-
-
-Use
----
-
-fit_titration.py
-~~~~~~~~~~~~~~~~
-
-A single script for pK and Cl and various methods w/out bootstraping: 1.
-svd 2. bands and 3. single lambda.
-
-   input ← csvtable and note_file
-
-..
-
-   output → pK spK (stdout) and pdf of analysis
-
-To do
-^^^^^
-
--  Bootstrap svd with optimize or lmfit.
--  **Average spectra**
--  Join spectra [‘B’, ‘E’, ‘F’]
--  Compute band integral (or sums)
-
-fit_titration_global.py
-~~~~~~~~~~~~~~~~~~~~~~~
-
-A script for fitting tuples (y1, y2) of values for each concentration
-(x). It uses lmfit confint and bootstrap.
-
-   input ← x y1 y2 (file)
-
-..
-
-   output → K SA1 SB1 SA2 SB2 , png and correl.png
-
-
-In global fit the best approach was using lmfit without bootstraping.
-
-Example
-^^^^^^^
-
-::
-
-    for i in *.dat; do gfit $i png2 --boot 99 > png2/$i.txt; done
-
-
-Old tecan todo list
--------------------
-
-I do not know how to unittest
-
-- better fit 400, 485 (also separated) e bootstrap to estimate
-  uncertanty
-
-- print sorted output
-
-- buffer correction and report controls e.g. S202N, E2 and V224Q
-
-- dilution correction
-
-- check metadata and report the diff REMEMBER 8.8; dataframe groupby
-  per meta_pre, ma anche enspire
-
-- **fit chloride**
-
-- fluorescence is constant? GREAT
-
-- plot data when fit fail and save txt file
+    pip install clophfit
 
 
 Development
 -----------
 
-Make sure this README passes https://pypi.org/project/readme-renderer/
+Prepare a virtual development environment and test first installation::
 
-::
-
-   gh release create (--target devel) v0.3.0a0
-
-   gh workflow disable|enable|view|run|list
-
-
-TL;DR
-~~~~~
-
-::
-
-   poetry env use 3.9
+   pyenv install 3.10.2
+   poetry env use 3.10
    poetry install
+   poetry run pytest -v
+
+Make sure::
+
    pre-commit install
    pre-commit install --hook-type commit-msg
+
+For Jupyter_::
+
+   poetry run python -m ipykernel install --user --name="cloph-310"
+
+To generate docs::
+
+   poetry run nox -rs docs
 
 When needed (e.g. API updates)::
 
    sphinx-apidoc -f -o docs/api/ src/clophfit/
 
-For Jupyter_::
+Use commitizen and github-cli to release::
 
-    poetry run python -m ipykernel install --user --name="clophfit"
+   poetry run cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
+   gh release create (--target devel) v0.3.0a0
+
 
 Development environment
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -137,6 +109,9 @@ Development environment
   - flake8-comprehensions
   - flake8-pytest-style
   - flake8-annotations (see mypy)
+  - flake8-rst-docstrings
+
+	- rst-lint
 
 * pre-commit configured in .pre-commit-config.yaml activated with::
 
@@ -166,34 +141,44 @@ Development environment
 
     sphinx-apidoc -f -o docs/api/ src/clophfit/
 
-* CI/CD to PYPI_ configured in .github/::
+* CI/CD configured in .github/workflows::
 
 	tests.yml
 	release.yml
+
+  Remember to update tools version e.g. nox_poetry==0.9.
 
 What is missing to modernize_:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - coveralls/Codecov
-- release drafter
+- release drafter; maybe useful when merging pr into main.
 - readthedocs or ghpages?
   https://www.docslikecode.com/articles/github-pages-python-sphinx/
+- Make sure this README passes https://pypi.org/project/readme-renderer/
+
+
+Code of Conduct
+---------------
+
+Everyone interacting in the readme_renderer project's codebases, issue trackers,
+chat rooms, and mailing lists is expected to follow the `PSF Code of Conduct`_.
+
+   ..
+	  .. image:: https://readthedocs.org/projects/prtecan/badge/?version=latest
+			  :target: https://readthedocs.org/projects/prtecan/?badge=latest
+			  :alt: Documentation Status
 
 
 
-
-
-.. |Tests| image:: https://github.com/darosio/ClopHfit/workflows/Tests/badge.svg
-   :target: https://github.com/darosio/ClopHfit/actions?workflow=Tests
+.. |Tests| image:: https://github.com/darosio/ClopHfit/actions/workflows/tests.yml/badge.svg
+   :target: https://github.com/darosio/ClopHfit/actions/workflows/tests.yml
 .. |PyPI| image:: https://img.shields.io/pypi/v/ClopHfit.svg
    :target: https://pypi.org/project/ClopHfit/
 .. |RtD| image:: https://readthedocs.org/projects/clophfit/badge/
    :target: https://clophfit.readthedocs.io/
 
 .. _Commitizen: https://commitizen-tools.github.io/commitizen/
-
 .. _Jupyter: https://jupyter.org/
-
 .. _modernize: https://cjolowicz.github.io/posts/hypermodern-python-06-ci-cd/
-
-.. _PYPI: https://pypi.org/project/clophfit/
+.. _PSF Code of Conduct: https://github.com/pypa/.github/blob/main/CODE_OF_CONDUCT.md

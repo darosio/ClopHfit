@@ -1,10 +1,6 @@
 # exclude: ^tests/data/.
 repos:
 - hooks:
-  - id: rst-linter
-  repo: https://github.com/Lucas-C/pre-commit-hooks-markup
-  rev: v1.0.1
-- hooks:
   - id: check-yaml
   - id: end-of-file-fixer
   - id: trailing-whitespace
@@ -13,12 +9,14 @@ repos:
 - hooks:
   - entry: poetry run black
     id: black
+    exclude: ^src/clophfit/old
     language: system
     name: black
     types:
     - python
   - entry: poetry run flake8
     id: flake8
+    exclude: ^src/clophfit/old
     language: system
     name: flake8
     types:

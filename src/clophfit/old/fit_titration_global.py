@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 import numpy as np
-from lmfit import Parameters, minimize, conf_interval, report_fit
+from lmfit import Parameters, Minimizer, minimize, conf_interval, report_fit
 import pandas as pd
 import matplotlib.pyplot as plt
 # from scipy import optimize
@@ -93,10 +93,11 @@ def main():
         fit_params.add('K', value=7, min=4, max=10)
     elif args.titration_type == "cl":
         fit_params.add('K', value=20, min=0, max=1000)
-    fit = minimize(residual, fit_params, args=([df.x, df.x],),
-                   kws={'data': [df.y1, df.y2], 'titration_type': ttype})
+    mini = Minimizer(residual, fit_params, fcn_args=([df.x, df.x],),
+                   fcn_kws={'data': [df.y1, df.y2], 'titration_type': ttype})
+    res = mini.minimize()
     report_fit(fit_params)
-    ci = conf_interval(fit, sigmas=[.674, .95])
+    ci = conf_interval(mini, res, sigmas=[.674, .95])
     print(ci_report(ci))
     # plotting
     xfit = np.linspace(df.x.min(), df.x.max(), 100)
@@ -133,20 +134,20 @@ def bootstrap(df, nboot, fit_params, f_out, ttype):
     sa2 = []
     sb2 = []
     for i in range(nboot):
-        boot_idxs = np.random.random_integers(0, n_points-1, n_points)
+        boot_idxs = np.random.randint(0, n_points-1, n_points)
         df2 = df.loc[boot_idxs]
         df2.reset_index(drop=True, inplace=True)
-        boot_idxs = np.random.random_integers(0, n_points-1, n_points)
+        boot_idxs = np.random.randint(0, n_points-1, n_points)
         df3 = df.loc[boot_idxs]
         df3.reset_index(drop=True, inplace=True)
         try:
-            minimize(residual, fit_params, args=([df2.x, df3.x],),
+            res = minimize(residual, fit_params, args=([df2.x, df3.x],),
                      kws={'data': [df2.y1, df3.y2], 'titration_type': ttype})
-            kds.append(fit_params['K'].value)
-            sa1.append(fit_params['SA1'].value)
-            sb1.append(fit_params['SB1'].value)
-            sa2.append(fit_params['SA2'].value)
-            sb2.append(fit_params['SB2'].value)
+            kds.append(res.params['K'].value)
+            sa1.append(res.params['SA1'].value)
+            sb1.append(res.params['SB1'].value)
+            sa2.append(res.params['SA2'].value)
+            sb2.append(res.params['SB2'].value)
         except:
             print(df2)
             print(df3)

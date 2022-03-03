@@ -74,7 +74,7 @@ def main():
         plt.grid(True)
         ax2 = fig1.add_axes([0.42, 0.65, 0.32, 0.31])
         plt.grid(True)
-        ax1.plot(df.index, df)
+        ax1.plot(df)
         ax2.plot(ddf.index, u[:, 0], 'k-', lw=3)
         ax2.plot(ddf.index, u[:, 1], 'b--')
         ax3 = fig1.add_axes([0.80, 0.65, 0.18, 0.31], yscale='log',
@@ -103,7 +103,7 @@ def main():
             sa = []
             sb = []
             for i in range(100):
-                boot_idxs = np.random.random_integers(0, len(ddf.columns) - 1,
+                boot_idxs = np.random.randint(0, len(ddf.columns) - 1,
                                                       len(ddf.columns))
                 ddf2 = df.iloc[:, boot_idxs]
                 conc2 = conc[boot_idxs]
