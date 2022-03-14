@@ -6,7 +6,6 @@ build:
     python: "3.10"
   apt_packages:
     - r-base
-    - plantuml
 sphinx:
   configuration: docs/conf.py
 formats: all
