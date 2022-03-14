@@ -74,6 +74,7 @@ nbsphinx = "^0.8.8"
 ipython = "^8.1.0"
 flake8-rst-docstrings = "^0.2.5"
 readme-renderer = "^34.0"
+sphinxcontrib-plantuml = "^0.23"
 
 [tool.poetry.scripts]
 "clop" = "clophfit.cli:run"
