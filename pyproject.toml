@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ClopHfit"
-version = "0.3.0"
+version = "0.3.1"
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
 authors = [
   "daniele arosio <daniele.arosio@cnr.it>"
@@ -74,6 +74,7 @@ nbsphinx = "^0.8.8"
 ipython = "^8.1.0"
 flake8-rst-docstrings = "^0.2.5"
 readme-renderer = "^34.0"
+sphinxcontrib-plantuml = "^0.23"
 
 [tool.poetry.scripts]
 "clop" = "clophfit.cli:run"
@@ -97,7 +98,7 @@ exclude = '''
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.3.0"
+version = "0.3.1"
 tag_format = "v$version"
 version_files = [
   "pyproject.toml:version",
