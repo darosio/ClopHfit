@@ -8,6 +8,7 @@ Changelog
 Fixed
 ~~~~~
 
+- Read the docs
 - Removed :math: directive from README.rst.
 
 Added
