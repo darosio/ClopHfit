@@ -42,7 +42,7 @@ Usage
 	clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
 	  --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
-- Predict chloride dissociation constant :math:`K_d` at given pH::
+- Predict chloride dissociation constant `K_d` at given pH::
 
    clop eq1 --help
 
@@ -155,7 +155,6 @@ What is missing to modernize_:
 - release drafter; maybe useful when merging pr into main.
 - readthedocs or ghpages?
   https://www.docslikecode.com/articles/github-pages-python-sphinx/
-- Make sure this README passes https://pypi.org/project/readme-renderer/
 
 
 Code of Conduct

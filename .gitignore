@@ -68,3 +68,4 @@ coverage.xml
 .hypothesis/
 
 tests/data/_tmpoutput
+README.tmp.html
