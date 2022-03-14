@@ -3,8 +3,8 @@ source = ["src", "*/site-packages"]
 
 [run]
 branch = true
-source = ["clophfit"]
-# omit = ["*__init__.py"]
+# source = ["clophfit"]
+# # omit = ["*__init__.py"]
 
 [report]
 show_missing = true
