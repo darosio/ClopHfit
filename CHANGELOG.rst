@@ -2,6 +2,20 @@
 Changelog
 =========
 
+0.3.1 (2022-03-14)
+--------------------
+
+Fixed
+~~~~~
+
+- Removed :math: directive from README.rst.
+
+Added
+~~~~~
+
+- https://pypi.org/project/readme-renderer/ in lint
+
+
 0.3.0 (2022-03-14)
 --------------------
 

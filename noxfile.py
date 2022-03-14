@@ -33,12 +33,16 @@ def lint(session: Session) -> None:
         "flake8-comprehensions",
         "flake8-pytest-style",
         "flake8-annotations",
+        "readme-renderer",
     )
     session.run("flake8", "--exclude", "src/clophfit/old", *args)
     # session.run("flake8", "--exclude", "src/clophfit/old", "--select", "RST", *args)
     # session.run("flake8-rst", "--exclude", "src/clophfit/old", *args)
     session.run("rst-lint", "README.rst")  # for PyPI readme.rst
     # session.run("rst-lint", "CONTRIBUTING.rst")  # for PyPI readme.rst
+    session.run(
+        "python", "-m", "readme_renderer", "README.rst", "-o", "README.tmp.html"
+    )
 
 
 @nox_poetry.session(python=["3.10"])
@@ -78,3 +82,22 @@ def docs(session: Session) -> None:
         ".",
     )
     session.run("sphinx-build", "docs", "docs/_build")
+
+
+@nox_poetry.session(python="3.10")
+def clean(session: Session) -> None:
+    """Clean local repository."""
+    session.run(
+        "rm",
+        "-r",
+        "./README.tmp.html",
+        "./__pycache__",
+        "./.nox",
+        "./.mypy_cache",
+        "./.pytest_cache",
+        "./docs/_build",
+        "./src/clophfit/__pycache__",
+        "./tests/__pycache__",
+        "./dist",
+        external=True,
+    )
