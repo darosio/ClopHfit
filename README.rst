@@ -1,4 +1,4 @@
-|PyPI| |Tests| |RtD|
+|PyPI| |Tests| |RtD| |zenodo|
 
 ClopHfit
 ========
@@ -176,6 +176,9 @@ chat rooms, and mailing lists is expected to follow the `PSF Code of Conduct`_.
    :target: https://pypi.org/project/ClopHfit/
 .. |RtD| image:: https://readthedocs.org/projects/clophfit/badge/
    :target: https://clophfit.readthedocs.io/
+.. |zenodo| image:: https://zenodo.org/badge/DOI/10.5281/zenodo.6354112.svg
+   :target: https://doi.org/10.5281/zenodo.6354112
+
 
 .. _Commitizen: https://commitizen-tools.github.io/commitizen/
 .. _Jupyter: https://jupyter.org/
