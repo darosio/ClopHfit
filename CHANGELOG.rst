@@ -2,7 +2,7 @@
 Changelog
 =========
 
-0.3.1 (2022-03-14)
+0.3.2 (2022-03-14)
 --------------------
 
 Fixed
@@ -17,7 +17,7 @@ Added
 - https://pypi.org/project/readme-renderer/ in lint
 
 
-0.3.1 (2022-03-14)
+0.3.2 (2022-03-14)
 --------------------
 
 Added
@@ -39,6 +39,7 @@ Changed
 - Update dependencies::
 
 	poetry show --outdated
+
   with required minor changes in old scipts.
 - nox-poetry.
 - pandas.rpy (<=0.19) now lives in rpy2.
