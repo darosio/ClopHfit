@@ -7,15 +7,30 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - name: Check out the repository
+        uses: actions/checkout@v3
       - name: Install pandoc
         run: sudo apt-get install -y pandoc
-      - uses: actions/setup-python@v1
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v1
         with:
           python-version: '3.10'
           architecture: x64
-      - run: pip install nox-poetry==0.9
-      - run: pip install poetry==1.1.13
-      - run: nox
+      - name: Upgrade pip
+        run: |
+          pip install --constraint=.github/workflows/constraints.txt pip
+          pip --version
+      - name: Upgrade pip in virtual environments
+        shell: python
+        run: |
+          import os
+          import pip
+
+          with open(os.environ["GITHUB_ENV"], mode="a") as io:
+              print(f"VIRTUALENV_PIP={pip.__version__}", file=io)
+      - name: Install Poetry
+        run: |
+          pipx install --pip-args=--constraint=.github/workflows/constraints.txt poetry
+          poetry --version
       - run: poetry build
       - run: poetry publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}
