@@ -16,7 +16,7 @@ Changed
 - Update poetry 1.2.0 and notebook.
 
 
-0.3.3 (2022-03-14)
+0.3.4 (2022-03-14)
 ------------------
 
 Fixed
@@ -31,7 +31,7 @@ Added
 - https://pypi.org/project/readme-renderer/ in lint
 
 
-0.3.3 (2022-03-14)
+0.3.4 (2022-03-14)
 --------------------
 
 Added
