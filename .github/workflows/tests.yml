@@ -27,7 +27,7 @@ jobs:
           - { python: "3.8", os: "ubuntu-latest", session: "tests" }
           - { python: "3.10", os: "windows-latest", session: "tests" }
           - { python: "3.10", os: "macos-latest", session: "tests" }
-          - { python: "3.10", os: "ubuntu-latest", session: "typeguard" }
+          # - { python: "3.10", os: "ubuntu-latest", session: "typeguard" }
           - { python: "3.10", os: "ubuntu-latest", session: "docs" }
 
     env:
@@ -39,8 +39,9 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v3
 
-      # - name: Install pandoc
-      #   run: sudo apt-get install -y pandoc
+      - name: Install pandoc
+        if: matrix.session == 'docs'
+        run: sudo apt-get install -y pandoc
 
       - name: Set up Python ${{ matrix.python }}
         uses: actions/setup-python@v4
