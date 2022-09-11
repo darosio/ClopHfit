@@ -6,7 +6,7 @@ ClopHfit
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
-- Version: “0.3.4”
+- Version: “0.3.5”
 
 
 Features
