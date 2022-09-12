@@ -1,13 +1,13 @@
 """Test ``clop`` cli."""
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
-from clophfit.cli import app
+from clophfit import cli
 
 
-def test_eq1_cli() -> None:
+def test_eq1() -> None:
     """It runs XXX pr.tecan and generates correct results and graphs."""
     runner = CliRunner()
-    result = runner.invoke(app, ["eq1", "2", "2", "2"])
+    result = runner.invoke(cli.clop, ["eq1", "2", "2", "2"])
     assert result.exit_code == 0
     assert "4." in result.output

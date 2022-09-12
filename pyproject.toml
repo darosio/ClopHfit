@@ -77,7 +77,7 @@ readme-renderer = "^34.0"
 sphinxcontrib-plantuml = "^0.23"
 
 [tool.poetry.scripts]
-"clop" = "clophfit.cli:app"
+"clop" = "clophfit.cli:clop"
 
 [tool.black]
 line-length = 88

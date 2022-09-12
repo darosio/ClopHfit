@@ -3,36 +3,35 @@ import functools
 import os
 import pprint
 from enum import Enum
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import Tuple
 
-import typer
+import click
 
 from clophfit import binding, prtecan
 
-from . import __version__
 
-app = typer.Typer()
-
-
-# @typer.version_option(version=__version__)
-def version_callback(value: bool) -> None:
-    """Version callback function."""
-    if value:
-        typer.echo(f"{__version__}")
-        raise typer.Exit()
+@click.group()
+@click.version_option()
+def clop() -> None:
+    """Group command."""
+    pass
 
 
-version = typer.Option(None, "--version", callback=version_callback, is_eager=True)
-
-
-@app.command("eq1")
-def eq1(
-    kd1: float,  # Must be lowercase.
-    pka: float,
-    ph: float,
-    version: bool = version,
-) -> None:
+@clop.command()
+@click.option("--some", flag_value="bello", is_flag=False, show_default="LLL")
+@click.argument("kd1", type=float, default=13.2)
+@click.argument("pka", type=float)
+@click.argument("ph", type=float)
+def eq1(  # type: ignore
+    kd1,
+    pka,
+    ph,
+    some,
+):  # type: ignore
     """pH-deps for Kd."""
+    if some:
+        print(some)
     print(binding.kd(Kd1=kd1, pKa=pka, pH=ph))
 
 
@@ -43,38 +42,96 @@ class FitKind(str, Enum):
     Cl = "Cl"
 
 
-# -Arguments # TODO maybe use pathlib.Path
-list_file = typer.Argument(..., help="List of Tecan files and concentration values.")
-scheme = typer.Argument("", help="Describe content of wells.", show_default=False)
-dil = typer.Argument("", help="Describe volume addictions.", show_default=False)
-# -Options
-verbose = typer.Option(0, "--verbose", "-v", count=True)
-version = typer.Option(None, "--version", callback=version_callback, is_eager=True)
-bg = typer.Option(True, help="Substract buffer (scheme wells=='buffer').")
-kind = typer.Option(
-    FitKind.pH, "--kind", "-k", case_sensitive=False, help="Titration type."
+# @click.argument("list_file", type=click.Path(path_type=Path))
+
+
+@clop.command("prtecan")
+@click.argument("list_file", type=str)
+@click.option(
+    "--scheme",
+    type=click.Path(path_type=Path),
+    is_flag=False,
+    flag_value="scheme.txt",
+    show_default="scheme.txt",
+    help="Positions of buffer and controls wells.",
 )
-norm = typer.Option(False, help="Normalize using metadata (gain, flashes).")
-out = typer.Option("out2", help="Path to output results.")
-dat = typer.Option("./dat", help="Path to output dat files.")
-no_weight = typer.Option(
-    False, "--no-weight/ ", help="Global fitting without relative residues weights."
+@click.option(
+    "--dil",
+    type=click.Path(path_type=Path),
+    is_flag=False,
+    flag_value="additions.pH",
+    show_default="additions.pH",
+    help="Initial volume and additions",
 )
-confint = typer.Option(
-    0.95,
-    min=0,
-    max=1,
+@click.option(
+    "--kind",
+    "-k",
+    type=click.Choice(['pH', 'Cl'], case_sensitive=False),
+    default="pH",
+    help="Titration type.",
+    show_default=True,
+)
+@click.option(
+    "--out", type=str, default="out2", help="Path to output results.", show_default=True
+)
+@click.option(
+    "--dat",
+    type=str,
+    default="./dat",
+    help="Path to output dat files.",
+    show_default=True,
+)
+@click.option("--pdf", is_flag=True, help="Full report in pdf file.")
+@click.option(
+    "--Klim",
+    default=None,
+    type=Tuple[float, float],
+    help="Range MIN, MAX (xlim) for plot_K.",
+)
+@click.option("--title", "-t", default=None, help="Title for some plots.")
+@click.option(
+    "--sel",
+    default=None,
+    type=Tuple[float, float],
+    help="Errorbar plot for selection with K_min SA_min.",
+)
+@click.option(
+    "--weigth/--no-weight",
+    default=True,
+    show_default=True,
+    help="Global fitting without relative residues weights.",
+)
+@click.option(
+    "--confint",
+    default=0.95,
+    type=click.FloatRange(0, 1, clamp=True),
+    show_default=True,
     help="Confidence value for the calculation of parameter errors.",
 )
-Klim = typer.Option(None, "--Klim", help="Range MIN, MAX (xlim) for plot_K.")
-title = typer.Option(None, "-t", help="Title for some plots.")
-sel = typer.Option(None, help="Errorbar plot for selection with K_min SA_min.")
-pdf = typer.Option(False, help="Full report in pdf file.")
+@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
+@click.option("--bg", is_flag=True, help="Substract buffer (scheme wells=='buffer').")
+@click.option("--verbose", "-v", count=True)
+def tecan(  # type: ignore
+    list_file,
+    scheme,
+    dil,
+    verbose,
+    version,
+    bg,
+    kind,
+    norm,
+    out,
+    dat,
+    no_weight,
+    confint,
+    Klim,
+    title,
+    sel,
+    pdf,
+):
+    """Convert a list of plate reader acquisitions into titrations.
 
-
-"""
-    Positions of buffer and control samples goes into SCHEME [scheme.txt].
-    Initial volume and titration additions go into DIL [addition.cl|pH].
+    LIST_FILE : List of Tecan files and concentration values.
 
     Save titrations as .dat files.
     Fits all wells using 2 labels and produces:
@@ -83,29 +140,7 @@ pdf = typer.Option(False, help="Full report in pdf file.")
     - all_wells pdf
     - csv tables for all labelblocks and global fittings.
 
-"""
-
-
-@app.command("prtecan")
-def tecan(
-    list_file: str = list_file,
-    scheme: Optional[str] = scheme,
-    verbose: int = verbose,
-    version: bool = version,
-    bg: bool = bg,
-    dil: Optional[str] = dil,
-    kind: FitKind = kind,
-    norm: bool = norm,
-    out: str = out,
-    dat: str = dat,
-    no_weight: bool = no_weight,
-    confint: float = confint,
-    Klim: Optional[Tuple[float, float]] = Klim,
-    title: str = title,
-    sel: Tuple[float, float] = sel,
-    pdf: bool = pdf,
-) -> None:
-    """Convert a list of plate reader acquisitions into titrations."""
+    """
     tit = prtecan.Titration(list_file)
     # TitrationAnalysis
     if scheme:
@@ -188,8 +223,3 @@ def tecan(
         f.savefig(ttff('buffer.png'))
     if pdf:
         tit.plot_all_wells(ttff('all_wells.pdf'))
-
-
-def run() -> None:
-    """Run commands."""
-    app()
