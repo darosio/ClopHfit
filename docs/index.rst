@@ -1,4 +1,7 @@
-.. include:: ../README.rst
+
+.. toctree::
+
+   README.md
 
 
 .. toctree::
