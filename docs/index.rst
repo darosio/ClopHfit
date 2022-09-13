@@ -2,7 +2,7 @@
 .. toctree::
 
    README.md
-
+   :hidden:
 
 .. toctree::
    :hidden:
@@ -11,3 +11,13 @@
    api/api
    references/references
    misc/misc
+
+
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+
+..

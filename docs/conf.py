@@ -13,6 +13,7 @@
 import os
 import sys
 
+
 sys.path.insert(0, os.path.abspath('../..'))
 
 
@@ -36,6 +37,8 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinxcontrib.plantuml",
     "nbsphinx",
+    "sphinx_click",
+    "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',
 ]
 napoleon_include_init_with_doc = False
@@ -46,6 +49,14 @@ napoleon_use_rtype = False
 # autodoc_default_options \= {}
 #     'members': True
 #     'member-order': 'bysource
+
+autodoc_typehints = "description"
+# The suffix of source filenames.
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
+
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
