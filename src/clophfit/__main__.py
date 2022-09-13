@@ -1,8 +1,9 @@
 """Command-line interface."""
+from __future__ import annotations
+
 import functools
 import os
 import pprint
-from enum import Enum
 from pathlib import Path
 from typing import Tuple
 
@@ -20,7 +21,7 @@ def clop() -> None:
 
 @clop.command()
 @click.option("--some", flag_value="bello", is_flag=False, show_default="LLL")
-@click.argument("kd1", type=float, default=13.2)
+@click.argument("kd1", type=float)
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
 def eq1(  # type: ignore
@@ -35,26 +36,8 @@ def eq1(  # type: ignore
     print(binding.kd(Kd1=kd1, pKa=pka, pH=ph))
 
 
-class FitKind(str, Enum):
-    """Enum for kind of fit: pH or Cl."""
-
-    pH = "pH"
-    Cl = "Cl"
-
-
-# @click.argument("list_file", type=click.Path(path_type=Path))
-
-
-@clop.command("prtecan")
-@click.argument("list_file", type=str)
-@click.option(
-    "--scheme",
-    type=click.Path(path_type=Path),
-    is_flag=False,
-    flag_value="scheme.txt",
-    show_default="scheme.txt",
-    help="Positions of buffer and controls wells.",
-)
+@clop.command()
+@click.argument("list_file", type=click.Path(path_type=Path))
 @click.option(
     "--dil",
     type=click.Path(path_type=Path),
@@ -63,40 +46,26 @@ class FitKind(str, Enum):
     show_default="additions.pH",
     help="Initial volume and additions",
 )
+@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
+@click.option(
+    "--scheme",
+    type=click.Path(path_type=Path),
+    is_flag=False,
+    flag_value="scheme.txt",
+    show_default="scheme.txt",
+    help="Positions of buffer and controls wells.",
+)
+@click.option("--bg", is_flag=True, help="Substract buffer (scheme wells=='buffer').")
 @click.option(
     "--kind",
     "-k",
     type=click.Choice(['pH', 'Cl'], case_sensitive=False),
     default="pH",
-    help="Titration type.",
+    help="Kind of titration.",
     show_default=True,
 )
 @click.option(
-    "--out", type=str, default="out2", help="Path to output results.", show_default=True
-)
-@click.option(
-    "--dat",
-    type=str,
-    default="./dat",
-    help="Path to output dat files.",
-    show_default=True,
-)
-@click.option("--pdf", is_flag=True, help="Full report in pdf file.")
-@click.option(
-    "--Klim",
-    default=None,
-    type=Tuple[float, float],
-    help="Range MIN, MAX (xlim) for plot_K.",
-)
-@click.option("--title", "-t", default=None, help="Title for some plots.")
-@click.option(
-    "--sel",
-    default=None,
-    type=Tuple[float, float],
-    help="Errorbar plot for selection with K_min SA_min.",
-)
-@click.option(
-    "--weigth/--no-weight",
+    "--weight/--no-weight",
     default=True,
     show_default=True,
     help="Global fitting without relative residues weights.",
@@ -108,23 +77,49 @@ class FitKind(str, Enum):
     show_default=True,
     help="Confidence value for the calculation of parameter errors.",
 )
-@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
-@click.option("--bg", is_flag=True, help="Substract buffer (scheme wells=='buffer').")
-@click.option("--verbose", "-v", count=True)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    default="out2",
+    help="Path to output results.",
+    show_default=True,
+)
+@click.option(
+    "--dat",
+    type=click.Path(path_type=Path),
+    default="./dat",
+    help="Path to output dat files.",
+    show_default=True,
+)
+@click.option("--pdf", is_flag=True, help="Full report in pdf file.")
+@click.option("--title", "-t", default=None, help="Title for some plots.")
+@click.option(
+    "--Klim",
+    default=None,
+    type=Tuple[float, float],
+    help="Range MIN, MAX (xlim) for plot_K.",
+)
+@click.option(
+    "--sel",
+    default=None,
+    type=Tuple[float, float],
+    help="Errorbar plot for selection with K_min SA_min.",
+)
+@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def tecan(  # type: ignore
+    ctx,
     list_file,
     scheme,
     dil,
     verbose,
-    version,
     bg,
     kind,
     norm,
     out,
     dat,
-    no_weight,
+    weight,
     confint,
-    Klim,
+    klim,
     title,
     sel,
     pdf,
@@ -134,10 +129,15 @@ def tecan(  # type: ignore
     LIST_FILE : List of Tecan files and concentration values.
 
     Save titrations as .dat files.
+
     Fits all wells using 2 labels and produces:
+
     - K plot
+
     - ebar and (for selection) ebarZ plot
+
     - all_wells pdf
+
     - csv tables for all labelblocks and global fittings.
 
     """
@@ -149,7 +149,7 @@ def tecan(  # type: ignore
             tit.subtract_bg()
         if dil:
             tit.dilution_correction(dil)
-            if kind == 'cl':  # XXX cl conc must be elsewhere
+            if kind.lower() == 'cl':  # XXX cl conc must be elsewhere
                 tit.conc = tit.calculate_conc(tit.additions, 1000)
         if norm:
             tit.metadata_normalization()
@@ -165,7 +165,7 @@ def tecan(  # type: ignore
     # Export .dat
     tit.export_dat(ttff(dat))
     # Fit
-    tit.fit(kind.value, no_weight=no_weight, tval_conf=float(confint))
+    tit.fit(kind, no_weight=(not weight), tval_conf=float(confint))
     # metadata-labels.txt
     fp = open(ttff('metadata-labels.txt'), 'w')
     for lbg in tit.labelblocksgroups:
@@ -205,15 +205,15 @@ def tecan(  # type: ignore
             ttff('fit' + str(i) + '.csv'), float_format='%5.1f'
         )
         # Plots
-        f = tit.plot_K(i, xlim=Klim, title=title)
+        f = tit.plot_K(i, xlim=klim, title=title)
         f.savefig(ttff('K' + str(i) + '.png'))
         f = tit.plot_ebar(i, title=title)
         f.savefig(ttff('ebar' + str(i) + '.png'))
         if sel:
-            if kind.value.lower() == 'ph':  # FIXME **kw?
+            if kind.lower() == "ph":  # FIXME **kw?
                 xmin, ymin = sel
                 f = tit.plot_ebar(i, xmin=xmin, ymin=ymin, title=title)
-            if kind.value.lower() == 'cl':
+            if kind.lower() == 'cl':
                 xmax, ymin = sel
                 f = tit.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(ttff('ebarZ' + str(i) + '.png'))
