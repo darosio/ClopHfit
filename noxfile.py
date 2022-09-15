@@ -120,7 +120,6 @@ def precommit(session: Session) -> None:
         "pyupgrade",
         "commitizen",
     )
-    # TODO: other linters session.run("rst-lint", "README.rst")  # for PyPI readme.rst
     session.run("pre-commit", *args)
     if args and args[0] == "install":
         activate_virtualenv_in_precommit_hooks(session)
