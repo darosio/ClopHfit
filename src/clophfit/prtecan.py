@@ -35,6 +35,7 @@ from typing import Any  # , overload
 from typing import Dict
 from typing import List
 from typing import Optional
+from typing import Sequence
 from typing import Tuple
 from typing import Union
 
@@ -45,10 +46,10 @@ import scipy
 import scipy.stats
 import seaborn as sb
 from matplotlib.backends.backend_pdf import PdfPages
+from numpy.typing import NDArray
 
 
-list_of_lines = List[List]
-# bug xdoctest-3.7 #import numpy.typing as npt
+list_of_lines = List[List[Any]]
 
 
 def strip_lines(lines: list_of_lines) -> list_of_lines:
@@ -122,19 +123,23 @@ def extract_metadata(lines: list_of_lines) -> Dict[str, Any]:
     return m2
 
 
-def fz_Kd_singlesite(K: float, p: np.ndarray, x: np.ndarray) -> np.ndarray:
+def fz_kd_singlesite(
+    k: float, p: Sequence[float], x: NDArray[np.float_]
+) -> NDArray[np.float_]:
     """Fit function for Cl titration."""
-    return (p[0] + p[1] * x / K) / (1 + x / K)
+    return (p[0] + p[1] * x / k) / (1 + x / k)
 
 
-def fz_pK_singlesite(K: float, p: np.ndarray, x: np.ndarray) -> np.ndarray:
+def fz_pk_singlesite(
+    k: float, p: Sequence[float], x: NDArray[np.float_]
+) -> NDArray[np.float_]:
     """Fit function for pH titration."""
-    return (p[1] + p[0] * 10 ** (K - x)) / (1 + 10 ** (K - x))
+    return (p[1] + p[0] * 10 ** (k - x)) / (1 + 10 ** (k - x))
 
 
 def fit_titration(
     kind: str,
-    x: np.ndarray,
+    x: Sequence[float],
     y: np.ndarray,
     y2: Optional[np.ndarray] = None,
     residue: Optional[np.ndarray] = None,
@@ -180,9 +185,9 @@ def fit_titration(
 
     """
     if kind == 'pH':
-        fz = fz_pK_singlesite
+        fz = fz_pk_singlesite
     elif kind == 'Cl':
-        fz = fz_Kd_singlesite
+        fz = fz_kd_singlesite
     else:
         raise NameError('kind= pH or Cl')
 
@@ -869,9 +874,9 @@ class TitrationAnalysis(Titration):
 
         """
         if kind == 'Cl':
-            self.fz = fz_Kd_singlesite
+            self.fz = fz_kd_singlesite
         elif kind == 'pH':
-            self.fz = fz_pK_singlesite
+            self.fz = fz_pk_singlesite
         x = self.conc
         fittings = []
         for lbg in self.labelblocksgroups:
