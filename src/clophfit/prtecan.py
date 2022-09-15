@@ -26,18 +26,16 @@ Functions
 .. autofunction:: strip_lines
 
 """
+from __future__ import annotations
+
 import copy
 import hashlib
 import itertools
 import os
 import warnings
 from typing import Any  # , overload
-from typing import Dict
 from typing import List
-from typing import Optional
 from typing import Sequence
-from typing import Tuple
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -59,11 +57,12 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
 
     Parameters
     ----------
-    lines
+    lines : list_of_lines
         Lines that are a list of fields, typically from a csv/xls file.
 
     Returns
     -------
+    list_of_lines
         Lines removed from blank cells.
 
     """
@@ -75,7 +74,7 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
 
 
 # def extract_metadata(lines: list_of_lines) -> Dict[str, Union[str, float, List[Any]]]:
-def extract_metadata(lines: list_of_lines) -> Dict[str, Any]:
+def extract_metadata(lines: list_of_lines) -> dict[str, Any]:
     """Extract metadata from a list of stripped lines.
 
     First field is the *key*, remaining fields goes into a list of values::
@@ -90,11 +89,12 @@ def extract_metadata(lines: list_of_lines) -> Dict[str, Any]:
 
     Parameters
     ----------
-    lines
+    lines : list_of_lines
         Lines that are a list of fields, typically from a csv/xls file.
 
     Returns
     -------
+    Dict[str, Any]
         Metadata for Tecanfile or Labelblock.
 
     """
@@ -114,7 +114,7 @@ def extract_metadata(lines: list_of_lines) -> Dict[str, Any]:
         for line in stripped_lines
         if len(line) == 1 and 'Label' not in line[0] and 'Temperature' not in line[0]
     }
-    m2: Dict[str, Union[str, float, List[str]]] = {
+    m2: dict[str, str | float | list[str]] = {
         line[0]: line[1:] for line in stripped_lines if len(line) > 1
     }
     m2.update(m1)
@@ -141,9 +141,9 @@ def fit_titration(
     kind: str,
     x: Sequence[float],
     y: np.ndarray,
-    y2: Optional[np.ndarray] = None,
-    residue: Optional[np.ndarray] = None,
-    residue2: Optional[np.ndarray] = None,
+    y2: np.ndarray | None = None,
+    residue: np.ndarray | None = None,
+    residue2: np.ndarray | None = None,
     tval_conf: float = 0.95,
 ) -> pd.DataFrame:
     """Fit pH or Cl titration using a single-site binding model.
@@ -155,21 +155,24 @@ def fit_titration(
 
     Parameters
     ----------
-    kind
+    kind : str
         Titration type {'pH'|'Cl'}
-    x, y
-        Main dataset.
-    y2
-        Second dataset (share x with main dataset).
-    residue
+    x : Sequence[float]
+        Dataset x-values.
+    y : np.ndarray
+        Dataset y-values.
+    y2 : np.ndarray, optional
+        Optional second dataset y-values (share x with main dataset).
+    residue : np.ndarray, optional
         Residues for main dataset.
-    residue2
+    residue2 : np.ndarray, optional
         Residues for second dataset.
-    tval_conf
+    tval_conf : float
         Confidence level (default 0.95) for parameter estimations.
 
     Returns
     -------
+    pd.DataFrame
         Fitting results.
 
     Raises
@@ -305,7 +308,7 @@ class Labelblock:
 
     def __init__(
         self,
-        tecanfile: Optional['Tecanfile'],
+        tecanfile: Tecanfile | None,
         lines: list_of_lines,
     ) -> None:
         try:
@@ -332,7 +335,7 @@ class Labelblock:
         self.metadata = extract_metadata(stripped)
         self.data = self._extract_data(lines[15:23])
 
-    def _extract_data(self, lines: list_of_lines) -> Dict[str, float]:
+    def _extract_data(self, lines: list_of_lines) -> dict[str, float]:
         """Convert data into a dictionary.
 
         {'A01' : value}
@@ -341,12 +344,12 @@ class Labelblock:
 
         Parameters
         ----------
-        lines
+        lines : list_of_lines
             xls file read into lines.
 
         Returns
         -------
-        dict
+        dict[str, float]
             Data from a label block.
 
         Raises
@@ -472,11 +475,12 @@ class Tecanfile:
 
         Parameters
         ----------
-        path
+        path : str
             Path to .xls file.
 
         Returns
         -------
+        list_of_lines
             Lines.
 
         """
@@ -492,22 +496,23 @@ class Tecanfile:
         csvl: list_of_lines,
         pattern: str = 'Label: Label',
         col: int = 0,
-    ) -> List[int]:
+    ) -> list[int]:
         """Lookup the line number where given pattern occurs.
 
         If nothing found return empty list.
 
         Parameters
         ----------
-        csvl
+        csvl : list_of_lines
             Lines of a csv/xls file.
-        pattern
+        pattern : str
             Pattern to be searched for., default="Label: Label"
-        col
+        col : int
             Column to search (line-by-line).
 
         Returns
         -------
+        list[int]
             Row/line index for all occurrences of pattern.
 
         """
@@ -543,10 +548,10 @@ class LabelblocksGroup:
 
     """
 
-    buffer: Dict[str, List[float]]
-    data: Dict[str, List[float]]
+    buffer: dict[str, list[float]]
+    data: dict[str, list[float]]
 
-    def __init__(self, labelblocks: List[Labelblock]) -> None:
+    def __init__(self, labelblocks: list[Labelblock]) -> None:
         try:
             for lb in labelblocks[1:]:
                 assert labelblocks[0] == lb
@@ -565,7 +570,7 @@ class LabelblocksGroup:
             temperatures.append(lb.metadata['Temperature'])
         self.temperatures = temperatures
         # data
-        datagrp: Dict[str, List[float]] = {}
+        datagrp: dict[str, list[float]] = {}
         for key in labelblocks[0].data.keys():
             datagrp[key] = []
             for lb in labelblocks:
@@ -603,7 +608,7 @@ class TecanfilesGroup:
 
     """
 
-    def __init__(self, filenames: List[str]) -> None:
+    def __init__(self, filenames: list[str]) -> None:
         tecanfiles = []
         for f in filenames:
             tecanfiles.append(Tecanfile(f))
@@ -687,7 +692,7 @@ class Titration(TecanfilesGroup):
 
         Parameters
         ----------
-        path
+        path : str
             Path to output folder.
 
         """
@@ -734,7 +739,7 @@ class TitrationAnalysis(Titration):
 
     """
 
-    def __init__(self, titration: Titration, schemefile: Optional[str] = None) -> None:
+    def __init__(self, titration: Titration, schemefile: str | None = None) -> None:
         if schemefile is None:
             self.scheme = pd.Series({'well': []})
         else:
@@ -769,7 +774,7 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        additionsfile
+        additionsfile: str
             File listing volume additions during titration.
 
         """
@@ -787,7 +792,7 @@ class TitrationAnalysis(Titration):
     @classmethod
     def calculate_conc(
         cls,
-        additions: Union[np.ndarray, List[float]],
+        additions: Sequence[float],
         conc_stock: float,
         conc_ini: float = 0.0,
     ) -> np.ndarray:
@@ -797,24 +802,17 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        additions
+        additions : Sequence[float]
             Initial volume and all subsequent additions.
-        conc_stock
+        conc_stock : float
             Concentration of the stock used for additions.
-        conc_ini
+        conc_ini : float
             Initial concentration (default=0).
 
         Returns
         -------
+        np.ndarray
             Concentrations as vector.
-
-        Examples
-        --------
-        >>> additions = [112, 2, 2, 2, 2, 2, 2, 6, 4]
-        >>> TitrationAnalysis.calculate_conc(additions, 1000)
-        array([   0.        ,   17.54385965,   34.48275862,   50.84745763,
-                 66.66666667,   81.96721311,   96.77419355,  138.46153846,
-                164.17910448])
 
         """
         vol_tot = np.cumsum(additions)
@@ -851,7 +849,7 @@ class TitrationAnalysis(Titration):
         self: Any,
         kind: str,
         ini: int = 0,
-        fin: Optional[int] = None,
+        fin: int | None = None,
         no_weight: bool = False,
         **kwargs: Any,
     ) -> None:
@@ -861,15 +859,15 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        kind
+        kind : str
             Titration type {'pH'|'Cl'}
-        ini
+        ini : int
             Initial point (default: 0).
-        fin
+        fin : int, optional
             Final point (default: None).
-        no_weight
+        no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        **kwargs
+        **kwargs : Any
             Only for tval different from default=0.95 for the confint calculation.
 
         """
@@ -936,22 +934,23 @@ class TitrationAnalysis(Titration):
     def plot_K(
         self,
         lb: int,
-        xlim: Optional[Tuple[float, float]] = None,
-        title: Optional[str] = None,
+        xlim: tuple[float, float] | None = None,
+        title: str | None = None,
     ) -> plt.figure:
         """Plot K values as stripplot.
 
         Parameters
         ----------
-        lb
+        lb: int
             Labelblock index.
-        xlim
+        xlim : tuple[float, float], optional
             Range.
-        title
+        title : str, optional
             To name the plot.
 
         Returns
         -------
+        plt.figure
             The figure.
 
         Raises
@@ -1032,11 +1031,12 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        key
+        key: str
             Well position as dictionary key like "A01".
 
         Returns
         -------
+        plt.figure
             Pointer to mpl.figure.
 
         Raises
@@ -1144,7 +1144,7 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        path
+        path : str
             Where the pdf file is saved.
 
         Raises
@@ -1169,10 +1169,10 @@ class TitrationAnalysis(Titration):
         y: str = 'SA',
         xerr: str = 'sK',
         yerr: str = 'sSA',
-        xmin: Optional[float] = None,
-        ymin: Optional[float] = None,
-        xmax: Optional[float] = None,
-        title: Optional[str] = None,
+        xmin: float | None = None,
+        ymin: float | None = None,
+        xmax: float | None = None,
+        title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
         if not hasattr(self, 'fittings'):
@@ -1261,7 +1261,7 @@ class TitrationAnalysis(Titration):
         print('  UNK')
         df_print(res_unk.sort_index())
 
-    def plot_buffer(self, title: Optional[str] = None) -> plt.figure:
+    def plot_buffer(self, title: str | None = None) -> plt.figure:
         """Plot buffers (indicated in scheme) for all labelblocksgroups."""
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
