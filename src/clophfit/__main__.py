@@ -9,7 +9,8 @@ from typing import Tuple
 
 import click
 
-from clophfit import binding, prtecan
+from clophfit import binding
+from clophfit import prtecan
 
 
 @click.group()
@@ -178,7 +179,7 @@ def tecan(  # type: ignore
             try:
                 meta = tit.labelblocksgroups[i].metadata
                 print('{:s}'.format('-' * 79))
-                print('\nlabel{:d}'.format(i))
+                print(f'\nlabel{i:d}')
                 pprint.pprint(meta)
             except IndexError:
                 print('{:s}'.format('-' * 79))

@@ -11,6 +11,7 @@ import pytest
 
 from clophfit import prtecan
 
+
 # Tecan test file folder __file__=this file
 tests_dir = path.dirname(path.abspath(__file__))
 ttff = functools.partial(path.join, tests_dir)

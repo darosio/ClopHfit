@@ -5,6 +5,7 @@ from typing import Union
 import numpy as np
 import numpy.typing as npt
 
+
 Xtype = Union[npt.ArrayLike, float]
 
 

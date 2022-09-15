@@ -1,7 +1,10 @@
 [flake8]
 select = ANN,B,B9,BLK,C,D,DAR,E,F,I,S,W,RST
 ignore = E203,E501,W503,DAR000,S101,ANN101,ANN102,ANN001,ANN201,DAR101
-per-file-ignores = tests/*:ANN101,ANN102,S101,E800,noxfile.py:E800,src/*:RST210,DAR103
+per-file-ignores =
+				 tests/*:ANN101,ANN102,S101,E800,
+				 tests/test_scripts.py:S404,S603
+				 noxfile.py:E800,src/*:RST210,DAR103
 rst-directives = autofunction,#uml,
 rst-roles = ref,
 max-line-length = 88

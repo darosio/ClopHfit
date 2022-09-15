@@ -126,20 +126,6 @@ def precommit(session: Session) -> None:
         activate_virtualenv_in_precommit_hooks(session)
 
 
-@nox_poetry.session(python="3.10")
-def lint(session: Session) -> None:
-    """Lint using flake8."""
-    args = session.posargs or locations
-    session.run("flake8", "--exclude", "src/clophfit/old", *args)
-    # session.run("flake8", "--exclude", "src/clophfit/old", "--select", "RST", *args)
-    # session.run("flake8-rst", "--exclude", "src/clophfit/old", *args)
-    session.run("rst-lint", "README.rst")  # for PyPI readme.rst
-    # session.run("rst-lint", "CONTRIBUTING.rst")  # for PyPI readme.rst
-    session.run(
-        "python", "-m", "readme_renderer", "README.rst", "-o", "README.tmp.html"
-    )
-
-
 @nox_poetry.session(python=["3.10"])
 def mypy(session: Session) -> None:
     """Type-check using mypy."""

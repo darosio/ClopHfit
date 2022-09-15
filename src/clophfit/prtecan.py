@@ -31,7 +31,12 @@ import hashlib
 import itertools
 import os
 import warnings
-from typing import Any, Dict, List, Optional, Tuple, Union  # , overload
+from typing import Any  # , overload
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,6 +45,7 @@ import scipy
 import scipy.stats
 import seaborn as sb
 from matplotlib.backends.backend_pdf import PdfPages
+
 
 list_of_lines = List[List]
 # bug xdoctest-3.7 #import numpy.typing as npt
@@ -356,12 +362,12 @@ class Labelblock:
                 assert lines[i][0] == row  # e.g. "A" == "A"
                 for col in range(1, 13):
                     try:
-                        data[row + "{0:0>2}".format(col)] = float(lines[i][col])
+                        data[row + f"{col:0>2}"] = float(lines[i][col])
                     except ValueError:
-                        data[row + "{0:0>2}".format(col)] = np.nan
+                        data[row + f"{col:0>2}"] = np.nan
                         path = self.tecanfile.path if self.tecanfile else ""
                         warnings.warn(
-                            "OVER value in {0}{1:0>2} well for {2} of tecanfile: {3}".format(
+                            "OVER value in {}{:0>2} well for {} of tecanfile: {}".format(
                                 row, col, self.metadata['Label'], path
                             )
                         )
@@ -608,7 +614,7 @@ class TecanfilesGroup:
             # with length=len(tecanfiles).
             # Not for 'equal' labelblocks within the same tecanfile.
             n_tecanfiles = len(tecanfiles)
-            nmax_labelblocks = max([len(tf.labelblocks) for tf in tecanfiles])
+            nmax_labelblocks = max(len(tf.labelblocks) for tf in tecanfiles)
             for idx in itertools.product(range(nmax_labelblocks), repeat=n_tecanfiles):
                 try:
                     for i, tf in enumerate(tecanfiles):
@@ -842,7 +848,7 @@ class TitrationAnalysis(Titration):
         ini: int = 0,
         fin: Optional[int] = None,
         no_weight: bool = False,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         """Fit titrations.
 
@@ -908,7 +914,7 @@ class TitrationAnalysis(Titration):
                 y2=y2[ini:fin],
                 residue=residue[ini:fin],
                 residue2=residue2[ini:fin],
-                **kwargs
+                **kwargs,
             )
             res.index = [k]
             # fitting = fitting.append(res, sort=False) DDD
@@ -1195,7 +1201,12 @@ class TitrationAnalysis(Titration):
             for idx, xv, yv, l in zip(df.index, df[x], df[y], df['ctrl']):
                 # x or y do not exhist.# try:
                 if type(l) == str:
-                    color = '#' + hashlib.md5(l.encode()).hexdigest()[2:8]
+                    color = (
+                        '#'
+                        + hashlib.md5(l.encode(), usedforsecurity=False).hexdigest()[
+                            2:8
+                        ]
+                    )
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:
                     plt.text(xv, yv, idx, fontsize=12)
@@ -1220,11 +1231,11 @@ class TitrationAnalysis(Titration):
 
         def df_print(df: pd.DataFrame) -> None:
             for i, r in df.iterrows():
-                print('{:s}'.format(i), end=' ')
+                print(f'{i:s}', end=' ')
                 for k in out[:2]:
-                    print('{:7.2f}'.format(r[k]), end=' ')
+                    print(f'{r[k]:7.2f}', end=' ')
                 for k in out[2:]:
-                    print('{:7.0f}'.format(r[k]), end=' ')
+                    print(f'{r[k]:7.0f}', end=' ')
                 print()
 
         df = self.fittings[lb]
@@ -1235,13 +1246,13 @@ class TitrationAnalysis(Titration):
         if len(self.keys_ctrl) > 0:
             res_ctrl = df.loc[self.keys_ctrl]
             gr = res_ctrl.groupby('ctrl')
-            print('    ' + ' '.join(["{:>7s}".format(x) for x in out]))
+            print('    ' + ' '.join([f"{x:>7s}" for x in out]))
             for g in gr:
                 print(' ', g[0])
                 df_print(g[1][out])
         res_unk = df.loc[self.keys_unk]
         print()
-        print('    ' + ' '.join(["{:>7s}".format(x) for x in out]))
+        print('    ' + ' '.join([f"{x:>7s}" for x in out]))
         print('  UNK')
         df_print(res_unk.sort_index())
 
@@ -1254,11 +1265,11 @@ class TitrationAnalysis(Titration):
             bg = buf.pop('bg')
             bg_sd = buf.pop('bg_sd')
             rowlabel = ['Temp']
-            lines = [['{:6.1f}'.format(x) for x in lbg.temperatures]]
+            lines = [[f'{x:6.1f}' for x in lbg.temperatures]]
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
-                lines.append(['{:6.1f}'.format(x) for x in v])
+                lines.append([f'{x:6.1f}' for x in v])
                 ax[i].plot(x, v, 'o-', alpha=0.8, lw=2, markersize=3, color=colors[j])
             ax[i].errorbar(
                 x,

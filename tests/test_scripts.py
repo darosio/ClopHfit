@@ -2,11 +2,15 @@
 import glob
 import os
 import subprocess
-from typing import Any, Generator, List, Tuple
+from typing import Any
+from typing import Generator
+from typing import List
+from typing import Tuple
 
 import matplotlib.testing.compare as mpltc
 import pytest
 from matplotlib.testing.exceptions import ImageComparisonFailure
+
 
 PATH = os.path.split(__file__)[0]
 
@@ -132,7 +136,6 @@ bootstrap:""",
             universal_newlines=True,
         )
         yield request.param, process.communicate()
-        # shutil.rmtree(tmpoutput)
 
     def test_stdout(self, run_script: Tuple) -> None:
         """It print out results."""
