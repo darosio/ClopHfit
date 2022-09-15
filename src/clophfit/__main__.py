@@ -30,7 +30,7 @@ def eq1(  # type: ignore
     pka,
     ph,
     some,
-):  # type: ignore
+):
     """pH-deps for Kd."""
     if some:
         print(some)
