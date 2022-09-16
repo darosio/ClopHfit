@@ -34,7 +34,7 @@ def eq1(  # type: ignore
     """pH-deps for Kd."""
     if some:
         print(some)
-    print(binding.kd(Kd1=kd1, pKa=pka, pH=ph))
+    print(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
 @clop.command()
@@ -206,7 +206,7 @@ def tecan(  # type: ignore
             ttff('fit' + str(i) + '.csv'), float_format='%5.1f'
         )
         # Plots
-        f = tit.plot_K(i, xlim=klim, title=title)
+        f = tit.plot_k(i, xlim=klim, title=title)
         f.savefig(ttff('K' + str(i) + '.png'))
         f = tit.plot_ebar(i, title=title)
         f.savefig(ttff('ebar' + str(i) + '.png'))

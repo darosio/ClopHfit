@@ -1,31 +1,31 @@
 """Binding equations."""
-
-from typing import Union
+from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
 
 
-Xtype = Union[npt.ArrayLike, float]
+Xtype = npt.NDArray[np.float_] | float
 
 
-def kd(Kd1: float, pKa: float, pH: Xtype) -> Union[npt.ArrayLike, float]:
+# TODO: use this like fz in prtecan
+def kd(kd1: float, pka: float, ph: Xtype) -> Xtype:
     """Infinite cooperativity model.
 
     It can describe pH-dependence for chloride dissociation constant.
 
     Parameters
     ----------
-    Kd1 : float
+    kd1 : float
         Dissociation constant at pH <= 5.0 (fully protonated).
-    pKa : float
+    pka : float
         Acid dissociation constant.
-    pH : Xtype
+    ph : Xtype
         pH value(s).
 
     Returns
     -------
-    float or np.ndarray
+    Xtype
         Predicted Kd value(s).
 
     Examples
@@ -36,9 +36,7 @@ def kd(Kd1: float, pKa: float, pH: Xtype) -> Union[npt.ArrayLike, float]:
     array([11., 20.])
 
     """
-    if type(pH) is list:
-        pH = np.array(pH).astype(float)
-    return Kd1 * (1 + 10 ** (pKa - pH)) / 10 ** (pKa - pH)
+    return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)
 
 
 # TODO other from datan

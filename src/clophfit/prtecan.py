@@ -34,6 +34,7 @@ import itertools
 import os
 import warnings
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any  # , overload
 from typing import List
 from typing import Sequence
@@ -74,8 +75,7 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     return stripped_lines
 
 
-# def extract_metadata(lines: list_of_lines) -> Dict[str, Union[str, float, List[Any]]]:
-def extract_metadata(lines: list_of_lines) -> dict[str, Any]:
+def extract_metadata(lines: list_of_lines) -> dict[str, str | float | list[str]]:
     """Extract metadata from a list of stripped lines.
 
     First field is the *key*, remaining fields goes into a list of values::
@@ -277,6 +277,7 @@ def fit_titration(
     return res
 
 
+@dataclass
 class Labelblock:
     """Parse a label block within a Tecan file.
 
@@ -308,39 +309,20 @@ class Labelblock:
 
     """
 
-    def __init__(
-        self,
-        tecanfile: Tecanfile | None,
-        lines: list_of_lines,
-    ) -> None:
-        try:
-            assert lines[14][0] == '<>'
-            assert (
-                lines[23]
-                == lines[24]
-                == [
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                    '',
-                ]
-            )
-        except AssertionError as err:
-            raise Exception('Cannot build Labelblock: not 96 wells?') from err
-        stripped = strip_lines(lines)
-        stripped[14:23] = []
-        self.tecanfile = tecanfile
-        self.metadata = extract_metadata(stripped)
-        self.data = self._extract_data(lines[15:23])
+    tecanfile: Tecanfile
+    lines: list_of_lines
+    metadata: dict[str, str | float | list[str]] = field(init=False, repr=True)
+    data: dict[str, float] = field(init=False, repr=True)
+
+    def __post_init__(self) -> None:
+        """Generate metadata and data for this labelblock."""
+        if self.lines[14][0] == '<>' and self.lines[23] == self.lines[24] == [''] * 13:
+            stripped = strip_lines(self.lines)
+            stripped[14:23] = []
+            self.metadata = extract_metadata(stripped)
+            self.data = self._extract_data(self.lines[15:23])
+        else:
+            raise Exception("Cannot build Labelblock: not 96 wells?")
 
     def _extract_data(self, lines: list_of_lines) -> dict[str, float]:
         """Convert data into a dictionary.
@@ -749,7 +731,9 @@ class TitrationAnalysis(Titration):
 
     titration: Titration
     schemefile: str | None = None
-    # scheme:  = field(init=False, repr=False)
+    scheme: pd.Series[Any] = field(init=False, repr=True)
+    conc: list[float] = field(init=False, repr=True)
+    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create attributes."""
