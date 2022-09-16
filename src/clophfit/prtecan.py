@@ -33,17 +33,18 @@ import hashlib
 import itertools
 import os
 import warnings
+from dataclasses import dataclass
 from typing import Any  # , overload
 from typing import List
 from typing import Sequence
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
-import scipy
-import scipy.stats
-import seaborn as sb
-from matplotlib.backends.backend_pdf import PdfPages
+import scipy  # type: ignore
+import scipy.stats  # type: ignore
+import seaborn as sb  # type: ignore
+from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
 
@@ -159,13 +160,13 @@ def fit_titration(
         Titration type {'pH'|'Cl'}
     x : Sequence[float]
         Dataset x-values.
-    y : np.ndarray
+    y : NDArray[np.float]
         Dataset y-values.
-    y2 : np.ndarray, optional
+    y2 : NDArray[np.float], optional
         Optional second dataset y-values (share x with main dataset).
-    residue : np.ndarray, optional
+    residue : NDArray[np.float], optional
         Residues for main dataset.
-    residue2 : np.ndarray, optional
+    residue2 : NDArray[np.float], optional
         Residues for second dataset.
     tval_conf : float
         Confidence level (default 0.95) for parameter estimations.
@@ -194,31 +195,30 @@ def fit_titration(
     else:
         raise NameError('kind= pH or Cl')
 
-    def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> Sequence[float]:
+    def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> NDArray[np.float_]:
         df = pd.DataFrame({'x': x, 'y': y})
-        SA = df.y[df.x == min(df.x)].values[0]
-        SB = df.y[df.x == max(df.x)].values[0]
-        K = np.average([max(y), min(y)])
+        p0sa = df.y[df.x == min(df.x)].values[0]
+        p0sb = df.y[df.x == max(df.x)].values[0]
+        p0k = np.average([max(y), min(y)])
         try:
-            x1, y1 = df[df['y'] >= K].values[0]
+            x1, y1 = df[df['y'] >= p0k].values[0]
         except IndexError:
             x1 = np.nan
             y1 = np.nan
         try:
-            x2, y2 = df[df['y'] <= K].values[0]
+            x2, y2 = df[df['y'] <= p0k].values[0]
         except IndexError:
             x2 = np.nan
             y2 = np.nan
-        K = (x2 - x1) / (y2 - y1) * (K - y1) + x1
-        return np.r_[K, SA, SB]
-
-    x = np.array(x)
-    y = np.array(y)
+        p0k = (x2 - x1) / (y2 - y1) * (p0k - y1) + x1
+        return np.array(np.r_[p0k, p0sa, p0sb])
 
     if y2 is None:
 
-        def ssq1(p: np.ndarray, x: np.ndarray, y1: np.ndarray) -> np.ndarray:
-            return np.r_[y1 - fz(p[0], p[1:3], x)]
+        def ssq1(
+            p: Sequence[float], x: NDArray[np.float_], y1: NDArray[np.float_]
+        ) -> NDArray[np.float_]:
+            return np.array(np.r_[y1 - fz(p[0], p[1:3], x)])
 
         p0 = compute_p0(x, y)
         p, cov, info, msg, success = scipy.optimize.leastsq(
@@ -227,17 +227,19 @@ def fit_titration(
     else:
 
         def ssq2(
-            p: np.ndarray,
-            x: np.ndarray,
-            y1: np.ndarray,
-            y2: np.ndarray,
-            rd1: np.ndarray,
-            rd2: np.ndarray,
-        ) -> np.ndarray:
-            return np.r_[
-                (y1 - fz(p[0], p[1:3], x)) / rd1**2,
-                (y2 - fz(p[0], p[3:5], x)) / rd2**2,
-            ]
+            p: Sequence[float],
+            x: NDArray[np.float_],
+            y1: NDArray[np.float_],
+            y2: NDArray[np.float_],
+            rd1: NDArray[np.float_],
+            rd2: NDArray[np.float_],
+        ) -> NDArray[np.float_]:
+            return np.array(
+                np.r_[
+                    (y1 - fz(p[0], p[1:3], x)) / rd1**2,
+                    (y2 - fz(p[0], p[3:5], x)) / rd2**2,
+                ]
+            )
 
         p1 = compute_p0(x, y)
         p2 = compute_p0(x, y2)
@@ -493,7 +495,7 @@ class Tecanfile:
         n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
         df = pd.concat([n0, df], ignore_index=True)
         df.fillna('', inplace=True)
-        return df.values.tolist()
+        return list(df.values.tolist())
 
     @classmethod
     def lookup_csv_lines(
@@ -711,6 +713,7 @@ class Titration(TecanfilesGroup):
             df.to_csv(os.path.join(path, key + '.dat'), index=False)
 
 
+@dataclass(frozen=False)
 class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
 
@@ -744,20 +747,25 @@ class TitrationAnalysis(Titration):
 
     """
 
-    def __init__(self, titration: Titration, schemefile: str | None = None) -> None:
-        if schemefile is None:
+    titration: Titration
+    schemefile: str | None = None
+    # scheme:  = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Create attributes."""
+        if self.schemefile is None:
             self.scheme = pd.Series({'well': []})
         else:
-            df = pd.read_table(schemefile)
+            df = pd.read_table(self.schemefile)
             try:
                 assert df.columns.tolist() == ['well', 'sample']
                 assert df["well"].count() == df["sample"].count()
             except AssertionError as err:
                 msg = 'Check format [well sample] for schemefile: '
-                raise AssertionError(msg + schemefile) from err
+                raise AssertionError(msg + self.schemefile) from err
             self.scheme = df.groupby('sample')["well"].unique()
-        self.conc = np.array(titration.conc)
-        self.labelblocksgroups = copy.deepcopy(titration.labelblocksgroups)
+        self.conc = self.titration.conc
+        self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
 
     def subtract_bg(self) -> None:
         """Subtract average buffer values for each titration point."""
@@ -800,7 +808,7 @@ class TitrationAnalysis(Titration):
         additions: Sequence[float],
         conc_stock: float,
         conc_ini: float = 0.0,
-    ) -> np.ndarray:
+    ) -> NDArray[np.float_]:
         """Calculate concentration values.
 
         additions[0]=vol_ini; Stock concentration is a parameter.
@@ -872,21 +880,28 @@ class TitrationAnalysis(Titration):
             Final point (default: None).
         no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        **kwargs : dict[str, Any]
+        kwargs : dict[str, Any]
             Only for tval different from default=0.95 for the confint calculation.
+
+        Returns
+        -------
+        fittings: list
+            List of 3 fitting.
 
         """
         if kind == 'Cl':
             self.fz = fz_kd_singlesite
         elif kind == 'pH':
             self.fz = fz_pk_singlesite
-        x = self.conc
+        x = np.array(self.conc)
         fittings = []
         for lbg in self.labelblocksgroups:
             fitting = pd.DataFrame()
             for k, y in lbg.data.items():
-                res = fit_titration(kind, x[ini:fin], np.array(y[ini:fin]), **kwargs)
-                res.index = [k]
+                res = fit_titration(
+                    kind, self.conc[ini:fin], np.array(y[ini:fin]), **kwargs
+                )
+                res.index = pd.Index([k])
                 # fitting = fitting.append(res, sort=False) DDD
                 fitting = pd.concat([fitting, res], sort=False)
                 # TODO assert (fitting.columns == res.columns).all()
@@ -897,17 +912,16 @@ class TitrationAnalysis(Titration):
         fitting = pd.DataFrame()
         for k, y in self.labelblocksgroups[0].data.items():
             y2 = np.array(self.labelblocksgroups[1].data[k])
-            y = np.array(y)
             residue = y - self.fz(
                 fittings[0]['K'].loc[k],
-                np.array([fittings[0]['SA'].loc[k], fittings[0]['SB'].loc[k]]),
+                [fittings[0]['SA'].loc[k], fittings[0]['SB'].loc[k]],
                 x,
             )
             residue /= y  # TODO residue or
             # log(residue/y) https://www.tandfonline.com/doi/abs/10.1080/00031305.1985.10479385
             residue2 = y2 - self.fz(
                 fittings[1]['K'].loc[k],
-                np.array([fittings[1]['SA'].loc[k], fittings[1]['SB'].loc[k]]),
+                [fittings[1]['SA'].loc[k], fittings[1]['SB'].loc[k]],
                 x,
             )
             residue2 /= y2
@@ -917,26 +931,27 @@ class TitrationAnalysis(Titration):
                     residue2[i] = 1
             res = fit_titration(
                 kind,
-                x[ini:fin],
-                y[ini:fin],
+                self.conc[ini:fin],
+                np.array(y[ini:fin]),
                 y2=y2[ini:fin],
                 residue=residue[ini:fin],
                 residue2=residue2[ini:fin],
                 **kwargs,
             )
-            res.index = [k]
+            res.index = pd.Index([k])
             # fitting = fitting.append(res, sort=False) DDD
             fitting = pd.concat([fitting, res], sort=False)
         fittings.append(fitting)
+        # Write the name of the control e.g. S202N in the "ctrl" column
         for fitting in fittings:
             for ctrl, v in self.scheme.items():
                 for k in v:
-                    fitting.loc[k, 'ctrl'] = ctrl
+                    fitting.loc[k, "ctrl"] = ctrl
         # self.fittings and self.fz
         self.fittings = fittings
         self._get_keys()
 
-    def plot_K(
+    def plot_k(
         self,
         lb: int,
         xlim: tuple[float, float] | None = None,
@@ -1055,7 +1070,7 @@ class TitrationAnalysis(Titration):
         plt.style.use(['seaborn-ticks', 'seaborn-whitegrid'])
         out = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB']
         out2 = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB', 'SA2', 'sSA2', 'SB2', 'sSB2']
-        x = self.conc
+        x = np.array(self.conc)
         xfit = np.linspace(min(x) * 0.98, max(x) * 1.02, 50)
         residues = []
         colors = []
@@ -1211,12 +1226,7 @@ class TitrationAnalysis(Titration):
             for idx, xv, yv, l in zip(df.index, df[x], df[y], df['ctrl']):
                 # x or y do not exhist.# try:
                 if type(l) == str:
-                    color = (
-                        '#'
-                        + hashlib.md5(l.encode(), usedforsecurity=False).hexdigest()[
-                            2:8
-                        ]
-                    )
+                    color = '#' + hashlib.sha224(l.encode()).hexdigest()[2:8]
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:
                     plt.text(xv, yv, idx, fontsize=12)
