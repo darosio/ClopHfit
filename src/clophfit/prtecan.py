@@ -140,10 +140,10 @@ def fz_pk_singlesite(
 def fit_titration(
     kind: str,
     x: Sequence[float],
-    y: np.ndarray,
-    y2: np.ndarray | None = None,
-    residue: np.ndarray | None = None,
-    residue2: np.ndarray | None = None,
+    y: NDArray[np.float_],
+    y2: NDArray[np.float_] | None = None,
+    residue: NDArray[np.float_] | None = None,
+    residue2: NDArray[np.float_] | None = None,
     tval_conf: float = 0.95,
 ) -> pd.DataFrame:
     """Fit pH or Cl titration using a single-site binding model.
@@ -194,7 +194,7 @@ def fit_titration(
     else:
         raise NameError('kind= pH or Cl')
 
-    def compute_p0(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> Sequence[float]:
         df = pd.DataFrame({'x': x, 'y': y})
         SA = df.y[df.x == min(df.x)].values[0]
         SB = df.y[df.x == max(df.x)].values[0]
@@ -312,21 +312,26 @@ class Labelblock:
         lines: list_of_lines,
     ) -> None:
         try:
-            assert lines[14][0] == '<>' and lines[23] == lines[24] == [
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-                '',
-            ]
+            assert lines[14][0] == '<>'
+            assert (
+                lines[23]
+                == lines[24]
+                == [
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                ]
+            )
         except AssertionError as err:
             raise Exception('Cannot build Labelblock: not 96 wells?') from err
         stripped = strip_lines(lines)
@@ -846,7 +851,7 @@ class TitrationAnalysis(Titration):
         )
 
     def fit(
-        self: Any,
+        self,
         kind: str,
         ini: int = 0,
         fin: int | None = None,
@@ -867,7 +872,7 @@ class TitrationAnalysis(Titration):
             Final point (default: None).
         no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        **kwargs : Any
+        **kwargs : dict[str, Any]
             Only for tval different from default=0.95 for the confint calculation.
 
         """

@@ -171,14 +171,13 @@ def clean(session: Session) -> None:
     """Clean local repository."""
     session.run(
         "rm",
-        "-r",
-        "./README.tmp.html",
-        "./__pycache__",
+        "-rf",
+        ".coverage" "./__pycache__",
         "./.nox",
         "./.mypy_cache",
         "./.pytest_cache",
         "./docs/_build",
-        "./src/clophfit/__pycache__",
+        "./src/" + package + "/__pycache__",
         "./tests/__pycache__",
         "./dist",
         external=True,
