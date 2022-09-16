@@ -1,6 +1,7 @@
 """Nox sessions."""
 import os
 import shlex
+import sys
 from pathlib import Path
 from textwrap import dedent
 
@@ -128,9 +129,15 @@ def precommit(session: Session) -> None:
 @nox_poetry.session(python=["3.10"])
 def mypy(session: Session) -> None:
     """Type-check using mypy."""
-    args = session.posargs or locations
-    session.install("mypy")
+    args = session.posargs or ["src", "tests", "docs/conf.py"]
+    session.run(
+        "rm", "-rf", ".mypy_cache/", external=True
+    )  # for types-jinja2 from pyparser
+    session.install(".")
+    session.install("mypy", "pytest", "types-setuptools")
     session.run("mypy", *args)
+    if not session.posargs:
+        session.run("mypy", f"--python-executable={sys.executable}", "./noxfile.py")
 
 
 @nox_poetry.session(python=["3.10", "3.9", "3.8"])
