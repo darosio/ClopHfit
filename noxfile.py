@@ -13,7 +13,7 @@ from nox_poetry.sessions import Session
 package = "clophfit"
 locations = "src", "tests", "./noxfile.py", "docs/conf.py"
 python_versions = ["3.8", "3.9", "3.10"]
-nox.options.sessions = "pre-commit", "mypy", "tests", "xdoctest", "docs"
+nox.options.sessions = "pre-commit", "safety", "mypy", "tests", "xdoctest", "docs"
 # nox.options.sessions = "pre-commit", "safety", "mypy", "tests", "typeguard", "docs"
 
 
@@ -126,6 +126,14 @@ def precommit(session: Session) -> None:
         activate_virtualenv_in_precommit_hooks(session)
 
 
+@nox_poetry.session(python=python_versions[-1])
+def safety(session: Session) -> None:
+    """Scan dependencies for insecure packages."""
+    requirements = session.poetry.export_requirements()
+    session.install("safety")
+    session.run("safety", "check", "--full-report", f"--file={requirements}")
+
+
 @nox_poetry.session(python=["3.9"])
 def mypy(session: Session) -> None:
     """Type-check using mypy."""
@@ -140,7 +148,7 @@ def mypy(session: Session) -> None:
         session.run("mypy", f"--python-executable={sys.executable}", "./noxfile.py")
 
 
-@nox_poetry.session(python=["3.10", "3.9", "3.8"])
+@nox_poetry.session(python=python_versions)
 def tests(session: Session) -> None:
     """Run the test suite."""
     args = session.posargs or ["--cov", "-v"]
@@ -148,7 +156,7 @@ def tests(session: Session) -> None:
     session.run("pytest", *args)
 
 
-@nox_poetry.session(python=["3.10", "3.9", "3.8"])
+@nox_poetry.session(python=python_versions)
 def xdoctest(session: Session) -> None:
     """Run examples with xdoctest."""
     args = session.posargs or ["all"]
@@ -173,7 +181,7 @@ def docs(session: Session) -> None:
     session.run("sphinx-build", "docs", "docs/_build")
 
 
-@nox_poetry.session(python="3.10")
+@nox_poetry.session(python=python_versions[-1])
 def clean(session: Session) -> None:
     """Clean local repository."""
     session.run(

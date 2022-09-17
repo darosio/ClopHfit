@@ -70,23 +70,19 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     """
     stripped_lines = []
     for line in lines:
-        sl = [line[i] for i in range(len(line)) if line[i] != '']
+        sl = [line[i] for i in range(len(line)) if line[i] != ""]
         stripped_lines.append(sl)
     return stripped_lines
 
 
-def extract_metadata(lines: list_of_lines) -> dict[str, str | float | list[str]]:
-    """Extract metadata from a list of stripped lines.
+def extract_metadata(
+    lines: list_of_lines,
+) -> dict[str, str | list[str | int | float]]:
+    """Extract metadata into both Tecanfile and Labelblock.
 
-    First field is the *key*, remaining fields goes into a list of values::
-
-      ['', 'key', '', '', 'value1', '', ..., 'valueN', ''] -->
-                                        {key: [value1, ..., valueN]}
-
-    *Label* and *Temperature* are two exceptions::
-
-      ['Label: labelXX', '', '', '', '', '', '', '']
-      ['', 'Temperature: XX °C', '', '', '', '', '', '']
+    From a list of stripped lines takes the first field as the **key** of the
+    metadata dictionary, remaining fields goes into a list of values with the
+    exception of Label ([str]) and Temperature ([float]).
 
     Parameters
     ----------
@@ -95,27 +91,46 @@ def extract_metadata(lines: list_of_lines) -> dict[str, str | float | list[str]]
 
     Returns
     -------
-    Dict[str, Any]
+    dict[str, str | list[str | int | float]]
         Metadata for Tecanfile or Labelblock.
+
+    Examples
+    --------
+    >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
+    >>> extract_metadata(lines)
+    {'Shaking (Linear) Amplitude:': [2, 'mm']}
+
+    >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
+    >>> lines.append(['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', ''])
+    >>> extract_metadata(lines)
+    {'Excitation Wavelength': [400, 'nm'], 'Temperature': [26.0]}
+
+    >>> lines = [['Label: Label1', '', '', '', '', '', '', '', '', '', '', '', '']]
+    >>> extract_metadata(lines)
+    {'Label': ['Label1']}
+
+    >>> lines = [['Mode', '', '', '', 'Fluorescence Top Reading', '', '', '', '', '']]
+    >>> extract_metadata(lines)
+    {'Mode': ['Fluorescence Top Reading']}
 
     """
     stripped_lines = strip_lines(lines)
-    temp = {
-        'Temperature': float(line[0].split(':')[1].split('°C')[0])
+    temp: dict[str, list[float | int | str]] = {
+        "Temperature": [float(line[0].split(":")[1].split("°C")[0])]
         for line in stripped_lines
-        if len(line) == 1 and 'Temperature' in line[0]
+        if len(line) == 1 and "Temperature" in line[0]
     }
-    labl = {
-        'Label': line[0].split(':')[1].strip()
+    labl: dict[str, list[str | int | float]] = {
+        "Label": [line[0].split(":")[1].strip()]
         for line in stripped_lines
-        if len(line) == 1 and 'Label' in line[0]
+        if len(line) == 1 and "Label" in line[0]
     }
-    m1 = {
+    m1: dict[str, str | list[str | int | float]] = {
         line[0]: line[0]
         for line in stripped_lines
-        if len(line) == 1 and 'Label' not in line[0] and 'Temperature' not in line[0]
+        if len(line) == 1 and "Label" not in line[0] and "Temperature" not in line[0]
     }
-    m2: dict[str, str | float | list[str]] = {
+    m2: dict[str, str | list[str | int | float]] = {
         line[0]: line[1:] for line in stripped_lines if len(line) > 1
     }
     m2.update(m1)
@@ -183,30 +198,32 @@ def fit_titration(
 
     Examples
     --------
-    >>> fit_titration("Cl", [1, 10, 30, 100, 200], [10, 8, 5, 1, 0.1])[["K", "sK"]]
+    >>> import numpy as np
+    >>> fit_titration("Cl", np.array([1.0, 10, 30, 100, 200]), \
+          np.array([10, 8, 5, 1, 0.1]))[["K", "sK"]]
                K         sK
     0  38.955406  30.201929
 
     """
-    if kind == 'pH':
+    if kind == "pH":
         fz = fz_pk_singlesite
-    elif kind == 'Cl':
+    elif kind == "Cl":
         fz = fz_kd_singlesite
     else:
-        raise NameError('kind= pH or Cl')
+        raise NameError("kind= pH or Cl")
 
     def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> NDArray[np.float_]:
-        df = pd.DataFrame({'x': x, 'y': y})
+        df = pd.DataFrame({"x": x, "y": y})
         p0sa = df.y[df.x == min(df.x)].values[0]
         p0sb = df.y[df.x == max(df.x)].values[0]
         p0k = np.average([max(y), min(y)])
         try:
-            x1, y1 = df[df['y'] >= p0k].values[0]
+            x1, y1 = df[df["y"] >= p0k].values[0]
         except IndexError:
             x1 = np.nan
             y1 = np.nan
         try:
-            x2, y2 = df[df['y'] <= p0k].values[0]
+            x2, y2 = df[df["y"] <= p0k].values[0]
         except IndexError:
             x2 = np.nan
             y2 = np.nan
@@ -222,7 +239,7 @@ def fit_titration(
 
         p0 = compute_p0(x, y)
         p, cov, info, msg, success = scipy.optimize.leastsq(
-            ssq1, p0, args=(x, y), full_output=True, xtol=1e-11
+            ssq1, p0, args=(np.array(x), y), full_output=True, xtol=1e-11
         )
     else:
 
@@ -246,32 +263,36 @@ def fit_titration(
         ave = np.average([p1[0], p2[0]])
         p0 = np.r_[ave, p1[1], p1[2], p2[1], p2[2]]
         tmp = scipy.optimize.leastsq(
-            ssq2, p0, full_output=True, xtol=1e-11, args=(x, y, y2, residue, residue2)
+            ssq2,
+            p0,
+            full_output=True,
+            xtol=1e-11,
+            args=(np.array(x), y, y2, residue, residue2),
         )
         p, cov, info, msg, success = tmp
-    res = pd.DataFrame({'ss': [success]})
-    res['msg'] = msg
+    res = pd.DataFrame({"ss": [success]})
+    res["msg"] = msg
     if 1 <= success <= 4:
         try:
             tval = (tval_conf + 1) / 2
-            chisq = sum(info['fvec'] * info['fvec'])
-            res['df'] = len(y) - len(p)
-            res['tval'] = scipy.stats.distributions.t.ppf(tval, res.df)
-            res['chisqr'] = chisq / res.df
-            res['K'] = p[0]
-            res['SA'] = p[1]
-            res['SB'] = p[2]
+            chisq = sum(info["fvec"] * info["fvec"])
+            res["df"] = len(y) - len(p)
+            res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
+            res["chisqr"] = chisq / res.df
+            res["K"] = p[0]
+            res["SA"] = p[1]
+            res["SB"] = p[2]
             if y2 is not None:
-                res['df'] += len(y2)
-                res['tval'] = scipy.stats.distributions.t.ppf(tval, res.df)
-                res['chisqr'] = chisq / res.df
-                res['SA2'] = p[3]
-                res['SB2'] = p[4]
-                res['sSA2'] = np.sqrt(cov[3][3] * res.chisqr) * res.tval
-                res['sSB2'] = np.sqrt(cov[4][4] * res.chisqr) * res.tval
-            res['sK'] = np.sqrt(cov[0][0] * res.chisqr) * res.tval
-            res['sSA'] = np.sqrt(cov[1][1] * res.chisqr) * res.tval
-            res['sSB'] = np.sqrt(cov[2][2] * res.chisqr) * res.tval
+                res["df"] += len(y2)
+                res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
+                res["chisqr"] = chisq / res.df
+                res["SA2"] = p[3]
+                res["SB2"] = p[4]
+                res["sSA2"] = np.sqrt(cov[3][3] * res.chisqr) * res.tval
+                res["sSB2"] = np.sqrt(cov[4][4] * res.chisqr) * res.tval
+            res["sK"] = np.sqrt(cov[0][0] * res.chisqr) * res.tval
+            res["sSA"] = np.sqrt(cov[1][1] * res.chisqr) * res.tval
+            res["sSB"] = np.sqrt(cov[2][2] * res.chisqr) * res.tval
         except TypeError:
             pass  # if some params are not successfully determined.
     return res
@@ -309,20 +330,20 @@ class Labelblock:
 
     """
 
-    tecanfile: Tecanfile
+    tecanfile: Tecanfile | None
     lines: list_of_lines
-    metadata: dict[str, str | float | list[str]] = field(init=False, repr=True)
+    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Generate metadata and data for this labelblock."""
-        if self.lines[14][0] == '<>' and self.lines[23] == self.lines[24] == [''] * 13:
+        if self.lines[14][0] == "<>" and self.lines[23] == self.lines[24] == [""] * 13:
             stripped = strip_lines(self.lines)
             stripped[14:23] = []
             self.metadata = extract_metadata(stripped)
             self.data = self._extract_data(self.lines[15:23])
         else:
-            raise Exception("Cannot build Labelblock: not 96 wells?")
+            raise ValueError("Cannot build Labelblock: not 96 wells?")
 
     def _extract_data(self, lines: list_of_lines) -> dict[str, float]:
         """Convert data into a dictionary.
@@ -343,7 +364,7 @@ class Labelblock:
 
         Raises
         ------
-        Exception
+        ValueError
             When something went wrong. Possibly because not 96-well.
 
         Warns
@@ -351,7 +372,7 @@ class Labelblock:
             When a cell contains saturated signal (converted into np.nan).
 
         """
-        rownames = tuple('ABCDEFGH')
+        rownames = tuple("ABCDEFGH")
         data = {}
         try:
             assert len(lines) == 8
@@ -365,21 +386,23 @@ class Labelblock:
                         path = self.tecanfile.path if self.tecanfile else ""
                         warnings.warn(
                             "OVER value in {}{:0>2} well for {} of tecanfile: {}".format(
-                                row, col, self.metadata['Label'], path
+                                row, col, self.metadata["Label"], path
                             )
                         )
         except AssertionError as err:
-            raise Exception("Cannot extract data in Labelblock: not 96 wells?") from err
+            raise ValueError(
+                "Cannot extract data in Labelblock: not 96 wells?"
+            ) from err
         return data
 
     KEYS = [
-        'Emission Bandwidth',
-        'Emission Wavelength',
-        'Excitation Bandwidth',
-        'Excitation Wavelength',
-        'Integration Time',
-        'Mode',
-        'Number of Flashes',
+        "Emission Bandwidth",
+        "Emission Wavelength",
+        "Excitation Bandwidth",
+        "Excitation Wavelength",
+        "Integration Time",
+        "Mode",
+        "Number of Flashes",
     ]
 
     def __eq__(self, other: object) -> bool:
@@ -391,13 +414,14 @@ class Labelblock:
             return NotImplemented
         eq: bool = True
         for k in Labelblock.KEYS:
-            eq *= self.metadata[k] == other.metadata[k]
+            eq &= self.metadata[k] == other.metadata[k]
         # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
-        eq *= self.metadata['Gain'][0] == other.metadata['Gain'][0]
+        eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
         # annotation error: Value of type "Union[str, float, List[str]]" is not indexable
         return eq
 
 
+@dataclass
 class Tecanfile:
     """Parse a .xls file as exported from Tecan.
 
@@ -431,16 +455,17 @@ class Tecanfile:
 
     """
 
-    def __init__(self, path: str) -> None:
-        csvl = Tecanfile.read_xls(path)
-        idxs = Tecanfile.lookup_csv_lines(csvl, pattern='Label: Label', col=0)
+    path: str
+    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    labelblocks: list[Labelblock] = field(init=False, repr=True)
+
+    def __post_init__(self) -> None:
+        """Initialize."""
+        csvl = Tecanfile.read_xls(self.path)
+        idxs = Tecanfile.lookup_csv_lines(csvl, pattern="Label: Label", col=0)
         if len(idxs) == 0:
-            raise Exception('No Labelblock found.')
-        # path
-        self.path = path
-        # metadata
+            raise ValueError("No Labelblock found.")
         self.metadata = extract_metadata(csvl[: idxs[0]])
-        # labelblocks
         labelblocks = []
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
@@ -476,14 +501,14 @@ class Tecanfile:
         df = pd.read_excel(path)
         n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
         df = pd.concat([n0, df], ignore_index=True)
-        df.fillna('', inplace=True)
+        df.fillna("", inplace=True)
         return list(df.values.tolist())
 
     @classmethod
     def lookup_csv_lines(
         cls,
         csvl: list_of_lines,
-        pattern: str = 'Label: Label',
+        pattern: str = "Label: Label",
         col: int = 0,
     ) -> list[int]:
         """Lookup the line number where given pattern occurs.
@@ -541,30 +566,28 @@ class LabelblocksGroup:
     data: dict[str, list[float]]
 
     def __init__(self, labelblocks: list[Labelblock]) -> None:
-        try:
-            for lb in labelblocks[1:]:
-                assert labelblocks[0] == lb
-        except AssertionError as err:
-            raise AssertionError('Creation of labelblock group failed.') from err
-        # build common metadata only
-        metadata = {}
-        for k in Labelblock.KEYS:
-            metadata[k] = labelblocks[0].metadata[k]
-            # list with first element don't care about Manual/Optimal
-        metadata['Gain'] = [labelblocks[0].metadata['Gain'][0]]
-        self.metadata = metadata
-        # temperatures
-        temperatures = []
-        for lb in labelblocks:
-            temperatures.append(lb.metadata['Temperature'])
-        self.temperatures = temperatures
-        # data
-        datagrp: dict[str, list[float]] = {}
-        for key in labelblocks[0].data.keys():
-            datagrp[key] = []
+        if all(labelblocks[0] == lb for lb in labelblocks[1:]):
+            # build common metadata only
+            metadata = {}
+            for k in Labelblock.KEYS:
+                metadata[k] = labelblocks[0].metadata[k]
+                # list with first element don't care about Manual/Optimal
+            metadata["Gain"] = [labelblocks[0].metadata["Gain"][0]]
+            self.metadata = metadata
+            # temperatures
+            temperatures = []
             for lb in labelblocks:
-                datagrp[key].append(lb.data[key])
-        self.data = datagrp
+                temperatures.append(lb.metadata["Temperature"][0])
+            self.temperatures = temperatures
+            # data
+            datagrp: dict[str, list[float]] = {}
+            for key in labelblocks[0].data.keys():
+                datagrp[key] = []
+                for lb in labelblocks:
+                    datagrp[key].append(lb.data[key])
+            self.data = datagrp
+        else:
+            raise ValueError("Creation of labelblock group failed.")
 
 
 class TecanfilesGroup:
@@ -632,10 +655,10 @@ class TecanfilesGroup:
                     else:
                         grps.append(gr)
             if len(grps) == 0:
-                raise Exception('No common labelblock in filenames' + str(filenames))
+                raise Exception("No common labelblock in filenames" + str(filenames))
             else:
                 warnings.warn(
-                    'Different LabelblocksGroup among filenames.' + str(filenames)
+                    "Different LabelblocksGroup among filenames." + str(filenames)
                 )
         self.metadata = tecanfiles[0].metadata
         self.labelblocksgroups = grps
@@ -663,14 +686,11 @@ class Titration(TecanfilesGroup):
 
     def __init__(self, listfile: str) -> None:
         try:
-            df = pd.read_table(listfile, names=['filenames', 'conc'])
+            df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError as err:
-            raise FileNotFoundError('Cannot find: ' + listfile) from err
-        try:
-            assert df["filenames"].count() == df["conc"].count()
-        except AssertionError as err:
-            msg = 'Check format [filenames conc] for listfile: '
-            raise Exception(msg + listfile) from err
+            raise FileNotFoundError("Cannot find: " + listfile) from err
+        if df["filenames"].count() != df["conc"].count():
+            raise ValueError("Check format [filenames conc] for listfile: " + listfile)
         self.conc = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
@@ -688,11 +708,11 @@ class Titration(TecanfilesGroup):
         if not os.path.isdir(path):
             os.makedirs(path)
         for key, dy1 in self.labelblocksgroups[0].data.items():
-            df = pd.DataFrame({'x': self.conc, 'y1': dy1})
+            df = pd.DataFrame({"x": self.conc, "y1": dy1})
             for n, lb in enumerate(self.labelblocksgroups[1:], start=2):
                 dy = lb.data[key]
-                df['y' + str(n)] = dy
-            df.to_csv(os.path.join(path, key + '.dat'), index=False)
+                df["y" + str(n)] = dy
+            df.to_csv(os.path.join(path, key + ".dat"), index=False)
 
 
 @dataclass(frozen=False)
@@ -738,22 +758,22 @@ class TitrationAnalysis(Titration):
     def __post_init__(self) -> None:
         """Create attributes."""
         if self.schemefile is None:
-            self.scheme = pd.Series({'well': []})
+            self.scheme = pd.Series({"well": []})
         else:
             df = pd.read_table(self.schemefile)
             try:
-                assert df.columns.tolist() == ['well', 'sample']
+                assert df.columns.tolist() == ["well", "sample"]
                 assert df["well"].count() == df["sample"].count()
             except AssertionError as err:
-                msg = 'Check format [well sample] for schemefile: '
+                msg = "Check format [well sample] for schemefile: "
                 raise AssertionError(msg + self.schemefile) from err
-            self.scheme = df.groupby('sample')["well"].unique()
+            self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
 
     def subtract_bg(self) -> None:
         """Subtract average buffer values for each titration point."""
-        buffer_keys = self.scheme.pop('buffer')
+        buffer_keys = self.scheme.pop("buffer")
         for lbg in self.labelblocksgroups:
             lbg.buffer = {}
             for k in buffer_keys:
@@ -775,10 +795,10 @@ class TitrationAnalysis(Titration):
             File listing volume additions during titration.
 
         """
-        if hasattr(self, 'additions'):
-            warnings.warn('Dilution correction was already applied.')
+        if hasattr(self, "additions"):
+            warnings.warn("Dilution correction was already applied.")
             return
-        df = pd.read_table(additionsfile, names=['add'])
+        df = pd.read_table(additionsfile, names=["add"])
         self.additions = df["add"]
         volumes = np.cumsum(self.additions)
         corr = volumes / volumes[0]
@@ -823,15 +843,15 @@ class TitrationAnalysis(Titration):
 
     def metadata_normalization(self) -> None:
         """Normalize signal using gain, flashes and integration time."""
-        if hasattr(self, 'normalized'):
-            warnings.warn('Normalization using metadata was already applied.')
+        if hasattr(self, "normalized"):
+            warnings.warn("Normalization using metadata was already applied.")
             return
         for lbg in self.labelblocksgroups:
-            corr = 1000 / lbg.metadata['Gain'][0]
-            corr /= lbg.metadata['Integration Time'][0]
-            corr /= lbg.metadata['Number of Flashes'][0]
-            for k in lbg.data:
-                lbg.data[k] *= corr
+            corr = 1000 / float(lbg.metadata["Gain"][0])
+            corr /= float(lbg.metadata["Integration Time"][0])
+            corr /= float(lbg.metadata["Number of Flashes"][0])
+            for k in lbg.data.keys():
+                lbg.data[k] = [v * corr for v in lbg.data[k]]
         self.normalized = True
 
     def _get_keys(self) -> None:
@@ -848,7 +868,7 @@ class TitrationAnalysis(Titration):
         ini: int = 0,
         fin: int | None = None,
         no_weight: bool = False,
-        **kwargs: Any,
+        tval: float = 0.95,
     ) -> None:
         """Fit titrations.
 
@@ -864,18 +884,17 @@ class TitrationAnalysis(Titration):
             Final point (default: None).
         no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        kwargs : dict[str, Any]
+        tval : float
             Only for tval different from default=0.95 for the confint calculation.
 
-        Returns
-        -------
-        fittings: list
-            List of 3 fitting.
+        Notes
+        -----
+        Create (: list) 3 fitting tables into self.fittings.
 
         """
-        if kind == 'Cl':
+        if kind == "Cl":
             self.fz = fz_kd_singlesite
-        elif kind == 'pH':
+        elif kind == "pH":
             self.fz = fz_pk_singlesite
         x = np.array(self.conc)
         fittings = []
@@ -883,7 +902,7 @@ class TitrationAnalysis(Titration):
             fitting = pd.DataFrame()
             for k, y in lbg.data.items():
                 res = fit_titration(
-                    kind, self.conc[ini:fin], np.array(y[ini:fin]), **kwargs
+                    kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
                 )
                 res.index = pd.Index([k])
                 # fitting = fitting.append(res, sort=False) DDD
@@ -897,15 +916,15 @@ class TitrationAnalysis(Titration):
         for k, y in self.labelblocksgroups[0].data.items():
             y2 = np.array(self.labelblocksgroups[1].data[k])
             residue = y - self.fz(
-                fittings[0]['K'].loc[k],
-                [fittings[0]['SA'].loc[k], fittings[0]['SB'].loc[k]],
+                fittings[0]["K"].loc[k],
+                [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
                 x,
             )
             residue /= y  # TODO residue or
             # log(residue/y) https://www.tandfonline.com/doi/abs/10.1080/00031305.1985.10479385
             residue2 = y2 - self.fz(
-                fittings[1]['K'].loc[k],
-                [fittings[1]['SA'].loc[k], fittings[1]['SB'].loc[k]],
+                fittings[1]["K"].loc[k],
+                [fittings[1]["SA"].loc[k], fittings[1]["SB"].loc[k]],
                 x,
             )
             residue2 /= y2
@@ -920,7 +939,7 @@ class TitrationAnalysis(Titration):
                 y2=y2[ini:fin],
                 residue=residue[ini:fin],
                 residue2=residue2[ini:fin],
-                **kwargs,
+                tval_conf=tval,
             )
             res.index = pd.Index([k])
             # fitting = fitting.append(res, sort=False) DDD
@@ -930,7 +949,7 @@ class TitrationAnalysis(Titration):
         for fitting in fittings:
             for ctrl, v in self.scheme.items():
                 for k in v:
-                    fitting.loc[k, "ctrl"] = ctrl
+                    fitting.loc[k, "ctrl"] = ctrl  # type: ignore
         # self.fittings and self.fz
         self.fittings = fittings
         self._get_keys()
@@ -963,8 +982,8 @@ class TitrationAnalysis(Titration):
             When no fitting results are available (in this object).
 
         """
-        if not hasattr(self, 'fittings'):
-            raise Exception('run fit first')
+        if not hasattr(self, "fittings"):
+            raise Exception("run fit first")
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrls
@@ -972,10 +991,10 @@ class TitrationAnalysis(Titration):
         if len(self.keys_ctrl) > 0:
             res_ctrl = self.fittings[lb].loc[self.keys_ctrl]
             sb.stripplot(
-                x=res_ctrl['K'],
+                x=res_ctrl["K"],
                 y=res_ctrl.index,
                 size=8,
-                orient='h',
+                orient="h",
                 hue=res_ctrl.ctrl,
                 ax=ax1,
             )
@@ -983,47 +1002,47 @@ class TitrationAnalysis(Titration):
                 res_ctrl.K,
                 range(len(res_ctrl)),
                 xerr=res_ctrl.sK,  # xerr=res_ctrl.sK*res_ctrl.tval,
-                fmt='.',
+                fmt=".",
                 c="lightgray",
                 lw=8,
             )
-            plt.grid(1, axis='both')
+            plt.grid(1, axis="both")
         # Unks
         #  FIXME keys_unk is an attribute or a property
         res_unk = self.fittings[lb].loc[self.keys_unk]
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
-            x=res_unk['K'].sort_index(),
+            x=res_unk["K"].sort_index(),
             y=res_unk.index,
             size=12,
-            orient='h',
+            orient="h",
             palette="Greys",
-            hue=res_unk['SA'].sort_index(),
+            hue=res_unk["SA"].sort_index(),
             ax=ax2,
         )
-        plt.legend('')
+        plt.legend("")
         plt.errorbar(
-            res_unk['K'].sort_index(),
+            res_unk["K"].sort_index(),
             range(len(res_unk)),
-            xerr=res_unk['sK'].sort_index(),
-            fmt='.',
+            xerr=res_unk["sK"].sort_index(),
+            fmt=".",
             c="gray",
             lw=2,
         )
         plt.yticks(range(len(res_unk)), res_unk.index.sort_values())
         plt.ylim(-1, len(res_unk))
-        plt.grid(1, axis='both')
+        plt.grid(1, axis="both")
         if not xlim:
             xlim = (
-                0.99 * min(res_ctrl['K'].min(), res_unk['K'].min()),
-                1.01 * max(res_ctrl['K'].max(), res_unk['K'].max()),
+                0.99 * min(res_ctrl["K"].min(), res_unk["K"].min()),
+                1.01 * max(res_ctrl["K"].max(), res_unk["K"].max()),
             )
         ax1.set_xlim(xlim)
         ax2.set_xlim(xlim)
         ax1.set_xticklabels([])
-        ax1.set_xlabel('')
-        title = title if title else ''
-        title += '  label:' + str(lb)
+        ax1.set_xlabel("")
+        title = title if title else ""
+        title += "  label:" + str(lb)
         f.suptitle(title, fontsize=16)
         f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
         return f
@@ -1049,11 +1068,11 @@ class TitrationAnalysis(Titration):
             When fit is not yet run.
 
         """
-        if not hasattr(self, 'fittings'):
-            raise Exception('run fit first')
-        plt.style.use(['seaborn-ticks', 'seaborn-whitegrid'])
-        out = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB']
-        out2 = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB', 'SA2', 'sSA2', 'SB2', 'sSB2']
+        if not hasattr(self, "fittings"):
+            raise Exception("run fit first")
+        plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
+        out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
+        out2 = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         x = np.array(self.conc)
         xfit = np.linspace(min(x) * 0.98, max(x) * 1.02, 50)
         residues = []
@@ -1067,12 +1086,12 @@ class TitrationAnalysis(Titration):
             # ## data
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
-                x, y, 'o', color=colors[i], markersize=12, label='label' + str(i)
+                x, y, "o", color=colors[i], markersize=12, label="label" + str(i)
             )
             ax_data.plot(
                 xfit,
                 self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
-                '-',
+                "-",
                 lw=2,
                 color=colors[i],
                 alpha=0.8,
@@ -1083,9 +1102,9 @@ class TitrationAnalysis(Titration):
                 y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
             )
             # Print out.
-            line = ['%1.2f' % v for v in list(df[out].loc[key])]
+            line = ["%1.2f" % v for v in list(df[out].loc[key])]
             for _i in range(4):
-                line.append('')
+                line.append("")
             lines.append(line)
         # ## residues
         ax1 = plt.subplot2grid((3, 1), loc=(2, 0))
@@ -1101,22 +1120,22 @@ class TitrationAnalysis(Titration):
         ax_data.legend()
         # global
         df = self.fittings[-1]
-        lines.append(['%1.2f' % v for v in list(df[out2].loc[key])])
+        lines.append(["%1.2f" % v for v in list(df[out2].loc[key])])
         ax_data.plot(
             xfit,
             self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
-            'b--',
+            "b--",
             lw=0.5,
         )
         ax_data.plot(
             xfit,
             self.fz(df.K.loc[key], [df.SA2.loc[key], df.SB2.loc[key]], xfit),
-            'b--',
+            "b--",
             lw=0.5,
         )
-        ax_data.table(cellText=lines, colLabels=out2, loc='top')
-        ax1.grid(0, axis='y')  # switch off horizontal
-        ax2.grid(1, axis='both')
+        ax_data.table(cellText=lines, colLabels=out2, loc="top")
+        ax1.grid(0, axis="y")  # switch off horizontal
+        ax2.grid(1, axis="both")
         # ## only residues
         y = self.labelblocksgroups[0].data[key]
         ax1.plot(
@@ -1136,10 +1155,10 @@ class TitrationAnalysis(Titration):
         )
         if key in self.keys_ctrl:
             plt.title(
-                "Ctrl: " + df['ctrl'].loc[key] + "  [" + key + "]", {'fontsize': 16}
+                "Ctrl: " + df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
             )
         else:
-            plt.title(key, {'fontsize': 16})
+            plt.title(key, {"fontsize": 16})
         plt.close()
         return f
 
@@ -1157,8 +1176,8 @@ class TitrationAnalysis(Titration):
             When fit is not yet run.
 
         """
-        if not hasattr(self, 'fittings'):
-            raise Exception('run fit first')
+        if not hasattr(self, "fittings"):
+            raise Exception("run fit first")
         out = PdfPages(path)
         for k in self.fittings[0].loc[self.keys_ctrl].index:
             out.savefig(self.plot_well(k))
@@ -1169,20 +1188,20 @@ class TitrationAnalysis(Titration):
     def plot_ebar(
         self,
         lb: int,
-        x: str = 'K',
-        y: str = 'SA',
-        xerr: str = 'sK',
-        yerr: str = 'sSA',
+        x: str = "K",
+        y: str = "SA",
+        xerr: str = "sK",
+        yerr: str = "sSA",
         xmin: float | None = None,
         ymin: float | None = None,
         xmax: float | None = None,
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        if not hasattr(self, 'fittings'):
-            raise Exception('run fit first')
+        if not hasattr(self, "fittings"):
+            raise Exception("run fit first")
         df = self.fittings[lb]
-        with plt.style.context('fivethirtyeight'):
+        with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
                 df = df[df[x] > xmin]
@@ -1196,37 +1215,37 @@ class TitrationAnalysis(Titration):
                     df[y],
                     xerr=df[xerr],
                     yerr=df[yerr],
-                    fmt='o',
+                    fmt="o",
                     elinewidth=1,
                     markersize=10,
                     alpha=0.7,
                 )
             except ValueError:
                 pass
-            if 'ctrl' not in df:
-                df['ctrl'] = 0
+            if "ctrl" not in df:
+                df["ctrl"] = 0
             df = df[~np.isnan(df[x])]
             df = df[~np.isnan(df[y])]
-            for idx, xv, yv, l in zip(df.index, df[x], df[y], df['ctrl']):
+            for idx, xv, yv, l in zip(df.index, df[x], df[y], df["ctrl"]):
                 # x or y do not exhist.# try:
                 if type(l) == str:
-                    color = '#' + hashlib.sha224(l.encode()).hexdigest()[2:8]
+                    color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:
                     plt.text(xv, yv, idx, fontsize=12)
                 # x or y do not exhist.# except:
                 # x or y do not exhist.# continue
-            plt.yscale('log')
+            plt.yscale("log")
             # min(x) can be = NaN
             min_x = min(max([0.01, df[x].min()]), 14)
             min_y = min(max([0.01, df[y].min()]), 5000)
             plt.xlim(0.99 * min_x, 1.01 * df[x].max())
             plt.ylim(0.90 * min_y, 1.10 * df[y].max())
-            plt.grid(1, axis='both')
+            plt.grid(1, axis="both")
             plt.ylabel(y)
             plt.xlabel(x)
-            title = title if title else ''
-            title += '  label:' + str(lb)
+            title = title if title else ""
+            title += "  label:" + str(lb)
             plt.title(title, fontsize=15)
             return f
 
@@ -1235,29 +1254,29 @@ class TitrationAnalysis(Titration):
 
         def df_print(df: pd.DataFrame) -> None:
             for i, r in df.iterrows():
-                print(f'{i:s}', end=' ')
+                print(f"{i:s}", end=" ")
                 for k in out[:2]:
-                    print(f'{r[k]:7.2f}', end=' ')
+                    print(f"{r[k]:7.2f}", end=" ")
                 for k in out[2:]:
-                    print(f'{r[k]:7.0f}', end=' ')
+                    print(f"{r[k]:7.0f}", end=" ")
                 print()
 
         df = self.fittings[lb]
-        if 'SA2' in df.keys():
-            out = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB', 'SA2', 'sSA2', 'SB2', 'sSB2']
+        if "SA2" in df.keys():
+            out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:
-            out = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB']
+            out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         if len(self.keys_ctrl) > 0:
             res_ctrl = df.loc[self.keys_ctrl]
-            gr = res_ctrl.groupby('ctrl')
-            print('    ' + ' '.join([f"{x:>7s}" for x in out]))
+            gr = res_ctrl.groupby("ctrl")
+            print("    " + " ".join([f"{x:>7s}" for x in out]))
             for g in gr:
-                print(' ', g[0])
+                print(" ", g[0])
                 df_print(g[1][out])
         res_unk = df.loc[self.keys_unk]
         print()
-        print('    ' + ' '.join([f"{x:>7s}" for x in out]))
-        print('  UNK')
+        print("    " + " ".join([f"{x:>7s}" for x in out]))
+        print("  UNK")
         df_print(res_unk.sort_index())
 
     def plot_buffer(self, title: str | None = None) -> plt.figure:
@@ -1266,26 +1285,26 @@ class TitrationAnalysis(Titration):
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
         for i, lbg in enumerate(self.labelblocksgroups):
             buf = copy.deepcopy(lbg.buffer)
-            bg = buf.pop('bg')
-            bg_sd = buf.pop('bg_sd')
-            rowlabel = ['Temp']
-            lines = [[f'{x:6.1f}' for x in lbg.temperatures]]
+            bg = buf.pop("bg")
+            bg_sd = buf.pop("bg_sd")
+            rowlabel = ["Temp"]
+            lines = [[f"{x:6.1f}" for x in lbg.temperatures]]
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
-                lines.append([f'{x:6.1f}' for x in v])
-                ax[i].plot(x, v, 'o-', alpha=0.8, lw=2, markersize=3, color=colors[j])
+                lines.append([f"{x:6.1f}" for x in v])
+                ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])
             ax[i].errorbar(
                 x,
                 bg,
                 yerr=bg_sd,
-                fmt='o-.',
+                fmt="o-.",
                 markersize=15,
                 lw=1,
                 elinewidth=3,
                 alpha=0.8,
-                color='grey',
-                label='label' + str(i),
+                color="grey",
+                label="label" + str(i),
             )
             plt.subplots_adjust(hspace=0.0)
             ax[i].legend(fontsize=22)
@@ -1295,14 +1314,14 @@ class TitrationAnalysis(Titration):
             ax[i].table(
                 cellText=lines,
                 rowLabels=rowlabel,
-                loc='top',
+                loc="top",
                 rowColours=colors,
                 alpha=0.4,
             )
             ax[i].set_xlim(min(x) * 0.96, max(x) * 1.02)
             ax[i].set_yticks(ax[i].get_yticks()[:-1])
         ax[0].set_yticks(ax[0].get_yticks()[1:])
-        ax[0].set_xticklabels('')
+        ax[0].set_xticklabels("")
         if title:
             f.suptitle(title, fontsize=18)
         f.tight_layout(h_pad=5, rect=(0, 0, 1, 0.87))

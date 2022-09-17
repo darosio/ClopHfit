@@ -2,14 +2,15 @@
 import glob
 import os
 import subprocess
+import typing
 from typing import Any
 from typing import Generator
 from typing import List
 from typing import Tuple
 
-import matplotlib.testing.compare as mpltc
+import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest
-from matplotlib.testing.exceptions import ImageComparisonFailure
+from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
 
 PATH = os.path.split(__file__)[0]
@@ -21,7 +22,7 @@ expected = os.path.join(PATH, "data", "output") + os.sep
 os.chdir(os.path.join(PATH, "data"))
 
 
-class Test_fit_titration:
+class TestTitrationFit:
     """It test the old ``fit_titration.py`` script."""
 
     note_fp = "./NTT-A04-Cl_note"
@@ -96,7 +97,8 @@ SB =  -0.274\nsSB =  0.002\n""",
             raise ImageComparisonFailure(msg)
 
 
-class Test_fit_titration_global:
+@typing.no_type_check
+class TestTitrationFitGlobal:
     """It test the old ``fit_titration_global.py`` script."""
 
     dat_files = [
@@ -135,7 +137,7 @@ bootstrap:""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
         )
-        yield request.param, process.communicate()
+        return request.param, process.communicate()
 
     def test_stdout(self, run_script: Tuple) -> None:
         """It print out results."""

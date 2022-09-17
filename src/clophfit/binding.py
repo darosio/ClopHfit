@@ -32,7 +32,8 @@ def kd(kd1: float, pka: float, ph: Xtype) -> Xtype:
     --------
     >>> kd(10, 8.4, 7.4)
     11.0
-    >>> kd(10, 8.4, [7.4, 8.4])
+    >>> import numpy as np
+    >>> kd(10, 8.4, np.array([7.4, 8.4]))
     array([11., 20.])
 
     """

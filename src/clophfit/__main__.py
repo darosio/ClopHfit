@@ -60,7 +60,7 @@ def eq1(  # type: ignore
 @click.option(
     "--kind",
     "-k",
-    type=click.Choice(['pH', 'Cl'], case_sensitive=False),
+    type=click.Choice(["pH", "Cl"], case_sensitive=False),
     default="pH",
     help="Kind of titration.",
     show_default=True,
@@ -150,7 +150,7 @@ def tecan(  # type: ignore
             tit.subtract_bg()
         if dil:
             tit.dilution_correction(dil)
-            if kind.lower() == 'cl':  # XXX cl conc must be elsewhere
+            if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 tit.conc = tit.calculate_conc(tit.additions, 1000)
         if norm:
             tit.metadata_normalization()
@@ -162,13 +162,13 @@ def tecan(  # type: ignore
             os.makedirs(out)
         ttff = functools.partial(os.path.join, out)
     else:
-        ttff = functools.partial(os.path.join, '')
+        ttff = functools.partial(os.path.join, "")
     # Export .dat
     tit.export_dat(ttff(dat))
     # Fit
     tit.fit(kind, no_weight=(not weight), tval_conf=float(confint))
     # metadata-labels.txt
-    fp = open(ttff('metadata-labels.txt'), 'w')
+    fp = open(ttff("metadata-labels.txt"), "w")
     for lbg in tit.labelblocksgroups:
         pprint.pprint(lbg.metadata, stream=fp)
     fp.close()
@@ -178,49 +178,49 @@ def tecan(  # type: ignore
         if verbose:
             try:
                 meta = tit.labelblocksgroups[i].metadata
-                print('{:s}'.format('-' * 79))
-                print(f'\nlabel{i:d}')
+                print("{:s}".format("-" * 79))
+                print(f"\nlabel{i:d}")
                 pprint.pprint(meta)
             except IndexError:
-                print('{:s}'.format('-' * 79))
-                print('\nGlobal on both labels')
+                print("{:s}".format("-" * 79))
+                print("\nGlobal on both labels")
             tit.print_fitting(i)
         # Csv tables
-        fit.sort_index().to_csv(ttff('ffit' + str(i) + '.csv'))
-        if 'SA2' in fit:
+        fit.sort_index().to_csv(ttff("ffit" + str(i) + ".csv"))
+        if "SA2" in fit:
             out_cols = [
-                'K',
-                'sK',
-                'SA',
-                'sSA',
-                'SB',
-                'sSB',
-                'SA2',
-                'sSA2',
-                'SB2',
-                'sSB2',
+                "K",
+                "sK",
+                "SA",
+                "sSA",
+                "SB",
+                "sSB",
+                "SA2",
+                "sSA2",
+                "SB2",
+                "sSB2",
             ]
         else:
-            out_cols = ['K', 'sK', 'SA', 'sSA', 'SB', 'sSB']
+            out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         fit[out_cols].sort_index().to_csv(
-            ttff('fit' + str(i) + '.csv'), float_format='%5.1f'
+            ttff("fit" + str(i) + ".csv"), float_format="%5.1f"
         )
         # Plots
         f = tit.plot_k(i, xlim=klim, title=title)
-        f.savefig(ttff('K' + str(i) + '.png'))
+        f.savefig(ttff("K" + str(i) + ".png"))
         f = tit.plot_ebar(i, title=title)
-        f.savefig(ttff('ebar' + str(i) + '.png'))
+        f.savefig(ttff("ebar" + str(i) + ".png"))
         if sel:
             if kind.lower() == "ph":  # FIXME **kw?
                 xmin, ymin = sel
                 f = tit.plot_ebar(i, xmin=xmin, ymin=ymin, title=title)
-            if kind.lower() == 'cl':
+            if kind.lower() == "cl":
                 xmax, ymin = sel
                 f = tit.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
-            f.savefig(ttff('ebarZ' + str(i) + '.png'))
+            f.savefig(ttff("ebarZ" + str(i) + ".png"))
     # ---------- ebar ---------------------------
-    if hasattr(tit.labelblocksgroups[0], 'buffer'):
+    if hasattr(tit.labelblocksgroups[0], "buffer"):
         f = tit.plot_buffer(title=title)
-        f.savefig(ttff('buffer.png'))
+        f.savefig(ttff("buffer.png"))
     if pdf:
-        tit.plot_all_wells(ttff('all_wells.pdf'))
+        tit.plot_all_wells(ttff("all_wells.pdf"))
