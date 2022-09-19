@@ -145,17 +145,17 @@ def tecan(  # type: ignore
     tit = prtecan.Titration(list_file)
     # TitrationAnalysis
     if scheme:
-        tit = prtecan.TitrationAnalysis(tit, scheme)
+        titan = prtecan.TitrationAnalysis(tit, scheme)
         if bg:
-            tit.subtract_bg()
+            titan.subtract_bg()
         if dil:
-            tit.dilution_correction(dil)
+            titan.dilution_correction(dil)
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
-                tit.conc = tit.calculate_conc(tit.additions, 1000)
+                titan.conc = titan.calculate_conc(titan.additions, 1000)
         if norm:
-            tit.metadata_normalization()
+            titan.metadata_normalization()
     else:
-        tit = prtecan.TitrationAnalysis(tit)
+        titan = prtecan.TitrationAnalysis(tit)
     # Output dir
     if out:
         if not os.path.isdir(out):
@@ -166,14 +166,14 @@ def tecan(  # type: ignore
     # Export .dat
     tit.export_dat(ttff(dat))
     # Fit
-    tit.fit(kind, no_weight=(not weight), tval_conf=float(confint))
+    titan.fit(kind, no_weight=(not weight), tval=float(confint))
     # metadata-labels.txt
     fp = open(ttff("metadata-labels.txt"), "w")
     for lbg in tit.labelblocksgroups:
         pprint.pprint(lbg.metadata, stream=fp)
     fp.close()
     # Loop over fittings[]
-    for i, fit in enumerate(tit.fittings):
+    for i, fit in enumerate(titan.fittings):
         # Printout
         if verbose:
             try:
@@ -184,7 +184,7 @@ def tecan(  # type: ignore
             except IndexError:
                 print("{:s}".format("-" * 79))
                 print("\nGlobal on both labels")
-            tit.print_fitting(i)
+            titan.print_fitting(i)
         # Csv tables
         fit.sort_index().to_csv(ttff("ffit" + str(i) + ".csv"))
         if "SA2" in fit:
@@ -206,21 +206,21 @@ def tecan(  # type: ignore
             ttff("fit" + str(i) + ".csv"), float_format="%5.1f"
         )
         # Plots
-        f = tit.plot_k(i, xlim=klim, title=title)
+        f = titan.plot_k(i, xlim=klim, title=title)
         f.savefig(ttff("K" + str(i) + ".png"))
-        f = tit.plot_ebar(i, title=title)
+        f = titan.plot_ebar(i, title=title)
         f.savefig(ttff("ebar" + str(i) + ".png"))
         if sel:
             if kind.lower() == "ph":  # FIXME **kw?
                 xmin, ymin = sel
-                f = tit.plot_ebar(i, xmin=xmin, ymin=ymin, title=title)
+                f = titan.plot_ebar(i, xmin=xmin, ymin=ymin, title=title)
             if kind.lower() == "cl":
                 xmax, ymin = sel
-                f = tit.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
+                f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(ttff("ebarZ" + str(i) + ".png"))
     # ---------- ebar ---------------------------
     if hasattr(tit.labelblocksgroups[0], "buffer"):
-        f = tit.plot_buffer(title=title)
+        f = titan.plot_buffer(title=title)
         f.savefig(ttff("buffer.png"))
     if pdf:
-        tit.plot_all_wells(ttff("all_wells.pdf"))
+        titan.plot_all_wells(ttff("all_wells.pdf"))

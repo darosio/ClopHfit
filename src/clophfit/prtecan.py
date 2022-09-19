@@ -691,7 +691,7 @@ class Titration(TecanfilesGroup):
             raise FileNotFoundError("Cannot find: " + listfile) from err
         if df["filenames"].count() != df["conc"].count():
             raise ValueError("Check format [filenames conc] for listfile: " + listfile)
-        self.conc = df["conc"].tolist()
+        self.conc: Sequence[float] = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
         super().__init__(filenames)
@@ -752,8 +752,9 @@ class TitrationAnalysis(Titration):
     titration: Titration
     schemefile: str | None = None
     scheme: pd.Series[Any] = field(init=False, repr=True)
-    conc: list[float] = field(init=False, repr=True)
+    conc: Sequence[float] = field(init=False, repr=True)
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
+    additions: Sequence[float] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create attributes."""
@@ -799,7 +800,7 @@ class TitrationAnalysis(Titration):
             warnings.warn("Dilution correction was already applied.")
             return
         df = pd.read_table(additionsfile, names=["add"])
-        self.additions = df["add"]
+        self.additions = df["add"].tolist()
         volumes = np.cumsum(self.additions)
         corr = volumes / volumes[0]
         for lbg in self.labelblocksgroups:
