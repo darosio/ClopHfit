@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import numpy as np
-import numpy.typing as npt
-
-
-Xtype = npt.NDArray[np.float_] | float
+from numpy.typing import NDArray
 
 
 # TODO: use this like fz in prtecan
-def kd(kd1: float, pka: float, ph: Xtype) -> Xtype:
+def kd(
+    kd1: float, pka: float, ph: NDArray[np.float_] | float
+) -> NDArray[np.float_] | float:
     """Infinite cooperativity model.
 
     It can describe pH-dependence for chloride dissociation constant.
