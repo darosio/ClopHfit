@@ -69,3 +69,5 @@ coverage.xml
 
 tests/data/_tmpoutput
 README.tmp.html
+
+.mypy_cache

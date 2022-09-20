@@ -25,23 +25,28 @@ Classes to parse a file
 
 .. uml::
 
-   Labelblock "*" --o Tecanfile
+   left to right direction
+
+   Labelblock "1..*" --o Tecanfile
 
    class Labelblock{
-    KEYS
-    metadata : dict
-    data : dict {'H12':float}
-    __init__(parent_tecanfile, lines)
-    __eq__(KEYS)
+     tecanfile: Tecanfile | None
+     lines: list_of_lines
+     +metadata : dict
+     +data : dict {'H12':float}
+	 __eq__()
+     __almost_eq__()
     }
-   class Tecanfile{
-    path : str
-    metadata : dict
-    labelblocks : list of Labelblock
-    __init__(path)
-    +read_xls(path)
-    +lookup_csv_lines(csvl, pattern, col):
+
+	class Tecanfile{
+	  path : str
+	  +metadata : dict
+	  +labelblocks : list
+	  {static} +read_xls()
+	  {static} +lookup_csv_lines()
+	  ~__hash__()
     }
+
 
 .. autoclass:: Labelblock
    :members:
@@ -65,6 +70,14 @@ Classes to group files
     TecanfilesGroup <|-- Titration
     Titration <|-- TitrationAnalysis
 
+	class LabelblocksGroup{
+	  labelblocks: list[Labelblock]
+	  +metadata: dict
+	  +temperature: Sequence[float]
+	  +data: dict[str, list[float]]
+	  {abstract} buffer: dict[str, list[float]]
+    }
+
    class Titration{
     conc : list of float
     labelblocksgroups : list of LabelblocksGroup
@@ -81,12 +94,6 @@ Classes to group files
     subtract_bg()
     +calculate_conc(additions, conc_stock)
     fits(............)
-    }
-   class LabelblocksGroup{
-    metadata : dict
-    temperatures : list of float
-    data : dict of list of float {'H12':[]}
-    __init__(labelblocks)
     }
    class TecanfilesGroup{
     labelblocksgroups : list of LabelblocksGroup

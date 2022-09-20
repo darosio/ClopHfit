@@ -49,13 +49,12 @@ from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
 
+# after set([type(ll[i][j]) for i in range(len(ll)) for j in range(13)])
 list_of_lines = List[List[Any]]
 
 
 def strip_lines(lines: list_of_lines) -> list_of_lines:
     """Remove empty fields/cells from lines read from a csv file.
-
-    ([a,,b,,,]-->[a,b])
 
     Parameters
     ----------
@@ -66,6 +65,12 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     -------
     list_of_lines
         Lines removed from blank cells.
+
+    Examples
+    --------
+    >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
+    >>> strip_lines(lines)
+    [['Shaking (Linear) Amplitude:', 2, 'mm']]
 
     """
     stripped_lines = []
@@ -304,15 +309,13 @@ class Labelblock:
 
     Parameters
     ----------
-    tecanfile :
+    tecanfile : Tecanfile | None
         Object containing (has-a) this Labelblock.
-    lines :
+    lines : list_of_lines
         Lines for this Labelblock.
 
     Attributes
     ----------
-    tecanfile
-
     metadata : dict
         Metadata specific for this Labelblock.
     data : Dict[str, float]
@@ -389,35 +392,37 @@ class Labelblock:
                                 row, col, self.metadata["Label"], path
                             )
                         )
-        except AssertionError as err:
-            raise ValueError(
-                "Cannot extract data in Labelblock: not 96 wells?"
-            ) from err
+        except AssertionError:
+            raise ValueError("Cannot extract data in Labelblock: not 96 wells?")
         return data
 
-    KEYS = [
+    _KEYS = [
         "Emission Bandwidth",
         "Emission Wavelength",
         "Excitation Bandwidth",
         "Excitation Wavelength",
-        "Integration Time",
         "Mode",
+        "Integration Time",
         "Number of Flashes",
     ]
 
     def __eq__(self, other: object) -> bool:
         """Two labelblocks are equal when metadata KEYS are identical."""
-        # Identical labelblocks can be grouped safely into the same titration; otherwise
-        # some kind of normalization (# of flashes, gain, etc.) would be
-        # necessary.
         if not isinstance(other, Labelblock):
             return NotImplemented
         eq: bool = True
-        for k in Labelblock.KEYS:
+        for k in Labelblock._KEYS:
             eq &= self.metadata[k] == other.metadata[k]
         # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
         eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
-        # annotation error: Value of type "Union[str, float, List[str]]" is not indexable
+        return eq
+
+    def __almost_eq__(self, other: Labelblock) -> bool:
+        """Two labelblocks are almost equal when they could be merged after normalization."""
+        eq: bool = True
+        # Integration Time, Number of Flashes and Gain can differ.
+        for k in Labelblock._KEYS[:5]:
+            eq &= self.metadata[k] == other.metadata[k]
         return eq
 
 
@@ -432,9 +437,9 @@ class Tecanfile:
 
     Attributes
     ----------
-    path
-
-    metadata : dict
+    path: str
+        Tecan file path.
+    metadata : dict[str, str | list[str | int | float]]
         General metadata for Tecanfile e.g. 'Date:' or 'Shaking Duration:'.
     labelblocks : List[Labelblock]
         All labelblocks contained in the file.
@@ -472,12 +477,6 @@ class Tecanfile:
         for i in range(n_labelblocks):
             labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
         self.labelblocks = labelblocks
-
-    def __eq__(self, other: object) -> bool:
-        """Two Tecanfile are equal if their attributes are."""
-        # never used thus far.
-        # https://izziswift.com/compare-object-instances-for-equality-by-their-attributes/
-        return self.__dict__ == other.__dict__
 
     def __hash__(self) -> int:
         """Define hash (related to __eq__) using self.path."""
@@ -537,6 +536,7 @@ class Tecanfile:
         return idxs
 
 
+@dataclass
 class LabelblocksGroup:
     """Group of labelblocks with 'equal' metadata.
 
@@ -562,28 +562,32 @@ class LabelblocksGroup:
 
     """
 
-    buffer: dict[str, list[float]]
-    data: dict[str, list[float]]
+    labelblocks: list[Labelblock]
+    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    temperature: Sequence[float] = field(init=False, repr=True)
+    data: dict[str, list[float]] = field(init=False, repr=True)
+    buffer: dict[str, list[float]] = field(init=False, repr=True)
 
-    def __init__(self, labelblocks: list[Labelblock]) -> None:
-        if all(labelblocks[0] == lb for lb in labelblocks[1:]):
+    def __post_init__(self) -> None:
+        """Create common metadata and list for data and temperatures."""
+        if all(self.labelblocks[0] == lb for lb in self.labelblocks[1:]):
             # build common metadata only
             metadata = {}
-            for k in Labelblock.KEYS:
-                metadata[k] = labelblocks[0].metadata[k]
+            for k in Labelblock._KEYS:
+                metadata[k] = self.labelblocks[0].metadata[k]
                 # list with first element don't care about Manual/Optimal
-            metadata["Gain"] = [labelblocks[0].metadata["Gain"][0]]
+            metadata["Gain"] = [self.labelblocks[0].metadata["Gain"][0]]
             self.metadata = metadata
             # temperatures
             temperatures = []
-            for lb in labelblocks:
+            for lb in self.labelblocks:
                 temperatures.append(lb.metadata["Temperature"][0])
             self.temperatures = temperatures
             # data
             datagrp: dict[str, list[float]] = {}
-            for key in labelblocks[0].data.keys():
+            for key in self.labelblocks[0].data.keys():
                 datagrp[key] = []
-                for lb in labelblocks:
+                for lb in self.labelblocks:
                     datagrp[key].append(lb.data[key])
             self.data = datagrp
         else:

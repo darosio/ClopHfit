@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import os
 import os.path as path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -27,16 +28,27 @@ def test_strip_lines() -> None:
 
 def test_extract_metadata() -> None:
     """It extracts metadata correctly."""
-    csvl = prtecan.Tecanfile.read_xls(ttff("Tecan/290212_7.67.xls"))
-    idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
-    stripped = prtecan.strip_lines(csvl[: idxs[0]])
-    metadata = prtecan.extract_metadata(stripped)
-    assert metadata["Shaking (Linear) Duration:"] == [50.0, "s"]
-    assert metadata["System"] == ["TECANROBOT"]
+    lines: list[list[Any]] = [
+        ["Label: Label1", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ["Mode", "", "", "", "Fluorescence Top Reading", "", "", "", "", ""],
+        ["Shaking (Linear) Amplitude:", "", "", "", 2, "mm", "", "", "", "", ""],
+        ["Excitation Wavelength", "", "", "", 400, "nm", "", "", "", "", ""],
+        ["", "Temperature: 26 °C", "", "", "", "", "", "", "", "", ""],
+    ]
+    expected_metadata = {
+        "Shaking (Linear) Amplitude:": [2, "mm"],
+        "Excitation Wavelength": [400, "nm"],
+        "Temperature": [26.0],
+        "Label": ["Label1"],
+        "Mode": ["Fluorescence Top Reading"],
+    }
+
+    metadata = prtecan.extract_metadata(lines)
+    assert metadata == expected_metadata
 
 
 def test_fit_titration() -> None:
-    """It fits pH and Cl titrations correctly."""
+    """It fits pH and Cl titrations."""
     x = [3.0, 5, 7, 9, 11.0]
     y = np.array([1.9991, 1.991, 1.5, 1.009, 1.0009])
     df = prtecan.fit_titration("pH", x, y)
