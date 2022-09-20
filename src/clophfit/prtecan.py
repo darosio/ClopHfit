@@ -594,6 +594,7 @@ class LabelblocksGroup:
             raise ValueError("Creation of labelblock group failed.")
 
 
+@dataclass
 class TecanfilesGroup:
     """Group of Tecanfiles containing at least one common Labelblock.
 
@@ -624,9 +625,14 @@ class TecanfilesGroup:
 
     """
 
-    def __init__(self, filenames: list[str]) -> None:
+    filenames: list[str]
+    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
+
+    def __post_init__(self) -> None:
+        """Create metadata and labelblocksgroups."""
         tecanfiles = []
-        for f in filenames:
+        for f in self.filenames:
             tecanfiles.append(Tecanfile(f))
         tf0 = tecanfiles[0]
         grps = []
@@ -659,15 +665,18 @@ class TecanfilesGroup:
                     else:
                         grps.append(gr)
             if len(grps) == 0:
-                raise Exception("No common labelblock in filenames" + str(filenames))
+                raise Exception(
+                    "No common labelblock in filenames" + str(self.filenames)
+                )
             else:
                 warnings.warn(
-                    "Different LabelblocksGroup among filenames." + str(filenames)
+                    "Different LabelblocksGroup among filenames." + str(self.filenames)
                 )
         self.metadata = tecanfiles[0].metadata
         self.labelblocksgroups = grps
 
 
+@dataclass(init=False)
 class Titration(TecanfilesGroup):
     """Group tecanfiles into a Titration as indicated by a listfile.
 
@@ -688,6 +697,8 @@ class Titration(TecanfilesGroup):
 
     """
 
+    conc: Sequence[float] = field(init=False, repr=True)
+
     def __init__(self, listfile: str) -> None:
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
@@ -695,7 +706,7 @@ class Titration(TecanfilesGroup):
             raise FileNotFoundError("Cannot find: " + listfile) from err
         if df["filenames"].count() != df["conc"].count():
             raise ValueError("Check format [filenames conc] for listfile: " + listfile)
-        self.conc: Sequence[float] = df["conc"].tolist()
+        self.conc = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
         super().__init__(filenames)
@@ -719,8 +730,8 @@ class Titration(TecanfilesGroup):
             df.to_csv(os.path.join(path, key + ".dat"), index=False)
 
 
-@dataclass(frozen=False)
-class TitrationAnalysis(Titration):
+@dataclass
+class TitrationAnalysis:
     """Perform analysis of a titration.
 
     Parameters

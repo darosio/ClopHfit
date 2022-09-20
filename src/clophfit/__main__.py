@@ -151,7 +151,7 @@ def tecan(  # type: ignore
         if dil:
             titan.dilution_correction(dil)
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
-                titan.conc = titan.calculate_conc(titan.additions, 1000)
+                titan.conc = list(titan.calculate_conc(titan.additions, 1000.0))
         if norm:
             titan.metadata_normalization()
     else:

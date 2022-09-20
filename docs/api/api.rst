@@ -66,9 +66,32 @@ Classes to group files
 
 .. uml::
 
-    LabelblocksGroup "*" --o TecanfilesGroup
+   Labelblock "1..*" --o Tecanfile
+
+   class Labelblock{
+     tecanfile: Tecanfile | None
+     lines: list_of_lines
+     +metadata : dict
+     +data : dict {'H12':float}
+	 __eq__()
+     __almost_eq__()
+    }
+
+	class Tecanfile{
+	  path : str
+	  +metadata : dict
+	  +labelblocks : list
+	  {static} +read_xls()
+	  {static} +lookup_csv_lines()
+	  ~__hash__()
+    }
+
+	LabelblocksGroup ..> Labelblock
+    TecanfilesGroup ..> Tecanfile
+
+	LabelblocksGroup "*" --o TecanfilesGroup
     TecanfilesGroup <|-- Titration
-    Titration <|-- TitrationAnalysis
+    Titration "1" --o TitrationAnalysis
 
 	class LabelblocksGroup{
 	  labelblocks: list[Labelblock]
@@ -78,27 +101,39 @@ Classes to group files
 	  {abstract} buffer: dict[str, list[float]]
     }
 
-   class Titration{
-    conc : list of float
-    labelblocksgroups : list of LabelblocksGroup
-    __init__(listfile)
-    export_dat(path)
+	class TecanfilesGroup{
+      filenames: list[str]
+	  +metadata: dict
+	  +labelblocksgroups: list[LabelblocksGroup]
     }
-   class TitrationAnalysis{
-    scheme : DataFrame
-    conc : list of float
-    labelblocksgroups : list of LabelblocksGroup
-    __init__(titration, schemefile)
-    dilution_correction(additionsfile)
-    metadata_normalization()
-    subtract_bg()
-    +calculate_conc(additions, conc_stock)
-    fits(............)
+
+	class Titration{
+	  listfile: str
+	  +metadata: dict
+	  +labelblocksgroups: list[LabelblocksGroup]
+	  +conc: list[float]
+	  +export_dat(path)
     }
-   class TecanfilesGroup{
-    labelblocksgroups : list of LabelblocksGroup
-    __init__(filenames)
-    }
+
+	class TitrationAnalysis{
+	  titration: Titration
+	  schemefile: str | None
+	  +scheme: pd.Series[Any]
+	  +conc: Sequence[float]
+	  +labelblocksgroups: list[LabelblocksGroup]
+	  +additions: Sequence[float]
+	  +subtract_bg()
+	  +dilution_correction(additionsfile)
+	  {static} +calculate_conc(additions, stock, ini=0)
+	  +metadata_normalization()
+	  +fit(kind, ini, fin, no_weight, tval=0.95)
+	  +plot_k()
+	  +plot_well()
+	  +plot_all_wells()
+	  +plot_ebar()
+	  +print_fitting()
+	  +plot_buffers()
+	}
 
 .. autoclass:: LabelblocksGroup
    :members:
