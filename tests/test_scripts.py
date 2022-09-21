@@ -1,12 +1,19 @@
 """Test cases for the old scripts."""
+from __future__ import annotations
+
 import glob
 import os
 import subprocess
-from typing import Any, Generator, List, Tuple
+import typing
+from typing import Any
+from typing import Iterator
+from typing import List
+from typing import Tuple
 
-import matplotlib.testing.compare as mpltc
+import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest
-from matplotlib.testing.exceptions import ImageComparisonFailure
+from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
+
 
 PATH = os.path.split(__file__)[0]
 
@@ -15,9 +22,10 @@ tmpoutput = os.path.join(PATH, "data", "_tmpoutput") + os.sep
 expected = os.path.join(PATH, "data", "output") + os.sep
 
 os.chdir(os.path.join(PATH, "data"))
+Rscript = Tuple[Tuple[str, str, List[str]], Any]
 
 
-class Test_fit_titration:
+class TestTitrationFit:
     """It test the old ``fit_titration.py`` script."""
 
     note_fp = "./NTT-A04-Cl_note"
@@ -44,7 +52,7 @@ SB =  -0.274\nsSB =  0.002\n""",
             (csv_files[1], res_band[1], ["-m", "band", "-b", "480", "530"]),
         ],
     )
-    def run_script(self, request: Any) -> Generator[Tuple[Tuple, Tuple], List, None]:
+    def run_script(self, request: Any) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration.py"
         csv_file = request.param[0]
@@ -61,27 +69,27 @@ SB =  -0.274\nsSB =  0.002\n""",
         for fp in glob.glob("output/*_pdf.png"):
             os.remove(fp)
 
-    def test_stdout(self, run_script: Tuple) -> None:
+    def test_stdout(self, run_script: Rscript) -> None:
         """It print out results."""
         expected = run_script[0][1]
         assert expected in run_script[1][0]
 
     @pytest.mark.xfail(reason="Deprecation from dependency.")
-    def test_stderr_svd(self, run_script: Tuple[Tuple, Tuple]) -> None:
+    def test_stderr_svd(self, run_script: Rscript) -> None:
         """Test stderr for svd."""
         if run_script[0][2][1] == "svd":
             assert run_script[1][1] == ""
         else:
-            assert 1 == 2
+            raise AssertionError
 
-    def test_stderr_band(self, run_script: Tuple) -> None:
+    def test_stderr_band(self, run_script: Rscript) -> None:
         """Test stderr for band."""
         if run_script[0][2][1] == "band":
             assert run_script[1][1] == ""
         else:
             assert 1 == 1
 
-    def test_pdf(self, run_script: Tuple[Tuple, Tuple]) -> None:
+    def test_pdf(self, run_script: Rscript) -> None:
         """It saves pdf file."""
         csv_ = run_script[0][0].split("/")[-1].split(".")[0]
         f = "_".join([run_script[0][2][1], csv_, "NTT-A04-Cl_note.pdf"])
@@ -92,7 +100,8 @@ SB =  -0.274\nsSB =  0.002\n""",
             raise ImageComparisonFailure(msg)
 
 
-class Test_fit_titration_global:
+@typing.no_type_check
+class TestTitrationFitGlobal:
     """It test the old ``fit_titration_global.py`` script."""
 
     dat_files = [
@@ -121,7 +130,7 @@ bootstrap:""",
             (dat_files[1], res[1], ["--boot", "3", "-t", "cl"]),
         ],
     )
-    def run_script(self, request: Any) -> Generator[Tuple[Tuple, Tuple], List, None]:
+    def run_script(self, request: Any) -> Rscript:
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration_global.py"
         dat_file = request.param[0]
@@ -131,21 +140,20 @@ bootstrap:""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
         )
-        yield request.param, process.communicate()
-        # shutil.rmtree(tmpoutput)
+        return request.param, process.communicate()
 
-    def test_stdout(self, run_script: Tuple) -> None:
+    def test_stdout(self, run_script: Rscript) -> None:
         """It print out results."""
         expected = run_script[0][1]
         assert expected in run_script[1][0]
 
     @pytest.mark.xfail(reason="Deprecation from dependency.")
-    def test_stderr(self, run_script: Tuple[Tuple, Tuple]) -> None:
+    def test_stderr(self, run_script: Rscript) -> None:
         """Stderr is empty."""
         assert run_script[1][1] == ""
 
     @pytest.mark.xfail(reason="Image sizes do not match.")
-    def test_png(self, run_script: Tuple[Tuple, Tuple]) -> None:
+    def test_png(self, run_script: Rscript) -> None:
         """It saves pdf file."""
         f = ".".join([run_script[0][0], "png"])
         fp_test = os.path.join(tmpoutput, f.split("/")[-1])
