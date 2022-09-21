@@ -6,6 +6,6 @@ Miscellaneous Pages
    :maxdepth: 2
 
    license
-   changelog
+   CHANGELOG.md
    TODO
    contributing
