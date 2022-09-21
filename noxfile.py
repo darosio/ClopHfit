@@ -13,8 +13,15 @@ from nox_poetry.sessions import Session
 package = "clophfit"
 locations = "src", "tests", "./noxfile.py", "docs/conf.py"
 python_versions = ["3.8", "3.9", "3.10"]
-nox.options.sessions = "pre-commit", "safety", "mypy", "tests", "xdoctest", "docs"
-# nox.options.sessions = "pre-commit", "safety", "mypy", "tests", "typeguard", "docs"
+nox.options.sessions = (
+    "pre-commit",
+    "safety",
+    "mypy",
+    "tests",
+    "xdoctest",
+    "typeguard",
+    "docs",
+)
 
 
 def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
@@ -163,6 +170,14 @@ def xdoctest(session: Session) -> None:
     session.install("xdoctest", "pygments", ".")
     session.run("echo", "== Xdoctest is testing: ", package, "and", *args, "==")
     session.run("python", "-m", "xdoctest", package, *args)
+
+
+@nox_poetry.session(python=python_versions[-1])
+def typeguard(session: Session) -> None:
+    """Runtime type checking using Typeguard."""
+    session.install(".")
+    session.install("pytest", "typeguard", "pygments")
+    session.run("pytest", f"--typeguard-packages={package}", *session.posargs)
 
 
 @nox_poetry.session(python=python_versions[-1])

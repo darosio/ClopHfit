@@ -5,7 +5,6 @@ import functools
 import os
 import pprint
 from pathlib import Path
-from typing import Tuple
 
 import click
 
@@ -97,13 +96,13 @@ def eq1(  # type: ignore
 @click.option(
     "--Klim",
     default=None,
-    type=Tuple[float, float],
+    type=(float, float),
     help="Range MIN, MAX (xlim) for plot_K.",
 )
 @click.option(
     "--sel",
     default=None,
-    type=Tuple[float, float],
+    type=(float, float),
     help="Errorbar plot for selection with K_min SA_min.",
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")

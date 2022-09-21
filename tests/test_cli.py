@@ -1,4 +1,6 @@
 """Test ``clop`` cli."""
+from __future__ import annotations
+
 from click.testing import CliRunner
 
 from clophfit.__main__ import clop

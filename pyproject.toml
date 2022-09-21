@@ -84,6 +84,8 @@ pre-commit-hooks = ">=4.3.0"
 pyupgrade = ">=2.37.3"
 myst-parser = ">=0.18.0"
 safety = "^2.1.1"
+typeguard = "^2.13.3"
+sphinx-click = "^4.3.0"
 
 [tool.black]
 line-length = 88

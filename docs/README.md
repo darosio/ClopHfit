@@ -87,6 +87,10 @@ Use commitizen and github-cli to release:
     poetry run cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
     gh release create (--target devel) v0.3.0a0
 
+Remember!!! Update::
+- ClopHfit/docs/requirements.txt
+- ClopHfit/.github/workflows/constraints.txt
+
 ### Development environment
 
 -   Test automation requires nox and nox-poetry.

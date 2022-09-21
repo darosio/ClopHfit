@@ -145,17 +145,17 @@ def extract_metadata(
 
 
 def fz_kd_singlesite(
-    k: float, p: Sequence[float], x: NDArray[np.float_]
+    k: float, p: NDArray[np.float_] | Sequence[float], x: NDArray[np.float_]
 ) -> NDArray[np.float_]:
     """Fit function for Cl titration."""
-    return (p[0] + p[1] * x / k) / (1 + x / k)
+    return (float(p[0]) + float(p[1]) * x / k) / (1 + x / k)
 
 
 def fz_pk_singlesite(
-    k: float, p: Sequence[float], x: NDArray[np.float_]
+    k: float, p: NDArray[np.float_] | Sequence[float], x: NDArray[np.float_]
 ) -> NDArray[np.float_]:
     """Fit function for pH titration."""
-    return (p[1] + p[0] * 10 ** (k - x)) / (1 + 10 ** (k - x))
+    return (float(p[1]) + float(p[0]) * 10 ** (k - x)) / (1 + 10 ** (k - x))
 
 
 def fit_titration(
@@ -238,7 +238,7 @@ def fit_titration(
     if y2 is None:
 
         def ssq1(
-            p: Sequence[float], x: NDArray[np.float_], y1: NDArray[np.float_]
+            p: NDArray[np.float_], x: NDArray[np.float_], y1: NDArray[np.float_]
         ) -> NDArray[np.float_]:
             return np.array(np.r_[y1 - fz(p[0], p[1:3], x)])
 
@@ -249,7 +249,7 @@ def fit_titration(
     else:
 
         def ssq2(
-            p: Sequence[float],
+            p: NDArray[np.float_],
             x: NDArray[np.float_],
             y1: NDArray[np.float_],
             y2: NDArray[np.float_],
