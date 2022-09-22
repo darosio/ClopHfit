@@ -148,7 +148,7 @@ def tecan(  # type: ignore
     - csv tables for all labelblocks and global fittings.
 
     """
-    tit = prtecan.Titration(list_file)
+    tit = prtecan.Titration(str(list_file))
     # TitrationAnalysis
     if scheme:
         titan = prtecan.TitrationAnalysis(tit, scheme)
