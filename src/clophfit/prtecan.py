@@ -35,6 +35,7 @@ import os
 import warnings
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 from typing import Any  # , overload
 from typing import List
 from typing import Sequence
@@ -699,13 +700,13 @@ class Titration(TecanfilesGroup):
 
     conc: Sequence[float] = field(init=False, repr=True)
 
-    def __init__(self, listfile: str) -> None:
+    def __init__(self, listfile: Path) -> None:
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
-        except FileNotFoundError as err:
-            raise FileNotFoundError("Cannot find: " + listfile) from err
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Cannot find: {listfile}")
         if df["filenames"].count() != df["conc"].count():
-            raise ValueError("Check format [filenames conc] for listfile: " + listfile)
+            raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         self.conc = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
