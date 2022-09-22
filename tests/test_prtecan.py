@@ -680,7 +680,3 @@ class TestTitrationAnalysis:
         df1 = pd.read_csv(ttff("Tecan/140220/fit1-1.csv"), index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0, atol=1e-5)
         pd.testing.assert_frame_equal(df1.sort_index(), fit1)
-
-
-if __name__ == "__main__":
-    pytest.main()

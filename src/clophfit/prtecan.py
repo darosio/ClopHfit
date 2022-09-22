@@ -1049,10 +1049,13 @@ class TitrationAnalysis:
         plt.ylim(-1, len(res_unk))
         plt.grid(1, axis="both")
         if not xlim:
-            xlim = (
-                0.99 * min(res_ctrl["K"].min(), res_unk["K"].min()),
-                1.01 * max(res_ctrl["K"].max(), res_unk["K"].max()),
-            )
+            xlim = (res_unk["K"].min(), res_unk["K"].max())
+            if len(self.keys_ctrl) > 0:
+                xlim = (
+                    0.99 * min(res_ctrl["K"].min(), xlim[0]),
+                    1.01 * max(res_ctrl["K"].max(), xlim[1]),
+                )
+            xlim = (0.99 * xlim[0], 1.01 * xlim[1])
         ax1.set_xlim(xlim)
         ax2.set_xlim(xlim)
         ax1.set_xticklabels([])
