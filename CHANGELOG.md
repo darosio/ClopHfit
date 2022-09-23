@@ -1,18 +1,24 @@
 # Changelog
 
+## 0.3.7 (2022-09-23)
+
+### Fix
+- `clop prtecan` Install from pipx.
+
+### Refactor
+- Path and str are mixing yet it is fixed.
+- tests do not use os.chdir() anymore.
+
 ## 0.3.6 (2022-09-21)
 
 ### Feat
-
 - [docs] Add click-sphinx.
 
 ### Fix
-
 - pipx installation?
-- Remain an issue in lbG test ph5,cl20 all metadata are list (exception. str)
+- Remain an issue in lbG test ph5,cl20 all metadata are list (exception str).
 
 ### Refactor
-
 - dataclasses in prtecan.
 - string normalization to black default.
 - [ci] isort and pyupgrade from pre-commit.
@@ -22,22 +28,18 @@
 ## 0.3.5 (2022-09-07)
 
 ### Fixed
-
 -   Python deps \"\>3.8, \<3.11\" in pyproject.
 
 ### Changed
-
 -   Update poetry 1.2.0 and notebook.
 
 ## 0.3.4 (2022-03-14)
 
 ### Fixed
-
--   Read the docs
+-   Read the docs.
 -   Removed :math: directive from README.rst.
 
 ### Added
-
 -   Tecan file parser.
 -   usage.org (exported to .rst) serves as tutorial in docs and
     includes:
@@ -49,7 +51,6 @@
 -   <https://pypi.org/project/readme-renderer/> in lint.
 
 ### Changed
-
 -   Update to python 3.9 and 3.10.
 -   Update dependencies:
 
@@ -59,7 +60,6 @@
 -   pandas.rpy (\<=0.19) now lives in rpy2.
 
 ### Fixed
-
 -   warning for keys_unk set used as index in pd.
 
 ## 0.2.1 (2021-11-18)
