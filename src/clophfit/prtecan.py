@@ -702,10 +702,10 @@ class Titration(TecanfilesGroup):
     def __init__(self, listfile: str) -> None:
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
-        except FileNotFoundError as err:
-            raise FileNotFoundError("Cannot find: " + listfile) from err
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Cannot find: {listfile}")
         if df["filenames"].count() != df["conc"].count():
-            raise ValueError("Check format [filenames conc] for listfile: " + listfile)
+            raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         self.conc = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
@@ -1049,10 +1049,13 @@ class TitrationAnalysis:
         plt.ylim(-1, len(res_unk))
         plt.grid(1, axis="both")
         if not xlim:
-            xlim = (
-                0.99 * min(res_ctrl["K"].min(), res_unk["K"].min()),
-                1.01 * max(res_ctrl["K"].max(), res_unk["K"].max()),
-            )
+            xlim = (res_unk["K"].min(), res_unk["K"].max())
+            if len(self.keys_ctrl) > 0:
+                xlim = (
+                    0.99 * min(res_ctrl["K"].min(), xlim[0]),
+                    1.01 * max(res_ctrl["K"].max(), xlim[1]),
+                )
+            xlim = (0.99 * xlim[0], 1.01 * xlim[1])
         ax1.set_xlim(xlim)
         ax2.set_xlim(xlim)
         ax1.set_xticklabels([])

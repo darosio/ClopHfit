@@ -1,10 +1,9 @@
 """Test cases for the old scripts."""
 from __future__ import annotations
 
-import glob
-import os
 import subprocess
 import typing
+from pathlib import Path
 from typing import Any
 from typing import Iterator
 from typing import List
@@ -15,13 +14,10 @@ import pytest
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
 
-PATH = os.path.split(__file__)[0]
+_data = Path(__file__).parent / "data"
+tmpoutput = _data / "_tmpoutput"
+_expected = _data / "output"
 
-
-tmpoutput = os.path.join(PATH, "data", "_tmpoutput") + os.sep
-expected = os.path.join(PATH, "data", "output") + os.sep
-
-os.chdir(os.path.join(PATH, "data"))
 Rscript = Tuple[Tuple[str, str, List[str]], Any]
 
 
@@ -62,12 +58,13 @@ SB =  -0.274\nsSB =  0.002\n""",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
+            cwd=_data,
         )
         yield request.param, process.communicate()
-        if os.path.exists("./bs.txt"):
-            os.remove("bs.txt")
-        for fp in glob.glob("output/*_pdf.png"):
-            os.remove(fp)
+        if (_data / "bs.txt").exists():
+            (_data / "bs.txt").unlink()
+        for fp in _expected.glob("*_pdf.png"):
+            fp.unlink()
 
     def test_stdout(self, run_script: Rscript) -> None:
         """It print out results."""
@@ -93,8 +90,8 @@ SB =  -0.274\nsSB =  0.002\n""",
         """It saves pdf file."""
         csv_ = run_script[0][0].split("/")[-1].split(".")[0]
         f = "_".join([run_script[0][2][1], csv_, "NTT-A04-Cl_note.pdf"])
-        fp_test = os.path.join(tmpoutput, f)
-        fp_expected = os.path.join(expected, f)
+        fp_test = tmpoutput / f
+        fp_expected = _expected / f
         msg = mpltc.compare_images(fp_test, fp_expected, 80.0)
         if msg:
             raise ImageComparisonFailure(msg)
@@ -139,6 +136,7 @@ bootstrap:""",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
+            cwd=_data,
         )
         return request.param, process.communicate()
 
@@ -156,8 +154,8 @@ bootstrap:""",
     def test_png(self, run_script: Rscript) -> None:
         """It saves pdf file."""
         f = ".".join([run_script[0][0], "png"])
-        fp_test = os.path.join(tmpoutput, f.split("/")[-1])
-        fp_expected = os.path.join(expected, f.lstrip("./"))
+        fp_test = tmpoutput / f.split("/")[-1]
+        fp_expected = _expected / f.lstrip("./")
         msg = mpltc.compare_images(fp_test, fp_expected, 1.01)
         if msg:
             raise ImageComparisonFailure(msg)

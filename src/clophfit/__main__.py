@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import os
 import pprint
+import sys
 from pathlib import Path
 
 import click
@@ -36,7 +37,7 @@ def eq1(  # type: ignore
     print(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
-@clop.command()
+@clop.command("prtecan")
 @click.argument("list_file", type=click.Path(path_type=Path))
 @click.option(
     "--dil",
@@ -69,6 +70,12 @@ def eq1(  # type: ignore
     default=True,
     show_default=True,
     help="Global fitting without relative residues weights.",
+)
+@click.option(
+    "--fit/--no-fit",
+    default=True,
+    show_default=True,
+    help="Perform also fit.",
 )
 @click.option(
     "--confint",
@@ -107,7 +114,6 @@ def eq1(  # type: ignore
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def tecan(  # type: ignore
-    ctx,
     list_file,
     scheme,
     dil,
@@ -118,6 +124,7 @@ def tecan(  # type: ignore
     out,
     dat,
     weight,
+    fit,
     confint,
     klim,
     title,
@@ -141,7 +148,7 @@ def tecan(  # type: ignore
     - csv tables for all labelblocks and global fittings.
 
     """
-    tit = prtecan.Titration(list_file)
+    tit = prtecan.Titration(str(list_file))
     # TitrationAnalysis
     if scheme:
         titan = prtecan.TitrationAnalysis(tit, scheme)
@@ -165,6 +172,8 @@ def tecan(  # type: ignore
     # Export .dat
     tit.export_dat(ttff(dat))
     # Fit
+    if not fit:
+        sys.exit(0)
     titan.fit(kind, no_weight=(not weight), tval=float(confint))
     # metadata-labels.txt
     fp = open(ttff("metadata-labels.txt"), "w")

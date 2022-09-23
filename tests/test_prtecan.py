@@ -1,9 +1,7 @@
 """Test prtecan module."""
 from __future__ import annotations
 
-import functools
-import os
-import os.path as path
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -14,9 +12,7 @@ import pytest
 from clophfit import prtecan
 
 
-# Tecan test file folder __file__=this file
-tests_dir = path.dirname(path.abspath(__file__))
-ttff = functools.partial(path.join, tests_dir)
+data_tests = Path(__file__).parent / "Tecan"
 
 
 def test_strip_lines() -> None:
@@ -68,7 +64,7 @@ class TestLabelblock:
 
     def setup_class(self) -> None:
         """Initialize a labelblock from an .xls file."""
-        csvl = prtecan.Tecanfile.read_xls(ttff("Tecan/290212_7.67.xls"))
+        csvl = prtecan.Tecanfile.read_xls(str(data_tests / "290212_7.67.xls"))
         # tf = prtecan.Tecanfile(ttff("Tecan/290212_7.67.xls"))
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         self.lb = prtecan.Labelblock(None, csvl[idxs[0] : idxs[1]])
@@ -83,7 +79,7 @@ class TestLabelblock:
 
     def test_overvalue(self) -> None:
         """It detects saturated data ("OVER")."""
-        csvl = prtecan.Tecanfile.read_xls(ttff("Tecan/pH5.1_130913a-orig.xls"))
+        csvl = prtecan.Tecanfile.read_xls(str(data_tests / "pH5.1_130913a-orig.xls"))
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.warns(UserWarning) as record:
             lb = prtecan.Labelblock(None, csvl[idxs[0] : idxs[1]])
@@ -96,14 +92,14 @@ class TestLabelblock:
 
     def test_raise_missing_column(self) -> None:
         """It raises Exception when a column is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(ttff("Tecan/88wells_290212_20.xlsx"))
+        csvl = prtecan.Tecanfile.read_xls(str(data_tests / "88wells_290212_20.xlsx"))
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
             self.lb = prtecan.Labelblock(None, csvl[idxs[0] : len(csvl)])
 
     def test_raise_missing_row(self) -> None:
         """It raises Exception when a row is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(ttff("Tecan/84wells_290212_20.xlsx"))
+        csvl = prtecan.Tecanfile.read_xls(str(data_tests / "84wells_290212_20.xlsx"))
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.raises(
             ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
@@ -116,13 +112,12 @@ class TestTecanFile:
 
     def setup_class(self) -> None:
         """Initialize a tecan file and read the corresponding xls file."""
-        path = ttff("Tecan/290212_7.67.xls")
-        self.tf1 = prtecan.Tecanfile(path)
-        self.csvl = prtecan.Tecanfile.read_xls(path)
+        self.tf1 = prtecan.Tecanfile(str(data_tests / "290212_7.67.xls"))
+        self.csvl = prtecan.Tecanfile.read_xls(str(data_tests / "290212_7.67.xls"))
 
     def test_path(self) -> None:
         """It reads the file path."""
-        assert self.tf1.path == ttff("Tecan/290212_7.67.xls")
+        assert self.tf1.path == str(data_tests / "290212_7.67.xls")
 
     def test_metadata(self) -> None:
         """It parses the Date."""
@@ -145,7 +140,7 @@ class TestTecanFile:
 
     def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        tf2 = prtecan.Tecanfile(ttff("Tecan/290212_7.67.xls"))
+        tf2 = prtecan.Tecanfile(str(data_tests / "290212_7.67.xls"))
         assert tf2 == self.tf1
 
     def test___hash__(self) -> None:
@@ -153,7 +148,7 @@ class TestTecanFile:
 
         ttff() uses absolute path.
         """
-        assert self.tf1.__hash__() == hash(ttff("Tecan/290212_7.67.xls"))
+        assert self.tf1.__hash__() == hash(str(data_tests / "290212_7.67.xls"))
 
     def test_filenotfound(self) -> None:
         """It raises FileNotFoundError when the file path does not exist."""
@@ -163,7 +158,7 @@ class TestTecanFile:
     def test_missing_label(self) -> None:
         """It raises Exception when there is no Label pattern."""
         with pytest.raises(ValueError, match="No Labelblock found."):
-            prtecan.Tecanfile(ttff("Tecan/0_Labelblocks_290513_5.5.xlsx"))
+            prtecan.Tecanfile(str(data_tests / "0_Labelblocks_290513_5.5.xlsx"))
 
 
 class TestLabelblocksGroup:
@@ -171,8 +166,8 @@ class TestLabelblocksGroup:
 
     def setup_class(self) -> None:
         """Initialize a labelblocksgroup reading (and concatenating) 2 xls files."""
-        self.tf1 = prtecan.Tecanfile(ttff("Tecan/290212_5.78.xls"))
-        self.tf2 = prtecan.Tecanfile(ttff("Tecan/290212_6.38.xls"))
+        self.tf1 = prtecan.Tecanfile(str(data_tests / "290212_5.78.xls"))
+        self.tf2 = prtecan.Tecanfile(str(data_tests / "290212_6.38.xls"))
         self.metadata = self.tf2.labelblocks[0].metadata
         self.lb_grp = prtecan.LabelblocksGroup(
             [self.tf1.labelblocks[0], self.tf2.labelblocks[0]]
@@ -223,14 +218,16 @@ class TestTecanfilesGroup:
             "290212_100.xls",
             "290212_150.xls",
         ]
-        self.dir = os.getcwd()
-        os.chdir(ttff("Tecan/"))
-        self.group = prtecan.TecanfilesGroup(filenames)
-        self.group_cl = prtecan.TecanfilesGroup(filenames_cl)
+        # self.dir = os.getcwd()
+        # os.chdir(ttff("Tecan/"))
+        self.group = prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
+        self.group_cl = prtecan.TecanfilesGroup(
+            [str(data_tests / f) for f in filenames_cl]
+        )
 
-    def teardown_class(self) -> None:
-        """Return to the initial folder."""
-        os.chdir(self.dir)
+    # def teardown_class(self) -> None:
+    #     """Return to the initial folder."""
+    #     os.chdir(self.dir)
 
     def test_metadata(self) -> None:
         """It parses general metadata."""
@@ -294,7 +291,7 @@ class TestTecanfilesGroup:
         """It raises Exception when labelblocks are different (acquisition day)."""
         filenames = ["290212_5.78.xls", "290513_5.5.xls"]
         with pytest.raises(ValueError, match=r"Creation of labelblock group failed."):
-            prtecan.TecanfilesGroup(filenames)
+            prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
         # assert "No common labelblock in filenames" in str(err.value)
         # assert "['290212_5.78.xls', '290513_5.5.xls']" in str(err.value)
 
@@ -304,7 +301,7 @@ class TestTecanfilesGroup:
         # Different labelblocks or in different order.
         filenames = ["290212_5.78.xls", "290212_20.xls"]
         with pytest.warns(UserWarning) as record:
-            prtecan.TecanfilesGroup(filenames)
+            prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
         assert "Different LabelblocksGroup among filenames" in str(record[0].message)
         assert "['290212_5.78.xls', '290212_20.xls']" in str(record[0].message)
 
@@ -314,8 +311,8 @@ class TestTitration:
 
     def setup_class(self) -> None:
         """Initialize pH and Cl titration from list.pH and list.cl files."""
-        self.tit = prtecan.Titration(ttff("Tecan/list.pH"))
-        self.tit_cl = prtecan.Titration(ttff("Tecan/list.cl20"))
+        self.tit = prtecan.Titration(str(data_tests / "list.pH"))
+        self.tit_cl = prtecan.Titration(str(data_tests / "list.cl20"))
 
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
@@ -412,14 +409,13 @@ class TestTitration:
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError) as err:
-            prtecan.Titration(ttff("aax"))
-        assert str(err.value) == "Cannot find: " + ttff("aax")
+            prtecan.Titration("aax")
+        assert str(err.value) == "Cannot find: " + "aax"
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
-        name = ttff("Tecan/list.pH2")
         with pytest.raises(ValueError, match=r"Check format .* for listfile: (?s).*"):
-            prtecan.Titration(name)
+            prtecan.Titration(str(data_tests / "list.pH2"))
 
 
 @pytest.mark.filterwarnings("ignore: OVER value")
@@ -428,9 +424,9 @@ class TestTitrationAnalysis:
 
     def setup_class(self) -> None:
         """Initialize objects reading list.pH and scheme.txt."""
-        self.tit = prtecan.Titration(ttff("Tecan/140220/list.pH"))
+        self.tit = prtecan.Titration(str(data_tests / "140220/list.pH"))
         self.tit_an = prtecan.TitrationAnalysis(
-            self.tit, ttff("Tecan/140220/scheme.txt")
+            self.tit, str(data_tests / "140220/scheme.txt")
         )
         self.lbg0 = self.tit_an.labelblocksgroups[0]
         self.lbg1 = self.tit_an.labelblocksgroups[1]
@@ -442,15 +438,16 @@ class TestTitrationAnalysis:
     def test_raise_listfilenotfound(self) -> None:
         """It raises OSError when sheme file does not exist."""
         with pytest.raises(OSError, match=r"No such file .*"):
-            prtecan.TitrationAnalysis(self.tit, ttff("aax"))
+            prtecan.TitrationAnalysis(self.tit, "aax")
         # assert "No such file" in str(err.value)
 
+    # XXX: These tests depends on the execution of the previous one
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
-        name = ttff("Tecan/140220/scheme0.txt")
+        name = str(data_tests / "140220/scheme0.txt")
         with pytest.raises(AssertionError) as err:
             prtecan.TitrationAnalysis(self.tit, name)
-        assert str(err.value) == "Check format [well sample] for schemefile: " + name
+        assert str(err.value) == f"Check format [well sample] for schemefile: {name}"
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
@@ -491,7 +488,7 @@ class TestTitrationAnalysis:
 
     def test_dilution_correction(self) -> None:
         """It applies dilution correction read from file listing additions."""
-        self.tit_an.dilution_correction(ttff("Tecan/140220/additions.pH"))
+        self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
         np.testing.assert_array_equal(self.tit_an.additions, [100, 2, 2, 2, 2, 2, 2])
         np.testing.assert_almost_equal(
             self.lbg1.data["A12"],
@@ -502,7 +499,7 @@ class TestTitrationAnalysis:
         """It warns when dilution correction is repeated."""
         # run in previous test_dilution_correction
         with pytest.warns(UserWarning) as record:
-            self.tit_an.dilution_correction(ttff("Tecan/140220/additions.pH"))
+            self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
         assert str(record[0].message) == "Dilution correction was already applied."
 
     def test_metadata_normalization(self) -> None:
@@ -668,19 +665,16 @@ class TestTitrationAnalysis:
         self.tit_an.fit("pH")
         fit0 = self.tit_an.fittings[0].sort_index()
         fit1 = self.tit_an.fittings[1].sort_index()
-        df0 = pd.read_csv(ttff("Tecan/140220/fit0.csv"), index_col=0)
-        df1 = pd.read_csv(ttff("Tecan/140220/fit1.csv"), index_col=0)
+        print(fit0)
+        df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
+        df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0)
         pd.testing.assert_frame_equal(df1.sort_index(), fit1)
         # 0:-1
         self.tit_an.fit("pH", fin=-1)
         fit0 = self.tit_an.fittings[0].sort_index()
         fit1 = self.tit_an.fittings[1].sort_index()
-        df0 = pd.read_csv(ttff("Tecan/140220/fit0-1.csv"), index_col=0)
-        df1 = pd.read_csv(ttff("Tecan/140220/fit1-1.csv"), index_col=0)
+        df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)
+        df1 = pd.read_csv(data_tests / "140220/fit1-1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0, atol=1e-5)
         pd.testing.assert_frame_equal(df1.sort_index(), fit1)
-
-
-if __name__ == "__main__":
-    pytest.main()
