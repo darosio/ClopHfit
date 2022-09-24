@@ -212,3 +212,20 @@ def clean(session: Session) -> None:
         "./dist",
         external=True,
     )
+
+
+@nox_poetry.session(python=python_versions[-1])
+def bump(session: Session) -> None:
+    """Bump repository and upload to testpypi."""
+    session.install("commitizen")
+    session.run("cz", "bump", "--files-only", "--increment", "PATCH")
+    # session.run("cz", "ch", "--unreleased-version", "`poetry version -s`")
+    vv = session.run(
+        "poetry",
+        "version",
+        external=True,
+    )
+    print(vv)
+
+
+# https://nox.thea.codes/en/stable/cookbook.html?highlight=input#the-auto-release

@@ -67,7 +67,7 @@ def eq1(  # type: ignore
 )
 @click.option(
     "--weight/--no-weight",
-    default=True,
+    default=False,
     show_default=True,
     help="Global fitting without relative residues weights.",
 )

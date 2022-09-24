@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8 (2022-09-24)
+
+### Fix
+
+- missing xlrd issue.
+
 ## 0.3.7 (2022-09-23)
 
 ### Fix
