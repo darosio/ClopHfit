@@ -96,9 +96,9 @@ Classes to group files
 	class LabelblocksGroup{
 	  labelblocks: list[Labelblock]
 	  +metadata: dict
-	  +temperature: Sequence[float]
+	  +temperatures: Sequence[float]
 	  +data: dict[str, list[float]]
-	  {abstract} buffer: dict[str, list[float]]
+	  {abstract} buffer: Optional[dict[str, list[float]]]
     }
 
 	class TecanfilesGroup{

@@ -564,9 +564,9 @@ class LabelblocksGroup:
 
     labelblocks: list[Labelblock]
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
-    temperature: Sequence[float] = field(init=False, repr=True)
+    temperatures: Sequence[float] = field(init=False, repr=True)
     data: dict[str, list[float]] = field(init=False, repr=True)
-    buffer: dict[str, list[float]] = field(init=False, repr=True)
+    buffer: dict[str, list[float]] | None = None
 
     def __post_init__(self) -> None:
         """Create common metadata and list for data and temperatures."""
