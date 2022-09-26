@@ -478,10 +478,6 @@ class Tecanfile:
             labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
         self.labelblocks = labelblocks
 
-    def __hash__(self) -> int:
-        """Define hash (related to __eq__) using self.path."""
-        return hash(self.path)
-
     @classmethod
     def read_xls(cls, path: str) -> list_of_lines:
         """Read first sheet of an xls file.

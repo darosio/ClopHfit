@@ -143,13 +143,6 @@ class TestTecanFile:
         tf2 = prtecan.Tecanfile(str(data_tests / "290212_7.67.xls"))
         assert tf2 == self.tf1
 
-    def test___hash__(self) -> None:
-        """It hashes its file path.
-
-        ttff() uses absolute path.
-        """
-        assert self.tf1.__hash__() == hash(str(data_tests / "290212_7.67.xls"))
-
     def test_filenotfound(self) -> None:
         """It raises FileNotFoundError when the file path does not exist."""
         with pytest.raises(FileNotFoundError):
