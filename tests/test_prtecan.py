@@ -107,7 +107,7 @@ class TestLabelblock:
             self.lb = prtecan.Labelblock(None, csvl[idxs[0] : len(csvl)])
 
 
-class TestTecanFile:
+class TestTecanfile:
     """Test TecanFile class."""
 
     def setup_class(self) -> None:
@@ -211,16 +211,10 @@ class TestTecanfilesGroup:
             "290212_100.xls",
             "290212_150.xls",
         ]
-        # self.dir = os.getcwd()
-        # os.chdir(ttff("Tecan/"))
-        self.group = prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
-        self.group_cl = prtecan.TecanfilesGroup(
-            [str(data_tests / f) for f in filenames_cl]
-        )
-
-    # def teardown_class(self) -> None:
-    #     """Return to the initial folder."""
-    #     os.chdir(self.dir)
+        tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
+        tecanfiles_cl = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames_cl]
+        self.group = prtecan.TecanfilesGroup(tecanfiles)
+        self.group_cl = prtecan.TecanfilesGroup(tecanfiles_cl)
 
     def test_metadata(self) -> None:
         """It parses general metadata."""
@@ -283,20 +277,22 @@ class TestTecanfilesGroup:
     def test_raise_exception(self) -> None:
         """It raises Exception when labelblocks are different (acquisition day)."""
         filenames = ["290212_5.78.xls", "290513_5.5.xls"]
-        with pytest.raises(ValueError, match=r"Creation of labelblock group failed."):
-            prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
+        tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
+        with pytest.raises(ValueError, match=r"No common labelblock in filenames."):
+            prtecan.TecanfilesGroup(tecanfiles)
         # assert "No common labelblock in filenames" in str(err.value)
         # assert "['290212_5.78.xls', '290513_5.5.xls']" in str(err.value)
 
-    @pytest.mark.skip("raiseassertion in mixing tf with 1 and 2 lbks")
+    # @pytest.mark.skip("raiseassertion in mixing tf with 1 and 2 lbks")
     def test_warn(self) -> None:
         """XXX must raise error."""
         # Different labelblocks or in different order.
         filenames = ["290212_5.78.xls", "290212_20.xls"]
+        tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
         with pytest.warns(UserWarning) as record:
-            prtecan.TecanfilesGroup([str(data_tests / f) for f in filenames])
+            prtecan.TecanfilesGroup(tecanfiles)
         assert "Different LabelblocksGroup among filenames" in str(record[0].message)
-        assert "['290212_5.78.xls', '290212_20.xls']" in str(record[0].message)
+        # assert "['290212_5.78.xls', '290212_20.xls']" in str(record[0].message)
 
 
 class TestTitration:

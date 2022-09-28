@@ -717,7 +717,8 @@ class Titration(TecanfilesGroup):
         self.conc = df["conc"].tolist()
         dirname = os.path.dirname(listfile)
         filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
-        super().__init__(filenames)
+        tecanfiles = [Tecanfile(f) for f in filenames]
+        super().__init__(tecanfiles)
 
     def export_dat(self, path: str) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
