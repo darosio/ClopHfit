@@ -33,6 +33,7 @@ import hashlib
 import itertools
 import os
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any  # , overload
@@ -488,6 +489,11 @@ class Tecanfile:
         idxs.append(len(csvl))
         for i in range(n_labelblocks):
             labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
+        if any(
+            labelblocks[i] == labelblocks[j]
+            for i, j in itertools.combinations(range(n_labelblocks), 2)
+        ):
+            warnings.warn("Repeated labelblocks")
         self.labelblocks = labelblocks
 
     @classmethod
@@ -571,6 +577,7 @@ class LabelblocksGroup:
     """
 
     labelblocks: list[Labelblock]
+    allequal: bool = False
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     temperatures: Sequence[float] = field(init=False, repr=True)
     data: dict[str, list[float]] = field(init=False, repr=True)
@@ -578,14 +585,12 @@ class LabelblocksGroup:
 
     def __post_init__(self) -> None:
         """Create common metadata and list for data and temperatures."""
-        if all(self.labelblocks[0] == lb for lb in self.labelblocks[1:]):
-            # build common metadata only
-            metadata = {}
-            for k in Labelblock._KEYS:
-                metadata[k] = self.labelblocks[0].metadata[k]
-                # list with first element don't care about Manual/Optimal
-            metadata["Gain"] = [self.labelblocks[0].metadata["Gain"][0]]
-            self.metadata = metadata
+        if not self.allequal:
+            self.allequal = all(
+                self.labelblocks[0] == lb for lb in self.labelblocks[1:]
+            )
+        if self.allequal:
+            self.metadata = self._merge_md(self.labelblocks)
             # temperatures
             temperatures = []
             for lb in self.labelblocks:
@@ -598,8 +603,29 @@ class LabelblocksGroup:
                 for lb in self.labelblocks:
                     datagrp[key].append(lb.data[key])
             self.data = datagrp
+        elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
+            self.metadata = self._merge_md(self.labelblocks)
+            # temperatures
+            temperatures = []
+            for lb in self.labelblocks:
+                temperatures.append(float(lb.metadata["Temperature"][0]))
+            self.temperatures = temperatures
         else:
             raise ValueError("Creation of labelblock group failed.")
+
+    def _merge_md(self, labelblocks: list[Labelblock]):
+        """Merge metadata from a list of labelblocks."""
+        mmd = defaultdict(list)
+        for lb in labelblocks:
+            for k, v in lb.metadata.items():
+                mmd[k].append(tuple(v))
+        md = {}
+        for k, v in mmd.items():
+            if len(set(v)) == 1:
+                md[k] = list(set(v).pop())
+            else:
+                md[k] = v
+        return md
 
 
 @dataclass
@@ -633,55 +659,45 @@ class TecanfilesGroup:
 
     """
 
-    filenames: list[str]
+    tecanfiles: list[Tecanfile]
+    labelblocksgroups: list[LabelblocksGroup] = field(default_factory=list)
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
-    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create metadata and labelblocksgroups."""
-        tecanfiles = [Tecanfile(f) for f in self.filenames]
-        tf0 = tecanfiles[0]
-        grps = []
-        # build LbG1 (equal or almost equal)
-        #
-        if all([tf0.labelblocks == tf.labelblocks for tf in tecanfiles[1:]]):
-            # expected behaviour
+        n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
+        tf0 = self.tecanfiles[0]
+        if all([tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]]):
+            # Same number and order of labelblocks
             for i, _lb in enumerate(tf0.labelblocks):
-                gr = LabelblocksGroup([tf.labelblocks[i] for tf in tecanfiles])
-                grps.append(gr)
+                self.labelblocksgroups.append(
+                    LabelblocksGroup(
+                        [tf.labelblocks[i] for tf in self.tecanfiles], allequal=True
+                    )
+                )
         else:
-            # Try to creates as many as possible groups of labelblocks
-            # with length=len(tecanfiles).
-            # Not for 'equal' labelblocks within the same tecanfile.
-            n_tecanfiles = len(tecanfiles)
-            nmax_labelblocks = max(len(tf.labelblocks) for tf in tecanfiles)
-            for idx in itertools.product(range(nmax_labelblocks), repeat=n_tecanfiles):
+            # Create as many as possible groups of labelblocks
+            rngs = tuple([range(n) for n in n_labelblocks])
+            for idx in itertools.product(*rngs):
                 try:
-                    for i, tf in enumerate(tecanfiles):
-                        tf.labelblocks[idx[i]]
-                except IndexError:
+                    gr = LabelblocksGroup(
+                        [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
+                    )
+                except ValueError:
                     continue
-                # if all labelblocks exhist
+                # if labelblocks are all 'equal'
                 else:
-                    try:
-                        gr = LabelblocksGroup(
-                            [tf.labelblocks[idx[i]] for i, tf in enumerate(tecanfiles)]
-                        )
-                    except AssertionError:
-                        continue
-                    # if labelblocks are all 'equal'
-                    else:
-                        grps.append(gr)
-            if len(grps) == 0:
-                raise Exception(
-                    "No common labelblock in filenames" + str(self.filenames)
+                    self.labelblocksgroups.append(gr)
+            if len(self.labelblocksgroups) == 0:  # == []
+                raise ValueError(
+                    "No common labelblock in filenames."  # + str(self.tecanfiles[0].path)
                 )
             else:
                 warnings.warn(
-                    "Different LabelblocksGroup among filenames." + str(self.filenames)
+                    "Different LabelblocksGroup among filenames."
+                    + str(self.tecanfiles[0].path)
                 )
-        self.metadata = tecanfiles[0].metadata
-        self.labelblocksgroups = grps
+        self.metadata = self.tecanfiles[0].metadata
 
 
 @dataclass(init=False)
@@ -872,7 +888,7 @@ class TitrationAnalysis:
             warnings.warn("Normalization using metadata was already applied.")
             return
         for lbg in self.labelblocksgroups:
-            corr = 1000 / float(lbg.metadata["Gain"][0])
+            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # new lbg metadata
             corr /= float(lbg.metadata["Integration Time"][0])
             corr /= float(lbg.metadata["Number of Flashes"][0])
             for k in lbg.data.keys():

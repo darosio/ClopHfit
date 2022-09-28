@@ -115,6 +115,12 @@ class TestTecanfile:
         self.tf1 = prtecan.Tecanfile(str(data_tests / "290212_7.67.xls"))
         self.csvl = prtecan.Tecanfile.read_xls(str(data_tests / "290212_7.67.xls"))
 
+    def test_warn(self) -> None:
+        """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
+        with pytest.warns(UserWarning) as record:
+            prtecan.Tecanfile(str(data_tests / "290212_7.67_repeated_lb.xls"))
+        assert "Repeated labelblocks" in str(record[0].message)
+
     def test_path(self) -> None:
         """It reads the file path."""
         assert self.tf1.path == str(data_tests / "290212_7.67.xls")
@@ -187,34 +193,14 @@ class TestLabelblocksGroup:
             prtecan.LabelblocksGroup([self.tf1.labelblocks[0], self.tf2.labelblocks[1]])
 
 
-# TODO change data and test any warning behavior separately
-@pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
-class TestTecanfilesGroup:
-    """Test TecanfilesGroup class."""
+class TestTecanfilesGroup1:
+    """Test TecanfilesGroup class (2 labelblocksgroup in the same order)."""
 
     def setup_class(self) -> None:
         """Initialize file lists for pH and Cl."""
-        filenames = [
-            "290212_5.78.xls",
-            "290212_6.38.xls",
-            "290212_6.83.xls",
-            "290212_7.24.xls",
-            "290212_7.67.xls",
-            "290212_8.23.xls",
-            "290212_8.82.xls",
-            "290212_9.31.xls",
-        ]
-        filenames_cl = [
-            # "290212_5.78.xls",
-            "290212_20.xls",
-            "290212_50.xls",
-            "290212_100.xls",
-            "290212_150.xls",
-        ]
+        filenames = ["290212_5.78.xls", "290212_6.38.xls", "290212_6.83.xls"]
         tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
-        tecanfiles_cl = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames_cl]
         self.group = prtecan.TecanfilesGroup(tecanfiles)
-        self.group_cl = prtecan.TecanfilesGroup(tecanfiles_cl)
 
     def test_metadata(self) -> None:
         """It parses general metadata."""
@@ -234,65 +220,84 @@ class TestTecanfilesGroup:
         assert lbg0.metadata["Number of Flashes"][0] == 10.0
         assert lbg1.metadata["Gain"][0] == 93.0
         # data
-        assert lbg0.data["A01"] == [
-            30344,
-            30072,
-            31010,
-            32678,
-            33731,
-            36506,
-            37967,
-            37725,
-        ]
-        assert lbg1.data["A01"] == [
-            6289,
-            9165,
-            12326,
-            15591,
-            17726,
-            20788,
-            21781,
-            22534,
-        ]
-        assert lbg0.data["H12"] == [
-            21287,
-            20888,
-            21209,
-            21711,
-            22625,
-            23397,
-            24791,
-            25045,
-        ]
-        assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
+        assert lbg0.data["A01"] == [30344, 30072, 31010]
+        assert lbg1.data["A01"] == [6289, 9165, 12326]
+        assert lbg0.data["H12"] == [21287, 20888, 21209]
+        assert lbg1.data["H12"] == [4477, 5849, 7165]
 
-    def test_labelblocksgroups_cl(self) -> None:
-        """It generates 2 labelblocksgroups for Cl list. It tests only data."""
-        lbg = self.group_cl.labelblocksgroups[0]
-        # assert lbg.data["A01"] == [6289, 6462, 6390, 6465, 6774]
-        assert lbg.data["A01"] == [6462, 6390, 6465, 6774]
-        # assert lbg.data["H12"] == [4477, 4705, 4850, 4918, 5007]
-        assert lbg.data["H12"] == [4705, 4850, 4918, 5007]
+
+class TestTecanfilesGroup2:
+    """Test TecanfilesGroup when one labelblocksgroup has only almost equal labelblocks."""
+
+    def setup_class(self) -> None:
+        """Initialize file lists for pH and Cl."""
+        filenames = [
+            "290513_5.5.xls",  # Label1 and Label2
+            "290513_7.2.xls",  # Label1 and Label2
+            "290513_8.8.xls",  # Label1 and Label2 with different metadata
+        ]
+        self.tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
+        with pytest.warns(UserWarning) as self.record:
+            self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+
+    def test_warn(self) -> None:
+        """It warns about difference in labelblocks order."""
+        assert "Different LabelblocksGroup among filenames" in str(
+            self.record[0].message
+        )
+
+    def test_labelblocksgroups(self) -> None:
+        """It generates 1 labelblocksgroups for Cl list. It tests only data."""
+        lbg0 = self.group.labelblocksgroups[0]
+        # metadata
+        assert lbg0.metadata["Number of Flashes"][0] == 10.0
+        assert lbg0.metadata["Gain"][0] == (94.0, "Manual")
+        # data
+        assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
+        assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
+
+
+class TestTecanfilesGroup3:
+    """Test TecanfilesGroup with different number of labelblocks."""
+
+    def setup_class(self) -> None:
+        """Initialize file lists for pH and Cl."""
+        filenames = [
+            "290212_5.78.xls",  # Label1 and Label2
+            "290212_20.xls",  # Label2 only
+            "290212_100.xls",  # Label2 only
+        ]
+        self.tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
+        with pytest.warns(UserWarning) as self.record:
+            self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+
+    def test_warn(self) -> None:
+        """It warns about difference in labelblocks order."""
+        assert "Different LabelblocksGroup among filenames" in str(
+            self.record[0].message
+        )
+
+    def test_labelblocksgroups(self) -> None:
+        """It generates 1 labelblocksgroups for Cl list. It tests only data."""
+        lbg = self.group.labelblocksgroups[0]
+        # metadata
+        assert lbg.metadata["Number of Flashes"][0] == 10.0
+        assert lbg.metadata["Gain"][0] == 93.0
+        # data
+        assert lbg.data["A01"] == [6289, 6462, 6465]
+        assert lbg.data["H12"] == [4477, 4705, 4918]
+
+
+class TestTecanfilesGroup4Raise:
+    """Test TecanfilesGroup without mergeable labelblocks."""
 
     def test_raise_exception(self) -> None:
-        """It raises Exception when labelblocks are different (acquisition day)."""
-        filenames = ["290212_5.78.xls", "290513_5.5.xls"]
+        """It raises Exception when there is no way to build labelblocksGroup."""
+        filenames = ["290212_5.78.xls", "290513_5.5_bad.xls"]
         tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
         with pytest.raises(ValueError, match=r"No common labelblock in filenames."):
             prtecan.TecanfilesGroup(tecanfiles)
-        # assert "No common labelblock in filenames" in str(err.value)
         # assert "['290212_5.78.xls', '290513_5.5.xls']" in str(err.value)
-
-    # @pytest.mark.skip("raiseassertion in mixing tf with 1 and 2 lbks")
-    def test_warn(self) -> None:
-        """XXX must raise error."""
-        # Different labelblocks or in different order.
-        filenames = ["290212_5.78.xls", "290212_20.xls"]
-        tecanfiles = [prtecan.Tecanfile(str(data_tests / f)) for f in filenames]
-        with pytest.warns(UserWarning) as record:
-            prtecan.TecanfilesGroup(tecanfiles)
-        assert "Different LabelblocksGroup among filenames" in str(record[0].message)
-        # assert "['290212_5.78.xls', '290212_20.xls']" in str(record[0].message)
 
 
 class TestTitration:
@@ -314,7 +319,7 @@ class TestTitration:
         lbg1 = self.tit.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"][0] == 10.0
-        assert lbg1.metadata["Gain"][0] == 93.0
+        assert lbg1.metadata["Gain"][0][0] == 93.0  # pH9.3 is 93 Optimal not Manual
         # data
         assert lbg0.data["A01"] == [
             30344,
@@ -403,7 +408,7 @@ class TestTitration:
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
-        with pytest.raises(ValueError, match=r"Check format .* for listfile: (?s).*"):
+        with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
             prtecan.Titration(str(data_tests / "list.pH2"))
 
 
