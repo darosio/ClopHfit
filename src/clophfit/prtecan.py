@@ -578,7 +578,9 @@ class LabelblocksGroup:
 
     labelblocks: list[Labelblock]
     allequal: bool = False
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    metadata: dict[str, list[str | int | float | list[str | int]]] = field(
+        init=False, repr=True
+    )
     temperatures: Sequence[float] = field(init=False, repr=True)
     data: dict[str, list[float]] = field(init=False, repr=True)
     buffer: dict[str, list[float]] | None = None
@@ -613,19 +615,26 @@ class LabelblocksGroup:
         else:
             raise ValueError("Creation of labelblock group failed.")
 
-    def _merge_md(self, labelblocks: list[Labelblock]):
+    def _merge_md(
+        self, labelblocks: list[Labelblock]
+    ) -> dict[str, list[str | int | float | list[str | int]]]:
         """Merge metadata from a list of labelblocks."""
-        mmd = defaultdict(list)
+        mmd: dict[str, list[Any]] = defaultdict(list)
         for lb in labelblocks:
             for k, v in lb.metadata.items():
-                mmd[k].append(tuple(v))
-        md = {}
+                if len(v) == 1:
+                    mmd[k].append(v[0])
+                else:
+                    mmd[k].append(v)
         for k, v in mmd.items():
-            if len(set(v)) == 1:
-                md[k] = list(set(v).pop())
+            if all([v[0] == val for val in v[1:]]):
+                if type(v[0]) is str or type(v[0]) is int:
+                    mmd[k] = [v[0]]
+                else:
+                    mmd[k] = v[0]  # type: ignore
             else:
-                md[k] = v
-        return md
+                mmd[k] = v
+        return dict(mmd)
 
 
 @dataclass
@@ -888,9 +897,10 @@ class TitrationAnalysis:
             warnings.warn("Normalization using metadata was already applied.")
             return
         for lbg in self.labelblocksgroups:
-            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # new lbg metadata
-            corr /= float(lbg.metadata["Integration Time"][0])
-            corr /= float(lbg.metadata["Number of Flashes"][0])
+            # new lbg metadata
+            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # type: ignore
+            corr /= float(lbg.metadata["Integration Time"][0])  # type: ignore
+            corr /= float(lbg.metadata["Number of Flashes"][0])  # type: ignore
             for k in lbg.data.keys():
                 lbg.data[k] = [v * corr for v in lbg.data[k]]
         self.normalized = True
@@ -1329,12 +1339,12 @@ class TitrationAnalysis:
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
         for i, lbg in enumerate(self.labelblocksgroups):
             buf = copy.deepcopy(lbg.buffer)
-            bg = buf.pop("bg")
-            bg_sd = buf.pop("bg_sd")
+            bg = buf.pop("bg")  # type: ignore
+            bg_sd = buf.pop("bg_sd")  # type: ignore
             rowlabel = ["Temp"]
             lines = [[f"{x:6.1f}" for x in lbg.temperatures]]
-            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
-            for j, (k, v) in enumerate(buf.items(), start=1):
+            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
+            for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
                 rowlabel.append(k)
                 lines.append([f"{x:6.1f}" for x in v])
                 ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])

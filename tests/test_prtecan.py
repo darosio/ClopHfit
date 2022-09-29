@@ -251,7 +251,7 @@ class TestTecanfilesGroup2:
         lbg0 = self.group.labelblocksgroups[0]
         # metadata
         assert lbg0.metadata["Number of Flashes"][0] == 10.0
-        assert lbg0.metadata["Gain"][0] == (94.0, "Manual")
+        assert lbg0.metadata["Gain"][0] == [94.0, "Manual"]
         # data
         assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
         assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
@@ -319,7 +319,8 @@ class TestTitration:
         lbg1 = self.tit.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"][0] == 10.0
-        assert lbg1.metadata["Gain"][0][0] == 93.0  # pH9.3 is 93 Optimal not Manual
+        # pH9.3 is 93 Optimal not Manual
+        assert lbg1.metadata["Gain"][0] == [93.0, "Manual"]
         # data
         assert lbg0.data["A01"] == [
             30344,
@@ -446,7 +447,7 @@ class TestTitrationAnalysis:
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
         self.tit_an.subtract_bg()
-        assert self.lbg0.buffer["E01"] == [
+        assert self.lbg0.buffer["E01"] == [  # type: ignore
             11192.0,
             12092.0,
             11932.0,
