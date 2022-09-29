@@ -563,8 +563,6 @@ class LabelblocksGroup:
     ----------
     metadata : dict
         The common metadata.
-    temperatures : List[float]
-        The temperatire value for each Labelblock.
     data : Dict[str, List[float]]
         The usual dict for data (see Labelblock) with well name as key but with
         list of values as value.
@@ -581,23 +579,17 @@ class LabelblocksGroup:
     metadata: dict[str, list[str | int | float | list[str | int]]] = field(
         init=False, repr=True
     )
-    temperatures: Sequence[float] = field(init=False, repr=True)
     data: dict[str, list[float]] = field(init=False, repr=True)
     buffer: dict[str, list[float]] | None = None
 
     def __post_init__(self) -> None:
-        """Create common metadata and list for data and temperatures."""
+        """Create common metadata and data."""
         if not self.allequal:
             self.allequal = all(
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
         if self.allequal:
             self.metadata = self._merge_md(self.labelblocks)
-            # temperatures
-            temperatures = []
-            for lb in self.labelblocks:
-                temperatures.append(float(lb.metadata["Temperature"][0]))
-            self.temperatures = temperatures
             # data
             datagrp: dict[str, list[float]] = {}
             for key in self.labelblocks[0].data.keys():
@@ -607,11 +599,6 @@ class LabelblocksGroup:
             self.data = datagrp
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
             self.metadata = self._merge_md(self.labelblocks)
-            # temperatures
-            temperatures = []
-            for lb in self.labelblocks:
-                temperatures.append(float(lb.metadata["Temperature"][0]))
-            self.temperatures = temperatures
         else:
             raise ValueError("Creation of labelblock group failed.")
 
@@ -1342,7 +1329,7 @@ class TitrationAnalysis:
             bg = buf.pop("bg")  # type: ignore
             bg_sd = buf.pop("bg_sd")  # type: ignore
             rowlabel = ["Temp"]
-            lines = [[f"{x:6.1f}" for x in lbg.temperatures]]
+            lines = [[f"{x:6.1f}" for x in lbg.metadata["Temperature"]]]
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
             for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
                 rowlabel.append(k)

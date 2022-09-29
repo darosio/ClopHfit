@@ -180,7 +180,7 @@ class TestLabelblocksGroup:
 
     def test_temperatures(self) -> None:
         """It reads Temperature metadata."""
-        assert self.lb_grp.temperatures == [25.9, 26]
+        assert self.lb_grp.metadata["Temperature"] == [25.9, 26]
 
     def test_data(self) -> None:
         """It reads cell data."""
