@@ -338,7 +338,6 @@ class Labelblock:
     lines: list_of_lines
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
-    data_normalized: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         """Generate metadata and data for this labelblock."""
@@ -427,16 +426,23 @@ class Labelblock:
             eq &= self.metadata[k] == other.metadata[k]
         return eq
 
-    def normalize_data(self) -> None:
+
+@dataclass
+class NormalizedLabelblock:
+    """Store normalized data for a labelblock."""
+
+    lb: Labelblock
+    data: dict[str, float] = field(init=False, repr=True)
+
+    def __post_init__(self) -> None:
         """Normalize data by number of flashes, integration time and gain value."""
         norm = (
             1000.0
-            / float(self.metadata["Gain"][0])
-            / float(self.metadata["Number of Flashes"][0])
-            / float(self.metadata["Integration Time"][0])
+            / float(self.lb.metadata["Gain"][0])
+            / float(self.lb.metadata["Number of Flashes"][0])
+            / float(self.lb.metadata["Integration Time"][0])
         )
-        self.data_normalized = {k: v * norm for k, v in self.data.items()}
-        return None
+        self.data = {k: v * norm for k, v in self.lb.data.items()}
 
 
 @dataclass
@@ -599,6 +605,12 @@ class LabelblocksGroup:
             self.data = datagrp
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
             self.metadata = self._merge_md(self.labelblocks)
+            norm_labelblocks = [NormalizedLabelblock(lb) for lb in self.labelblocks]
+            datagrp = defaultdict(list)
+            for key in norm_labelblocks[0].data.keys():
+                for nlb in norm_labelblocks:
+                    datagrp[key].append(nlb.data[key])
+            self.data = datagrp
         else:
             raise ValueError("Creation of labelblock group failed.")
 
