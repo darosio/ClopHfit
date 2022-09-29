@@ -1,8 +1,6 @@
 """Command-line interface."""
 from __future__ import annotations
 
-import functools
-import os
 import pprint
 import sys
 from pathlib import Path
@@ -148,7 +146,7 @@ def tecan(  # type: ignore
     - csv tables for all labelblocks and global fittings.
 
     """
-    tit = prtecan.Titration(str(list_file))
+    tit = prtecan.Titration(list_file)
     # TitrationAnalysis
     if scheme:
         titan = prtecan.TitrationAnalysis(tit, scheme)
@@ -162,21 +160,13 @@ def tecan(  # type: ignore
             titan.metadata_normalization()
     else:
         titan = prtecan.TitrationAnalysis(tit)
-    # Output dir
-    if out:
-        if not os.path.isdir(out):
-            os.makedirs(out)
-        ttff = functools.partial(os.path.join, out)
-    else:
-        ttff = functools.partial(os.path.join, "")
-    # Export .dat
-    tit.export_dat(ttff(dat))
+    tit.export_dat(out / dat)
     # Fit
     if not fit:
         sys.exit(0)
     titan.fit(kind, no_weight=(not weight), tval=float(confint))
     # metadata-labels.txt
-    fp = open(ttff("metadata-labels.txt"), "w")
+    fp = open(out / "metadata-labels.txt", "w")
     for lbg in tit.labelblocksgroups:
         pprint.pprint(lbg.metadata, stream=fp)
     fp.close()
@@ -194,7 +184,7 @@ def tecan(  # type: ignore
                 print("\nGlobal on both labels")
             titan.print_fitting(i)
         # Csv tables
-        fit.sort_index().to_csv(ttff("ffit" + str(i) + ".csv"))
+        fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
         if "SA2" in fit:
             out_cols = [
                 "K",
@@ -211,13 +201,13 @@ def tecan(  # type: ignore
         else:
             out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         fit[out_cols].sort_index().to_csv(
-            ttff("fit" + str(i) + ".csv"), float_format="%5.1f"
+            out / Path("fit" + str(i) + ".csv"), float_format="%5.1f"
         )
         # Plots
         f = titan.plot_k(i, xlim=klim, title=title)
-        f.savefig(ttff("K" + str(i) + ".png"))
+        f.savefig(out / Path("K" + str(i) + ".png"))
         f = titan.plot_ebar(i, title=title)
-        f.savefig(ttff("ebar" + str(i) + ".png"))
+        f.savefig(out / Path("ebar" + str(i) + ".png"))
         if sel:
             if kind.lower() == "ph":  # FIXME **kw?
                 xmin, ymin = sel
@@ -225,10 +215,10 @@ def tecan(  # type: ignore
             if kind.lower() == "cl":
                 xmax, ymin = sel
                 f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
-            f.savefig(ttff("ebarZ" + str(i) + ".png"))
+            f.savefig(out / Path("ebarZ" + str(i) + ".png"))
     # ---------- ebar ---------------------------
     if hasattr(tit.labelblocksgroups[0], "buffer"):
         f = titan.plot_buffer(title=title)
-        f.savefig(ttff("buffer.png"))
+        f.savefig(out / Path("buffer.png"))
     if pdf:
-        titan.plot_all_wells(ttff("all_wells.pdf"))
+        titan.plot_all_wells(out / Path("all_wells.pdf"))

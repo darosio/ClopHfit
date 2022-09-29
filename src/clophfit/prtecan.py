@@ -31,11 +31,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import itertools
-import os
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 from typing import Any  # , overload
 from typing import List
 from typing import Sequence
@@ -446,11 +446,11 @@ class Tecanfile:
     Parameters
     ----------
     path
-        Name of the xls file.
+        Path to the '.xls' file.
 
     Attributes
     ----------
-    path: str
+    path: Path
         Tecan file path.
     metadata : dict[str, str | list[str | int | float]]
         General metadata for Tecanfile e.g. 'Date:' or 'Shaking Duration:'.
@@ -473,7 +473,7 @@ class Tecanfile:
 
     """
 
-    path: str
+    path: Path
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     labelblocks: list[Labelblock] = field(init=False, repr=True)
 
@@ -497,12 +497,12 @@ class Tecanfile:
         self.labelblocks = labelblocks
 
     @classmethod
-    def read_xls(cls, path: str) -> list_of_lines:
+    def read_xls(cls, path: Path) -> list_of_lines:
         """Read first sheet of an xls file.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Path to .xls file.
 
         Returns
@@ -719,7 +719,7 @@ class Titration(TecanfilesGroup):
 
     conc: Sequence[float] = field(init=False, repr=True)
 
-    def __init__(self, listfile: str) -> None:
+    def __init__(self, listfile: Path) -> None:
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
@@ -727,28 +727,25 @@ class Titration(TecanfilesGroup):
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         self.conc = df["conc"].tolist()
-        dirname = os.path.dirname(listfile)
-        filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
-        tecanfiles = [Tecanfile(f) for f in filenames]
+        tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
         super().__init__(tecanfiles)
 
-    def export_dat(self, path: str) -> None:
+    def export_dat(self, path: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Path to output folder.
 
         """
-        if not os.path.isdir(path):
-            os.makedirs(path)
+        path.mkdir(parents=True, exist_ok=True)
         for key, dy1 in self.labelblocksgroups[0].data.items():
             df = pd.DataFrame({"x": self.conc, "y1": dy1})
             for n, lb in enumerate(self.labelblocksgroups[1:], start=2):
                 dy = lb.data[key]
                 df["y" + str(n)] = dy
-            df.to_csv(os.path.join(path, key + ".dat"), index=False)
+            df.to_csv(path / Path(key).with_suffix(".dat"), index=False)
 
 
 @dataclass
