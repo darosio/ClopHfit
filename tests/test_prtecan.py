@@ -1,6 +1,7 @@
 """Test prtecan module."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,12 @@ class TestLabelblock:
             ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
         ):
             self.lb = prtecan.Labelblock(None, csvl[idxs[0] : len(csvl)])
+
+
+class TestNormalizedLabelblock:
+    """Test data class."""
+
+    pass
 
 
 class TestTecanfile:
@@ -239,13 +246,13 @@ class TestTecanfilesGroup2:
             self.group = prtecan.TecanfilesGroup(self.tecanfiles)
 
     def test_warn(self) -> None:
-        """It warns about difference in labelblocks order."""
-        assert "Different LabelblocksGroup among filenames" in str(
+        """It warns about difference in labelblocks XXX."""
+        assert "Different LabelblocksGroup among filenames:" in str(
             self.record[0].message
         )
 
     def test_labelblocksgroups(self) -> None:
-        """It generates 1 labelblocksgroups for Cl list. It tests only data."""
+        """It generates 1 std XXX labelblocksgroups."""
         lbg0 = self.group.labelblocksgroups[0]
         # metadata
         assert lbg0.metadata["Number of Flashes"][0] == 10.0
@@ -253,6 +260,20 @@ class TestTecanfilesGroup2:
         # data
         assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
         assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
+
+    def test_mergeable_labelblocksgroups(self) -> None:
+        """It generates 1 std XXX labelblocksgroups."""
+        lbg1 = self.group.labelblocksgroups[1]
+        # metadata
+        assert lbg1.metadata["Number of Flashes"][0] == 10.0
+        assert lbg1.metadata["Gain"][0] == [98.0, "Manual"]
+        # # data
+        np.testing.assert_almost_equal(
+            lbg1.data["A01"], [401.9387755, 446.9897959, 450.0]
+        )
+        np.testing.assert_almost_equal(
+            lbg1.data["H12"], [725.8163265, 693.9795918, 714.4949494]
+        )
 
 
 class TestTecanfilesGroup3:
@@ -293,9 +314,11 @@ class TestTecanfilesGroup4Raise:
         """It raises Exception when there is no way to build labelblocksGroup."""
         filenames = ["290212_5.78.xls", "290513_5.5_bad.xls"]
         tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-        with pytest.raises(ValueError, match=r"No common labelblock in filenames."):
+        with pytest.raises(
+            ValueError, match=r"No common labelblock in filenames."
+        ) as err:
             prtecan.TecanfilesGroup(tecanfiles)
-        # assert "['290212_5.78.xls', '290513_5.5.xls']" in str(err.value)
+        assert "['290212_5.78.xls', '290513_5.5_bad.xls']" in str(err.value)
 
 
 class TestTitration:
@@ -434,13 +457,12 @@ class TestTitrationAnalysis:
             prtecan.TitrationAnalysis(self.tit, "aax")
         # assert "No such file" in str(err.value)
 
-    # XXX: These tests depends on the execution of the previous one
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
-        name = str(data_tests / "140220/scheme0.txt")
-        with pytest.raises(AssertionError) as err:
-            prtecan.TitrationAnalysis(self.tit, name)
-        assert str(err.value) == f"Check format [well sample] for schemefile: {name}"
+        bad_schemefile = str(data_tests / "140220/scheme0.txt")
+        msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
+        with pytest.raises(ValueError, match=re.escape(msg)):
+            prtecan.TitrationAnalysis(self.tit, bad_schemefile)
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""

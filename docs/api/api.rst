@@ -28,6 +28,7 @@ Classes to parse a file
    left to right direction
 
    Labelblock "1..*" --o Tecanfile
+   Labelblock "1..1" --o NormalizedLabelblock
 
    class Labelblock{
      tecanfile: Tecanfile | None
@@ -36,16 +37,21 @@ Classes to parse a file
      +data : dict {'H12':float}
 	 __eq__()
      __almost_eq__()
-    }
+   }
 
-	class Tecanfile{
-	  path : str
-	  +metadata : dict
-	  +labelblocks : list
-	  {static} +read_xls()
-	  {static} +lookup_csv_lines()
-	  ~__hash__()
-    }
+   class NormalizedLabelblock{
+     lb: Labelblock
+     +data : dict {'H12':float}
+   }
+
+   class Tecanfile{
+     path : str
+	 +metadata : dict
+	 +labelblocks : list
+	 {static} +read_xls()
+	 {static} +lookup_csv_lines()
+	 ~__hash__()
+   }
 
 
 .. autoclass:: Labelblock
@@ -67,6 +73,7 @@ Classes to group files
 .. uml::
 
    Labelblock "1..*" --o Tecanfile
+   Labelblock "1..1" --o NormalizedLabelblock
 
    class Labelblock{
      tecanfile: Tecanfile | None
@@ -75,65 +82,71 @@ Classes to group files
      +data : dict {'H12':float}
 	 __eq__()
      __almost_eq__()
-    }
+   }
 
-	class Tecanfile{
-	  path : str
-	  +metadata : dict
-	  +labelblocks : list
-	  {static} +read_xls()
-	  {static} +lookup_csv_lines()
-	  ~__hash__()
-    }
+   class NormalizedLabelblock{
+     lb: Labelblock
+     +data : dict {'H12':float}
+   }
 
-	LabelblocksGroup ..> Labelblock
-    TecanfilesGroup ..> Tecanfile
+   class Tecanfile{
+     path : str
+	 +metadata : dict
+	 +labelblocks : list
+	 {static} +read_xls()
+	 {static} +lookup_csv_lines()
+	 ~__hash__()
+   }
 
-	LabelblocksGroup "*" --o TecanfilesGroup
-    TecanfilesGroup <|-- Titration
-    Titration "1" --o TitrationAnalysis
+   LabelblocksGroup ..> Labelblock
+   LabelblocksGroup ..> NormalizedLabelblock
+   TecanfilesGroup ..> Tecanfile
 
-	class LabelblocksGroup{
-	  labelblocks: list[Labelblock]
-	  +metadata: dict
-	  +temperatures: Sequence[float]
-	  +data: dict[str, list[float]]
-	  {abstract} buffer: Optional[dict[str, list[float]]]
-    }
+   LabelblocksGroup "*" --o TecanfilesGroup
+   TecanfilesGroup <|-- Titration
+   Titration "1" --o TitrationAnalysis
 
-	class TecanfilesGroup{
-      filenames: list[str]
-	  +metadata: dict
-	  +labelblocksgroups: list[LabelblocksGroup]
-    }
+   class LabelblocksGroup{
+     labelblocks: list[Labelblock]
+	 +metadata: dict
+	 +temperatures: Sequence[float]
+	 +data: dict[str, list[float]]
+	 {abstract} buffer: Optional[dict[str, list[float]]]
+   }
 
-	class Titration{
-	  listfile: str
-	  +metadata: dict
-	  +labelblocksgroups: list[LabelblocksGroup]
-	  +conc: list[float]
-	  +export_dat(path)
-    }
+   class TecanfilesGroup{
+     filenames: list[str]
+	 +metadata: dict
+	 +labelblocksgroups: list[LabelblocksGroup]
+   }
 
-	class TitrationAnalysis{
-	  titration: Titration
-	  schemefile: str | None
-	  +scheme: pd.Series[Any]
-	  +conc: Sequence[float]
-	  +labelblocksgroups: list[LabelblocksGroup]
-	  +additions: Sequence[float]
-	  +subtract_bg()
-	  +dilution_correction(additionsfile)
-	  {static} +calculate_conc(additions, stock, ini=0)
-	  +metadata_normalization()
-	  +fit(kind, ini, fin, no_weight, tval=0.95)
-	  +plot_k()
-	  +plot_well()
-	  +plot_all_wells()
-	  +plot_ebar()
-	  +print_fitting()
-	  +plot_buffers()
-	}
+   class Titration{
+     listfile: str
+	 +metadata: dict
+	 +labelblocksgroups: list[LabelblocksGroup]
+	 +conc: list[float]
+	 +export_dat(path)
+   }
+
+   class TitrationAnalysis{
+     titration: Titration
+	 schemefile: str | None
+	 +scheme: pd.Series[Any]
+	 +conc: Sequence[float]
+	 +labelblocksgroups: list[LabelblocksGroup]
+	 +additions: Sequence[float]
+	 +subtract_bg()
+	 +dilution_correction(additionsfile)
+	 {static} +calculate_conc(additions, stock, ini=0)
+	 +metadata_normalization()
+	 +fit(kind, ini, fin, no_weight, tval=0.95)
+	 +plot_k()
+	 +plot_well()
+	 +plot_all_wells()
+	 +plot_ebar()
+	 +print_fitting()
+	 +plot_buffers()
+   }
 
 .. autoclass:: LabelblocksGroup
    :members:

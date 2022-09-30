@@ -429,7 +429,19 @@ class Labelblock:
 
 @dataclass
 class NormalizedLabelblock:
-    """Store normalized data for a labelblock."""
+    """Store normalized data for a labelblock.
+
+    Parameters
+    ----------
+    lb : Labelblock
+        Object containing data to be normalized.
+
+    Attributes
+    ----------
+    data : Dict[str, float]
+        Normalized data values as {'well_name': value}.
+
+    """
 
     lb: Labelblock
     data: dict[str, float] = field(init=False, repr=True)
@@ -594,19 +606,18 @@ class LabelblocksGroup:
             self.allequal = all(
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
+        datagrp = defaultdict(list)
         if self.allequal:
+            # list of labelblocks with the same key metadata
             self.metadata = self._merge_md(self.labelblocks)
-            # data
-            datagrp: dict[str, list[float]] = {}
             for key in self.labelblocks[0].data.keys():
-                datagrp[key] = []
                 for lb in self.labelblocks:
                     datagrp[key].append(lb.data[key])
             self.data = datagrp
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
+            # list of labelblocks that can  be merged after normalization
             self.metadata = self._merge_md(self.labelblocks)
             norm_labelblocks = [NormalizedLabelblock(lb) for lb in self.labelblocks]
-            datagrp = defaultdict(list)
             for key in norm_labelblocks[0].data.keys():
                 for nlb in norm_labelblocks:
                     datagrp[key].append(nlb.data[key])
@@ -696,15 +707,11 @@ class TecanfilesGroup:
                 # if labelblocks are all 'equal'
                 else:
                     self.labelblocksgroups.append(gr)
+            files = [tf.path.name for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
-                raise ValueError(
-                    "No common labelblock in filenames."  # + str(self.tecanfiles[0].path)
-                )
+                raise ValueError(f"No common labelblock in filenames: {files}.")
             else:
-                warnings.warn(
-                    "Different LabelblocksGroup among filenames."
-                    + str(self.tecanfiles[0].path)
-                )
+                warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
         self.metadata = self.tecanfiles[0].metadata
 
 
@@ -807,12 +814,13 @@ class TitrationAnalysis:
             self.scheme = pd.Series({"well": []})
         else:
             df = pd.read_table(self.schemefile)
-            try:
-                assert df.columns.tolist() == ["well", "sample"]
-                assert df["well"].count() == df["sample"].count()
-            except AssertionError as err:
-                msg = "Check format [well sample] for schemefile: "
-                raise AssertionError(msg + self.schemefile) from err
+            if (
+                df.columns.tolist() != ["well", "sample"]
+                or df["well"].count() != df["sample"].count()
+            ):
+                raise ValueError(
+                    f"Check format [well sample] for schemefile: {self.schemefile}"
+                )
             self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
