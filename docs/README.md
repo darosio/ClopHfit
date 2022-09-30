@@ -1,5 +1,6 @@
 [![PyPI](https://img.shields.io/pypi/v/ClopHfit.svg)](https://pypi.org/project/ClopHfit/)
 [![Tests](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml)
+[![image](https://codecov.io/gh/darosio/clophfit/branch/main/graph/badge.svg?token=OR0LUZUJUR)](https://codecov.io/gh/darosio/nima)
 [![RtD](https://readthedocs.org/projects/clophfit/badge/)](https://clophfit.readthedocs.io/)
 [![zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.6354112.svg)](https://doi.org/10.5281/zenodo.6354112)
 
