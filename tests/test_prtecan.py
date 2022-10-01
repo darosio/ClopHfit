@@ -57,6 +57,8 @@ def test_fit_titration() -> None:
     assert abs(df["K"][0] - 10) < 0.0000001
     assert abs(df["SA"][0] - 2) < 0.000000001
     assert abs(df["SB"][0] - 0) < 0.00000001
+    with pytest.raises(NameError, match="kind= pH or Cl"):
+        prtecan.fit_titration("unk", x, y)
 
 
 class TestLabelblock:
@@ -80,14 +82,17 @@ class TestLabelblock:
         """It detects saturated data ("OVER")."""
         csvl = prtecan.Tecanfile.read_xls(data_tests / "pH5.1_130913a-orig.xls")
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
-        with pytest.warns(UserWarning) as record:
+        with pytest.warns(
+            UserWarning, match=r"OVER value in A01 well for \['Label1'\] of tecanfile: "
+        ):
             lb = prtecan.Labelblock(None, csvl[idxs[0] : idxs[1]])
         assert np.nansum(lb.data["A01"]) == np.nansum(np.nan)
         assert np.nansum(lb.data["F01"]) == np.nansum(np.nan)
-        assert (
-            str(record[0].message)
-            == "OVER value in A01 well for ['Label1'] of tecanfile: "
-        )
+
+    def test___eq__(self) -> None:
+        """It is equal to itself. TODO and different from other."""
+        assert self.lb == self.lb
+        assert self.lb.__eq__(1) == NotImplemented
 
     def test_raise_missing_column(self) -> None:
         """It raises Exception when a column is missing from the labelblock."""
@@ -122,9 +127,8 @@ class TestTecanfile:
 
     def test_warn(self) -> None:
         """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
-        with pytest.warns(UserWarning) as record:
+        with pytest.warns(UserWarning, match="Repeated labelblocks"):
             prtecan.Tecanfile(data_tests / "290212_7.67_repeated_lb.xls")
-        assert "Repeated labelblocks" in str(record[0].message)
 
     def test_path(self) -> None:
         """It reads the file path."""
@@ -315,10 +319,10 @@ class TestTecanfilesGroup4Raise:
         filenames = ["290212_5.78.xls", "290513_5.5_bad.xls"]
         tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
         with pytest.raises(
-            ValueError, match=r"No common labelblock in filenames."
-        ) as err:
+            ValueError,
+            match=r"No common labelblock in filenames: .*290212_5.78.xls.*290513_5.5_bad.xls",
+        ):
             prtecan.TecanfilesGroup(tecanfiles)
-        assert "['290212_5.78.xls', '290513_5.5_bad.xls']" in str(err.value)
 
 
 class TestTitration:
@@ -424,9 +428,8 @@ class TestTitration:
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
-        with pytest.raises(FileNotFoundError) as err:
+        with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
             prtecan.Titration(Path("aax"))
-        assert str(err.value) == "Cannot find: " + "aax"
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
@@ -452,10 +455,11 @@ class TestTitrationAnalysis:
         self.tit_an.scheme["buf"] = ["D01", "E01", "D12", "E12"]
 
     def test_raise_listfilenotfound(self) -> None:
-        """It raises OSError when sheme file does not exist."""
-        with pytest.raises(OSError, match=r"No such file .*"):
+        """It raises OSError when scheme file does not exist."""
+        with pytest.raises(
+            FileNotFoundError, match=r"No such file or directory: 'aax'"
+        ):
             prtecan.TitrationAnalysis(self.tit, "aax")
-        # assert "No such file" in str(err.value)
 
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
@@ -513,9 +517,10 @@ class TestTitrationAnalysis:
     def test_dilution_correction_warning(self) -> None:
         """It warns when dilution correction is repeated."""
         # run in previous test_dilution_correction
-        with pytest.warns(UserWarning) as record:
+        with pytest.warns(
+            UserWarning, match="Dilution correction was already applied."
+        ):
             self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
-        assert str(record[0].message) == "Dilution correction was already applied."
 
     def test_metadata_normalization(self) -> None:
         """It normalizes data."""
@@ -547,12 +552,10 @@ class TestTitrationAnalysis:
 
     def test_metadata_normalization_warning(self) -> None:
         """It warns when normalization is repeated."""
-        with pytest.warns(UserWarning) as record:
+        with pytest.warns(
+            UserWarning, match="Normalization using metadata was already applied."
+        ):
             self.tit_an.metadata_normalization()
-        assert (
-            str(record[0].message)
-            == "Normalization using metadata was already applied."
-        )
 
     def test_calculate_conc(self) -> None:
         """It calculates concentration values from Cl additions."""
@@ -680,7 +683,6 @@ class TestTitrationAnalysis:
         self.tit_an.fit("pH")
         fit0 = self.tit_an.fittings[0].sort_index()
         fit1 = self.tit_an.fittings[1].sort_index()
-        print(fit0)
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0)

@@ -94,7 +94,7 @@ SB =  -0.274\nsSB =  0.002\n""",
         fp_expected = _expected / f
         msg = mpltc.compare_images(fp_test, fp_expected, 80.0)
         if msg:
-            raise ImageComparisonFailure(msg)
+            raise ImageComparisonFailure(msg)  # pragma: no cover
 
 
 @typing.no_type_check
@@ -157,5 +157,5 @@ bootstrap:""",
         fp_test = tmpoutput / f.split("/")[-1]
         fp_expected = _expected / f.lstrip("./")
         msg = mpltc.compare_images(fp_test, fp_expected, 1.01)
-        if msg:
+        if msg:  # pragma: no cover
             raise ImageComparisonFailure(msg)

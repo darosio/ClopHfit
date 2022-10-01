@@ -2,9 +2,7 @@
 name = "ClopHfit"
 version = "0.3.8"
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
-authors = [
-  "daniele arosio <daniele.arosio@cnr.it>"
-]
+authors = ["daniele arosio <daniele.arosio@cnr.it>"]
 license = "BSD-3-Clause"
 readme = "docs/README.md"
 homepage = "https://github.com/darosio/ClopHfit"
@@ -16,7 +14,7 @@ keywords = [
   "data fitting",
   "pH",
   "macromolecule binding",
-]
+  ]
 classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
@@ -27,10 +25,8 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
   "Development Status :: 3 - Alpha"
-]
-include = [
-  "LICENSE.txt"
-]
+  ]
+include = ["LICENSE.txt"]
 
 [tool.poetry.dependencies]
 python = ">=3.8, <3.11"
@@ -104,6 +100,7 @@ exclude = '''
   | dist
 )/
 '''
+
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
 tests = ["tests", "*/tests"]
@@ -116,6 +113,11 @@ omit = ["*__init__.py"]
 [tool.coverage.report]
 show_missing = true
 # fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "pytest.raises",
+    "pytest.warns",
+    ]
 
 [tool.isort]
 profile = "black"
@@ -132,7 +134,7 @@ version_files = [
   "pyproject.toml:version",
   "docs/conf.py:release",
   "docs/README.md:Version",
-]
+  ]
 changelog_incremental = true
 
 [tool.mypy]
