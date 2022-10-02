@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.9 (2022-10-02)
+
+### Feat
+- LabelblocksGroup metadata now list all values if not identical.
+- [ci] Add nox -s bump.
+- [ci] Add nox -s coverage and codecov flag in readme.
+
+### Refactor
+- Removed temperatures attribute as already present in metadata.
+- Slightly improved design for TecanfilesGroup(List[Tecanfile]).
+- Prototyped NormalizedLabelblock class.
+- Removed of os.path in favor of pathlib.Path
+
 ## 0.3.8 (2022-09-24)
 
 ### Fix

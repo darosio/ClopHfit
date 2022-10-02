@@ -234,14 +234,18 @@ def clean(session: Session) -> None:
 def bump(session: Session) -> None:
     """Bump repository and upload to testpypi."""
     session.install("commitizen")
-    session.run("cz", "bump", "--files-only", "--increment", "PATCH")
-    # session.run("cz", "ch", "--unreleased-version", "`poetry version -s`")
-    vv = session.run(
-        "poetry",
-        "version",
-        external=True,
+    session.run(
+        "cz",
+        "bump",
+        "-ch",
+        "--files-only",
+        # "--no-verify",
+        "--increment",
+        "PATCH",
+        # "-pr",
+        # "rc",
     )
-    print(vv)
+    session.run("poetry", "publish", "-r", "testpypi", "--build", external=True)
 
 
 # https://nox.thea.codes/en/stable/cookbook.html?highlight=input#the-auto-release
