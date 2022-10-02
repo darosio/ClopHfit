@@ -31,10 +31,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import itertools
-import os
 import warnings
+from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 from typing import Any  # , overload
 from typing import List
 from typing import Sequence
@@ -427,17 +428,47 @@ class Labelblock:
 
 
 @dataclass
+class NormalizedLabelblock:
+    """Store normalized data for a labelblock.
+
+    Parameters
+    ----------
+    lb : Labelblock
+        Object containing data to be normalized.
+
+    Attributes
+    ----------
+    data : Dict[str, float]
+        Normalized data values as {'well_name': value}.
+
+    """
+
+    lb: Labelblock
+    data: dict[str, float] = field(init=False, repr=True)
+
+    def __post_init__(self) -> None:
+        """Normalize data by number of flashes, integration time and gain value."""
+        norm = (
+            1000.0
+            / float(self.lb.metadata["Gain"][0])
+            / float(self.lb.metadata["Number of Flashes"][0])
+            / float(self.lb.metadata["Integration Time"][0])
+        )
+        self.data = {k: v * norm for k, v in self.lb.data.items()}
+
+
+@dataclass
 class Tecanfile:
     """Parse a .xls file as exported from Tecan.
 
     Parameters
     ----------
     path
-        Name of the xls file.
+        Path to the '.xls' file.
 
     Attributes
     ----------
-    path: str
+    path: Path
         Tecan file path.
     metadata : dict[str, str | list[str | int | float]]
         General metadata for Tecanfile e.g. 'Date:' or 'Shaking Duration:'.
@@ -460,7 +491,7 @@ class Tecanfile:
 
     """
 
-    path: str
+    path: Path
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     labelblocks: list[Labelblock] = field(init=False, repr=True)
 
@@ -476,19 +507,20 @@ class Tecanfile:
         idxs.append(len(csvl))
         for i in range(n_labelblocks):
             labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
+        if any(
+            labelblocks[i] == labelblocks[j]
+            for i, j in itertools.combinations(range(n_labelblocks), 2)
+        ):
+            warnings.warn("Repeated labelblocks")
         self.labelblocks = labelblocks
 
-    def __hash__(self) -> int:
-        """Define hash (related to __eq__) using self.path."""
-        return hash(self.path)
-
     @classmethod
-    def read_xls(cls, path: str) -> list_of_lines:
+    def read_xls(cls, path: Path) -> list_of_lines:
         """Read first sheet of an xls file.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Path to .xls file.
 
         Returns
@@ -549,8 +581,6 @@ class LabelblocksGroup:
     ----------
     metadata : dict
         The common metadata.
-    temperatures : List[float]
-        The temperatire value for each Labelblock.
     data : Dict[str, List[float]]
         The usual dict for data (see Labelblock) with well name as key but with
         list of values as value.
@@ -563,35 +593,58 @@ class LabelblocksGroup:
     """
 
     labelblocks: list[Labelblock]
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
-    temperature: Sequence[float] = field(init=False, repr=True)
+    allequal: bool = False
+    metadata: dict[str, list[str | int | float | list[str | int]]] = field(
+        init=False, repr=True
+    )
     data: dict[str, list[float]] = field(init=False, repr=True)
-    buffer: dict[str, list[float]] = field(init=False, repr=True)
+    buffer: dict[str, list[float]] | None = None
 
     def __post_init__(self) -> None:
-        """Create common metadata and list for data and temperatures."""
-        if all(self.labelblocks[0] == lb for lb in self.labelblocks[1:]):
-            # build common metadata only
-            metadata = {}
-            for k in Labelblock._KEYS:
-                metadata[k] = self.labelblocks[0].metadata[k]
-                # list with first element don't care about Manual/Optimal
-            metadata["Gain"] = [self.labelblocks[0].metadata["Gain"][0]]
-            self.metadata = metadata
-            # temperatures
-            temperatures = []
-            for lb in self.labelblocks:
-                temperatures.append(lb.metadata["Temperature"][0])
-            self.temperatures = temperatures
-            # data
-            datagrp: dict[str, list[float]] = {}
+        """Create common metadata and data."""
+        if not self.allequal:
+            self.allequal = all(
+                self.labelblocks[0] == lb for lb in self.labelblocks[1:]
+            )
+        datagrp = defaultdict(list)
+        if self.allequal:
+            # list of labelblocks with the same key metadata
+            self.metadata = self._merge_md(self.labelblocks)
             for key in self.labelblocks[0].data.keys():
-                datagrp[key] = []
                 for lb in self.labelblocks:
                     datagrp[key].append(lb.data[key])
             self.data = datagrp
+        elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
+            # list of labelblocks that can  be merged after normalization
+            self.metadata = self._merge_md(self.labelblocks)
+            norm_labelblocks = [NormalizedLabelblock(lb) for lb in self.labelblocks]
+            for key in norm_labelblocks[0].data.keys():
+                for nlb in norm_labelblocks:
+                    datagrp[key].append(nlb.data[key])
+            self.data = datagrp
         else:
             raise ValueError("Creation of labelblock group failed.")
+
+    def _merge_md(
+        self, labelblocks: list[Labelblock]
+    ) -> dict[str, list[str | int | float | list[str | int]]]:
+        """Merge metadata from a list of labelblocks."""
+        mmd: dict[str, list[Any]] = defaultdict(list)
+        for lb in labelblocks:
+            for k, v in lb.metadata.items():
+                if len(v) == 1:
+                    mmd[k].append(v[0])
+                else:
+                    mmd[k].append(v)
+        for k, v in mmd.items():
+            if all([v[0] == val for val in v[1:]]):
+                if type(v[0]) is str or type(v[0]) is int:
+                    mmd[k] = [v[0]]
+                else:
+                    mmd[k] = v[0]  # type: ignore
+            else:
+                mmd[k] = v
+        return dict(mmd)
 
 
 @dataclass
@@ -625,55 +678,41 @@ class TecanfilesGroup:
 
     """
 
-    filenames: list[str]
+    tecanfiles: list[Tecanfile]
+    labelblocksgroups: list[LabelblocksGroup] = field(default_factory=list)
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
-    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create metadata and labelblocksgroups."""
-        tecanfiles = []
-        for f in self.filenames:
-            tecanfiles.append(Tecanfile(f))
-        tf0 = tecanfiles[0]
-        grps = []
-        if all([tf0.labelblocks == tf.labelblocks for tf in tecanfiles[1:]]):
-            # expected behaviour
+        n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
+        tf0 = self.tecanfiles[0]
+        if all([tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]]):
+            # Same number and order of labelblocks
             for i, _lb in enumerate(tf0.labelblocks):
-                gr = LabelblocksGroup([tf.labelblocks[i] for tf in tecanfiles])
-                grps.append(gr)
+                self.labelblocksgroups.append(
+                    LabelblocksGroup(
+                        [tf.labelblocks[i] for tf in self.tecanfiles], allequal=True
+                    )
+                )
         else:
-            # Try to creates as many as possible groups of labelblocks
-            # with length=len(tecanfiles).
-            # Not for 'equal' labelblocks within the same tecanfile.
-            n_tecanfiles = len(tecanfiles)
-            nmax_labelblocks = max(len(tf.labelblocks) for tf in tecanfiles)
-            for idx in itertools.product(range(nmax_labelblocks), repeat=n_tecanfiles):
+            # Create as many as possible groups of labelblocks
+            rngs = tuple([range(n) for n in n_labelblocks])
+            for idx in itertools.product(*rngs):
                 try:
-                    for i, tf in enumerate(tecanfiles):
-                        tf.labelblocks[idx[i]]
-                except IndexError:
+                    gr = LabelblocksGroup(
+                        [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
+                    )
+                except ValueError:
                     continue
-                # if all labelblocks exhist
+                # if labelblocks are all 'equal'
                 else:
-                    try:
-                        gr = LabelblocksGroup(
-                            [tf.labelblocks[idx[i]] for i, tf in enumerate(tecanfiles)]
-                        )
-                    except AssertionError:
-                        continue
-                    # if labelblocks are all 'equal'
-                    else:
-                        grps.append(gr)
-            if len(grps) == 0:
-                raise Exception(
-                    "No common labelblock in filenames" + str(self.filenames)
-                )
+                    self.labelblocksgroups.append(gr)
+            files = [tf.path.name for tf in self.tecanfiles]
+            if len(self.labelblocksgroups) == 0:  # == []
+                raise ValueError(f"No common labelblock in filenames: {files}.")
             else:
-                warnings.warn(
-                    "Different LabelblocksGroup among filenames." + str(self.filenames)
-                )
-        self.metadata = tecanfiles[0].metadata
-        self.labelblocksgroups = grps
+                warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
+        self.metadata = self.tecanfiles[0].metadata
 
 
 @dataclass(init=False)
@@ -699,7 +738,7 @@ class Titration(TecanfilesGroup):
 
     conc: Sequence[float] = field(init=False, repr=True)
 
-    def __init__(self, listfile: str) -> None:
+    def __init__(self, listfile: Path) -> None:
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
@@ -707,27 +746,25 @@ class Titration(TecanfilesGroup):
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         self.conc = df["conc"].tolist()
-        dirname = os.path.dirname(listfile)
-        filenames = [os.path.join(dirname, fn) for fn in df["filenames"]]
-        super().__init__(filenames)
+        tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
+        super().__init__(tecanfiles)
 
-    def export_dat(self, path: str) -> None:
+    def export_dat(self, path: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Path to output folder.
 
         """
-        if not os.path.isdir(path):
-            os.makedirs(path)
+        path.mkdir(parents=True, exist_ok=True)
         for key, dy1 in self.labelblocksgroups[0].data.items():
             df = pd.DataFrame({"x": self.conc, "y1": dy1})
             for n, lb in enumerate(self.labelblocksgroups[1:], start=2):
                 dy = lb.data[key]
                 df["y" + str(n)] = dy
-            df.to_csv(os.path.join(path, key + ".dat"), index=False)
+            df.to_csv(path / Path(key).with_suffix(".dat"), index=False)
 
 
 @dataclass
@@ -777,12 +814,13 @@ class TitrationAnalysis:
             self.scheme = pd.Series({"well": []})
         else:
             df = pd.read_table(self.schemefile)
-            try:
-                assert df.columns.tolist() == ["well", "sample"]
-                assert df["well"].count() == df["sample"].count()
-            except AssertionError as err:
-                msg = "Check format [well sample] for schemefile: "
-                raise AssertionError(msg + self.schemefile) from err
+            if (
+                df.columns.tolist() != ["well", "sample"]
+                or df["well"].count() != df["sample"].count()
+            ):
+                raise ValueError(
+                    f"Check format [well sample] for schemefile: {self.schemefile}"
+                )
             self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
@@ -863,9 +901,10 @@ class TitrationAnalysis:
             warnings.warn("Normalization using metadata was already applied.")
             return
         for lbg in self.labelblocksgroups:
-            corr = 1000 / float(lbg.metadata["Gain"][0])
-            corr /= float(lbg.metadata["Integration Time"][0])
-            corr /= float(lbg.metadata["Number of Flashes"][0])
+            # new lbg metadata
+            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # type: ignore
+            corr /= float(lbg.metadata["Integration Time"][0])  # type: ignore
+            corr /= float(lbg.metadata["Number of Flashes"][0])  # type: ignore
             for k in lbg.data.keys():
                 lbg.data[k] = [v * corr for v in lbg.data[k]]
         self.normalized = True
@@ -1304,12 +1343,12 @@ class TitrationAnalysis:
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
         for i, lbg in enumerate(self.labelblocksgroups):
             buf = copy.deepcopy(lbg.buffer)
-            bg = buf.pop("bg")
-            bg_sd = buf.pop("bg_sd")
+            bg = buf.pop("bg")  # type: ignore
+            bg_sd = buf.pop("bg_sd")  # type: ignore
             rowlabel = ["Temp"]
-            lines = [[f"{x:6.1f}" for x in lbg.temperatures]]
-            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
-            for j, (k, v) in enumerate(buf.items(), start=1):
+            lines = [[f"{x:6.1f}" for x in lbg.metadata["Temperature"]]]
+            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
+            for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
                 rowlabel.append(k)
                 lines.append([f"{x:6.1f}" for x in v])
                 ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])

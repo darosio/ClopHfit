@@ -1,5 +1,6 @@
 [![PyPI](https://img.shields.io/pypi/v/ClopHfit.svg)](https://pypi.org/project/ClopHfit/)
 [![Tests](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/darosio/ClopHfit/branch/main/graph/badge.svg?token=OU6F9VFUQ6)](https://codecov.io/gh/darosio/ClopHfit)
 [![RtD](https://readthedocs.org/projects/clophfit/badge/)](https://clophfit.readthedocs.io/)
 [![zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.6354112.svg)](https://doi.org/10.5281/zenodo.6354112)
 
@@ -8,7 +9,7 @@
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
--   Version: "0.3.8"
+-   Version: "0.3.9"
 
 ## Features
 
