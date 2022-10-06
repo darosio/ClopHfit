@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: daily
+    target-branch: "develop"
+  - package-ecosystem: pip
+    directory: "/.github/workflows"
+    schedule:
+      interval: daily
+    target-branch: "develop"
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: daily
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: "direct"
+      # - dependency-type: "production"
+    target-branch: "develop"
+    open-pull-requests-limit: 15
