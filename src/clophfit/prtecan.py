@@ -338,6 +338,7 @@ class Labelblock:
     lines: list_of_lines
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
+    data_normalized: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         """Generate metadata and data for this labelblock."""
@@ -425,6 +426,17 @@ class Labelblock:
         for k in Labelblock._KEYS[:5]:
             eq &= self.metadata[k] == other.metadata[k]
         return eq
+
+    def normalize_data(self) -> None:
+        """Normalize data by number of flashes, integration time and gain value."""
+        norm = (
+            1000.0
+            / float(self.metadata["Gain"][0])
+            / float(self.metadata["Number of Flashes"][0])
+            / float(self.metadata["Integration Time"][0])
+        )
+        self.data_normalized = {k: v * norm for k, v in self.data.items()}
+        return None
 
 
 @dataclass
