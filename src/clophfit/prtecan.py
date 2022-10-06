@@ -750,7 +750,8 @@ class Titration(TecanfilesGroup):
 
     conc: Sequence[float] = field(init=False, repr=True)
 
-    def __init__(self, listfile: Path) -> None:
+    def __init__(self, listfile: Path | str) -> None:
+        listfile = Path(listfile)  # hacky fix for ipython str arguments
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
