@@ -469,7 +469,7 @@ class NormalizedLabelblock:
         self.data = {k: v * norm for k, v in self.lb.data.items()}
 
 
-@dataclass
+@dataclass(slots=True)
 class Tecanfile:
     """Parse a .xls file as exported from Tecan.
 
@@ -580,7 +580,7 @@ class Tecanfile:
         return idxs
 
 
-@dataclass
+@dataclass(slots=True)
 class LabelblocksGroup:
     """Group of labelblocks with 'equal' metadata.
 
@@ -751,7 +751,8 @@ class Titration(TecanfilesGroup):
     conc: Sequence[float] = field(init=False, repr=True)
 
     def __init__(self, listfile: Path | str) -> None:
-        listfile = Path(listfile)  # hacky fix for ipython str arguments
+        if isinstance(listfile, str):
+            listfile = Path(listfile)
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
