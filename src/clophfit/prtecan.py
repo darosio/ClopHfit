@@ -33,6 +33,7 @@ import hashlib
 import itertools
 import warnings
 from collections import defaultdict
+from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -304,7 +305,7 @@ def fit_titration(
     return res
 
 
-@dataclass
+@dataclass(slots=True)
 class Labelblock:
     """Parse a label block within a Tecan file.
 
@@ -334,18 +335,18 @@ class Labelblock:
 
     """
 
-    lines: list_of_lines
+    lines: InitVar[list_of_lines]
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
     data_normalized: dict[str, float] | None = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, lines: list_of_lines) -> None:
         """Generate metadata and data for this labelblock."""
-        if self.lines[14][0] == "<>" and self.lines[23] == self.lines[24] == [""] * 13:
-            stripped = strip_lines(self.lines)
+        if lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13:
+            stripped = strip_lines(lines)
             stripped[14:23] = []
             self.metadata = extract_metadata(stripped)
-            self.data = self._extract_data(self.lines[15:23])
+            self.data = self._extract_data(lines[15:23])
         else:
             raise ValueError("Cannot build Labelblock: not 96 wells?")
 
