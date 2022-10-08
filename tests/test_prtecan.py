@@ -68,7 +68,7 @@ class TestLabelblock:
         """Initialize a labelblock from an .xls file."""
         csvl = prtecan.Tecanfile.read_xls(data_tests / "290212_7.67.xls")
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
-        self.lb = prtecan.Labelblock(None, csvl[idxs[0] : idxs[1]])
+        self.lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
@@ -85,7 +85,7 @@ class TestLabelblock:
         with pytest.warns(
             UserWarning, match=r"OVER value in A01 well for \['Label1'\] of tecanfile: "
         ):
-            lb = prtecan.Labelblock(None, csvl[idxs[0] : idxs[1]])
+            lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         assert np.nansum(lb.data["A01"]) == np.nansum(np.nan)
         assert np.nansum(lb.data["F01"]) == np.nansum(np.nan)
 
@@ -99,7 +99,7 @@ class TestLabelblock:
         csvl = prtecan.Tecanfile.read_xls(data_tests / "88wells_290212_20.xlsx")
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
-            self.lb = prtecan.Labelblock(None, csvl[idxs[0] : len(csvl)])
+            self.lb = prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
     def test_raise_missing_row(self) -> None:
         """It raises Exception when a row is missing from the labelblock."""
@@ -108,7 +108,7 @@ class TestLabelblock:
         with pytest.raises(
             ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
         ):
-            self.lb = prtecan.Labelblock(None, csvl[idxs[0] : len(csvl)])
+            self.lb = prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
 
 class TestNormalizedLabelblock:

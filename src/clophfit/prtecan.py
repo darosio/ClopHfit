@@ -334,7 +334,6 @@ class Labelblock:
 
     """
 
-    tecanfile: Tecanfile | None
     lines: list_of_lines
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
@@ -388,10 +387,9 @@ class Labelblock:
                         data[row + f"{col:0>2}"] = float(lines[i][col])
                     except ValueError:
                         data[row + f"{col:0>2}"] = np.nan
-                        path = self.tecanfile.path if self.tecanfile else ""
                         warnings.warn(
                             "OVER value in {}{:0>2} well for {} of tecanfile: {}".format(
-                                row, col, self.metadata["Label"], path
+                                row, col, self.metadata["Label"], ""
                             )
                         )
         except AssertionError:
@@ -518,7 +516,7 @@ class Tecanfile:
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
         for i in range(n_labelblocks):
-            labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
+            labelblocks.append(Labelblock(csvl[idxs[i] : idxs[i + 1]]))
         if any(
             labelblocks[i] == labelblocks[j]
             for i, j in itertools.combinations(range(n_labelblocks), 2)
