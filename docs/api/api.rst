@@ -16,6 +16,7 @@ clophfit.binding module
 clophfit.prtecan
 ----------------
 
+
 .. automodule:: clophfit.prtecan
 
 .. _prtecan parse:
@@ -23,71 +24,53 @@ clophfit.prtecan
 Classes to parse a file
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. uml::
+.. autosummary::
 
-   left to right direction
-
-   Labelblock "1..*" --o Tecanfile
-   Labelblock "1..1" --o NormalizedLabelblock
-
-   class Labelblock{
-     tecanfile: Tecanfile | None
-     lines: list_of_lines
-     +metadata : dict
-     +data : dict {'H12':float}
-	 __eq__()
-     __almost_eq__()
-   }
-
-   class NormalizedLabelblock{
-     lb: Labelblock
-     +data : dict {'H12':float}
-   }
-
-   class Tecanfile{
-     path : str
-	 +metadata : dict
-	 +labelblocks : list
-	 {static} +read_xls()
-	 {static} +lookup_csv_lines()
-	 ~__hash__()
-   }
-
+   clophfit.prtecan.Labelblock
+   clophfit.prtecan.Tecanfile
 
 .. autoclass:: Labelblock
    :members:
-   :special-members: KEYS, __eq__
-   :private-members:
-   :undoc-members:
 
+.. autosummary::
+
+   clophfit.prtecan.Tecanfile
 
 .. autoclass:: Tecanfile
    :members:
-   :noindex:
 
 .. _prtecan group:
 
 Classes to group files
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+
+   clophfit.prtecan.LabelblocksGroup
+   clophfit.prtecan.TecanfilesGroup
+   clophfit.prtecan.Titration
+   clophfit.prtecan.TitrationAnalysis
 
 .. uml::
 
-   Labelblock "1..*" --o Tecanfile
-   Labelblock "1..1" --o NormalizedLabelblock
+   left to right direction
 
    class Labelblock{
-     tecanfile: Tecanfile | None
      lines: list_of_lines
      +metadata : dict
      +data : dict {'H12':float}
+     +data_normalized : dict {'H12':float}
+	 +buffer_wells: list
+     +data_buffersubtracted : dict
+     +data_buffersubtracted_norm : dict
+	 +buffer: float
+	 +sd_buffer: float
+	 +buffer_norm: float
+	 +sd_buffer_norm: float
 	 __eq__()
      __almost_eq__()
    }
 
-   class NormalizedLabelblock{
-     lb: Labelblock
-     +data : dict {'H12':float}
-   }
+   Labelblock "1..*" --o Tecanfile
 
    class Tecanfile{
      path : str
@@ -99,7 +82,6 @@ Classes to group files
    }
 
    LabelblocksGroup ..> Labelblock
-   LabelblocksGroup ..> NormalizedLabelblock
    TecanfilesGroup ..> Tecanfile
 
    LabelblocksGroup "*" --o TecanfilesGroup
@@ -150,11 +132,9 @@ Classes to group files
 
 .. autoclass:: LabelblocksGroup
    :members:
-   :show-inheritance:
 
 .. autoclass:: TecanfilesGroup
    :members:
-   :show-inheritance:
 
 .. autoclass:: Titration
    :members:
@@ -162,5 +142,3 @@ Classes to group files
 
 .. autoclass:: TitrationAnalysis
    :members:
-   :show-inheritance:
-   :noindex:

@@ -71,6 +71,8 @@ class TestLabelblock:
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         self.lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         self.lb1 = prtecan.Labelblock(csvl[idxs[1] :])
+        self.lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
+        self.lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
@@ -78,9 +80,42 @@ class TestLabelblock:
         assert self.lb1.metadata["Temperature"] == [25.3]
 
     def test_data(self) -> None:
-        """It parses "A01" cell data."""
+        """It parses data values."""
         assert self.lb0.data["F06"] == 19551
         assert self.lb1.data["H12"] == 543
+
+    def test_data_normalized(self) -> None:
+        """Normalize data using some metadata values."""
+        assert self.lb0.data_normalized["F06"] == pytest.approx(1051.1290323)
+        assert self.lb1.data_normalized["H12"] == pytest.approx(48.4821429)
+
+    def test_data_buffersubtracted(self) -> None:
+        """Calculate buffer value from average of buffer wells and subtract from data."""
+        assert self.lb0.buffer == 11889.25
+        assert self.lb1.buffer == 56.75
+        assert self.lb0.sd_buffer == pytest.approx(450.2490)
+        assert self.lb1.sd_buffer == pytest.approx(4.43706)
+        assert self.lb0.data_buffersubtracted["F06"] == pytest.approx(7661.75)
+        assert self.lb1.data_buffersubtracted["H12"] == pytest.approx(486.25)
+        # Can also assign a buffer value.
+        self.lb0.buffer = 1
+        self.lb1.buffer = 2.9
+        assert self.lb0.data_buffersubtracted["F06"] == 19550
+        assert self.lb1.data_buffersubtracted["H12"] == 540.1
+
+    def test_data_buffersubtracted_norm(self) -> None:
+        """Calculate normalized buffer value from average of buffer wells and subtract from data."""
+        assert self.lb0.buffer_norm == pytest.approx(639.20699)
+        assert self.lb1.buffer_norm == pytest.approx(5.06696)
+        assert self.lb0.sd_buffer_norm == pytest.approx(24.20694)
+        assert self.lb1.sd_buffer_norm == pytest.approx(0.396166)
+        assert self.lb0.data_buffersubtracted_norm["F06"] == pytest.approx(411.922)
+        assert self.lb1.data_buffersubtracted_norm["H12"] == pytest.approx(43.4152)
+        # Can also assign a buffer_norm value.
+        self.lb0.buffer_norm = 1
+        self.lb1.buffer_norm = 0.4821
+        assert self.lb0.data_buffersubtracted_norm["F06"] == pytest.approx(1050.13)
+        assert self.lb1.data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
 
     def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
@@ -95,7 +130,6 @@ class TestLabelblock:
         lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         assert lb.__almost_eq__(self.lb0)
         assert not lb.__almost_eq__(self.lb1)
-        assert lb.__almost_eq__(1) == NotImplemented
 
     def test_overvalue(self) -> None:
         """It detects saturated data ("OVER")."""

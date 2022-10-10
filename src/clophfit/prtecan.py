@@ -1,9 +1,9 @@
 """Parse Tecan files, group lists and fit titrations.
 
-(Titrations are described in list.pH or list.cl file.
+- Titration is described in list.pH or list.cl file.
+- Builds 96 titrations and export them in txt files.
+- In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
-Builds 96 titrations and export them in txt files. In the case of 2 labelblocks
-performs a global fit saving a png and printing the fitting results.)
 
 :ref:`prtecan parse`:
 
@@ -20,14 +20,13 @@ performs a global fit saving a png and printing the fitting results.)
 Functions
 ---------
 .. autofunction:: fit_titration
-.. autofunction:: fz_Kd_singlesite
-.. autofunction:: fz_pK_singlesite
+.. autofunction:: fz_kd_singlesite
+.. autofunction:: fz_pk_singlesite
 .. autofunction:: extract_metadata
 .. autofunction:: strip_lines
 
 """
 from __future__ import annotations
-from time import sleep
 
 import copy
 import hashlib
@@ -340,7 +339,11 @@ class Labelblock:
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
     _buffer: float = field(init=False, repr=False)
-    _data_bgsubtracted: dict[str, float] | None = field(init=False, repr=False)
+    _buffer_norm: float = field(init=False, repr=False)
+    _sd_buffer: float = field(init=False, repr=False)
+    _sd_buffer_norm: float = field(init=False, repr=False)
+    _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
+    _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
 
     def __post_init__(self, lines: list_of_lines) -> None:
@@ -423,48 +426,11 @@ class Labelblock:
 
     def __almost_eq__(self, other: Labelblock) -> bool:
         """Two labelblocks are almost equal when they could be merged after normalization."""
-        if not isinstance(other, Labelblock):
-            return NotImplemented
         eq: bool = True
         # Integration Time, Number of Flashes and Gain can differ.
         for k in Labelblock._KEYS[:5]:
             eq &= self.metadata[k] == other.metadata[k]
         return eq
-
-    @property
-    def buffer(self) -> float | None:
-        """Background value to be subtracted before dilution correction."""
-        return self._buffer
-
-    @buffer.setter
-    def buffer(self, buffer: float) -> None:
-        if hasattr(self, "_buffer") and self._buffer == buffer:
-            return None
-        self._data_bgsubtracted = None
-        self._buffer = buffer
-
-    @property
-    def data_bgsubtracted(self) -> dict[str, float]:
-        """Subtract buffer value from data."""
-        if isinstance(self.buffer, (float, int)):
-            if self._data_bgsubtracted is None:
-                sleep(2)
-                self._data_bgsubtracted = {
-                    k: v - self.buffer for k, v in self.data.items()
-                }
-            return self._data_bgsubtracted
-        else:
-            raise AttributeError("Provide a buffer value first.")
-
-    @property
-    def buffer_wells(self) -> list[str]:
-        """List of buffer wells."""
-        return self._buffer_wells
-
-    @buffer_wells.setter
-    def buffer_wells(self, buffer_wells: list[str]) -> None:
-        self._buffer_wells = buffer_wells
-        self._buffer = np.average([self.data[k] for k in self.buffer_wells])
 
     @property
     def data_normalized(self) -> dict[str, float]:
@@ -476,6 +442,83 @@ class Labelblock:
             / float(self.metadata["Integration Time"][0])
         )
         return {k: v * norm for k, v in self.data.items()}
+
+    @property
+    def buffer_wells(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        self._buffer = float(np.average([self.data[k] for k in self.buffer_wells]))
+        self._sd_buffer = float(np.std([self.data[k] for k in self.buffer_wells]))
+        self._buffer_norm = float(
+            np.average([self.data_normalized[k] for k in self.buffer_wells])
+        )
+        self._sd_buffer_norm = float(
+            np.std([self.data_normalized[k] for k in self.buffer_wells])
+        )
+        self._data_buffersubtracted = None
+        self._data_buffersubtracted_norm = None
+
+    @property
+    def sd_buffer(self) -> float | None:
+        """Get standard deviation of buffer_wells values."""
+        return self._sd_buffer
+
+    @property
+    def sd_buffer_norm(self) -> float | None:
+        """Get standard deviation of normalized buffer_wells values."""
+        return self._sd_buffer_norm
+
+    @property
+    def buffer(self) -> float | None:
+        """Background value to be subtracted before dilution correction."""
+        return self._buffer
+
+    @buffer.setter
+    def buffer(self, value: float) -> None:
+        if hasattr(self, "_buffer") and self._buffer == value:
+            return None
+        self._data_buffersubtracted = None
+        self._buffer = value
+
+    @property
+    def data_buffersubtracted(self) -> dict[str, float]:
+        """Subtract buffer value from data."""
+        if isinstance(self.buffer, (float, int)):
+            if self._data_buffersubtracted is None:
+                self._data_buffersubtracted = {
+                    k: v - self.buffer for k, v in self.data.items()
+                }
+            return self._data_buffersubtracted
+        else:
+            raise AttributeError("Provide a buffer value first.")
+
+    @property
+    def buffer_norm(self) -> float | None:
+        """Background value to be subtracted before dilution correction."""
+        return self._buffer_norm
+
+    @buffer_norm.setter
+    def buffer_norm(self, value: float) -> None:
+        if hasattr(self, "_buffer_norm") and self._buffer_norm == value:
+            return None
+        self._data_buffersubtracted_norm = None
+        self._buffer_norm = value
+
+    @property
+    def data_buffersubtracted_norm(self) -> dict[str, float]:
+        """Subtract buffer value from data."""
+        if isinstance(self.buffer_norm, (float, int)):
+            if self._data_buffersubtracted_norm is None:
+                self._data_buffersubtracted_norm = {
+                    k: v - self.buffer_norm for k, v in self.data_normalized.items()
+                }
+            return self._data_buffersubtracted_norm
+        else:
+            raise AttributeError("Provide a buffer value first.")
 
 
 @dataclass
@@ -621,7 +664,7 @@ class Tecanfile:
 
 @dataclass(slots=True)
 class LabelblocksGroup:
-    """Group of labelblocks with 'equal' metadata.
+    """Group labelblocks with compatible metadata.
 
     Parameters
     ----------
