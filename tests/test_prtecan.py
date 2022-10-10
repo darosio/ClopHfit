@@ -61,54 +61,72 @@ def test_fit_titration() -> None:
         prtecan.fit_titration("unk", x, y)
 
 
+@pytest.mark.filterwarnings("ignore: OVER value")
 class TestLabelblock:
     """Test labelblock class."""
 
     def setup_class(self) -> None:
         """Initialize a labelblock from an .xls file."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "290212_7.67.xls")
+        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/pH6.5_200214.xls")
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
-        self.lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        self.lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        self.lb1 = prtecan.Labelblock(csvl[idxs[1] :])
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
-        assert self.lb.metadata["Temperature"] == [25.9]
+        assert self.lb0.metadata["Temperature"] == [25.6]
+        assert self.lb1.metadata["Temperature"] == [25.3]
 
     def test_data(self) -> None:
         """It parses "A01" cell data."""
-        assert self.lb.data["A01"] == 33731
-
-    def test_overvalue(self) -> None:
-        """It detects saturated data ("OVER")."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "pH5.1_130913a-orig.xls")
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
-        with pytest.warns(
-            UserWarning, match=r"OVER value in A01 well for \['Label1'\] of tecanfile: "
-        ):
-            lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
-        assert np.nansum(lb.data["A01"]) == np.nansum(np.nan)
-        assert np.nansum(lb.data["F01"]) == np.nansum(np.nan)
+        assert self.lb0.data["F06"] == 19551
+        assert self.lb1.data["H12"] == 543
 
     def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        assert self.lb == self.lb
-        assert self.lb.__eq__(1) == NotImplemented
+        assert self.lb0 == self.lb0
+        assert self.lb0 != self.lb1
+        assert self.lb0.__eq__(1) == NotImplemented
+
+    def test___almost_eq__(self) -> None:
+        """It is equal to itself. TODO and different from other."""
+        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/NaCl4_200214.xls")
+        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        assert lb.__almost_eq__(self.lb0)
+        assert not lb.__almost_eq__(self.lb1)
+        assert lb.__almost_eq__(1) == NotImplemented
+
+    def test_overvalue(self) -> None:
+        """It detects saturated data ("OVER")."""
+        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        with pytest.warns(
+            UserWarning, match=r"OVER value in A06 well for \['Label1'\] of tecanfile: "
+        ):
+            lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        assert np.nansum(lb.data["A06"]) == np.nansum(np.nan)
+        assert np.nansum(lb.data["H02"]) == np.nansum(np.nan)
 
     def test_raise_missing_column(self) -> None:
         """It raises Exception when a column is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "88wells_290212_20.xlsx")
+        csvl = prtecan.Tecanfile.read_xls(
+            data_tests / "exceptions/88wells_290212_20.xlsx"
+        )
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
-            self.lb = prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
+            prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
     def test_raise_missing_row(self) -> None:
         """It raises Exception when a row is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "84wells_290212_20.xlsx")
+        csvl = prtecan.Tecanfile.read_xls(
+            data_tests / "exceptions/84wells_290212_20.xlsx"
+        )
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.raises(
             ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
         ):
-            self.lb = prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
+            prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
 
 class TestNormalizedLabelblock:

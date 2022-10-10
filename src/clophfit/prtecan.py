@@ -27,6 +27,7 @@ Functions
 
 """
 from __future__ import annotations
+from time import sleep
 
 import copy
 import hashlib
@@ -338,7 +339,9 @@ class Labelblock:
     lines: InitVar[list_of_lines]
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     data: dict[str, float] = field(init=False, repr=True)
-    data_normalized: dict[str, float] | None = None
+    _buffer: float = field(init=False, repr=False)
+    _data_bgsubtracted: dict[str, float] | None = field(init=False, repr=False)
+    _buffer_wells: list[str] = field(init=False, repr=False)
 
     def __post_init__(self, lines: list_of_lines) -> None:
         """Generate metadata and data for this labelblock."""
@@ -420,13 +423,51 @@ class Labelblock:
 
     def __almost_eq__(self, other: Labelblock) -> bool:
         """Two labelblocks are almost equal when they could be merged after normalization."""
+        if not isinstance(other, Labelblock):
+            return NotImplemented
         eq: bool = True
         # Integration Time, Number of Flashes and Gain can differ.
         for k in Labelblock._KEYS[:5]:
             eq &= self.metadata[k] == other.metadata[k]
         return eq
 
-    def normalize_data(self) -> None:
+    @property
+    def buffer(self) -> float | None:
+        """Background value to be subtracted before dilution correction."""
+        return self._buffer
+
+    @buffer.setter
+    def buffer(self, buffer: float) -> None:
+        if hasattr(self, "_buffer") and self._buffer == buffer:
+            return None
+        self._data_bgsubtracted = None
+        self._buffer = buffer
+
+    @property
+    def data_bgsubtracted(self) -> dict[str, float]:
+        """Subtract buffer value from data."""
+        if isinstance(self.buffer, (float, int)):
+            if self._data_bgsubtracted is None:
+                sleep(2)
+                self._data_bgsubtracted = {
+                    k: v - self.buffer for k, v in self.data.items()
+                }
+            return self._data_bgsubtracted
+        else:
+            raise AttributeError("Provide a buffer value first.")
+
+    @property
+    def buffer_wells(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        self._buffer = np.average([self.data[k] for k in self.buffer_wells])
+
+    @property
+    def data_normalized(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain value."""
         norm = (
             1000.0
@@ -434,8 +475,7 @@ class Labelblock:
             / float(self.metadata["Number of Flashes"][0])
             / float(self.metadata["Integration Time"][0])
         )
-        self.data_normalized = {k: v * norm for k, v in self.data.items()}
-        return None
+        return {k: v * norm for k, v in self.data.items()}
 
 
 @dataclass
