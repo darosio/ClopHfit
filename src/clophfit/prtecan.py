@@ -4,26 +4,33 @@
 - Builds 96 titrations and export them in txt files.
 - In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
-
-:ref:`prtecan parse`:
-
-* Labelblock
-* Tecanfile
-
-:ref:`prtecan group`:
-
-* LabelblocksGroup
-* TecanfilesGroup
-* Titration
-* TitrationAnalysis
-
-Functions
+functions
 ---------
-.. autofunction:: fit_titration
-.. autofunction:: fz_kd_singlesite
-.. autofunction:: fz_pk_singlesite
-.. autofunction:: extract_metadata
-.. autofunction:: strip_lines
+.. autosummary::
+
+   fit_titration
+   fz_kd_singlesite
+   fz_pk_singlesite
+   extract_metadata
+   strip_lines
+
+classes to parse a file
+-----------------------
+.. autosummary::
+
+   Labelblock
+   Tecanfile
+
+.. include:: ../../docs/api/prtecan.uml.rst
+
+classes to group files
+----------------------
+.. autosummary::
+
+   LabelblocksGroup
+   TecanfilesGroup
+   Titration
+   TitrationAnalysis
 
 """
 from __future__ import annotations
@@ -311,17 +318,8 @@ class Labelblock:
 
     Parameters
     ----------
-    tecanfile : Tecanfile | None
-        Object containing (has-a) this Labelblock.
     lines : list_of_lines
-        Lines for this Labelblock.
-
-    Attributes
-    ----------
-    metadata : dict
-        Metadata specific for this Labelblock.
-    data : Dict[str, float]
-        The 96 data values as {'well_name': value}.
+        Lines to create this Labelblock.
 
     Raises
     ------
@@ -337,12 +335,14 @@ class Labelblock:
 
     lines: InitVar[list_of_lines]
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    """Metadata specific for this Labelblock."""
     data: dict[str, float] = field(init=False, repr=True)
+    """The 96 data values as {'well_name', value}."""
     _buffer: float = field(init=False, repr=False)
     _buffer_norm: float = field(init=False, repr=False)
     _sd_buffer: float = field(init=False, repr=False)
     _sd_buffer_norm: float = field(init=False, repr=False)
-    _data_normalized: dict[str, float] | None = None
+    _data_normalized: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
@@ -354,6 +354,7 @@ class Labelblock:
             stripped[14:23] = []
             self.metadata = extract_metadata(stripped)
             self.data = self._extract_data(lines[15:23])
+            self._data_normalized = None
         else:
             raise ValueError("Cannot build Labelblock: not 96 wells?")
 
@@ -435,7 +436,7 @@ class Labelblock:
 
     @property
     def data_normalized(self) -> dict[str, float]:
-        """Normalize data by number of flashes, integration time and gain value."""
+        """Normalize data by number of flashes, integration time and gain."""
         if self._data_normalized is None:
             norm = (
                 1000.0
@@ -466,14 +467,28 @@ class Labelblock:
         self._data_buffersubtracted_norm = None
 
     @property
-    def sd_buffer(self) -> float | None:
-        """Get standard deviation of buffer_wells values."""
-        return self._sd_buffer
+    def data_buffersubtracted(self) -> dict[str, float]:
+        """Buffer subtracted data."""
+        if isinstance(self.buffer, (float, int)):
+            if self._data_buffersubtracted is None:
+                self._data_buffersubtracted = {
+                    k: v - self.buffer for k, v in self.data.items()
+                }
+            return self._data_buffersubtracted
+        else:
+            raise AttributeError("Provide a buffer value first.")
 
     @property
-    def sd_buffer_norm(self) -> float | None:
-        """Get standard deviation of normalized buffer_wells values."""
-        return self._sd_buffer_norm
+    def data_buffersubtracted_norm(self) -> dict[str, float]:
+        """Normalize buffer-subtracted data."""
+        if isinstance(self.buffer_norm, (float, int)):
+            if self._data_buffersubtracted_norm is None:
+                self._data_buffersubtracted_norm = {
+                    k: v - self.buffer_norm for k, v in self.data_normalized.items()
+                }
+            return self._data_buffersubtracted_norm
+        else:
+            raise AttributeError("Provide a buffer value first.")
 
     @property
     def buffer(self) -> float | None:
@@ -488,16 +503,9 @@ class Labelblock:
         self._buffer = value
 
     @property
-    def data_buffersubtracted(self) -> dict[str, float]:
-        """Subtract buffer value from data."""
-        if isinstance(self.buffer, (float, int)):
-            if self._data_buffersubtracted is None:
-                self._data_buffersubtracted = {
-                    k: v - self.buffer for k, v in self.data.items()
-                }
-            return self._data_buffersubtracted
-        else:
-            raise AttributeError("Provide a buffer value first.")
+    def sd_buffer(self) -> float | None:
+        """Get standard deviation of buffer_wells values."""
+        return self._sd_buffer
 
     @property
     def buffer_norm(self) -> float | None:
@@ -512,16 +520,9 @@ class Labelblock:
         self._buffer_norm = value
 
     @property
-    def data_buffersubtracted_norm(self) -> dict[str, float]:
-        """Subtract buffer value from data."""
-        if isinstance(self.buffer_norm, (float, int)):
-            if self._data_buffersubtracted_norm is None:
-                self._data_buffersubtracted_norm = {
-                    k: v - self.buffer_norm for k, v in self.data_normalized.items()
-                }
-            return self._data_buffersubtracted_norm
-        else:
-            raise AttributeError("Provide a buffer value first.")
+    def sd_buffer_norm(self) -> float | None:
+        """Get standard deviation of normalized buffer_wells values."""
+        return self._sd_buffer_norm
 
 
 @dataclass(slots=True)
@@ -851,18 +852,6 @@ class TitrationAnalysis:
         Concentration values common to all 96 titrations.
     labelblocksgroups : List[LabelblocksGroup]
         Deepcopy from titration.
-
-    Methods
-    -------
-    subtract_bg
-
-    dilution_correction
-
-    metadata_normalization
-
-    calculate_conc
-
-    fit
 
     """
 
@@ -1449,3 +1438,27 @@ class TitrationAnalysis:
             f.suptitle(title, fontsize=18)
         f.tight_layout(h_pad=5, rect=(0, 0, 1, 0.87))
         return f
+
+
+@dataclass
+class TestClass:
+    """Test class for dataclasses.
+
+    This is the body of the docstring description.
+
+    Parameters
+    ----------
+    var_int: int
+        Primo parametro.
+    var_str: str
+        Secondo parametro.
+
+    """
+
+    var_int: int
+    var_str: str
+    scheme: pd.Series[Any] = field(init=False, repr=True)  #: Forte
+
+    def __post_init__(self):
+        """Make magic."""
+        self.strange: int = 2  #: seconda

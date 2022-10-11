@@ -42,16 +42,17 @@ extensions = [
     "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',
 ]
-napoleon_include_init_with_doc = False
-napoleon_include_private_with_doc = True
-napoleon_include_special_with_doc = True
-napoleon_use_rtype = False
 
-# autodoc_default_options \= {}
-#     'members': True
-#     'member-order': 'bysource
+# Napoleon settings
+
+autodoc_default_options = {
+    "members": True,
+    "member-order": "bysource",
+    "undoc-members": False,
+}
 
 autodoc_typehints = "description"
+
 # The suffix of source filenames.
 source_suffix = {
     ".rst": "restructuredtext",
