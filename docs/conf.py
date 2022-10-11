@@ -43,7 +43,8 @@ extensions = [
     # 'IPython.sphinxext.ipython_console_highlighting',
 ]
 
-# Napoleon settings
+# Napoleon settings to Default
+napoleon_use_ivar = False
 
 autodoc_default_options = {
     "members": True,

@@ -4,34 +4,6 @@
 - Builds 96 titrations and export them in txt files.
 - In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
-functions
----------
-.. autosummary::
-
-   fit_titration
-   fz_kd_singlesite
-   fz_pk_singlesite
-   extract_metadata
-   strip_lines
-
-classes to parse a file
------------------------
-.. autosummary::
-
-   Labelblock
-   Tecanfile
-
-.. include:: ../../docs/api/prtecan.uml.rst
-
-classes to group files
-----------------------
-.. autosummary::
-
-   LabelblocksGroup
-   TecanfilesGroup
-   Titration
-   TitrationAnalysis
-
 """
 from __future__ import annotations
 
@@ -415,25 +387,6 @@ class Labelblock:
         "Number of Flashes",
     ]
 
-    def __eq__(self, other: object) -> bool:
-        """Two labelblocks are equal when metadata KEYS are identical."""
-        if not isinstance(other, Labelblock):
-            return NotImplemented
-        eq: bool = True
-        for k in Labelblock._KEYS:
-            eq &= self.metadata[k] == other.metadata[k]
-        # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
-        eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
-        return eq
-
-    def __almost_eq__(self, other: Labelblock) -> bool:
-        """Two labelblocks are almost equal when they could be merged after normalization."""
-        eq: bool = True
-        # Integration Time, Number of Flashes and Gain can differ.
-        for k in Labelblock._KEYS[:5]:
-            eq &= self.metadata[k] == other.metadata[k]
-        return eq
-
     @property
     def data_normalized(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain."""
@@ -524,31 +477,34 @@ class Labelblock:
         """Get standard deviation of normalized buffer_wells values."""
         return self._sd_buffer_norm
 
+    def __eq__(self, other: object) -> bool:
+        """Two labelblocks are equal when metadata KEYS are identical."""
+        if not isinstance(other, Labelblock):
+            return NotImplemented
+        eq: bool = True
+        for k in Labelblock._KEYS:
+            eq &= self.metadata[k] == other.metadata[k]
+        # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
+        eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
+        return eq
+
+    def __almost_eq__(self, other: Labelblock) -> bool:
+        """Two labelblocks are almost equal when they could be merged after normalization."""
+        eq: bool = True
+        # Integration Time, Number of Flashes and Gain can differ.
+        for k in Labelblock._KEYS[:5]:
+            eq &= self.metadata[k] == other.metadata[k]
+        return eq
+
 
 @dataclass(slots=True)
 class Tecanfile:
-    """Parse a .xls file as exported from Tecan.
+    """Parse a Tecan .xls file.
 
     Parameters
     ----------
-    path
-        Path to the '.xls' file.
-
-    Attributes
-    ----------
     path: Path
-        Tecan file path.
-    metadata : dict[str, str | list[str | int | float]]
-        General metadata for Tecanfile e.g. 'Date:' or 'Shaking Duration:'.
-    labelblocks : List[Labelblock]
-        All labelblocks contained in the file.
-
-    Methods
-    -------
-    read_xls(path) :
-        Read xls file at path.
-    lookup_csv_lines(csvl, pattern='Label: Label', col=0) :
-        Return row index for pattern found at col.
+        Path to `.xls` file.
 
     Raises
     ------
@@ -561,7 +517,9 @@ class Tecanfile:
 
     path: Path
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    """General metadata for Tecanfile, like `Date` and `Shaking Duration`."""
     labelblocks: list[Labelblock] = field(init=False, repr=True)
+    """All labelblocks contained in this file."""
 
     def __post_init__(self) -> None:
         """Initialize."""
@@ -589,7 +547,7 @@ class Tecanfile:
         Parameters
         ----------
         path : Path
-            Path to .xls file.
+            Path to `.xls` file.
 
         Returns
         -------
@@ -605,28 +563,23 @@ class Tecanfile:
 
     @classmethod
     def lookup_csv_lines(
-        cls,
-        csvl: list_of_lines,
-        pattern: str = "Label: Label",
-        col: int = 0,
+        cls, csvl: list_of_lines, pattern: str = "Label: Label", col: int = 0
     ) -> list[int]:
-        """Lookup the line number where given pattern occurs.
-
-        If nothing found return empty list.
+        """Lookup line numbers (row index) where given pattern occurs.
 
         Parameters
         ----------
         csvl : list_of_lines
             Lines of a csv/xls file.
         pattern : str
-            Pattern to be searched for., default="Label: Label"
+            Pattern to be searched (default="Label: Label").
         col : int
-            Column to search (line-by-line).
+            Column to search (default=0).
 
         Returns
         -------
         list[int]
-            Row/line index for all occurrences of pattern.
+            Row/line index for all occurrences of pattern. Empty list for no occurrences.
 
         """
         idxs = []
@@ -642,31 +595,28 @@ class LabelblocksGroup:
 
     Parameters
     ----------
-    labelblocks
-        List of labelblocks with 'equal' metadata.
-
-    Attributes
-    ----------
-    metadata : dict
-        The common metadata.
-    data : Dict[str, List[float]]
-        The usual dict for data (see Labelblock) with well name as key but with
-        list of values as value.
+    labelblocks: list[Labelblock]
+        Labelblocks to be grouped.
+    allequal: bool
+        True if labelblocks already tested to be equal.
 
     Raises
     ------
     Exception
-        If metadata are not all 'equal'.
+        When labelblocks are neither equal nor almost equal.
 
     """
 
     labelblocks: list[Labelblock]
     allequal: bool = False
+    #: TODO: remove because already in labelblock?
+    buffer: dict[str, list[float]] | None = None
+    #: The common metadata.
     metadata: dict[str, list[str | int | float | list[str | int]]] = field(
         init=False, repr=True
     )
+    #: Dict for data, like  Labelblock with well name as key and list of values as value.
     data: dict[str, list[float]] = field(init=False, repr=True)
-    buffer: dict[str, list[float]] | None = None
 
     def __post_init__(self) -> None:
         """Create common metadata and data."""
@@ -717,19 +667,13 @@ class TecanfilesGroup:
 
     Parameters
     ----------
-    filenames
-        List of xls (paths) filenames.
-
-    Attributes
-    ----------
-    labelblocksgroups : List[LabelblocksGroup]
-       Each group contains its own data like a titration.
+    tecanfiles: list[Tecanfile]
+        List of Tecanfiles.
 
     Raises
     ------
     Exception
-        When is not possible to build any LabelblocksGroup because nothing
-        in common between files (listed in filenames).
+        When all Labelblocks are not at least almost equal.
 
     Warns
     -----
@@ -743,7 +687,9 @@ class TecanfilesGroup:
     """
 
     tecanfiles: list[Tecanfile]
-    labelblocksgroups: list[LabelblocksGroup] = field(default_factory=list)
+    #: Each group contains its own data like a titration. ??
+    labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
+    #: FIXME: Metadata of the first Tecanfile.
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
@@ -791,15 +737,16 @@ class Titration(TecanfilesGroup):
     listfile
         File path to the listfile ([tecan_file_path conc]).
 
-    Attributes
-    ----------
-    conc : List[float]
-        Concentration values common to all 96 titrations.
-    labelblocksgroups: List[LabelblocksGroup]
-        List of labelblocksgroups.
+    Raises
+    ------
+    FileNotFoundError
+        When cannot access `listfile`.
+    ValueError
+        For unexpected file format, e.g. length of filename column differs from length of conc values.
 
     """
 
+    #: Concentration values common to all 96 titrations.
     conc: Sequence[float] = field(init=False, repr=True)
 
     def __init__(self, listfile: Path | str) -> None:
@@ -839,26 +786,25 @@ class TitrationAnalysis:
 
     Parameters
     ----------
-    titration
+    titration : Titration
         Titration object.
-    schemefile
+    schemefile : str | None
         File path to the schemefile (e.g. {"C01: 'V224Q'"}).
 
-    Attributes
-    ----------
-    scheme : pd.DataFrame or pd.Series FIXME
-        e.g. {'buffer': ['H12']}
-    conc : List[float]
-        Concentration values common to all 96 titrations.
-    labelblocksgroups : List[LabelblocksGroup]
-        Deepcopy from titration.
+    Raises
+    ------
+    ValueError
+        For unexpected file format, e.g. header `names`.
 
     """
 
     titration: Titration
     schemefile: str | None = None
+    #: Scheme for known samples e.g. {'buffer', ['H12', 'H01']}
     scheme: pd.Series[Any] = field(init=False, repr=True)
+    #: Concentration values common to all 96 titrations.
     conc: Sequence[float] = field(init=False, repr=True)
+    #: Deepcopy from titration.
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
     additions: Sequence[float] = field(init=False, repr=True)
 
@@ -878,41 +824,6 @@ class TitrationAnalysis:
             self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
-
-    def subtract_bg(self) -> None:
-        """Subtract average buffer values for each titration point."""
-        buffer_keys = self.scheme.pop("buffer")
-        for lbg in self.labelblocksgroups:
-            lbg.buffer = {}
-            for k in buffer_keys:
-                lbg.buffer[k] = lbg.data.pop(k)
-            bgs = list(lbg.buffer.values())
-            bg = np.mean(bgs, axis=0)
-            bg_sd = np.std(bgs, axis=0)
-            for k in lbg.data:
-                lbg.data[k] -= bg
-            lbg.buffer["bg"] = bg
-            lbg.buffer["bg_sd"] = bg_sd
-
-    def dilution_correction(self, additionsfile: str) -> None:
-        """Apply dilution correction.
-
-        Parameters
-        ----------
-        additionsfile: str
-            File listing volume additions during titration.
-
-        """
-        if hasattr(self, "additions"):
-            warnings.warn("Dilution correction was already applied.")
-            return
-        df = pd.read_table(additionsfile, names=["add"])
-        self.additions = df["add"].tolist()
-        volumes = np.cumsum(self.additions)
-        corr = volumes / volumes[0]
-        for lbg in self.labelblocksgroups:
-            for k in lbg.data:
-                lbg.data[k] *= corr
 
     @classmethod
     def calculate_conc(
@@ -948,6 +859,41 @@ class TitrationAnalysis:
                 concs[i - 1] * vol_tot[i - 1] + conc_stock * float(add)
             ) / vol_tot[i]
         return concs  # , vol_tot
+
+    def subtract_bg(self) -> None:
+        """Subtract average buffer values for each titration point."""
+        buffer_keys = self.scheme.pop("buffer")
+        for lbg in self.labelblocksgroups:
+            lbg.buffer = {}
+            for k in buffer_keys:
+                lbg.buffer[k] = lbg.data.pop(k)
+            bgs = list(lbg.buffer.values())
+            bg = np.mean(bgs, axis=0)
+            bg_sd = np.std(bgs, axis=0)
+            for k in lbg.data:
+                lbg.data[k] -= bg
+            lbg.buffer["bg"] = bg
+            lbg.buffer["bg_sd"] = bg_sd
+
+    def dilution_correction(self, additionsfile: str) -> None:
+        """Apply dilution correction.
+
+        Parameters
+        ----------
+        additionsfile: str
+            File listing volume additions during titration.
+
+        """
+        if hasattr(self, "additions"):
+            warnings.warn("Dilution correction was already applied.")
+            return
+        df = pd.read_table(additionsfile, names=["add"])
+        self.additions = df["add"].tolist()
+        volumes = np.cumsum(self.additions)
+        corr = volumes / volumes[0]
+        for lbg in self.labelblocksgroups:
+            for k in lbg.data:
+                lbg.data[k] *= corr
 
     def metadata_normalization(self) -> None:
         """Normalize signal using gain, flashes and integration time."""
@@ -1440,25 +1386,4 @@ class TitrationAnalysis:
         return f
 
 
-@dataclass
-class TestClass:
-    """Test class for dataclasses.
-
-    This is the body of the docstring description.
-
-    Parameters
-    ----------
-    var_int: int
-        Primo parametro.
-    var_str: str
-        Secondo parametro.
-
-    """
-
-    var_int: int
-    var_str: str
-    scheme: pd.Series[Any] = field(init=False, repr=True)  #: Forte
-
-    def __post_init__(self):
-        """Make magic."""
-        self.strange: int = 2  #: seconda
+9
