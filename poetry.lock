@@ -1809,7 +1809,7 @@ docutils = ">=0.11,<1.0"
 
 [[package]]
 name = "rpy2"
-version = "3.5.4"
+version = "3.5.5"
 description = "Python interface to the R language (embedded R)"
 category = "main"
 optional = false
@@ -3642,6 +3642,13 @@ PyYAML = [
     {file = "PyYAML-6.0-cp310-cp310-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:f84fbc98b019fef2ee9a1cb3ce93e3187a6df0b2538a651bfb890254ba9f90b5"},
     {file = "PyYAML-6.0-cp310-cp310-win32.whl", hash = "sha256:2cd5df3de48857ed0544b34e2d40e9fac445930039f3cfe4bcc592a1f836d513"},
     {file = "PyYAML-6.0-cp310-cp310-win_amd64.whl", hash = "sha256:daf496c58a8c52083df09b80c860005194014c3698698d1a57cbcfa182142a3a"},
+    {file = "PyYAML-6.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:d4b0ba9512519522b118090257be113b9468d804b19d63c71dbcf4a48fa32358"},
+    {file = "PyYAML-6.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:81957921f441d50af23654aa6c5e5eaf9b06aba7f0a19c18a538dc7ef291c5a1"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:afa17f5bc4d1b10afd4466fd3a44dc0e245382deca5b3c353d8b757f9e3ecb8d"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:dbad0e9d368bb989f4515da330b88a057617d16b6a8245084f1b05400f24609f"},
+    {file = "PyYAML-6.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:432557aa2c09802be39460360ddffd48156e30721f5e8d917f01d31694216782"},
+    {file = "PyYAML-6.0-cp311-cp311-win32.whl", hash = "sha256:bfaef573a63ba8923503d27530362590ff4f576c626d86a9fed95822a8255fd7"},
+    {file = "PyYAML-6.0-cp311-cp311-win_amd64.whl", hash = "sha256:01b45c0191e6d66c470b6cf1b9531a771a83c1c4208272ead47a3ae4f2f603bf"},
     {file = "PyYAML-6.0-cp36-cp36m-macosx_10_9_x86_64.whl", hash = "sha256:897b80890765f037df3403d22bab41627ca8811ae55e9a722fd0392850ec4d86"},
     {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:50602afada6d6cbfad699b0c7bb50d5ccffa7e46a3d738092afddc1f9758427f"},
     {file = "PyYAML-6.0-cp36-cp36m-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:48c346915c114f5fdb3ead70312bd042a953a8ce5c7106d5bfb1a5254e47da92"},
@@ -3765,11 +3772,10 @@ restructuredtext-lint = [
     {file = "restructuredtext_lint-1.4.0.tar.gz", hash = "sha256:1b235c0c922341ab6c530390892eb9e92f90b9b75046063e047cacfb0f050c45"},
 ]
 rpy2 = [
-    {file = "rpy2-3.5.4-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:9984fc765f02123eb82f74bbe27177165651eeb04b364181a59752f2e213ef41"},
-    {file = "rpy2-3.5.4-cp37-cp37m-macosx_10_15_x86_64.whl", hash = "sha256:816560379f893403ddd96d9e364414b223c0d51ef6f7d8b6c42dacbafe27b1d8"},
-    {file = "rpy2-3.5.4-cp38-cp38-macosx_10_15_x86_64.whl", hash = "sha256:d3839ee3a030311afe8084746a76e025dd683e65a38d1e7876e5e56a2203d9ac"},
-    {file = "rpy2-3.5.4-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:99bce1c37763fc1639fb4c5a263e975b5be65f29dbbd50c3e75d284075802fde"},
-    {file = "rpy2-3.5.4.tar.gz", hash = "sha256:ba0a877b2b96e27d2091383d4652b82aa2271cff4a505243d45da430b712aaf5"},
+    {file = "rpy2-3.5.5-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:bdf5140c7df853d9f73803145d1d6e304818e2dfa5612f85d41dbb2c9bf4210a"},
+    {file = "rpy2-3.5.5-cp38-cp38-macosx_10_15_x86_64.whl", hash = "sha256:8ed04bbc38e30213e68d53c41fbac69d0316342ce95c5c2645a530afc2bd07d8"},
+    {file = "rpy2-3.5.5-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:f759e12761690934ab4d6a4b36e61da6ae80216523b41630b249db58c331e8d9"},
+    {file = "rpy2-3.5.5.tar.gz", hash = "sha256:a252c40e21cf4f23ac6e13bffdcb82b5900b49c3043ed8fd31da5c61fb58d037"},
 ]
 "ruamel.yaml" = [
     {file = "ruamel.yaml-0.17.21-py3-none-any.whl", hash = "sha256:742b35d3d665023981bd6d16b3d24248ce5df75fdb4e2924e93a05c1f8b61ca7"},
