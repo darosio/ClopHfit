@@ -342,6 +342,7 @@ class Labelblock:
     _buffer_norm: float = field(init=False, repr=False)
     _sd_buffer: float = field(init=False, repr=False)
     _sd_buffer_norm: float = field(init=False, repr=False)
+    _data_normalized: dict[str, float] | None = None
     _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
@@ -435,13 +436,15 @@ class Labelblock:
     @property
     def data_normalized(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain value."""
-        norm = (
-            1000.0
-            / float(self.metadata["Gain"][0])
-            / float(self.metadata["Number of Flashes"][0])
-            / float(self.metadata["Integration Time"][0])
-        )
-        return {k: v * norm for k, v in self.data.items()}
+        if self._data_normalized is None:
+            norm = (
+                1000.0
+                / float(self.metadata["Gain"][0])
+                / float(self.metadata["Number of Flashes"][0])
+                / float(self.metadata["Integration Time"][0])
+            )
+            self._data_normalized = {k: v * norm for k, v in self.data.items()}
+        return self._data_normalized
 
     @property
     def buffer_wells(self) -> list[str]:
@@ -519,36 +522,6 @@ class Labelblock:
             return self._data_buffersubtracted_norm
         else:
             raise AttributeError("Provide a buffer value first.")
-
-
-@dataclass
-class NormalizedLabelblock:
-    """Store normalized data for a labelblock.
-
-    Parameters
-    ----------
-    lb : Labelblock
-        Object containing data to be normalized.
-
-    Attributes
-    ----------
-    data : Dict[str, float]
-        Normalized data values as {'well_name': value}.
-
-    """
-
-    lb: Labelblock
-    data: dict[str, float] = field(init=False, repr=True)
-
-    def __post_init__(self) -> None:
-        """Normalize data by number of flashes, integration time and gain value."""
-        norm = (
-            1000.0
-            / float(self.lb.metadata["Gain"][0])
-            / float(self.lb.metadata["Number of Flashes"][0])
-            / float(self.lb.metadata["Integration Time"][0])
-        )
-        self.data = {k: v * norm for k, v in self.lb.data.items()}
 
 
 @dataclass(slots=True)
@@ -701,23 +674,19 @@ class LabelblocksGroup:
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
         datagrp = defaultdict(list)
+        self.metadata = self._merge_md(self.labelblocks)
         if self.allequal:
-            # list of labelblocks with the same key metadata
-            self.metadata = self._merge_md(self.labelblocks)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
                     datagrp[key].append(lb.data[key])
-            self.data = datagrp
+        # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
-            # list of labelblocks that can  be merged after normalization
-            self.metadata = self._merge_md(self.labelblocks)
-            norm_labelblocks = [NormalizedLabelblock(lb) for lb in self.labelblocks]
-            for key in norm_labelblocks[0].data.keys():
-                for nlb in norm_labelblocks:
-                    datagrp[key].append(nlb.data[key])
-            self.data = datagrp
+            for key in self.labelblocks[0].data.keys():
+                for lb in self.labelblocks:
+                    datagrp[key].append(lb.data_normalized[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
+        self.data = datagrp
 
     def _merge_md(
         self, labelblocks: list[Labelblock]

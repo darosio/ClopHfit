@@ -163,12 +163,6 @@ class TestLabelblock:
             prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
 
-class TestNormalizedLabelblock:
-    """Test data class."""
-
-    pass
-
-
 class TestTecanfile:
     """Test TecanFile class."""
 
