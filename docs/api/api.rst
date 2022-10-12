@@ -66,4 +66,4 @@ classes to group files
 
 ..
    .. automodule:: clophfit.prtecan
-	  :exclude-members: Labelblock, 
+	  :exclude-members: Labelblock,

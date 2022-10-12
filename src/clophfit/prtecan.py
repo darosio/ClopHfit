@@ -29,7 +29,6 @@ import seaborn as sb  # type: ignore
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
-
 # after set([type(ll[i][j]) for i in range(len(ll)) for j in range(13)])
 list_of_lines = List[List[Any]]
 
@@ -284,7 +283,7 @@ def fit_titration(
     return res
 
 
-@dataclass(slots=True)
+@dataclass
 class Labelblock:
     """Parse a label block within a Tecan file.
 
@@ -497,7 +496,7 @@ class Labelblock:
         return eq
 
 
-@dataclass(slots=True)
+@dataclass
 class Tecanfile:
     """Parse a Tecan .xls file.
 
@@ -589,7 +588,7 @@ class Tecanfile:
         return idxs
 
 
-@dataclass(slots=True)
+@dataclass
 class LabelblocksGroup:
     """Group labelblocks with compatible metadata.
 
