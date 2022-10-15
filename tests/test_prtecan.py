@@ -28,19 +28,34 @@ def test_extract_metadata() -> None:
         ["Label: Label1", "", "", "", "", "", "", "", "", "", "", "", ""],
         ["Mode", "", "", "", "Fluorescence Top Reading", "", "", "", "", ""],
         ["Shaking (Linear) Amplitude:", "", "", "", 2, "mm", "", "", "", "", ""],
-        ["Excitation Wavelength", "", "", "", 400, "nm", "", "", "", "", ""],
+        ["Excitation Wavelength", "", "", "", 400, "nm", "", "unexpected", "", "", ""],
         ["", "Temperature: 26 °C", "", "", "", "", "", "", "", "", ""],
     ]
     expected_metadata = {
-        "Shaking (Linear) Amplitude:": [2, "mm"],
-        "Excitation Wavelength": [400, "nm"],
-        "Temperature": [26.0],
-        "Label": ["Label1"],
-        "Mode": ["Fluorescence Top Reading"],
+        "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
+        "Excitation Wavelength": prtecan.Metadata(400, ["nm", "unexpected"]),
+        "Temperature": prtecan.Metadata(26.0, ["°C"]),
+        "Label": prtecan.Metadata("Label1"),
+        "Mode": prtecan.Metadata("Fluorescence Top Reading"),
     }
 
     metadata = prtecan.extract_metadata(lines)
     assert metadata == expected_metadata
+
+
+def test__merge_md() -> None:
+    """Merge metadata of both labelblocks and tecanfiles."""
+    md1 = {
+        "Gain": prtecan.Metadata(93, ["Manual"]),
+        "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
+    }
+    md2 = {
+        "Gain": prtecan.Metadata(93, ["Optimal"]),
+        "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
+    }
+    mmd = prtecan._merge_md([md1, md2])
+    assert mmd["Gain"] == prtecan.Metadata(93)
+    assert mmd["Shaking (Linear) Amplitude:"] == prtecan.Metadata(2, ["mm"])
 
 
 def test_fit_titration() -> None:
@@ -76,8 +91,8 @@ class TestLabelblock:
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
-        assert self.lb0.metadata["Temperature"] == [25.6]
-        assert self.lb1.metadata["Temperature"] == [25.3]
+        assert self.lb0.metadata["Temperature"].value == 25.6
+        assert self.lb1.metadata["Temperature"].value == 25.3
 
     def test_data(self) -> None:
         """It parses data values."""
@@ -179,7 +194,7 @@ class TestTecanfile:
 
     def test_metadata(self) -> None:
         """It parses the Date."""
-        assert self.tf1.metadata["Date:"] == ["20/02/2014"]
+        assert self.tf1.metadata["Date:"].value == "20/02/2014"
 
     def test_read_xls(self) -> None:
         """The test reads the xls file using cls method."""
@@ -191,8 +206,8 @@ class TestTecanfile:
 
     def test_labelblocks(self) -> None:
         """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert self.tf1.labelblocks[0].metadata["Temperature"] == [25.3]
-        assert self.tf1.labelblocks[1].metadata["Temperature"] == [25.7]
+        assert self.tf1.labelblocks[0].metadata["Temperature"].value == 25.3
+        assert self.tf1.labelblocks[1].metadata["Temperature"].value == 25.7
         assert self.tf1.labelblocks[0].data["A01"] == 17260
         assert self.tf1.labelblocks[1].data["H12"] == 4196
 
@@ -237,7 +252,10 @@ class TestLabelblocksGroup:
 
     def test_temperatures(self) -> None:
         """It reads Temperature metadata."""
-        assert self.lb_grp.metadata["Temperature"] == [25.9, 26]
+        assert self.lb_grp.metadata.get("Temperature") is None
+        # Because Gain is in common while Temperature is not.
+        assert self.lb_grp.metadata["Gain"].value == 81
+        assert self.lb_grp.metadata["Number of Flashes"].value == 10
 
     def test_data(self) -> None:
         """It reads cell data."""
@@ -259,12 +277,18 @@ class TestTecanfilesGroup1:
         tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
         self.group = prtecan.TecanfilesGroup(tecanfiles)
 
-    def test_metadata(self) -> None:
+    def test_generalmetadata(self) -> None:
         """It parses general metadata."""
-        assert self.group.metadata["Plate"] == ["PE 96 Flat Bottom White   [PE.pdfx]"]
-        assert self.group.metadata["Shaking (Linear) Amplitude:"] == [2.0, "mm"]
-        assert self.group.metadata["Shaking (Linear) Duration:"] == [50.0, "s"]
-        assert self.group.metadata["System"] == ["TECANROBOT"]
+        assert (
+            self.group.metadata["Plate"].value == "PE 96 Flat Bottom White   [PE.pdfx]"
+        )
+        assert self.group.metadata["Shaking (Linear) Amplitude:"] == prtecan.Metadata(
+            2.0, ["mm"]
+        )
+        assert self.group.metadata["Shaking (Linear) Duration:"] == prtecan.Metadata(
+            50.0, ["s"]
+        )
+        assert self.group.metadata["System"].value == "TECANROBOT"
 
     def test_labelblocksgroups(self) -> None:
         """It generates 2 labelblocksgroups for pH list.
@@ -274,8 +298,8 @@ class TestTecanfilesGroup1:
         lbg0 = self.group.labelblocksgroups[0]
         lbg1 = self.group.labelblocksgroups[1]
         # metadata
-        assert lbg0.metadata["Number of Flashes"][0] == 10.0
-        assert lbg1.metadata["Gain"][0] == 93.0
+        assert lbg0.metadata["Number of Flashes"].value == 10.0
+        assert lbg1.metadata["Gain"].value == 93.0
         # data
         assert lbg0.data["A01"] == [30344, 30072, 31010]
         assert lbg1.data["A01"] == [6289, 9165, 12326]
@@ -307,8 +331,8 @@ class TestTecanfilesGroup2:
         """It generates 1 std XXX labelblocksgroups."""
         lbg0 = self.group.labelblocksgroups[0]
         # metadata
-        assert lbg0.metadata["Number of Flashes"][0] == 10.0
-        assert lbg0.metadata["Gain"][0] == [94.0, "Manual"]
+        assert lbg0.metadata["Number of Flashes"].value == 10.0
+        assert lbg0.metadata["Gain"].value == 94
         # data
         assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
         assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
@@ -317,8 +341,8 @@ class TestTecanfilesGroup2:
         """It generates 1 std XXX labelblocksgroups."""
         lbg1 = self.group.labelblocksgroups[1]
         # metadata
-        assert lbg1.metadata["Number of Flashes"][0] == 10.0
-        assert lbg1.metadata["Gain"][0] == [98.0, "Manual"]
+        assert lbg1.metadata["Number of Flashes"].value == 10.0
+        assert lbg1.metadata.get("Gain") is None
         # # data
         np.testing.assert_almost_equal(
             lbg1.data["A01"], [401.9387755, 446.9897959, 450.0]
@@ -352,8 +376,8 @@ class TestTecanfilesGroup3:
         """It generates 1 labelblocksgroups for Cl list. It tests only data."""
         lbg = self.group.labelblocksgroups[0]
         # metadata
-        assert lbg.metadata["Number of Flashes"][0] == 10.0
-        assert lbg.metadata["Gain"][0] == 93.0
+        assert lbg.metadata["Number of Flashes"].value == 10.0
+        assert lbg.metadata["Gain"].value == 93.0
         # data
         assert lbg.data["A01"] == [6289, 6462, 6465]
         assert lbg.data["H12"] == [4477, 4705, 4918]
@@ -391,9 +415,9 @@ class TestTitration:
         lbg0 = self.tit.labelblocksgroups[0]
         lbg1 = self.tit.labelblocksgroups[1]
         # metadata
-        assert lbg0.metadata["Number of Flashes"][0] == 10.0
+        assert lbg0.metadata["Number of Flashes"].value == 10.0
         # pH9.3 is 93 Optimal not Manual
-        assert lbg1.metadata["Gain"][0] == [93.0, "Manual"]
+        assert lbg1.metadata["Gain"] == prtecan.Metadata(93.0)
         # data
         assert lbg0.data["A01"] == [
             30344,
@@ -485,7 +509,7 @@ class TestTitration:
             prtecan.Titration(data_tests / "list.pH2")
 
 
-@pytest.mark.filterwarnings("ignore: OVER value")
+@pytest.mark.filterwarnings("ignore:OVER")
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 

@@ -17,7 +17,7 @@ def test_eq1() -> None:
     assert "4." in result.output
 
 
-@pytest.mark.filterwarnings("ignore: OVER value")
+@pytest.mark.filterwarnings("ignore:OVER")
 def test_prtecan(tmp_path: Any) -> None:
     """It runs XXX pr.tecan and generates correct results and graphs."""
     out = tmp_path / "out3"

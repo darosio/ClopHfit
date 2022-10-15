@@ -61,9 +61,21 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     return stripped_lines
 
 
+# TODO with a filter ectract_metadata with a map
+
+
+@dataclass(frozen=False)
+class Metadata:
+    """Value type of a metadata dictionary."""
+
+    value: int | str | float | None
+    unit: list[str] | None = None
+    """First element is the unit, the following are somewhat unexpected."""
+
+
 def extract_metadata(
     lines: list_of_lines,
-) -> dict[str, str | list[str | int | float]]:
+) -> dict[str, Metadata]:
     """Extract metadata into both Tecanfile and Labelblock.
 
     From a list of stripped lines takes the first field as the **key** of the
@@ -101,28 +113,38 @@ def extract_metadata(
 
     """
     stripped_lines = strip_lines(lines)
-    temp: dict[str, list[float | int | str]] = {
-        "Temperature": [float(line[0].split(":")[1].split("°C")[0])]
+    md: dict[str, Metadata] = {}
+    md |= {
+        "Temperature": Metadata(float(line[0].split(":")[1].split("°C")[0]), ["°C"])
         for line in stripped_lines
         if len(line) == 1 and "Temperature" in line[0]
     }
-    labl: dict[str, list[str | int | float]] = {
-        "Label": [line[0].split(":")[1].strip()]
+    md |= {
+        "Label": Metadata(line[0].split(":")[1].strip())
         for line in stripped_lines
         if len(line) == 1 and "Label" in line[0]
     }
-    m1: dict[str, str | list[str | int | float]] = {
-        line[0]: line[0]
+    # m1 is only for the key 'Plate-ID (Stacker)' and any possible unexpected
+    md |= {
+        line[0]: Metadata(None)
         for line in stripped_lines
         if len(line) == 1 and "Label" not in line[0] and "Temperature" not in line[0]
     }
-    m2: dict[str, str | list[str | int | float]] = {
-        line[0]: line[1:] for line in stripped_lines if len(line) > 1
+    md |= {
+        line[0]: Metadata(line[1]) if len(line) == 2 else Metadata(line[1], line[2:])
+        for line in stripped_lines
+        if len(line) > 1
     }
-    m2.update(m1)
-    m2.update(temp)
-    m2.update(labl)
-    return m2
+    return md
+
+
+def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
+    mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
+    # To account for the case 93"Optimal" and 93"Manual" in lb metadata
+    if mmd.get("Gain") is None and mds[0].get("Gain") is not None:
+        if all(mds[0]["Gain"].value == md["Gain"].value for md in mds[1:]):
+            mmd["Gain"] = Metadata(mds[0]["Gain"].value)
+    return mmd
 
 
 def fz_kd_singlesite(
@@ -307,7 +329,7 @@ class Labelblock:
 
     lines: InitVar[list_of_lines]
     path: Path | None = None
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
     """Metadata specific for this Labelblock."""
     data: dict[str, float] = field(init=False, repr=True)
     """The 96 data values as {'well_name', value}."""
@@ -370,7 +392,7 @@ class Labelblock:
                     except ValueError:
                         data[row + f"{col:0>2}"] = np.nan
                         warnings.warn(
-                            f"OVER\n Overvalue in {self.metadata['Label'][0]}:"
+                            f"OVER\n Overvalue in {self.metadata['Label'].value}:"
                             f"{row}{col:0>2} of tecanfile {self.path}"
                         )
         except AssertionError:
@@ -391,12 +413,21 @@ class Labelblock:
     def data_normalized(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain."""
         if self._data_normalized is None:
-            norm = (
-                1000.0
-                / float(self.metadata["Gain"][0])
-                / float(self.metadata["Number of Flashes"][0])
-                / float(self.metadata["Integration Time"][0])
-            )
+            if (
+                isinstance(self.metadata["Gain"].value, (float, int))
+                and isinstance(self.metadata["Number of Flashes"].value, (float, int))
+                and isinstance(self.metadata["Integration Time"].value, (float, int))
+            ):
+                norm = (
+                    1000.0
+                    / self.metadata["Gain"].value
+                    / self.metadata["Number of Flashes"].value
+                    / self.metadata["Integration Time"].value
+                )
+            else:
+                warnings.warn(
+                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time."
+                )  # pragma: no cover
             self._data_normalized = {k: v * norm for k, v in self.data.items()}
         return self._data_normalized
 
@@ -485,7 +516,7 @@ class Labelblock:
         for k in Labelblock._KEYS:
             eq &= self.metadata[k] == other.metadata[k]
         # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
-        eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
+        eq &= self.metadata["Gain"].value == other.metadata["Gain"].value
         return eq
 
     def __almost_eq__(self, other: Labelblock) -> bool:
@@ -516,7 +547,7 @@ class Tecanfile:
     """
 
     path: Path
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
     """General metadata for Tecanfile, like `Date` and `Shaking Duration`."""
     labelblocks: list[Labelblock] = field(init=False, repr=True)
     """All labelblocks contained in this file."""
@@ -612,9 +643,7 @@ class LabelblocksGroup:
     #: TODO: remove because already in labelblock?
     buffer: dict[str, list[float]] | None = None
     #: The common metadata.
-    metadata: dict[str, list[str | int | float | list[str | int]]] = field(
-        init=False, repr=True
-    )
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: Dict for data, like  Labelblock with well name as key and list of values as value.
     data: dict[str, list[float]] = field(init=False, repr=True)
 
@@ -625,7 +654,6 @@ class LabelblocksGroup:
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
         datagrp = defaultdict(list)
-        self.metadata = self._merge_md(self.labelblocks)
         if self.allequal:
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
@@ -638,27 +666,7 @@ class LabelblocksGroup:
         else:
             raise ValueError("Creation of labelblock group failed.")
         self.data = datagrp
-
-    def _merge_md(
-        self, labelblocks: list[Labelblock]
-    ) -> dict[str, list[str | int | float | list[str | int]]]:
-        """Merge metadata from a list of labelblocks."""
-        mmd: dict[str, list[Any]] = defaultdict(list)
-        for lb in labelblocks:
-            for k, v in lb.metadata.items():
-                if len(v) == 1:
-                    mmd[k].append(v[0])
-                else:
-                    mmd[k].append(v)
-        for k, v in mmd.items():
-            if all([v[0] == val for val in v[1:]]):
-                if type(v[0]) is str or type(v[0]) is int:
-                    mmd[k] = [v[0]]
-                else:
-                    mmd[k] = v[0]  # type: ignore
-            else:
-                mmd[k] = v
-        return dict(mmd)
+        self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
 
 
 @dataclass
@@ -690,7 +698,7 @@ class TecanfilesGroup:
     #: Each group contains its own data like a titration. ??
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
     #: FIXME: Metadata of the first Tecanfile.
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create metadata and labelblocksgroups."""
@@ -722,7 +730,7 @@ class TecanfilesGroup:
                 raise ValueError(f"No common labelblock in filenames: {files}.")
             else:
                 warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
-        self.metadata = self.tecanfiles[0].metadata
+        self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
 
 
 @dataclass(init=False)
@@ -902,9 +910,9 @@ class TitrationAnalysis:
             return
         for lbg in self.labelblocksgroups:
             # new lbg metadata
-            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # type: ignore
-            corr /= float(lbg.metadata["Integration Time"][0])  # type: ignore
-            corr /= float(lbg.metadata["Number of Flashes"][0])  # type: ignore
+            corr = 1000 / float(lbg.metadata["Gain"].value)  # type: ignore
+            corr /= float(lbg.metadata["Integration Time"].value)  # type: ignore
+            corr /= float(lbg.metadata["Number of Flashes"].value)  # type: ignore
             for k in lbg.data.keys():
                 lbg.data[k] = [v * corr for v in lbg.data[k]]
         self.normalized = True
@@ -1346,7 +1354,14 @@ class TitrationAnalysis:
             bg = buf.pop("bg")  # type: ignore
             bg_sd = buf.pop("bg_sd")  # type: ignore
             rowlabel = ["Temp"]
-            lines = [[f"{x:6.1f}" for x in lbg.metadata["Temperature"]]]
+            lines = [
+                [
+                    f"{x:6.1f}"
+                    for x in [
+                        lb.metadata["Temperature"].value for lb in lbg.labelblocks
+                    ]
+                ]
+            ]
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
             for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
                 rowlabel.append(k)
