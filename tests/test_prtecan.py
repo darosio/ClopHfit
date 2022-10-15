@@ -61,7 +61,7 @@ def test_fit_titration() -> None:
         prtecan.fit_titration("unk", x, y)
 
 
-@pytest.mark.filterwarnings("ignore: OVER value")
+@pytest.mark.filterwarnings("ignore:OVER")
 class TestLabelblock:
     """Test labelblock class."""
 
@@ -136,7 +136,7 @@ class TestLabelblock:
         csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/pH6.5_200214.xls")
         idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
         with pytest.warns(
-            UserWarning, match=r"OVER value in A06 well for \['Label1'\] of tecanfile: "
+            UserWarning, match=r"OVER\n Overvalue in Label1:A06 of tecanfile "
         ):
             lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         assert np.nansum(lb.data["A06"]) == np.nansum(np.nan)
@@ -168,41 +168,43 @@ class TestTecanfile:
 
     def setup_class(self) -> None:
         """Initialize a tecan file and read the corresponding xls file."""
-        self.tf1 = prtecan.Tecanfile(data_tests / "290212_7.67.xls")
-        self.csvl = prtecan.Tecanfile.read_xls(data_tests / "290212_7.67.xls")
+        self.tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
+        self.tfpath = data_tests / "140220/pH8.3_200214.xls"
+        self.tf1 = prtecan.Tecanfile(self.tfpath)
+        self.csvl = prtecan.Tecanfile.read_xls(self.tfpath)
+
+    def test_path(self) -> None:
+        """It reads the file path."""
+        assert self.tf1.path == self.tfpath
+
+    def test_metadata(self) -> None:
+        """It parses the Date."""
+        assert self.tf1.metadata["Date:"] == ["20/02/2014"]
+
+    def test_read_xls(self) -> None:
+        """The test reads the xls file using cls method."""
+        assert len(self.csvl) == 74
+
+    def test_lookup_csv_lines(self) -> None:
+        """It finds Label occurrences using cls method."""
+        assert prtecan.Tecanfile.lookup_csv_lines(self.csvl) == [14, 44]
+
+    def test_labelblocks(self) -> None:
+        """It parses "Temperature" metadata and cell data from 2 labelblocks."""
+        assert self.tf1.labelblocks[0].metadata["Temperature"] == [25.3]
+        assert self.tf1.labelblocks[1].metadata["Temperature"] == [25.7]
+        assert self.tf1.labelblocks[0].data["A01"] == 17260
+        assert self.tf1.labelblocks[1].data["H12"] == 4196
+
+    def test___eq__(self) -> None:
+        """It is equal to itself. TODO and different from other."""
+        assert self.tf1 == self.tf1
+        assert self.tf2 != self.tf1
 
     def test_warn(self) -> None:
         """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
         with pytest.warns(UserWarning, match="Repeated labelblocks"):
-            prtecan.Tecanfile(data_tests / "290212_7.67_repeated_lb.xls")
-
-    def test_path(self) -> None:
-        """It reads the file path."""
-        assert self.tf1.path == data_tests / "290212_7.67.xls"
-
-    def test_metadata(self) -> None:
-        """It parses the Date."""
-        assert self.tf1.metadata["Date:"] == ["29/02/2012"]
-
-    def test_read_xls(self) -> None:
-        """The test reads the xls file using cls method."""
-        assert len(self.csvl) == 77
-
-    def test_lookup_csv_lines(self) -> None:
-        """It finds Label occurrences using cls method."""
-        assert prtecan.Tecanfile.lookup_csv_lines(self.csvl) == [17, 47]
-
-    def test_labelblocks(self) -> None:
-        """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert self.tf1.labelblocks[0].metadata["Temperature"] == [25.9]
-        assert self.tf1.labelblocks[1].metadata["Temperature"] == [25.7]
-        assert self.tf1.labelblocks[0].data["A01"] == 33731
-        assert self.tf1.labelblocks[1].data["H12"] == 8477
-
-    def test___eq__(self) -> None:
-        """It is equal to itself. TODO and different from other."""
-        tf2 = prtecan.Tecanfile(data_tests / "290212_7.67.xls")
-        assert tf2 == self.tf1
+            prtecan.Tecanfile(data_tests / "exceptions/290212_7.67_repeated_lb.xls")
 
     def test_filenotfound(self) -> None:
         """It raises FileNotFoundError when the file path does not exist."""
@@ -212,7 +214,7 @@ class TestTecanfile:
     def test_missing_label(self) -> None:
         """It raises Exception when there is no Label pattern."""
         with pytest.raises(ValueError, match="No Labelblock found."):
-            prtecan.Tecanfile(data_tests / "0_Labelblocks_290513_5.5.xlsx")
+            prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
 class TestLabelblocksGroup:

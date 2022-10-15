@@ -29,6 +29,7 @@ import seaborn as sb  # type: ignore
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
+
 # after set([type(ll[i][j]) for i in range(len(ll)) for j in range(13)])
 list_of_lines = List[List[Any]]
 
@@ -300,11 +301,12 @@ class Labelblock:
     Warns
     -----
     Warning
-        When it replaces "OVER" with ``np.nan`` for any saturated value.
+        When it replaces "OVER" with ``np.nan`` for saturated values.
 
     """
 
     lines: InitVar[list_of_lines]
+    path: Path | None = None
     metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
     """Metadata specific for this Labelblock."""
     data: dict[str, float] = field(init=False, repr=True)
@@ -368,9 +370,8 @@ class Labelblock:
                     except ValueError:
                         data[row + f"{col:0>2}"] = np.nan
                         warnings.warn(
-                            "OVER value in {}{:0>2} well for {} of tecanfile: {}".format(
-                                row, col, self.metadata["Label"], ""
-                            )
+                            f"OVER\n Overvalue in {self.metadata['Label'][0]}:"
+                            f"{row}{col:0>2} of tecanfile {self.path}"
                         )
         except AssertionError:
             raise ValueError("Cannot extract data in Labelblock: not 96 wells?")
@@ -531,7 +532,7 @@ class Tecanfile:
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
         for i in range(n_labelblocks):
-            labelblocks.append(Labelblock(csvl[idxs[i] : idxs[i + 1]]))
+            labelblocks.append(Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path))
         if any(
             labelblocks[i] == labelblocks[j]
             for i, j in itertools.combinations(range(n_labelblocks), 2)
