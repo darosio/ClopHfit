@@ -96,49 +96,62 @@ def extract_metadata(
     --------
     >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
     >>> extract_metadata(lines)
-    {'Shaking (Linear) Amplitude:': [2, 'mm']}
+    {'Shaking (Linear) Amplitude:': Metadata(value=2, unit=['mm'])}
 
     >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
     >>> lines.append(['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', ''])
     >>> extract_metadata(lines)
-    {'Excitation Wavelength': [400, 'nm'], 'Temperature': [26.0]}
+    {'Temperature': Metadata(value=26.0, unit=['°C']), 'Excitation Wavelength': Metadata(value=400, unit=['nm'])}
 
     >>> lines = [['Label: Label1', '', '', '', '', '', '', '', '', '', '', '', '']]
     >>> extract_metadata(lines)
-    {'Label': ['Label1']}
+    {'Label': Metadata(value='Label1', unit=None)}
 
     >>> lines = [['Mode', '', '', '', 'Fluorescence Top Reading', '', '', '', '', '']]
-    >>> extract_metadata(lines)
-    {'Mode': ['Fluorescence Top Reading']}
+    >>> extract_metadata(lines)['Mode'].value
+    'Fluorescence Top Reading'
 
     """
     stripped_lines = strip_lines(lines)
     md: dict[str, Metadata] = {}
-    md |= {
-        "Temperature": Metadata(float(line[0].split(":")[1].split("°C")[0]), ["°C"])
-        for line in stripped_lines
-        if len(line) == 1 and "Temperature" in line[0]
-    }
-    md |= {
-        "Label": Metadata(line[0].split(":")[1].strip())
-        for line in stripped_lines
-        if len(line) == 1 and "Label" in line[0]
-    }
+    md.update(
+        {
+            "Temperature": Metadata(float(line[0].split(":")[1].split("°C")[0]), ["°C"])
+            for line in stripped_lines
+            if len(line) == 1 and "Temperature" in line[0]
+        }
+    )
+    md.update(
+        {
+            "Label": Metadata(line[0].split(":")[1].strip())
+            for line in stripped_lines
+            if len(line) == 1 and "Label" in line[0]
+        }
+    )
     # m1 is only for the key 'Plate-ID (Stacker)' and any possible unexpected
-    md |= {
-        line[0]: Metadata(None)
-        for line in stripped_lines
-        if len(line) == 1 and "Label" not in line[0] and "Temperature" not in line[0]
-    }
-    md |= {
-        line[0]: Metadata(line[1]) if len(line) == 2 else Metadata(line[1], line[2:])
-        for line in stripped_lines
-        if len(line) > 1
-    }
+    md.update(
+        {
+            line[0]: Metadata(None)
+            for line in stripped_lines
+            if len(line) == 1
+            and "Label" not in line[0]
+            and "Temperature" not in line[0]
+        }
+    )
+    md.update(
+        {
+            line[0]: Metadata(line[1])
+            if len(line) == 2
+            else Metadata(line[1], line[2:])
+            for line in stripped_lines
+            if len(line) > 1
+        }
+    )
     return md
 
 
 def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
+    """Merge a list of metadata dict if the key value is the same in the list."""
     mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
     if mmd.get("Gain") is None and mds[0].get("Gain") is not None:

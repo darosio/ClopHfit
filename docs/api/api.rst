@@ -27,11 +27,13 @@ module functions
    clophfit.prtecan.fz_pk_singlesite
    clophfit.prtecan.extract_metadata
    clophfit.prtecan.strip_lines
+   clophfit.prtecan._merge_md
 
 classes to parse a file
 -----------------------
 .. autosummary::
 
+   clophfit.prtecan.Metadata
    clophfit.prtecan.Labelblock
    clophfit.prtecan.Tecanfile
 
@@ -45,6 +47,8 @@ classes to group files
    clophfit.prtecan.TitrationAnalysis
 
 .. include:: ../../docs/api/prtecan.uml.rst
+
+.. autoclass:: Metadata
 
 .. autoclass:: Labelblock
    :special-members: __almost_eq__, __eq__
@@ -60,6 +64,7 @@ classes to group files
 
 .. autofunction:: strip_lines
 .. autofunction:: extract_metadata
+.. autofunction:: _merge_md
 .. autofunction:: fz_pk_singlesite
 .. autofunction:: fz_kd_singlesite
 .. autofunction:: fit_titration
