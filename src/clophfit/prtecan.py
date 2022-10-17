@@ -30,8 +30,60 @@ from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
 
-# after set([type(ll[i][j]) for i in range(len(ll)) for j in range(13)])
+# after set([type(x) for l in csvl for x in l]) float | int | str
 list_of_lines = List[List[Any]]
+
+
+def read_xls(path: Path) -> list_of_lines:
+    """Read first sheet of an xls file.
+
+    Parameters
+    ----------
+    path : Path
+        Path to `.xls` file.
+
+    Returns
+    -------
+    list_of_lines
+        Lines.
+
+    """
+    df = pd.read_excel(path)
+    n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
+    df = pd.concat([n0, df], ignore_index=True)
+    df.fillna("", inplace=True)
+    return list(df.values.tolist())
+
+
+def lookup_listoflines(
+    csvl: list_of_lines, pattern: str = "Label: Label", col: int = 0
+) -> list[int]:
+    """Lookup line numbers (row index) where given pattern occurs.
+
+    Parameters
+    ----------
+    csvl : list_of_lines
+        Lines of a csv/xls file.
+    pattern : str
+        Pattern to be searched (default="Label: Label").
+    col : int
+        Column to search (default=0).
+
+    Returns
+    -------
+    list[int]
+        Row/line index for all occurrences of pattern. Empty list for no occurrences.
+
+    """
+    return [
+        tuple_i_line[0]
+        for tuple_i_line in list(
+            filter(
+                lambda x: pattern in x[1][0] if isinstance(x[1][0], str) else None,
+                enumerate(csvl),
+            )
+        )
+    ]
 
 
 def strip_lines(lines: list_of_lines) -> list_of_lines:
@@ -567,8 +619,8 @@ class Tecanfile:
 
     def __post_init__(self) -> None:
         """Initialize."""
-        csvl = Tecanfile.read_xls(self.path)
-        idxs = Tecanfile.lookup_csv_lines(csvl, pattern="Label: Label", col=0)
+        csvl = read_xls(self.path)
+        idxs = lookup_listoflines(csvl, pattern="Label: Label", col=0)
         if len(idxs) == 0:
             raise ValueError("No Labelblock found.")
         self.metadata = extract_metadata(csvl[: idxs[0]])
@@ -583,54 +635,6 @@ class Tecanfile:
         ):
             warnings.warn("Repeated labelblocks")
         self.labelblocks = labelblocks
-
-    @classmethod
-    def read_xls(cls, path: Path) -> list_of_lines:
-        """Read first sheet of an xls file.
-
-        Parameters
-        ----------
-        path : Path
-            Path to `.xls` file.
-
-        Returns
-        -------
-        list_of_lines
-            Lines.
-
-        """
-        df = pd.read_excel(path)
-        n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
-        df = pd.concat([n0, df], ignore_index=True)
-        df.fillna("", inplace=True)
-        return list(df.values.tolist())
-
-    @classmethod
-    def lookup_csv_lines(
-        cls, csvl: list_of_lines, pattern: str = "Label: Label", col: int = 0
-    ) -> list[int]:
-        """Lookup line numbers (row index) where given pattern occurs.
-
-        Parameters
-        ----------
-        csvl : list_of_lines
-            Lines of a csv/xls file.
-        pattern : str
-            Pattern to be searched (default="Label: Label").
-        col : int
-            Column to search (default=0).
-
-        Returns
-        -------
-        list[int]
-            Row/line index for all occurrences of pattern. Empty list for no occurrences.
-
-        """
-        idxs = []
-        for i, line in enumerate(csvl):
-            if pattern in line[col]:
-                idxs.append(i)
-        return idxs
 
 
 @dataclass

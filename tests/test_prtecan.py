@@ -82,8 +82,8 @@ class TestLabelblock:
 
     def setup_class(self) -> None:
         """Initialize a labelblock from an .xls file."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/pH6.5_200214.xls")
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
         self.lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         self.lb1 = prtecan.Labelblock(csvl[idxs[1] :])
         self.lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
@@ -140,16 +140,16 @@ class TestLabelblock:
 
     def test___almost_eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/NaCl4_200214.xls")
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        csvl = prtecan.read_xls(data_tests / "140220/NaCl4_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
         lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
         assert lb.__almost_eq__(self.lb0)
         assert not lb.__almost_eq__(self.lb1)
 
     def test_overvalue(self) -> None:
         """It detects saturated data ("OVER")."""
-        csvl = prtecan.Tecanfile.read_xls(data_tests / "140220/pH6.5_200214.xls")
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
         with pytest.warns(
             UserWarning, match=r"OVER\n Overvalue in Label1:A06 of tecanfile "
         ):
@@ -159,19 +159,15 @@ class TestLabelblock:
 
     def test_raise_missing_column(self) -> None:
         """It raises Exception when a column is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(
-            data_tests / "exceptions/88wells_290212_20.xlsx"
-        )
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        csvl = prtecan.read_xls(data_tests / "exceptions/88wells_290212_20.xlsx")
+        idxs = prtecan.lookup_listoflines(csvl)
         with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
             prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
     def test_raise_missing_row(self) -> None:
         """It raises Exception when a row is missing from the labelblock."""
-        csvl = prtecan.Tecanfile.read_xls(
-            data_tests / "exceptions/84wells_290212_20.xlsx"
-        )
-        idxs = prtecan.Tecanfile.lookup_csv_lines(csvl)
+        csvl = prtecan.read_xls(data_tests / "exceptions/84wells_290212_20.xlsx")
+        idxs = prtecan.lookup_listoflines(csvl)
         with pytest.raises(
             ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
         ):
@@ -186,7 +182,7 @@ class TestTecanfile:
         self.tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
         self.tfpath = data_tests / "140220/pH8.3_200214.xls"
         self.tf1 = prtecan.Tecanfile(self.tfpath)
-        self.csvl = prtecan.Tecanfile.read_xls(self.tfpath)
+        self.csvl = prtecan.read_xls(self.tfpath)
 
     def test_path(self) -> None:
         """It reads the file path."""
@@ -200,9 +196,9 @@ class TestTecanfile:
         """The test reads the xls file using cls method."""
         assert len(self.csvl) == 74
 
-    def test_lookup_csv_lines(self) -> None:
+    def test_lookup_listoflines(self) -> None:
         """It finds Label occurrences using cls method."""
-        assert prtecan.Tecanfile.lookup_csv_lines(self.csvl) == [14, 44]
+        assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
 
     def test_labelblocks(self) -> None:
         """It parses "Temperature" metadata and cell data from 2 labelblocks."""
