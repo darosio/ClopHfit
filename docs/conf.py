@@ -33,7 +33,7 @@ release = "0.3.9"
 # ones.
 extensions = [
     "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
+    "autodocsumm",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinxcontrib.plantuml",
@@ -50,6 +50,7 @@ autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "undoc-members": False,
+    "autosummary": True,
 }
 
 autodoc_typehints = "description"

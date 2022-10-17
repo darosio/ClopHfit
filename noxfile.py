@@ -206,6 +206,7 @@ def docs(session: Session) -> None:
         "sphinxcontrib-plantuml",
         "sphinx-autodoc-typehints",
         "nbsphinx",
+        "autodocsumm",
         ".",
     )
     session.run("sphinx-build", "docs", "docs/_build")

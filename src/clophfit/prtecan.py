@@ -4,6 +4,8 @@
 - Builds 96 titrations and export them in txt files.
 - In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
+.. include:: ../../docs/api/prtecan.uml.rst
+
 """
 from __future__ import annotations
 
@@ -115,7 +117,7 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 class Metadata:
     """Value type of a metadata dictionary."""
 
-    value: int | str | float | None
+    value: int | str | float | None  #: Value for the dictionary key.
     unit: Sequence[str | float | int] | None = None
     """First element is the unit, the following are somewhat unexpected."""
 
@@ -145,10 +147,13 @@ def extract_metadata(
     >>> extract_metadata(lines)
     {'Shaking (Linear) Amplitude:': Metadata(value=2, unit=['mm'])}
 
-    >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
-    >>> lines.append(['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', ''])
+    >>> lines = [['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', '']]
     >>> extract_metadata(lines)
-    {'Temperature': Metadata(value=26.0, unit=['°C']), 'Excitation Wavelength': Metadata(value=400, unit=['nm'])}
+    {'Temperature': Metadata(value=26.0, unit=['°C'])}
+
+    >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
+    >>> extract_metadata(lines)
+    {'Excitation Wavelength': Metadata(value=400, unit=['nm'])}
 
     >>> lines = [['Label: Label1', '', '', '', '', '', '', '', '', '', '', '', '']]
     >>> extract_metadata(lines)
@@ -359,8 +364,10 @@ class Labelblock:
 
     Parameters
     ----------
-    lines : list_of_lines
+    lines : list[list[str | int | float]]
         Lines to create this Labelblock.
+    path : Path, optional
+        File path to the tecanfile that contains this labelblock.
 
     Raises
     ------
@@ -1398,6 +1405,3 @@ class TitrationAnalysis:
             f.suptitle(title, fontsize=18)
         f.tight_layout(h_pad=5, rect=(0, 0, 1, 0.87))
         return f
-
-
-9

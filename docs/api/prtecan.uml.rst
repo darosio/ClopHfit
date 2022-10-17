@@ -1,12 +1,16 @@
 .. uml::
-
-   left to right direction
-
+   
+   class Metadata{
+     value: float|int|str
+	 unit: list[float|int|str]
+   }
+   
    class Labelblock{
      lines: list_of_lines
+	 path: Path, optional
      +metadata : dict
-     +data : dict {'H12':float}
-     +@data_normalized : dict {'H12':float}
+     +data : dict e.g.{'H12':float}
+     +@data_normalized : dict
 	 +@buffer_wells: list
      +@data_buffersubtracted : dict
      +@data_buffersubtracted_norm : dict
@@ -18,14 +22,14 @@
      __almost_eq__()
    }
 
-   Labelblock "1..*" --o Tecanfile
+   Tecanfile "1..*" --o Labelblock
+   Tecanfile::metadata "1..*" --o Metadata
+   Labelblock::metadata "1..*" --o Metadata
 
    class Tecanfile{
      path : Path
 	 +metadata : dict
 	 +labelblocks : list
-	 {static} +read_xls()
-	 {static} +lookup_csv_lines()
    }
 
    LabelblocksGroup ..> Labelblock
@@ -50,7 +54,7 @@
    }
 
    class Titration{
-     listfile: Path | str
+     listfile: Path|str
 	 +metadata: dict
 	 +conc: Sequence[float]
 	 +export_dat()
@@ -58,7 +62,7 @@
 
    class TitrationAnalysis{
      titration: Titration
-	 schemefile: str | Path
+	 schemefile: str|Path
 	 +scheme: pd.Series[Any]
 	 +conc: Sequence[float]
 	 +labelblocksgroups: list[LabelblocksGroup]
@@ -75,3 +79,7 @@
 	 +print_fitting()
 	 +plot_buffers()
    }
+
+
+..
+   left to right direction
