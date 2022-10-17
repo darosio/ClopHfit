@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 from typing import Any  # , overload
-from typing import List
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -30,11 +29,11 @@ from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
 
-# after set([type(x) for l in csvl for x in l]) float | int | str
-list_of_lines = List[List[Any]]
+# list_of_lines
+# after set([type(x) for l in csvl for x in l]) = float | int | str
 
 
-def read_xls(path: Path) -> list_of_lines:
+def read_xls(path: Path) -> list[list[str | int | float]]:
     """Read first sheet of an xls file.
 
     Parameters
@@ -56,7 +55,7 @@ def read_xls(path: Path) -> list_of_lines:
 
 
 def lookup_listoflines(
-    csvl: list_of_lines, pattern: str = "Label: Label", col: int = 0
+    csvl: list[list[str | int | float]], pattern: str = "Label: Label", col: int = 0
 ) -> list[int]:
     """Lookup line numbers (row index) where given pattern occurs.
 
@@ -86,7 +85,7 @@ def lookup_listoflines(
     ]
 
 
-def strip_lines(lines: list_of_lines) -> list_of_lines:
+def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | float]]:
     """Remove empty fields/cells from lines read from a csv file.
 
     Parameters
@@ -106,11 +105,7 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
 
     """
-    stripped_lines = []
-    for line in lines:
-        sl = [line[i] for i in range(len(line)) if line[i] != ""]
-        stripped_lines.append(sl)
-    return stripped_lines
+    return [[e for e in line if e != ""] for line in lines]
 
 
 # TODO with a filter ectract_metadata with a map
@@ -121,12 +116,12 @@ class Metadata:
     """Value type of a metadata dictionary."""
 
     value: int | str | float | None
-    unit: list[str] | None = None
+    unit: Sequence[str | float | int] | None = None
     """First element is the unit, the following are somewhat unexpected."""
 
 
 def extract_metadata(
-    lines: list_of_lines,
+    lines: list[list[str | int | float]],
 ) -> dict[str, Metadata]:
     """Extract metadata into both Tecanfile and Labelblock.
 
@@ -164,41 +159,28 @@ def extract_metadata(
     'Fluorescence Top Reading'
 
     """
-    stripped_lines = strip_lines(lines)
     md: dict[str, Metadata] = {}
-    md.update(
-        {
-            "Temperature": Metadata(float(line[0].split(":")[1].split("°C")[0]), ["°C"])
-            for line in stripped_lines
-            if len(line) == 1 and "Temperature" in line[0]
-        }
-    )
-    md.update(
-        {
-            "Label": Metadata(line[0].split(":")[1].strip())
-            for line in stripped_lines
-            if len(line) == 1 and "Label" in line[0]
-        }
-    )
-    # m1 is only for the key 'Plate-ID (Stacker)' and any possible unexpected
-    md.update(
-        {
-            line[0]: Metadata(None)
-            for line in stripped_lines
-            if len(line) == 1
-            and "Label" not in line[0]
-            and "Temperature" not in line[0]
-        }
-    )
-    md.update(
-        {
-            line[0]: Metadata(line[1])
-            if len(line) == 2
-            else Metadata(line[1], line[2:])
-            for line in stripped_lines
-            if len(line) > 1
-        }
-    )
+
+    for line in strip_lines(lines):
+        if len(line) > 2:
+            md.update({str(line[0]): Metadata(line[1], line[2:])})
+        elif len(line) == 2:
+            md.update({str(line[0]): Metadata(line[1])})
+        elif len(line) == 1 and isinstance(line[0], str) and ":" in line[0]:
+            k, v = line[0].split(":")
+            vals: list[str] = v.split()
+            val: float | str
+            try:
+                val = float(vals[0])
+            except ValueError:
+                val = vals[0]
+            if len(vals) == 1:
+                md.update({k: Metadata(val)})
+            else:
+                md.update({k: Metadata(val, vals[1:])})
+        elif line:
+            md.update({str(line[0]): Metadata(line[0])})
+
     return md
 
 
@@ -392,7 +374,7 @@ class Labelblock:
 
     """
 
-    lines: InitVar[list_of_lines]
+    lines: InitVar[list[list[str | int | float]]]
     path: Path | None = None
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     """Metadata specific for this Labelblock."""
@@ -407,7 +389,7 @@ class Labelblock:
     _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
 
-    def __post_init__(self, lines: list_of_lines) -> None:
+    def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
         if lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13:
             stripped = strip_lines(lines)
@@ -418,7 +400,7 @@ class Labelblock:
         else:
             raise ValueError("Cannot build Labelblock: not 96 wells?")
 
-    def _extract_data(self, lines: list_of_lines) -> dict[str, float]:
+    def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
         """Convert data into a dictionary.
 
         {'A01' : value}

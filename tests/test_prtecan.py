@@ -17,7 +17,9 @@ data_tests = Path(__file__).parent / "Tecan"
 
 def test_strip_lines() -> None:
     """It strips empty fields."""
-    lines = [["Excitation Wavelength", "", "", "", 485.0, "nm", "", "", ""]]
+    lines: list[list[float | int | str]] = [
+        ["Excitation Wavelength", "", "", "", 485.0, "nm", "", "", ""]
+    ]
     stripped = prtecan.strip_lines(lines)
     assert stripped == [["Excitation Wavelength", 485.0, "nm"]]
 
@@ -32,11 +34,11 @@ def test_extract_metadata() -> None:
         ["", "Temperature: 26 °C", "", "", "", "", "", "", "", "", ""],
     ]
     expected_metadata = {
+        "Label": prtecan.Metadata("Label1"),
+        "Mode": prtecan.Metadata("Fluorescence Top Reading"),
         "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
         "Excitation Wavelength": prtecan.Metadata(400, ["nm", "unexpected"]),
         "Temperature": prtecan.Metadata(26.0, ["°C"]),
-        "Label": prtecan.Metadata("Label1"),
-        "Mode": prtecan.Metadata("Fluorescence Top Reading"),
     }
 
     metadata = prtecan.extract_metadata(lines)
