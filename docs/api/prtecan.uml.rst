@@ -1,10 +1,5 @@
 .. uml::
-   
-   class Metadata{
-     value: float|int|str
-	 unit: list[float|int|str]
-   }
-   
+      
    class Labelblock{
      lines: list_of_lines
 	 path: Path, optional
@@ -22,22 +17,20 @@
      __almost_eq__()
    }
 
-   Tecanfile "1..*" --o Labelblock
-   Tecanfile::metadata "1..*" --o Metadata
-   Labelblock::metadata "1..*" --o Metadata
-
    class Tecanfile{
      path : Path
 	 +metadata : dict
 	 +labelblocks : list
    }
 
-   LabelblocksGroup ..> Labelblock
-   TecanfilesGroup ..> Tecanfile
+   class Metadata{
+     value: float|int|str
+	 unit: list[float|int|str]
+   }
 
-   LabelblocksGroup "*" --o TecanfilesGroup
-   TecanfilesGroup <|-- Titration
-   Titration "1" --o TitrationAnalysis
+   Tecanfile "1..*" o-- Labelblock
+   Tecanfile::metadata "1..*" *-- Metadata
+   Labelblock::metadata "1..*" *-- Metadata
 
    class LabelblocksGroup{
      labelblocks: list[Labelblock]
@@ -46,12 +39,20 @@
 	 +metadata: dict
 	 +data: dict[str, list[float]]
    }
+   
+   LabelblocksGroup::labelblocks "(ordered)" o-- Labelblock
+
+   LabelblocksGroup "*" --o TecanfilesGroup
+   TecanfilesGroup <|-- Titration
+   Titration "1" --o TitrationAnalysis
 
    class TecanfilesGroup{
      tecanfiles: list[Tecanfile]
 	 +labelblocksgroups: list[LabelblocksGroup]
 	 +metadata: dict
    }
+
+   TecanfilesGroup::tecanfiles "*..1" --o Tecanfile
 
    class Titration{
      listfile: Path|str

@@ -4,8 +4,6 @@
 - Builds 96 titrations and export them in txt files.
 - In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
-.. include:: ../../docs/api/prtecan.uml.rst
-
 """
 from __future__ import annotations
 
@@ -659,19 +657,19 @@ class LabelblocksGroup:
             self.allequal = all(
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
-        datagrp = defaultdict(list)
+        data = defaultdict(list)
         if self.allequal:
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    datagrp[key].append(lb.data[key])
+                    data[key].append(lb.data[key])
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    datagrp[key].append(lb.data_normalized[key])
+                    data[key].append(lb.data_normalized[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
-        self.data = datagrp
+        self.data = data
         self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
 
 
