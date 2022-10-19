@@ -2,7 +2,7 @@
 
    class Labelblock{
      lines: list_of_lines
-	 path: Path, optional
+	 #path: Path, optional
      +metadata : dict
      +data : dict e.g.{'H12':float}
      +@data_normalized : dict
@@ -18,14 +18,14 @@
    }
 
    class Tecanfile{
-     path : Path
+     #path : Path
 	 +metadata : dict
 	 +labelblocks : list
    }
 
    class Metadata{
-     value: float|int|str
-	 unit: list[float|int|str]
+     #value: float|int|str
+	 #unit: list[float|int|str]
    }
 
    Tecanfile "1..*" o-- Labelblock
@@ -33,8 +33,8 @@
    Labelblock::metadata "1..*" *-- Metadata
 
    class LabelblocksGroup{
-     labelblocks: list[Labelblock]
-	 allequal: bool
+     #labelblocks: list[Labelblock]
+	 #allequal: bool
 	 +metadata: dict
 	 +data: dict[str, list[float]]
      +@data_normalized : dict
@@ -46,24 +46,23 @@
    LabelblocksGroup::labelblocks "(ordered)" o-- Labelblock
    LabelblocksGroup::buffer_wells "0..1" <--> Labelblock::buffer_wells : (same)
 
-   LabelblocksGroup "*" --o TecanfilesGroup
-   TecanfilesGroup <|-- Titration
-   Titration "1" --o TitrationAnalysis
-
    class TecanfilesGroup{
-     tecanfiles: list[Tecanfile]
+     #tecanfiles: list[Tecanfile]
 	 +labelblocksgroups: list[LabelblocksGroup]
 	 +metadata: dict
    }
 
-   TecanfilesGroup::tecanfiles "*..1" --o Tecanfile
+   TecanfilesGroup "*" o-- LabelblocksGroup
+   TecanfilesGroup::tecanfiles "1..*" o-- Tecanfile
 
    class Titration{
-     listfile: Path|str
-	 +metadata: dict
-	 +conc: Sequence[float]
+     #conc: Sequence
+	 #tecanfiles: list
+	 #fromlistfile(Path)
 	 +export_dat()
    }
+
+   Titration --|> TecanfilesGroup
 
    class TitrationAnalysis{
      titration: Titration
@@ -72,7 +71,6 @@
 	 +conc: Sequence[float]
 	 +labelblocksgroups: list[LabelblocksGroup]
 	 +additions: Sequence[float]
-	 {static} +calculate_conc()
 	 +subtract_bg()
 	 +dilution_correction()
 	 +metadata_normalization()
@@ -85,6 +83,7 @@
 	 +plot_buffers()
    }
 
+   TitrationAnalysis "1" o-- Titration
 
 ..
    left to right direction

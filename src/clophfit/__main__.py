@@ -146,7 +146,7 @@ def tecan(  # type: ignore
     - csv tables for all labelblocks and global fittings.
 
     """
-    tit = prtecan.Titration(list_file)
+    tit = prtecan.Titration.fromlistfile(list_file)
     # TitrationAnalysis
     if scheme:
         titan = prtecan.TitrationAnalysis(tit, scheme)
@@ -155,7 +155,7 @@ def tecan(  # type: ignore
         if dil:
             titan.dilution_correction(dil)
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
-                titan.conc = list(titan.calculate_conc(titan.additions, 1000.0))
+                titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))
         if norm:
             titan.metadata_normalization()
     else:

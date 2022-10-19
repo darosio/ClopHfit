@@ -115,9 +115,10 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 class Metadata:
     """Value type of a metadata dictionary."""
 
-    value: int | str | float | None  #: Value for the dictionary key.
+    #: Value for the dictionary key.
+    value: int | str | float | None
+    #: First element is the unit, the following are somewhat unexpected.
     unit: Sequence[str | float | int] | None = None
-    """First element is the unit, the following are somewhat unexpected."""
 
 
 def extract_metadata(
@@ -195,6 +196,38 @@ def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
         if all(mds[0]["Gain"].value == md["Gain"].value for md in mds[1:]):
             mmd["Gain"] = Metadata(mds[0]["Gain"].value)
     return mmd
+
+
+def calculate_conc(
+    additions: Sequence[float], conc_stock: float, conc_ini: float = 0.0
+) -> NDArray[np.float_]:
+    """Calculate concentration values.
+
+    additions[0]=vol_ini; Stock concentration is a parameter.
+
+    Parameters
+    ----------
+    additions : Sequence[float]
+        Initial volume and all subsequent additions.
+    conc_stock : float
+        Concentration of the stock used for additions.
+    conc_ini : float
+        Initial concentration (default=0).
+
+    Returns
+    -------
+    np.ndarray
+        Concentrations as vector.
+
+    """
+    vol_tot = np.cumsum(additions)
+    concs = np.ones(len(additions))
+    concs[0] = conc_ini
+    for i, add in enumerate(additions[1:], start=1):
+        concs[i] = (concs[i - 1] * vol_tot[i - 1] + conc_stock * float(add)) / vol_tot[
+            i
+        ]
+    return concs  # , vol_tot
 
 
 def fz_kd_singlesite(
@@ -796,29 +829,41 @@ class TecanfilesGroup:
 
 @dataclass(init=False)
 class Titration(TecanfilesGroup):
-    """Group tecanfiles into a Titration as indicated by a listfile.
-
-    The script will work from any directory: list.pH list filenames relative to
-    its position.
+    """TecanfileGroup + concentrations.
 
     Parameters
     ----------
-    listfile
-        File path to the listfile ([tecan_file_path conc]).
-
-    Raises
-    ------
-    FileNotFoundError
-        When cannot access `listfile`.
-    ValueError
-        For unexpected file format, e.g. length of filename column differs from length of conc values.
-
+    conc : Sequence[float]
+        Concentration or pH values.
+    tecanfiles : list[Tecanfile]
+        Tecanfiles to be grouped.
     """
 
-    #: Concentration values common to all 96 titrations.
-    conc: Sequence[float] = field(init=False, repr=True)
+    def __init__(self, conc: Sequence[float], tecanfiles: list[Tecanfile]) -> None:
+        self.conc = conc
+        super().__init__(tecanfiles)
 
-    def __init__(self, listfile: Path | str) -> None:
+    @classmethod
+    def fromlistfile(cls, listfile: Path | str) -> Titration:
+        """Create titration from a list[.pH|.Cl] file.
+
+        Parameters
+        ----------
+        listfile
+            File path to the listfile ([tecan_file_path conc]).
+
+        Returns
+        -------
+        Titration
+
+        Raises
+        ------
+        FileNotFoundError
+            When cannot access `listfile`.
+        ValueError
+            For unexpected file format, e.g. length of filename column differs from
+            length of conc values.
+        """
         if isinstance(listfile, str):
             listfile = Path(listfile)
         try:
@@ -827,26 +872,31 @@ class Titration(TecanfilesGroup):
             raise FileNotFoundError(f"Cannot find: {listfile}")
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
-        self.conc = df["conc"].tolist()
+        conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
-        super().__init__(tecanfiles)
+        return cls(conc, tecanfiles)
 
-    def export_dat(self, path: Path) -> None:
+    def export_dat(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
 
         Parameters
         ----------
-        path : Path
+        out_folder : Path
             Path to output folder.
 
         """
-        path.mkdir(parents=True, exist_ok=True)
-        for key, dy1 in self.labelblocksgroups[0].data.items():
-            df = pd.DataFrame({"x": self.conc, "y1": dy1})
-            for n, lb in enumerate(self.labelblocksgroups[1:], start=2):
-                dy = lb.data[key]
-                df["y" + str(n)] = dy
-            df.to_csv(path / Path(key).with_suffix(".dat"), index=False)
+        out_folder.mkdir(parents=True, exist_ok=True)
+        if self.labelblocksgroups[0].data:
+            for key, dy1 in self.labelblocksgroups[0].data.items():
+                df = pd.DataFrame({"x": self.conc, "y1": dy1})
+                for n, lbg in enumerate(self.labelblocksgroups[1:], start=2):
+                    if lbg.data:
+                        dy = lbg.data[key]
+                        df["y" + str(n)] = dy
+                    df.to_csv(out_folder / Path(key).with_suffix(".dat"), index=False)
+
+
+# TODO: complete reacher export, including norm buffer subtracted ...
 
 
 @dataclass
@@ -893,41 +943,6 @@ class TitrationAnalysis:
             self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
-
-    @classmethod
-    def calculate_conc(
-        cls,
-        additions: Sequence[float],
-        conc_stock: float,
-        conc_ini: float = 0.0,
-    ) -> NDArray[np.float_]:
-        """Calculate concentration values.
-
-        additions[0]=vol_ini; Stock concentration is a parameter.
-
-        Parameters
-        ----------
-        additions : Sequence[float]
-            Initial volume and all subsequent additions.
-        conc_stock : float
-            Concentration of the stock used for additions.
-        conc_ini : float
-            Initial concentration (default=0).
-
-        Returns
-        -------
-        np.ndarray
-            Concentrations as vector.
-
-        """
-        vol_tot = np.cumsum(additions)
-        concs = np.ones(len(additions))
-        concs[0] = conc_ini
-        for i, add in enumerate(additions[1:], start=1):
-            concs[i] = (
-                concs[i - 1] * vol_tot[i - 1] + conc_stock * float(add)
-            ) / vol_tot[i]
-        return concs  # , vol_tot
 
     def subtract_bg(self) -> None:
         """Subtract average buffer values for each titration point."""

@@ -60,6 +60,17 @@ def test__merge_md() -> None:
     assert mmd["Shaking (Linear) Amplitude:"] == prtecan.Metadata(2, ["mm"])
 
 
+def test_calculate_conc() -> None:
+    """Calculates concentration values from Cl additions."""
+    additions = [112, 2, 2, 2, 2, 2, 2, 6, 4]
+    conc = prtecan.calculate_conc(additions, 1000)
+    np.testing.assert_almost_equal(
+        conc,
+        [0.0, 17.544, 34.483, 50.847, 66.667, 81.967, 96.774, 138.462, 164.179],
+        3,
+    )
+
+
 def test_fit_titration() -> None:
     """It fits pH and Cl titrations."""
     x = [3.0, 5, 7, 9, 11.0]
@@ -303,6 +314,8 @@ class TestLabelblocksGroup:
 
 
 class TestTecanfileGroup:
+    """Group tecanfiles properly."""
+
     class TestAllEqLbgs:
         """Test TecanfilesGroup class (2 labelblocksgroup in the same order)."""
 
@@ -431,8 +444,8 @@ class TestTitration:
 
     def setup_class(self) -> None:
         """Initialize pH and Cl titration from list.pH and list.cl files."""
-        self.tit = prtecan.Titration(data_tests / "list.pH")
-        self.tit_cl = prtecan.Titration(data_tests / "list.cl20")
+        self.tit = prtecan.Titration.fromlistfile(data_tests / "list.pH")
+        self.tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20")
 
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
@@ -530,12 +543,12 @@ class TestTitration:
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
-            prtecan.Titration(Path("aax"))
+            prtecan.Titration.fromlistfile(Path("aax"))
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            prtecan.Titration(data_tests / "list.pH2")
+            prtecan.Titration.fromlistfile(data_tests / "list.pH2")
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
@@ -544,7 +557,7 @@ class TestTitrationAnalysis:
 
     def setup_class(self) -> None:
         """Initialize objects reading list.pH and scheme.txt."""
-        self.tit = prtecan.Titration(data_tests / "140220/list.pH")
+        self.tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH")
         self.tit_an = prtecan.TitrationAnalysis(
             self.tit, str(data_tests / "140220/scheme.txt")
         )
@@ -657,25 +670,6 @@ class TestTitrationAnalysis:
             UserWarning, match="Normalization using metadata was already applied."
         ):
             self.tit_an.metadata_normalization()
-
-    def test_calculate_conc(self) -> None:
-        """It calculates concentration values from Cl additions."""
-        additions = [112, 2, 2, 2, 2, 2, 2, 6, 4]
-        conc = prtecan.TitrationAnalysis.calculate_conc(additions, 1000)
-        np.testing.assert_almost_equal(
-            conc,
-            [
-                0.0,
-                17.54385965,
-                34.48275862,
-                50.84745763,
-                66.66666667,
-                81.96721311,
-                96.77419355,
-                138.46153846,
-                164.17910448,
-            ],
-        )
 
     def test__get_keys(self) -> None:
         """It gets well positions for ctrl and unknown samples."""
