@@ -17,7 +17,7 @@ clophfit.prtecan
 .. automodule:: clophfit.prtecan
    :show-inheritance: Titration
    :special-members: __almost_eq__
-   
+
    .. include:: ./prtecan.uml.rst
 
 ..

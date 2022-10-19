@@ -1,12 +1,12 @@
 .. uml::
-      
+
    class Labelblock{
      lines: list_of_lines
 	 path: Path, optional
      +metadata : dict
      +data : dict e.g.{'H12':float}
      +@data_normalized : dict
-	 +@buffer_wells: list
+	 +@buffer_wells: list[str]
      +@data_buffersubtracted : dict
      +@data_buffersubtracted_norm : dict
 	 +@buffer: float
@@ -35,12 +35,16 @@
    class LabelblocksGroup{
      labelblocks: list[Labelblock]
 	 allequal: bool
-	 buffer: None
 	 +metadata: dict
 	 +data: dict[str, list[float]]
+     +@data_normalized : dict
+	 +@buffer_wells: list[str]
+     +@data_buffersubtracted : dict
+     +@data_buffersubtracted_norm : dict
    }
-   
+
    LabelblocksGroup::labelblocks "(ordered)" o-- Labelblock
+   LabelblocksGroup::buffer_wells "0..1" <--> Labelblock::buffer_wells : (same)
 
    LabelblocksGroup "*" --o TecanfilesGroup
    TecanfilesGroup <|-- Titration

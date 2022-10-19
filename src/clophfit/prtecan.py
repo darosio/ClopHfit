@@ -381,18 +381,18 @@ class Labelblock:
 
     lines: InitVar[list[list[str | int | float]]]
     path: Path | None = None
+    #: Metadata specific for this Labelblock.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    """Metadata specific for this Labelblock."""
+    #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
-    """The 96 data values as {'well_name', value}."""
-    _buffer: float = field(init=False, repr=False)
-    _buffer_norm: float = field(init=False, repr=False)
-    _sd_buffer: float = field(init=False, repr=False)
-    _sd_buffer_norm: float = field(init=False, repr=False)
     _data_normalized: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
+    _buffer: float = field(init=False, repr=False)
+    _buffer_norm: float = field(init=False, repr=False)
+    _sd_buffer: float = field(init=False, repr=False)
+    _sd_buffer_norm: float = field(init=False, repr=False)
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
@@ -599,10 +599,10 @@ class Tecanfile:
     """
 
     path: Path
+    #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    """General metadata for Tecanfile, like `Date` and `Shaking Duration`."""
+    #: All labelblocks contained in this file.
     labelblocks: list[Labelblock] = field(init=False, repr=True)
-    """All labelblocks contained in this file."""
 
     def __post_init__(self) -> None:
         """Initialize."""
@@ -633,7 +633,7 @@ class LabelblocksGroup:
     labelblocks: list[Labelblock]
         Labelblocks to be grouped.
     allequal: bool
-        True if labelblocks already tested to be equal.
+        True if labelblocks already tested equal.
 
     Raises
     ------
@@ -644,12 +644,18 @@ class LabelblocksGroup:
 
     labelblocks: list[Labelblock]
     allequal: bool = False
-    #: TODO: remove because already in labelblock?
-    buffer: dict[str, list[float]] | None = None
-    #: The common metadata.
+    #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    #: Dict for data, like  Labelblock with well name as key and list of values as value.
-    data: dict[str, list[float]] = field(init=False, repr=True)
+    #: List of data in the same order of labelblocks.
+    data: dict[str, list[float]] | None = field(init=False, repr=True)
+    _data_normalized: dict[str, list[float]] | None = field(init=False, repr=False)
+    _data_buffersubtracted: dict[str, list[float]] | None = field(
+        init=False, repr=False
+    )
+    _data_buffersubtracted_norm: dict[str, list[float]] | None = field(
+        init=False, repr=False
+    )
+    _buffer_wells: list[str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Create common metadata and data."""
@@ -657,20 +663,71 @@ class LabelblocksGroup:
             self.allequal = all(
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
-        data = defaultdict(list)
         if self.allequal:
+            self.data = defaultdict(list)
+            self._data_normalized = None
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    data[key].append(lb.data[key])
+                    self.data[key].append(lb.data[key])
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
+            self.data = None
+            self._data_normalized = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    data[key].append(lb.data_normalized[key])
+                    self._data_normalized[key].append(lb.data_normalized[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
-        self.data = data
         self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
+
+    @property
+    def data_normalized(self) -> dict[str, list[float]]:
+        """Normalize data by number of flashes, integration time and gain."""
+        if self._data_normalized is None:
+            self._data_normalized = defaultdict(list)
+            for key in self.labelblocks[0].data.keys():
+                for lb in self.labelblocks:
+                    self._data_normalized[key].append(lb.data_normalized[key])
+        return self._data_normalized
+
+    @property
+    def buffer_wells(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        self._data_buffersubtracted = None
+        self._data_buffersubtracted_norm = None
+
+    @property
+    def data_buffersubtracted(self) -> dict[str, list[float]] | None:
+        """Buffer subtracted data."""
+        if self.data is None:
+            return None
+        if self._data_buffersubtracted is None:
+            self._data_buffersubtracted = defaultdict(list)
+            for lb in self.labelblocks:
+                lb.buffer_wells = self.buffer_wells
+                for key in self.labelblocks[0].data.keys():
+                    self._data_buffersubtracted[key].append(
+                        lb.data_buffersubtracted[key]
+                    )
+        return self._data_buffersubtracted
+
+    @property
+    def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
+        """Buffer subtracted data."""
+        if self._data_buffersubtracted_norm is None:
+            self._data_buffersubtracted_norm = defaultdict(list)
+            for lb in self.labelblocks:
+                lb.buffer_wells = self.buffer_wells
+                for key in self.labelblocks[0].data_normalized.keys():
+                    self._data_buffersubtracted_norm[key].append(
+                        lb.data_buffersubtracted_norm[key]
+                    )
+        return self._data_buffersubtracted_norm
 
 
 @dataclass
@@ -701,7 +758,7 @@ class TecanfilesGroup:
     tecanfiles: list[Tecanfile]
     #: Each group contains its own data like a titration. ??
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
-    #: FIXME: Metadata of the first Tecanfile.
+    #: Metadata shared by all tecanfiles.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:

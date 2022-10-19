@@ -142,11 +142,15 @@ class TestLabelblock:
 
     def test___almost_eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        csvl = prtecan.read_xls(data_tests / "140220/NaCl4_200214.xls")
+        csvl = prtecan.read_xls(data_tests / "290513_7.2.xls")  # Gain=98
         idxs = prtecan.lookup_listoflines(csvl)
-        lb = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
-        assert lb.__almost_eq__(self.lb0)
-        assert not lb.__almost_eq__(self.lb1)
+        lb11 = prtecan.Labelblock(csvl[idxs[1] :])
+        csvl = prtecan.read_xls(data_tests / "290513_8.8.xls")  # Gain=99
+        idxs = prtecan.lookup_listoflines(csvl)
+        lb12 = prtecan.Labelblock(csvl[idxs[1] :])
+        assert lb11 != lb12
+        assert lb11.__almost_eq__(lb12)
+        assert not lb11.__almost_eq__(self.lb0)
 
     def test_overvalue(self) -> None:
         """It detects saturated data ("OVER")."""
@@ -235,30 +239,62 @@ class TestLabelblocksGroup:
 
     def setup_class(self) -> None:
         """Initialize a labelblocksgroup reading (and concatenating) 2 xls files."""
-        self.tf1 = prtecan.Tecanfile(data_tests / "290212_5.78.xls")
-        self.tf2 = prtecan.Tecanfile(data_tests / "290212_6.38.xls")
+        self.tf1 = prtecan.Tecanfile(data_tests / "290513_5.5.xls")
+        self.tf2 = prtecan.Tecanfile(data_tests / "290513_7.2.xls")
+        self.tf3 = prtecan.Tecanfile(data_tests / "290513_8.8.xls")
         self.metadata = self.tf2.labelblocks[0].metadata
-        self.lb_grp = prtecan.LabelblocksGroup(
+        self.lbg1 = prtecan.LabelblocksGroup(
             [self.tf1.labelblocks[0], self.tf2.labelblocks[0]]
         )
-
-    def test_labelblock__eq(self) -> None:
-        """It groups Labelblocks with compatible metadata."""
-        assert prtecan.Labelblock.__eq__(
-            self.tf1.labelblocks[1], self.tf2.labelblocks[1]
+        self.lbg2 = prtecan.LabelblocksGroup(
+            [self.tf2.labelblocks[1], self.tf3.labelblocks[1]]
         )
 
-    def test_temperatures(self) -> None:
-        """It reads Temperature metadata."""
-        assert self.lb_grp.metadata.get("Temperature") is None
-        # Because Gain is in common while Temperature is not.
-        assert self.lb_grp.metadata["Gain"].value == 81
-        assert self.lb_grp.metadata["Number of Flashes"].value == 10
+    def test_metadata(self) -> None:
+        """Merge only shared metadata."""
+        assert self.lbg1.metadata.get("Temperature") is None
+        assert self.lbg2.metadata.get("Temperature") is None
+        assert self.lbg2.metadata.get("Gain") is None
+        assert self.lbg2.labelblocks[0].metadata["Gain"].value == 98
+        assert self.lbg2.labelblocks[1].metadata["Gain"].value == 99
+        # Common metadata.
+        assert self.lbg1.metadata["Gain"].value == 94
+        assert self.lbg1.metadata["Number of Flashes"].value == 10
 
     def test_data(self) -> None:
-        """It reads cell data."""
-        assert self.lb_grp.data["A01"] == [30344, 30072]
-        assert self.lb_grp.data["H12"] == [21287, 20888]
+        """Merge data."""
+        assert self.lbg1.data["A01"] == [18713, 17088]  # type: ignore
+        assert self.lbg1.data["H12"] == [28596, 25771]  # type: ignore
+        assert self.lbg2.data is None
+
+    def test_data_normalized(self) -> None:
+        """Merge data_normalized."""
+        np.testing.assert_almost_equal(
+            self.lbg2.data_normalized["H12"], [693.980, 714.495], 3
+        )
+        np.testing.assert_almost_equal(
+            self.lbg1.data_normalized["A01"], [995.372, 908.936], 3
+        )
+
+    def test_data_buffersubtracted(self) -> None:
+        """Merge data_buffersubtracted."""
+        self.lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        self.lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        np.testing.assert_almost_equal(
+            self.lbg1.data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
+        )
+        assert self.lbg2.data_buffersubtracted is None
+
+    def test_data_buffersubtracted_norm(self) -> None:
+        """Merge data_buffersubtracted."""
+        self.lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        self.lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        np.testing.assert_almost_equal(
+            self.lbg1.data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
+        )
+        np.testing.assert_almost_equal(
+            self.lbg2.data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
+        )
 
     def test_notequal_labelblocks(self) -> None:
         """It raises Exception when concatenating unequal labelblocks."""
@@ -266,133 +302,128 @@ class TestLabelblocksGroup:
             prtecan.LabelblocksGroup([self.tf1.labelblocks[0], self.tf2.labelblocks[1]])
 
 
-class TestTecanfilesGroup1:
-    """Test TecanfilesGroup class (2 labelblocksgroup in the same order)."""
+class TestTecanfileGroup:
+    class TestAllEqLbgs:
+        """Test TecanfilesGroup class (2 labelblocksgroup in the same order)."""
 
-    def setup_class(self) -> None:
-        """Initialize file lists for pH and Cl."""
-        filenames = ["290212_5.78.xls", "290212_6.38.xls", "290212_6.83.xls"]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-        self.group = prtecan.TecanfilesGroup(tecanfiles)
+        def setup_class(self) -> None:
+            """Initialize file lists for pH and Cl."""
+            filenames = ["290513_5.5.xls", "290513_7.2.xls"]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            self.group = prtecan.TecanfilesGroup(tecanfiles)
 
-    def test_generalmetadata(self) -> None:
-        """It parses general metadata."""
-        assert (
-            self.group.metadata["Plate"].value == "PE 96 Flat Bottom White   [PE.pdfx]"
-        )
-        assert self.group.metadata["Shaking (Linear) Amplitude:"] == prtecan.Metadata(
-            2.0, ["mm"]
-        )
-        assert self.group.metadata["Shaking (Linear) Duration:"] == prtecan.Metadata(
-            50.0, ["s"]
-        )
-        assert self.group.metadata["System"].value == "TECANROBOT"
+        def test_metadata(self) -> None:
+            """It parses general metadata."""
+            assert (
+                self.group.metadata["Plate"].value
+                == "PE 96 Flat Bottom White   [PE.pdfx]"
+            )
+            assert self.group.metadata["System"].value == "TECANROBOT"
 
-    def test_labelblocksgroups(self) -> None:
-        """It generates 2 labelblocksgroups for pH list.
+        def test_labelblocksgroups(self) -> None:
+            """It generates 2 labelblocksgroups for pH list.
 
-        Test metadata and data.
-        """
-        lbg0 = self.group.labelblocksgroups[0]
-        lbg1 = self.group.labelblocksgroups[1]
-        # metadata
-        assert lbg0.metadata["Number of Flashes"].value == 10.0
-        assert lbg1.metadata["Gain"].value == 93.0
-        # data
-        assert lbg0.data["A01"] == [30344, 30072, 31010]
-        assert lbg1.data["A01"] == [6289, 9165, 12326]
-        assert lbg0.data["H12"] == [21287, 20888, 21209]
-        assert lbg1.data["H12"] == [4477, 5849, 7165]
+            Test metadata and data.
+            """
+            lbg0 = self.group.labelblocksgroups[0]
+            lbg1 = self.group.labelblocksgroups[1]
+            # metadata
+            assert lbg0.metadata["Number of Flashes"].value == 10.0
+            assert lbg1.metadata["Gain"].value == 98.0
+            # data
+            assert lbg0.data["A01"] == [18713, 17088]  # type: ignore
+            assert lbg0.data["H12"] == [28596, 25771]  # type: ignore
+            assert lbg1.data["A01"] == [7878, 8761]  # type: ignore
+            assert lbg1.data["H12"] == [14226, 13602]  # type: ignore
+            # data normalized ... enough in lbg
 
+    class TestAlmostEqLbgs:
+        """Test TecanfilesGroup when one labelblocksgroup has only almost equal labelblocks."""
 
-class TestTecanfilesGroup2:
-    """Test TecanfilesGroup when one labelblocksgroup has only almost equal labelblocks."""
+        def setup_class(self) -> None:
+            """Initialize file lists for pH and Cl."""
+            filenames = [
+                "290513_5.5.xls",  # Label1 and Label2
+                "290513_7.2.xls",  # Label1 and Label2
+                "290513_8.8.xls",  # Label1 and Label2 with different metadata
+            ]
+            self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            with pytest.warns(UserWarning) as self.record:
+                self.group = prtecan.TecanfilesGroup(self.tecanfiles)
 
-    def setup_class(self) -> None:
-        """Initialize file lists for pH and Cl."""
-        filenames = [
-            "290513_5.5.xls",  # Label1 and Label2
-            "290513_7.2.xls",  # Label1 and Label2
-            "290513_8.8.xls",  # Label1 and Label2 with different metadata
-        ]
-        self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-        with pytest.warns(UserWarning) as self.record:
-            self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+        def test_warn(self) -> None:
+            """It warns about difference in labelblocks XXX."""
+            assert "Different LabelblocksGroup among filenames:" in str(
+                self.record[0].message
+            )
 
-    def test_warn(self) -> None:
-        """It warns about difference in labelblocks XXX."""
-        assert "Different LabelblocksGroup among filenames:" in str(
-            self.record[0].message
-        )
+        def test_labelblocksgroups(self) -> None:
+            """It generates 1 std XXX labelblocksgroups."""
+            lbg0 = self.group.labelblocksgroups[0]
+            # metadata
+            assert lbg0.metadata["Number of Flashes"].value == 10.0
+            assert lbg0.metadata["Gain"].value == 94
+            # data
+            assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]  # type: ignore
+            assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]  # type: ignore
 
-    def test_labelblocksgroups(self) -> None:
-        """It generates 1 std XXX labelblocksgroups."""
-        lbg0 = self.group.labelblocksgroups[0]
-        # metadata
-        assert lbg0.metadata["Number of Flashes"].value == 10.0
-        assert lbg0.metadata["Gain"].value == 94
-        # data
-        assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
-        assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
+        def test_mergeable_labelblocksgroups(self) -> None:
+            """It generates 1 std XXX labelblocksgroups."""
+            lbg1 = self.group.labelblocksgroups[1]
+            # metadata
+            assert lbg1.metadata["Number of Flashes"].value == 10.0
+            assert lbg1.metadata.get("Gain") is None
+            assert lbg1.data is None
+            # data_normalized
+            np.testing.assert_almost_equal(
+                lbg1.data_normalized["A01"], [401.9387755, 446.9897959, 450.0]
+            )
+            np.testing.assert_almost_equal(
+                lbg1.data_normalized["H12"], [725.8163265, 693.9795918, 714.4949494]
+            )
 
-    def test_mergeable_labelblocksgroups(self) -> None:
-        """It generates 1 std XXX labelblocksgroups."""
-        lbg1 = self.group.labelblocksgroups[1]
-        # metadata
-        assert lbg1.metadata["Number of Flashes"].value == 10.0
-        assert lbg1.metadata.get("Gain") is None
-        # # data
-        np.testing.assert_almost_equal(
-            lbg1.data["A01"], [401.9387755, 446.9897959, 450.0]
-        )
-        np.testing.assert_almost_equal(
-            lbg1.data["H12"], [725.8163265, 693.9795918, 714.4949494]
-        )
+    class TestOnly1commonLbg:
+        """Test TecanfilesGroup with different number of labelblocks."""
 
+        def setup_class(self) -> None:
+            """Initialize file lists for pH and Cl."""
+            filenames = [
+                "290212_5.78.xls",  # Label1 and Label2
+                "290212_20.xls",  # Label2 only
+                "290212_100.xls",  # Label2 only
+            ]
+            self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            with pytest.warns(UserWarning) as self.record:
+                self.group = prtecan.TecanfilesGroup(self.tecanfiles)
 
-class TestTecanfilesGroup3:
-    """Test TecanfilesGroup with different number of labelblocks."""
+        def test_warn(self) -> None:
+            """It warns about difference in labelblocks order."""
+            assert "Different LabelblocksGroup among filenames" in str(
+                self.record[0].message
+            )
 
-    def setup_class(self) -> None:
-        """Initialize file lists for pH and Cl."""
-        filenames = [
-            "290212_5.78.xls",  # Label1 and Label2
-            "290212_20.xls",  # Label2 only
-            "290212_100.xls",  # Label2 only
-        ]
-        self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-        with pytest.warns(UserWarning) as self.record:
-            self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+        def test_labelblocksgroups(self) -> None:
+            """It generates 1 labelblocksgroups for Cl list. It tests only data."""
+            lbg = self.group.labelblocksgroups[0]
+            # metadata
+            assert lbg.metadata["Number of Flashes"].value == 10.0
+            assert lbg.metadata["Gain"].value == 93.0
+            # data
+            assert lbg.data["A01"] == [6289, 6462, 6465]  # type: ignore
+            assert lbg.data["H12"] == [4477, 4705, 4918]  # type: ignore
 
-    def test_warn(self) -> None:
-        """It warns about difference in labelblocks order."""
-        assert "Different LabelblocksGroup among filenames" in str(
-            self.record[0].message
-        )
+    class TestFailToMerge:
+        """Test TecanfilesGroup without mergeable labelblocks."""
 
-    def test_labelblocksgroups(self) -> None:
-        """It generates 1 labelblocksgroups for Cl list. It tests only data."""
-        lbg = self.group.labelblocksgroups[0]
-        # metadata
-        assert lbg.metadata["Number of Flashes"].value == 10.0
-        assert lbg.metadata["Gain"].value == 93.0
-        # data
-        assert lbg.data["A01"] == [6289, 6462, 6465]
-        assert lbg.data["H12"] == [4477, 4705, 4918]
-
-
-class TestTecanfilesGroup4Raise:
-    """Test TecanfilesGroup without mergeable labelblocks."""
-
-    def test_raise_exception(self) -> None:
-        """It raises Exception when there is no way to build labelblocksGroup."""
-        filenames = ["290212_5.78.xls", "290513_5.5_bad.xls"]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-        with pytest.raises(
-            ValueError,
-            match=r"No common labelblock in filenames: .*290212_5.78.xls.*290513_5.5_bad.xls",
-        ):
-            prtecan.TecanfilesGroup(tecanfiles)
+        def test_raise_exception(self) -> None:
+            """It raises Exception when there is no way to build labelblocksGroup."""
+            filenames = ["290513_5.5.xls", "290513_5.5_bad.xls"]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            with pytest.raises(
+                ValueError,
+                match=r"No common labelblock in filenames: .*290513_5.5_bad.xls",
+            ):
+                prtecan.TecanfilesGroup(tecanfiles)
 
 
 class TestTitration:
