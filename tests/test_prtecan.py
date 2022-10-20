@@ -687,7 +687,7 @@ class TestTitrationAnalysis:
             # for k in self.tit_an.scheme["buffer"]:
             for k in self.tit.buffer_wells:
                 lbg.data.pop(k)
-        self.tit_an.scheme.pop("buffer")  # Needed when testing only this function
+        # self.tit_an.scheme.pop("buffer")  # Needed when testing only this function
         self.tit_an.fit("pH")
         fit0 = self.tit_an.fittings[0].sort_index()
         fit1 = self.tit_an.fittings[1].sort_index()
