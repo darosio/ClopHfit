@@ -1,5 +1,19 @@
 # Changelog
 
+### 
+
+build(deps): bump seaborn from 0.12.0 to 0.12.1 (#29)
+build(deps): bump scipy from 1.9.1 to 1.9.3 (#28)
+build(deps): bump pandas from 1.5.0 to 1.5.1 (#27)
+build(deps): bump pip from 22.2.2 to 22.3 in /.github/workflows (#26)
+build(deps): bump pandas-stubs from 1.4.4.220919 to 1.5.0.221012 (#25)
+build(deps): bump numpy from 1.23.3 to 1.23.4 (#24)
+build(deps): bump rpy2 from 3.5.4 to 3.5.5 (#23)
+build(deps): bump poetry from 1.2.0 to 1.2.2 in /.github/workflows (#21)
+build(deps): bump emcee from 3.1.2 to 3.1.3 (#18)
+build(deps): bump codecov/codecov-action from 3.1.0 to 3.1.1 (#16)
+build(deps): bump actions/setup-python from 1 to 4 (#15)
+
 ## v0.3.9 (2022-10-02)
 
 ### Feat
