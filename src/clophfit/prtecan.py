@@ -230,6 +230,24 @@ def calculate_conc(
     return concs  # , vol_tot
 
 
+def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
+    """Apply dilution correction.
+
+    Parameters
+    ----------
+    additions: list[float]
+        List of initial volume (index=0) followed by all additions.
+
+    Returns
+    -------
+    NDArray[float]
+        Dilution correction vector.
+    """
+    volumes = np.cumsum(additions)
+    correction = volumes / volumes[0]
+    return np.array(correction)
+
+
 def fz_kd_singlesite(
     k: float, p: NDArray[np.float_] | Sequence[float], x: NDArray[np.float_]
 ) -> NDArray[np.float_]:
@@ -839,6 +857,11 @@ class Titration(TecanfilesGroup):
         Tecanfiles to be grouped.
     """
 
+    _additions: list[float] = field(init=False, repr=False)
+    _data_corrected: list[dict[str, list[float]] | None] | None = field(init=False)
+    _data_corrected_norm: list[dict[str, list[float]]] | None = field(init=False)
+    _buffer_wells: list[str] = field(init=False, repr=False)
+
     def __init__(self, conc: Sequence[float], tecanfiles: list[Tecanfile]) -> None:
         self.conc = conc
         super().__init__(tecanfiles)
@@ -875,6 +898,57 @@ class Titration(TecanfilesGroup):
         conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
         return cls(conc, tecanfiles)
+
+    @property
+    def additions(self) -> list[float]:
+        """List of initial volume followed by additions."""
+        return self._additions
+
+    @additions.setter
+    def additions(self, additions: list[float]) -> None:
+        self._additions = additions
+        self._data_corrected = None
+        self._data_corrected_norm = None
+
+    @property
+    def buffer_wells(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        self._data_corrected = None
+        self._data_corrected_norm = None
+
+    @property
+    def data_corrected(self) -> list[dict[str, list[float]] | None] | None:
+        """Buffer subtracted data."""
+        if self._data_corrected is None:
+            corr = dilution_correction(self.additions)
+            self._data_corrected = []
+            for lbg in self.labelblocksgroups:
+                lbg.buffer_wells = self.buffer_wells
+                if lbg.data_buffersubtracted is None:
+                    self._data_corrected.append(None)
+                else:
+                    self._data_corrected.append(
+                        {k: v * corr for k, v in lbg.data_buffersubtracted.items()}
+                    )
+        return self._data_corrected
+
+    @property
+    def data_corrected_norm(self) -> list[dict[str, list[float]]] | None:
+        """Buffer subtracted data."""
+        if self._data_corrected_norm is None:
+            corr = dilution_correction(self.additions)
+            self._data_corrected_norm = []
+            for lbg in self.labelblocksgroups:
+                lbg.buffer_wells = self.buffer_wells
+                self._data_corrected_norm.append(
+                    {k: v * corr for k, v in lbg.data_buffersubtracted_norm.items()}
+                )
+        return self._data_corrected_norm
 
     def export_dat(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
@@ -925,7 +999,7 @@ class TitrationAnalysis:
     conc: Sequence[float] = field(init=False, repr=True)
     #: Deepcopy from titration.
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
-    additions: Sequence[float] = field(init=False, repr=True)
+    additions: Sequence[float] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Create attributes."""
@@ -944,61 +1018,12 @@ class TitrationAnalysis:
         self.conc = self.titration.conc
         self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
 
-    def subtract_bg(self) -> None:
-        """Subtract average buffer values for each titration point."""
-        buffer_keys = self.scheme.pop("buffer")
-        for lbg in self.labelblocksgroups:
-            lbg.buffer = {}
-            for k in buffer_keys:
-                lbg.buffer[k] = lbg.data.pop(k)
-            bgs = list(lbg.buffer.values())
-            bg = np.mean(bgs, axis=0)
-            bg_sd = np.std(bgs, axis=0)
-            for k in lbg.data:
-                lbg.data[k] -= bg
-            lbg.buffer["bg"] = bg
-            lbg.buffer["bg_sd"] = bg_sd
-
-    def dilution_correction(self, additionsfile: str) -> None:
-        """Apply dilution correction.
-
-        Parameters
-        ----------
-        additionsfile: str
-            File listing volume additions during titration.
-
-        """
-        if hasattr(self, "additions"):
-            warnings.warn("Dilution correction was already applied.")
-            return
-        df = pd.read_table(additionsfile, names=["add"])
-        self.additions = df["add"].tolist()
-        volumes = np.cumsum(self.additions)
-        corr = volumes / volumes[0]
-        for lbg in self.labelblocksgroups:
-            for k in lbg.data:
-                lbg.data[k] *= corr
-
-    def metadata_normalization(self) -> None:
-        """Normalize signal using gain, flashes and integration time."""
-        if hasattr(self, "normalized"):
-            warnings.warn("Normalization using metadata was already applied.")
-            return
-        for lbg in self.labelblocksgroups:
-            # new lbg metadata
-            corr = 1000 / float(lbg.metadata["Gain"].value)  # type: ignore
-            corr /= float(lbg.metadata["Integration Time"].value)  # type: ignore
-            corr /= float(lbg.metadata["Number of Flashes"].value)  # type: ignore
-            for k in lbg.data.keys():
-                lbg.data[k] = [v * corr for v in lbg.data[k]]
-        self.normalized = True
-
     def _get_keys(self) -> None:
         """Get plate positions of crtl and unk samples."""
         self.keys_ctrl = [k for ctr in self.scheme.tolist() for k in ctr]
         self.names_ctrl = list(self.scheme.to_dict())
         self.keys_unk = list(
-            self.labelblocksgroups[0].data.keys() - set(self.keys_ctrl)
+            self.labelblocksgroups[0].data_normalized.keys() - set(self.keys_ctrl)
         )
 
     def fit(
@@ -1039,7 +1064,7 @@ class TitrationAnalysis:
         fittings = []
         for lbg in self.labelblocksgroups:
             fitting = pd.DataFrame()
-            for k, y in lbg.data.items():
+            for k, y in lbg.data.items():  # type: ignore
                 res = fit_titration(
                     kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
                 )
@@ -1052,8 +1077,8 @@ class TitrationAnalysis:
             fittings.append(fitting)
         # global weighted on relative residues of single fittings
         fitting = pd.DataFrame()
-        for k, y in self.labelblocksgroups[0].data.items():
-            y2 = np.array(self.labelblocksgroups[1].data[k])
+        for k, y in self.labelblocksgroups[0].data.items():  # type: ignore
+            y2 = np.array(self.labelblocksgroups[1].data[k])  # type: ignore
             residue = y - self.fz(
                 fittings[0]["K"].loc[k],
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
@@ -1224,7 +1249,7 @@ class TitrationAnalysis:
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
         for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-            y = lbg.data[key]
+            y = lbg.data[key]  # type: ignore
             # ## data
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
@@ -1279,7 +1304,7 @@ class TitrationAnalysis:
         ax1.grid(0, axis="y")  # switch off horizontal
         ax2.grid(1, axis="both")
         # ## only residues
-        y = self.labelblocksgroups[0].data[key]
+        y = self.labelblocksgroups[0].data[key]  # type: ignore
         ax1.plot(
             x,
             (y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)),
@@ -1287,7 +1312,7 @@ class TitrationAnalysis:
             lw=1.5,
             color=colors[0],
         )
-        y = self.labelblocksgroups[1].data[key]
+        y = self.labelblocksgroups[1].data[key]  # type: ignore
         ax2.plot(
             x,
             (y - self.fz(df.K.loc[key], [df.SA2.loc[key], df.SB2.loc[key]], x)),
@@ -1426,9 +1451,12 @@ class TitrationAnalysis:
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
         for i, lbg in enumerate(self.labelblocksgroups):
-            buf = copy.deepcopy(lbg.buffer)
-            bg = buf.pop("bg")  # type: ignore
-            bg_sd = buf.pop("bg_sd")  # type: ignore
+            if lbg.data_buffersubtracted:
+                bg = []
+                bg_sd = []
+                for lb in lbg.labelblocks:
+                    bg.append(lb.buffer)
+                    bg_sd.append(lb.sd_buffer)
             rowlabel = ["Temp"]
             lines = [
                 [
@@ -1438,8 +1466,9 @@ class TitrationAnalysis:
                     ]
                 ]
             ]
-            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
-            for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
+            buf = {key: lbg.data[key] for key in self.titration.buffer_wells}  # type: ignore
+            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
+            for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
                 lines.append([f"{x:6.1f}" for x in v])
                 ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])

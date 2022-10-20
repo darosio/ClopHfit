@@ -151,13 +151,13 @@ def tecan(  # type: ignore
     if scheme:
         titan = prtecan.TitrationAnalysis(tit, scheme)
         if bg:
-            titan.subtract_bg()
+            pass  # titan.subtract_bg()
         if dil:
-            titan.dilution_correction(dil)
+            pass  # titan.dilution_correction(dil)
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))
         if norm:
-            titan.metadata_normalization()
+            pass  # titan.metadata_normalization()
     else:
         titan = prtecan.TitrationAnalysis(tit)
     tit.export_dat(out / dat)
