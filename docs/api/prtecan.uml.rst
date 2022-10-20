@@ -59,21 +59,23 @@
      #conc: Sequence
 	 #tecanfiles: list
 	 #fromlistfile(Path)
+	 +@additions: list
+	 +@buffer_wells: list
+	 +@data_corrected: list[dict]
+	 +@data_corrected_norm: list[dict]
 	 +export_dat()
    }
 
    Titration --|> TecanfilesGroup
 
    class TitrationAnalysis{
-     titration: Titration
-	 schemefile: str|Path
+     #titration: Titration
+	 #schemefile: str|Path
 	 +scheme: pd.Series[Any]
 	 +conc: Sequence[float]
 	 +labelblocksgroups: list[LabelblocksGroup]
 	 +additions: Sequence[float]
-	 +subtract_bg()
-	 +dilution_correction()
-	 +metadata_normalization()
+	 _get_heys()
 	 +fit()
 	 +plot_k()
 	 +plot_well()
