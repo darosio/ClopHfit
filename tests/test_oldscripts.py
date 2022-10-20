@@ -22,7 +22,7 @@ Rscript = Tuple[Tuple[str, str, List[str]], Any]
 
 
 class TestTitrationFit:
-    """It test the old ``fit_titration.py`` script."""
+    """Test the old ``fit_titration.py`` script."""
 
     note_fp = "./NTT-A04-Cl_note"
     csv_files = ["./Meas/A04 Cl_A.csv", "./Meas/A04 Cl_B.csv"]
@@ -50,7 +50,7 @@ SB =  -0.274\nsSB =  0.002\n""",
     )
     def run_script(self, request: Any) -> Iterator[Rscript]:
         """Run the script as class fixture."""
-        cli = "../../src/clophfit/old/fit_titration.py"
+        cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
         process = subprocess.Popen(
             [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]

@@ -699,7 +699,6 @@ class TestTitrationAnalysis:
             fit1,
             check_like=True,
             check_categorical=False,
-            check_flags=False,
             atol=1e-3,
         )
         # 0:-1
