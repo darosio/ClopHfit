@@ -1,6 +1,6 @@
 # Changelog
 
-### 
+###
 
 build(deps): bump seaborn from 0.12.0 to 0.12.1 (#29)
 build(deps): bump scipy from 1.9.1 to 1.9.3 (#28)
