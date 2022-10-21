@@ -51,7 +51,7 @@ SB =  -0.274\nsSB =  0.002\n""",
     )
     def run_script(self, request: Any) -> Iterator[Rscript]:
         """Run the script as class fixture."""
-        cli = PurePath("../../src/clophfit/old/fit_titration.py")
+        cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
         process = subprocess.Popen(
             [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]
@@ -60,6 +60,7 @@ SB =  -0.274\nsSB =  0.002\n""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
+            shell=False,
         )
         yield request.param, process.communicate()
         if (_data / "bs.txt").exists():
