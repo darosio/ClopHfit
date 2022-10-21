@@ -436,7 +436,7 @@ class Labelblock:
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
-    _data_normalized: dict[str, float] | None = field(init=False, repr=False)
+    _data_normalized: dict[str, float] | None = None
     _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
     _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
     _buffer_wells: list[str] = field(init=False, repr=False)
@@ -452,7 +452,6 @@ class Labelblock:
             stripped[14:23] = []
             self.metadata = extract_metadata(stripped)
             self.data = self._extract_data(lines[15:23])
-            self._data_normalized = None
         else:
             raise ValueError("Cannot build Labelblock: not 96 wells?")
 
