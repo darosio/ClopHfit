@@ -138,6 +138,7 @@ bootstrap:""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
+            shell=True,
         )
         return request.param, process.communicate()
 
