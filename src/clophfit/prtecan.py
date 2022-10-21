@@ -437,13 +437,13 @@ class Labelblock:
     #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
     _data_normalized: dict[str, float] | None = None
-    _data_buffersubtracted: dict[str, float] | None = field(init=False, repr=False)
-    _data_buffersubtracted_norm: dict[str, float] | None = field(init=False, repr=False)
-    _buffer_wells: list[str] = field(init=False, repr=False)
-    _buffer: float = field(init=False, repr=False)
-    _buffer_norm: float = field(init=False, repr=False)
-    _sd_buffer: float = field(init=False, repr=False)
-    _sd_buffer_norm: float = field(init=False, repr=False)
+    _data_buffersubtracted: dict[str, float] | None = None
+    _data_buffersubtracted_norm: dict[str, float] | None = None
+    _buffer_wells: list[str] | None = None
+    _buffer: float | None = None
+    _buffer_norm: float | None = None
+    _sd_buffer: float | None = None
+    _sd_buffer_norm: float | None = None
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
@@ -534,20 +534,20 @@ class Labelblock:
         return self._data_normalized
 
     @property
-    def buffer_wells(self) -> list[str]:
+    def buffer_wells(self) -> list[str] | None:
         """List of buffer wells."""
         return self._buffer_wells
 
     @buffer_wells.setter
     def buffer_wells(self, buffer_wells: list[str]) -> None:
         self._buffer_wells = buffer_wells
-        self._buffer = float(np.average([self.data[k] for k in self.buffer_wells]))
-        self._sd_buffer = float(np.std([self.data[k] for k in self.buffer_wells]))
+        self._buffer = float(np.average([self.data[k] for k in buffer_wells]))
+        self._sd_buffer = float(np.std([self.data[k] for k in buffer_wells]))
         self._buffer_norm = float(
-            np.average([self.data_normalized[k] for k in self.buffer_wells])
+            np.average([self.data_normalized[k] for k in buffer_wells])
         )
         self._sd_buffer_norm = float(
-            np.std([self.data_normalized[k] for k in self.buffer_wells])
+            np.std([self.data_normalized[k] for k in buffer_wells])
         )
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
@@ -555,26 +555,26 @@ class Labelblock:
     @property
     def data_buffersubtracted(self) -> dict[str, float]:
         """Buffer subtracted data."""
-        if isinstance(self.buffer, (float, int)):
-            if self._data_buffersubtracted is None:
+        if self._data_buffersubtracted is None:
+            if self.buffer:
                 self._data_buffersubtracted = {
                     k: v - self.buffer for k, v in self.data.items()
                 }
-            return self._data_buffersubtracted
-        else:
-            raise AttributeError("Provide a buffer value first.")
+            else:
+                self._data_buffersubtracted = {}
+        return self._data_buffersubtracted
 
     @property
     def data_buffersubtracted_norm(self) -> dict[str, float]:
         """Normalize buffer-subtracted data."""
-        if isinstance(self.buffer_norm, (float, int)):
-            if self._data_buffersubtracted_norm is None:
+        if self._data_buffersubtracted_norm is None:
+            if self.buffer_norm:
                 self._data_buffersubtracted_norm = {
                     k: v - self.buffer_norm for k, v in self.data_normalized.items()
                 }
-            return self._data_buffersubtracted_norm
-        else:
-            raise AttributeError("Provide a buffer value first.")
+            else:
+                self._data_buffersubtracted_norm = {}
+        return self._data_buffersubtracted_norm
 
     @property
     def buffer(self) -> float | None:
@@ -583,15 +583,10 @@ class Labelblock:
 
     @buffer.setter
     def buffer(self, value: float) -> None:
-        if hasattr(self, "_buffer") and self._buffer == value:
+        if self._buffer == value:
             return None
         self._data_buffersubtracted = None
         self._buffer = value
-
-    @property
-    def sd_buffer(self) -> float | None:
-        """Get standard deviation of buffer_wells values."""
-        return self._sd_buffer
 
     @property
     def buffer_norm(self) -> float | None:
@@ -600,10 +595,15 @@ class Labelblock:
 
     @buffer_norm.setter
     def buffer_norm(self, value: float) -> None:
-        if hasattr(self, "_buffer_norm") and self._buffer_norm == value:
+        if self._buffer_norm == value:
             return None
         self._data_buffersubtracted_norm = None
         self._buffer_norm = value
+
+    @property
+    def sd_buffer(self) -> float | None:
+        """Get standard deviation of buffer_wells values."""
+        return self._sd_buffer
 
     @property
     def sd_buffer_norm(self) -> float | None:
@@ -697,15 +697,11 @@ class LabelblocksGroup:
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: List of data in the same order of labelblocks.
-    data: dict[str, list[float]] | None = field(init=False, repr=True)
-    _data_normalized: dict[str, list[float]] | None = field(init=False, repr=False)
-    _data_buffersubtracted: dict[str, list[float]] | None = field(
-        init=False, repr=False
-    )
-    _data_buffersubtracted_norm: dict[str, list[float]] | None = field(
-        init=False, repr=False
-    )
-    _buffer_wells: list[str] = field(init=False, repr=False)
+    data: dict[str, list[float]] | None = None
+    _data_normalized: dict[str, list[float]] | None = None
+    _data_buffersubtracted: dict[str, list[float]] | None = None
+    _data_buffersubtracted_norm: dict[str, list[float]] | None = None
+    _buffer_wells: list[str] | None = None
 
     def __post_init__(self) -> None:
         """Create common metadata and data."""
@@ -715,13 +711,11 @@ class LabelblocksGroup:
             )
         if self.allequal:
             self.data = defaultdict(list)
-            self._data_normalized = None
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
                     self.data[key].append(lb.data[key])
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
-            self.data = None
             self._data_normalized = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
@@ -741,7 +735,7 @@ class LabelblocksGroup:
         return self._data_normalized
 
     @property
-    def buffer_wells(self) -> list[str]:
+    def buffer_wells(self) -> list[str] | None:
         """List of buffer wells."""
         return self._buffer_wells
 
@@ -756,7 +750,7 @@ class LabelblocksGroup:
         """Buffer subtracted data."""
         if self.data is None:
             return None
-        if self._data_buffersubtracted is None:
+        if self._data_buffersubtracted is None and self.buffer_wells:
             self._data_buffersubtracted = defaultdict(list)
             for lb in self.labelblocks:
                 lb.buffer_wells = self.buffer_wells
@@ -770,13 +764,16 @@ class LabelblocksGroup:
     def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
         """Buffer subtracted data."""
         if self._data_buffersubtracted_norm is None:
-            self._data_buffersubtracted_norm = defaultdict(list)
-            for lb in self.labelblocks:
-                lb.buffer_wells = self.buffer_wells
-                for key in self.labelblocks[0].data_normalized.keys():
-                    self._data_buffersubtracted_norm[key].append(
-                        lb.data_buffersubtracted_norm[key]
-                    )
+            if self.buffer_wells:
+                self._data_buffersubtracted_norm = defaultdict(list)
+                for lb in self.labelblocks:
+                    lb.buffer_wells = self.buffer_wells
+                    for key in self.labelblocks[0].data_normalized.keys():
+                        self._data_buffersubtracted_norm[key].append(
+                            lb.data_buffersubtracted_norm[key]
+                        )
+            else:
+                self._data_buffersubtracted_norm = {}
         return self._data_buffersubtracted_norm
 
 

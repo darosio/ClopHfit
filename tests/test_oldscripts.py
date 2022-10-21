@@ -59,7 +59,6 @@ SB =  -0.274\nsSB =  0.002\n""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
-            shell=True,
         )
         yield request.param, process.communicate()
         if (_data / "bs.txt").exists():
