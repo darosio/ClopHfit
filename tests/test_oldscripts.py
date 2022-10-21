@@ -4,7 +4,6 @@ from __future__ import annotations
 import subprocess
 import typing
 from pathlib import Path
-from pathlib import PurePath
 from typing import Any
 from typing import Iterator
 from typing import List
