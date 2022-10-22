@@ -693,14 +693,14 @@ class TestTitrationAnalysis:
         fit1 = self.tit_an.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
-        # pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
-        # pd.testing.assert_frame_equal(
-        #     df1,
-        #     fit1,
-        #     check_like=True,
-        #     check_categorical=False,
-        #     atol=1e-3,
-        # )
+        pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
+        pd.testing.assert_frame_equal(
+            df1,
+            fit1,
+            check_like=True,
+            check_categorical=False,
+            atol=1e-3,
+        )
         # 0:-1
         self.tit_an.fit("pH", fin=-1)
         fit0 = self.tit_an.fittings[0].sort_index()
