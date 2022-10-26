@@ -853,10 +853,10 @@ class Titration(TecanfilesGroup):
         Tecanfiles to be grouped.
     """
 
-    _additions: list[float] = field(init=False, repr=False)
-    _data_corrected: list[dict[str, list[float]] | None] | None = field(init=False)
-    _data_corrected_norm: list[dict[str, list[float]]] | None = field(init=False)
-    _buffer_wells: list[str] = field(init=False, repr=False)
+    _additions: list[float] | None = None
+    _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
+    _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
+    _buffer_wells: list[str] | None = None
 
     def __init__(self, conc: Sequence[float], tecanfiles: list[Tecanfile]) -> None:
         self.conc = conc
@@ -896,55 +896,55 @@ class Titration(TecanfilesGroup):
         return cls(conc, tecanfiles)
 
     @property
-    def additions(self) -> list[float]:
+    def additions(self) -> list[float] | None:
         """List of initial volume followed by additions."""
         return self._additions
 
     @additions.setter
     def additions(self, additions: list[float]) -> None:
         self._additions = additions
-        self._data_corrected = None
-        self._data_corrected_norm = None
+        self._data_dilutioncorrected = None
+        self._data_dilutioncorrected_norm = None
 
     @property
-    def buffer_wells(self) -> list[str]:
+    def buffer_wells(self) -> list[str] | None:
         """List of buffer wells."""
         return self._buffer_wells
 
     @buffer_wells.setter
     def buffer_wells(self, buffer_wells: list[str]) -> None:
         self._buffer_wells = buffer_wells
-        self._data_corrected = None
-        self._data_corrected_norm = None
+        self._data_dilutioncorrected = None
+        self._data_dilutioncorrected_norm = None
 
     @property
-    def data_corrected(self) -> list[dict[str, list[float]] | None] | None:
+    def data_dilutioncorrected(self) -> list[dict[str, list[float]] | None] | None:
         """Buffer subtracted data."""
-        if self._data_corrected is None:
+        if self._data_dilutioncorrected is None and self.additions:
             corr = dilution_correction(self.additions)
-            self._data_corrected = []
+            self._data_dilutioncorrected = []
             for lbg in self.labelblocksgroups:
                 lbg.buffer_wells = self.buffer_wells
                 if lbg.data_buffersubtracted is None:
-                    self._data_corrected.append(None)
+                    self._data_dilutioncorrected.append(None)
                 else:
-                    self._data_corrected.append(
+                    self._data_dilutioncorrected.append(
                         {k: v * corr for k, v in lbg.data_buffersubtracted.items()}
                     )
-        return self._data_corrected
+        return self._data_dilutioncorrected
 
     @property
-    def data_corrected_norm(self) -> list[dict[str, list[float]]] | None:
+    def data_dilutioncorrected_norm(self) -> list[dict[str, list[float]]] | None:
         """Buffer subtracted data."""
-        if self._data_corrected_norm is None:
+        if self._data_dilutioncorrected_norm is None and self.additions:
             corr = dilution_correction(self.additions)
-            self._data_corrected_norm = []
+            self._data_dilutioncorrected_norm = []
             for lbg in self.labelblocksgroups:
                 lbg.buffer_wells = self.buffer_wells
-                self._data_corrected_norm.append(
+                self._data_dilutioncorrected_norm.append(
                     {k: v * corr for k, v in lbg.data_buffersubtracted_norm.items()}
                 )
-        return self._data_corrected_norm
+        return self._data_dilutioncorrected_norm
 
     def export_dat(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.

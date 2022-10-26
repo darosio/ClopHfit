@@ -1,7 +1,7 @@
 .. uml::
 
    class Labelblock{
-     lines: list_of_lines
+     #lines: list_of_lines
 	 #path: Path, optional
      +metadata : dict
      +data : dict e.g.{'H12':float}

@@ -628,7 +628,7 @@ class TestTitrationAnalysis:
         # self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
         np.testing.assert_array_equal(self.tit.additions, [100, 2, 2, 2, 2, 2, 2])
         np.testing.assert_almost_equal(
-            self.tit.data_corrected[1]["A12"],  # type: ignore
+            self.tit.data_dilutioncorrected[1]["A12"],  # type: ignore
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
@@ -636,7 +636,7 @@ class TestTitrationAnalysis:
         """It normalizes data."""
         # self.tit_an.metadata_normalization()
         np.testing.assert_almost_equal(
-            self.tit.data_corrected_norm[0]["A12"],  # type: ignore
+            self.tit.data_dilutioncorrected_norm[0]["A12"],  # type: ignore
             [
                 434.65053763,
                 651.77177419,
@@ -648,7 +648,7 @@ class TestTitrationAnalysis:
             ],
         )
         np.testing.assert_almost_equal(
-            self.tit.data_corrected_norm[1]["A12"],  # type: ignore
+            self.tit.data_dilutioncorrected_norm[1]["A12"],  # type: ignore
             [
                 871.27232143,
                 671.85669643,
@@ -683,7 +683,7 @@ class TestTitrationAnalysis:
     def test_fit(self) -> None:
         """It fits each label separately."""
         for i, lbg in enumerate(self.tit_an.labelblocksgroups):
-            lbg.data = self.tit_an.titration.data_corrected_norm[i]  # type: ignore
+            lbg.data = self.tit_an.titration.data_dilutioncorrected_norm[i]  # type: ignore
             # for k in self.tit_an.scheme["buffer"]:
             for k in self.tit.buffer_wells:
                 lbg.data.pop(k)
