@@ -1809,7 +1809,7 @@ docutils = ">=0.11,<1.0"
 
 [[package]]
 name = "rpy2"
-version = "3.5.4"
+version = "3.5.5"
 description = "Python interface to the R language (embedded R)"
 category = "main"
 optional = false
@@ -3779,11 +3779,10 @@ restructuredtext-lint = [
     {file = "restructuredtext_lint-1.4.0.tar.gz", hash = "sha256:1b235c0c922341ab6c530390892eb9e92f90b9b75046063e047cacfb0f050c45"},
 ]
 rpy2 = [
-    {file = "rpy2-3.5.4-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:9984fc765f02123eb82f74bbe27177165651eeb04b364181a59752f2e213ef41"},
-    {file = "rpy2-3.5.4-cp37-cp37m-macosx_10_15_x86_64.whl", hash = "sha256:816560379f893403ddd96d9e364414b223c0d51ef6f7d8b6c42dacbafe27b1d8"},
-    {file = "rpy2-3.5.4-cp38-cp38-macosx_10_15_x86_64.whl", hash = "sha256:d3839ee3a030311afe8084746a76e025dd683e65a38d1e7876e5e56a2203d9ac"},
-    {file = "rpy2-3.5.4-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:99bce1c37763fc1639fb4c5a263e975b5be65f29dbbd50c3e75d284075802fde"},
-    {file = "rpy2-3.5.4.tar.gz", hash = "sha256:ba0a877b2b96e27d2091383d4652b82aa2271cff4a505243d45da430b712aaf5"},
+    {file = "rpy2-3.5.5-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:bdf5140c7df853d9f73803145d1d6e304818e2dfa5612f85d41dbb2c9bf4210a"},
+    {file = "rpy2-3.5.5-cp38-cp38-macosx_10_15_x86_64.whl", hash = "sha256:8ed04bbc38e30213e68d53c41fbac69d0316342ce95c5c2645a530afc2bd07d8"},
+    {file = "rpy2-3.5.5-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:f759e12761690934ab4d6a4b36e61da6ae80216523b41630b249db58c331e8d9"},
+    {file = "rpy2-3.5.5.tar.gz", hash = "sha256:a252c40e21cf4f23ac6e13bffdcb82b5900b49c3043ed8fd31da5c61fb58d037"},
 ]
 "ruamel.yaml" = [
     {file = "ruamel.yaml-0.17.21-py3-none-any.whl", hash = "sha256:742b35d3d665023981bd6d16b3d24248ce5df75fdb4e2924e93a05c1f8b61ca7"},
