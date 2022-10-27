@@ -432,6 +432,7 @@ class Labelblock:
 
     lines: InitVar[list[list[str | int | float]]]
     path: Path | None = None
+
     #: Metadata specific for this Labelblock.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: The 96 data values as {'well_name', value}.
@@ -649,6 +650,7 @@ class Tecanfile:
     """
 
     path: Path
+
     #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: All labelblocks contained in this file.
@@ -694,6 +696,7 @@ class LabelblocksGroup:
 
     labelblocks: list[Labelblock]
     allequal: bool = False
+
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: List of data in the same order of labelblocks.
@@ -803,6 +806,7 @@ class TecanfilesGroup:
     """
 
     tecanfiles: list[Tecanfile]
+
     #: Each group contains its own data like a titration. ??
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
     #: Metadata shared by all tecanfiles.
@@ -841,26 +845,25 @@ class TecanfilesGroup:
         self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
 
 
-@dataclass(init=False)
+@dataclass
 class Titration(TecanfilesGroup):
     """TecanfileGroup + concentrations.
 
     Parameters
     ----------
-    conc : Sequence[float]
-        Concentration or pH values.
     tecanfiles : list[Tecanfile]
         Tecanfiles to be grouped.
+    conc : Sequence[float]
+        Concentration or pH values.
     """
+
+    tecanfiles: list[Tecanfile]
+    conc: Sequence[float]
 
     _additions: list[float] | None = None
     _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
     _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
     _buffer_wells: list[str] | None = None
-
-    def __init__(self, conc: Sequence[float], tecanfiles: list[Tecanfile]) -> None:
-        self.conc = conc
-        super().__init__(tecanfiles)
 
     @classmethod
     def fromlistfile(cls, listfile: Path | str) -> Titration:
@@ -893,7 +896,7 @@ class Titration(TecanfilesGroup):
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
-        return cls(conc, tecanfiles)
+        return cls(tecanfiles, conc)
 
     @property
     def additions(self) -> list[float] | None:
