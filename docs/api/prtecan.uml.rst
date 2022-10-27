@@ -56,13 +56,14 @@
    TecanfilesGroup::tecanfiles "1..*" o-- Tecanfile
 
    class Titration{
+     #tecanfiles: list[Tecanfile]
      #conc: Sequence
-	 #tecanfiles: list
 	 #fromlistfile(Path)
+	 +load_additions(Path)
 	 +@additions: list
 	 +@buffer_wells: list
-	 +@data_corrected: list[dict]
-	 +@data_corrected_norm: list[dict]
+	 +@data_dilutioncorrected: list[dict]
+	 +@data_dilutioncorrected_norm: list[dict]
 	 +export_dat()
    }
 

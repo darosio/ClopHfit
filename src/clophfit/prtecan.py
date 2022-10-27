@@ -7,7 +7,6 @@
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import itertools
 import warnings
@@ -745,6 +744,8 @@ class LabelblocksGroup:
     @buffer_wells.setter
     def buffer_wells(self, buffer_wells: list[str]) -> None:
         self._buffer_wells = buffer_wells
+        for lb in self.labelblocks:
+            lb.buffer_wells = self.buffer_wells
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
 
@@ -752,31 +753,30 @@ class LabelblocksGroup:
     def data_buffersubtracted(self) -> dict[str, list[float]] | None:
         """Buffer subtracted data."""
         if self.data is None:
-            return None
-        if self._data_buffersubtracted is None and self.buffer_wells:
-            self._data_buffersubtracted = defaultdict(list)
-            for lb in self.labelblocks:
-                lb.buffer_wells = self.buffer_wells
-                for key in self.labelblocks[0].data.keys():
-                    self._data_buffersubtracted[key].append(
-                        lb.data_buffersubtracted[key]
-                    )
+            return None  # only normalized data can be grouped
+        if self._data_buffersubtracted is None:
+            self._data_buffersubtracted = (
+                {
+                    key: [lb.data_buffersubtracted[key] for lb in self.labelblocks]
+                    for key in self.labelblocks[0].data.keys()
+                }
+                if self.buffer_wells
+                else {}
+            )
         return self._data_buffersubtracted
 
     @property
     def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
         """Buffer subtracted data."""
         if self._data_buffersubtracted_norm is None:
-            if self.buffer_wells:
-                self._data_buffersubtracted_norm = defaultdict(list)
-                for lb in self.labelblocks:
-                    lb.buffer_wells = self.buffer_wells
-                    for key in self.labelblocks[0].data_normalized.keys():
-                        self._data_buffersubtracted_norm[key].append(
-                            lb.data_buffersubtracted_norm[key]
-                        )
-            else:
-                self._data_buffersubtracted_norm = {}
+            self._data_buffersubtracted_norm = (
+                {
+                    key: [lb.data_buffersubtracted_norm[key] for lb in self.labelblocks]
+                    for key in self.labelblocks[0].data.keys()
+                }
+                if self.buffer_wells
+                else {}
+            )
         return self._data_buffersubtracted_norm
 
 
@@ -864,6 +864,7 @@ class Titration(TecanfilesGroup):
     _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
     _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
     _buffer_wells: list[str] | None = None
+    _dil_corr: NDArray[np.float_] = field(init=False)
 
     @classmethod
     def fromlistfile(cls, listfile: Path | str) -> Titration:
@@ -906,8 +907,14 @@ class Titration(TecanfilesGroup):
     @additions.setter
     def additions(self, additions: list[float]) -> None:
         self._additions = additions
+        self._dil_corr = dilution_correction(additions)
         self._data_dilutioncorrected = None
         self._data_dilutioncorrected_norm = None
+
+    def load_additions(self, additions_file: Path) -> None:
+        """Load additions from file."""
+        df = pd.read_table(additions_file, names=["add"])
+        self.additions = df["add"].tolist()
 
     @property
     def buffer_wells(self) -> list[str] | None:
@@ -917,6 +924,8 @@ class Titration(TecanfilesGroup):
     @buffer_wells.setter
     def buffer_wells(self, buffer_wells: list[str]) -> None:
         self._buffer_wells = buffer_wells
+        for lbg in self.labelblocksgroups:
+            lbg.buffer_wells = buffer_wells
         self._data_dilutioncorrected = None
         self._data_dilutioncorrected_norm = None
 
@@ -924,29 +933,25 @@ class Titration(TecanfilesGroup):
     def data_dilutioncorrected(self) -> list[dict[str, list[float]] | None] | None:
         """Buffer subtracted data."""
         if self._data_dilutioncorrected is None and self.additions:
-            corr = dilution_correction(self.additions)
-            self._data_dilutioncorrected = []
-            for lbg in self.labelblocksgroups:
-                lbg.buffer_wells = self.buffer_wells
-                if lbg.data_buffersubtracted is None:
-                    self._data_dilutioncorrected.append(None)
-                else:
-                    self._data_dilutioncorrected.append(
-                        {k: v * corr for k, v in lbg.data_buffersubtracted.items()}
-                    )
+            self._data_dilutioncorrected = [
+                {k: v * self._dil_corr for k, v in lbg.data_buffersubtracted.items()}
+                if lbg.data_buffersubtracted
+                else None
+                for lbg in self.labelblocksgroups
+            ]
         return self._data_dilutioncorrected
 
     @property
     def data_dilutioncorrected_norm(self) -> list[dict[str, list[float]]] | None:
         """Buffer subtracted data."""
         if self._data_dilutioncorrected_norm is None and self.additions:
-            corr = dilution_correction(self.additions)
-            self._data_dilutioncorrected_norm = []
-            for lbg in self.labelblocksgroups:
-                lbg.buffer_wells = self.buffer_wells
-                self._data_dilutioncorrected_norm.append(
-                    {k: v * corr for k, v in lbg.data_buffersubtracted_norm.items()}
-                )
+            self._data_dilutioncorrected_norm = [
+                {
+                    k: v * self._dil_corr
+                    for k, v in lbg.data_buffersubtracted_norm.items()
+                }
+                for lbg in self.labelblocksgroups
+            ]
         return self._data_dilutioncorrected_norm
 
     def export_dat(self, out_folder: Path) -> None:
@@ -992,6 +997,7 @@ class TitrationAnalysis:
 
     titration: Titration
     schemefile: str | None = None
+
     #: Scheme for known samples e.g. {'buffer', ['H12', 'H01']}
     scheme: pd.Series[Any] = field(init=False, repr=True)
     #: Concentration values common to all 96 titrations.
@@ -1015,7 +1021,7 @@ class TitrationAnalysis:
                 )
             self.scheme = df.groupby("sample")["well"].unique()
         self.conc = self.titration.conc
-        self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
+        self.labelblocksgroups = self.titration.labelblocksgroups
 
     def _get_keys(self) -> None:
         """Get plate positions of crtl and unk samples."""

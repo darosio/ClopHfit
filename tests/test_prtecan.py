@@ -626,7 +626,7 @@ class TestTitrationAnalysis:
     def test_dilution_correction(self) -> None:
         """It applies dilution correction read from file listing additions."""
         # self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
-        np.testing.assert_array_equal(self.tit.additions, [100, 2, 2, 2, 2, 2, 2])
+        np.testing.assert_array_equal(self.tit.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
         np.testing.assert_almost_equal(
             self.tit.data_dilutioncorrected[1]["A12"],  # type: ignore
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
