@@ -864,31 +864,45 @@ class Titration(TecanfilesGroup):
     _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
     _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
     _buffer_wells: list[str] | None = None
-    _dil_corr: NDArray[np.float_] = field(init=False)
+    _dil_corr: NDArray[np.float_] = field(init=False, repr=False)
 
     @classmethod
-    def fromlistfile(cls, listfile: Path | str) -> Titration:
-        """Create titration from a list[.pH|.Cl] file.
+    def fromlistfile(cls, list_file: Path | str) -> Titration:
+        """Build `Titration` from a list[.pH|.Cl] file.
 
         Parameters
         ----------
-        listfile
-            File path to the listfile ([tecan_file_path conc]).
+        list_file: Path | str
+            File path to the listfile ([fpath conc]).
 
         Returns
         -------
         Titration
+        """
+        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        return cls(tecanfiles, conc)
+
+    @staticmethod
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], Sequence[float]]:
+        """Help construction from file.
+
+        Parameters
+        ----------
+        listfile: Path
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        tecanfiles and conc.
 
         Raises
         ------
         FileNotFoundError
-            When cannot access `listfile`.
+            When cannot access `list_file`.
         ValueError
             For unexpected file format, e.g. length of filename column differs from
             length of conc values.
         """
-        if isinstance(listfile, str):
-            listfile = Path(listfile)
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
@@ -897,7 +911,7 @@ class Titration(TecanfilesGroup):
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
-        return cls(tecanfiles, conc)
+        return tecanfiles, conc
 
     @property
     def additions(self) -> list[float] | None:
@@ -978,7 +992,7 @@ class Titration(TecanfilesGroup):
 
 
 @dataclass
-class TitrationAnalysis:
+class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
 
     Parameters
@@ -995,33 +1009,48 @@ class TitrationAnalysis:
 
     """
 
-    titration: Titration
-    schemefile: str | None = None
+    _scheme: pd.Series[Any] = pd.Series({}, dtype=object)
+    _datafit: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
+    )  # [], empty list
 
-    #: Scheme for known samples e.g. {'buffer', ['H12', 'H01']}
-    scheme: pd.Series[Any] = field(init=False, repr=True)
-    #: Concentration values common to all 96 titrations.
-    conc: Sequence[float] = field(init=False, repr=True)
-    #: Deepcopy from titration.
-    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
-    additions: Sequence[float] = field(init=False, repr=False)
+    @classmethod
+    def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
+        """Build `TitrationAnalysis` from a list[.pH|.Cl] file.
 
-    def __post_init__(self) -> None:
-        """Create attributes."""
-        if self.schemefile is None:
-            self.scheme = pd.Series({"well": []})
-        else:
-            df = pd.read_table(self.schemefile)
-            if (
-                df.columns.tolist() != ["well", "sample"]
-                or df["well"].count() != df["sample"].count()
-            ):
-                raise ValueError(
-                    f"Check format [well sample] for schemefile: {self.schemefile}"
-                )
-            self.scheme = df.groupby("sample")["well"].unique()
-        self.conc = self.titration.conc
-        self.labelblocksgroups = self.titration.labelblocksgroups
+        Parameters
+        ----------
+        list_file: Path | str
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        TitrationAnalysis
+        """
+        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        return cls(tecanfiles, conc)
+
+    @property
+    def scheme(self) -> pd.Series[Any]:
+        """Scheme for known samples e.g. {'buffer', ['H12', 'H01']}."""
+        return self._scheme
+
+    @scheme.setter
+    def scheme(self, scheme: pd.Series[Any]) -> None:
+        self._scheme = scheme
+        self.buffer_wells = list(scheme["buffer"])
+
+    def load_scheme(self, scheme_file: Path) -> None:
+        """Load additions from file."""
+        df = pd.read_table(scheme_file)
+        if (
+            df.columns.tolist() != ["well", "sample"]
+            or df["well"].count() != df["sample"].count()
+        ):
+            raise ValueError(
+                f"Check format [well sample] for schemefile: {scheme_file}"
+            )
+        self.scheme = df.groupby("sample")["well"].unique()
 
     def _get_keys(self) -> None:
         """Get plate positions of crtl and unk samples."""
@@ -1067,23 +1096,50 @@ class TitrationAnalysis:
             self.fz = fz_pk_singlesite
         x = np.array(self.conc)
         fittings = []
-        for lbg in self.labelblocksgroups:
-            fitting = pd.DataFrame()
-            for k, y in lbg.data.items():  # type: ignore
-                res = fit_titration(
-                    kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
-                )
-                res.index = pd.Index([k])
-                # fitting = fitting.append(res, sort=False) DDD
-                fitting = pd.concat([fitting, res], sort=False)
-                # TODO assert (fitting.columns == res.columns).all()
-                # better to refactor this function
+        # datafit
+        if self.data_dilutioncorrected_norm:
+            self._datafit = self.data_dilutioncorrected_norm
+        elif self.data_dilutioncorrected:  # XXX: inverted temporarily
+            self._datafit = self.data_dilutioncorrected
+        elif self.labelblocksgroups[0].data_buffersubtracted:
+            self._datafit = [
+                lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+            ]
+        elif self.labelblocksgroups[0].data_buffersubtracted_norm:
+            self._datafit = [
+                lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+            ]
+        elif self.labelblocksgroups[0].data:
+            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
+        elif self.labelblocksgroups[0].data_normalized:
+            self._datafit = [lbg.data_normalized for lbg in self.labelblocksgroups]
 
-            fittings.append(fitting)
-        # global weighted on relative residues of single fittings
+        keys_fit = (  # Any Lbg at least contains normalized data.
+            self.labelblocksgroups[0].data_normalized.keys() - set(self.buffer_wells)
+            if self.buffer_wells
+            else self.labelblocksgroups[0].data_normalized.keys()
+        )
+
+        for data in self._datafit:
+            fitting = pd.DataFrame()
+            if data:
+                for k in keys_fit:
+                    y = data[k]
+                    res = fit_titration(
+                        kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
+                    )
+                    res.index = pd.Index([k])
+                    # fitting = fitting.append(res, sort=False) DDD
+                    fitting = pd.concat([fitting, res], sort=False)
+                    # TODO assert (fitting.columns == res.columns).all()
+                    # better to refactor this function
+                fittings.append(fitting)
+        # Global weighted on relative residues of single fittings.
         fitting = pd.DataFrame()
-        for k, y in self.labelblocksgroups[0].data.items():  # type: ignore
-            y2 = np.array(self.labelblocksgroups[1].data[k])  # type: ignore
+        for k in keys_fit:
+            # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
+            y = self._datafit[0][k]  # type: ignore
+            y2 = self._datafit[1][k]  # type: ignore
             residue = y - self.fz(
                 fittings[0]["K"].loc[k],
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
@@ -1105,7 +1161,7 @@ class TitrationAnalysis:
                 kind,
                 self.conc[ini:fin],
                 np.array(y[ini:fin]),
-                y2=y2[ini:fin],
+                y2=np.array(y2[ini:fin]),
                 residue=residue[ini:fin],
                 residue2=residue2[ini:fin],
                 tval_conf=tval,
@@ -1121,7 +1177,7 @@ class TitrationAnalysis:
                     fitting.loc[k, "ctrl"] = ctrl  # type: ignore
         # self.fittings and self.fz
         self.fittings = fittings
-        self._get_keys()
+        self._get_keys()  # XXX:
 
     def plot_k(
         self,
@@ -1471,7 +1527,7 @@ class TitrationAnalysis:
                     ]
                 ]
             ]
-            buf = {key: lbg.data[key] for key in self.titration.buffer_wells}  # type: ignore
+            buf = {key: lbg.data[key] for key in self.buffer_wells}  # type: ignore
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)

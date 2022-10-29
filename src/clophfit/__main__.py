@@ -146,28 +146,25 @@ def tecan(  # type: ignore
     - csv tables for all labelblocks and global fittings.
 
     """
-    tit = prtecan.Titration.fromlistfile(list_file)
-    # TitrationAnalysis
+    titan = prtecan.TitrationAnalysis.fromlistfile(list_file)
     if scheme:
-        titan = prtecan.TitrationAnalysis(tit, scheme)
+        titan.load_scheme(scheme)
         if bg:
             pass  # titan.subtract_bg()
         if dil:
-            pass  # titan.dilution_correction(dil)
+            titan.load_additions(dil)
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
-                titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))
+                titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))  # type: ignore
         if norm:
             pass  # titan.metadata_normalization()
-    else:
-        titan = prtecan.TitrationAnalysis(tit)
-    tit.export_dat(out / dat)
+    titan.export_dat(out / dat)
     # Fit
     if not fit:
         sys.exit(0)
     titan.fit(kind, no_weight=(not weight), tval=float(confint))
     # metadata-labels.txt
     fp = open(out / "metadata-labels.txt", "w")
-    for lbg in tit.labelblocksgroups:
+    for lbg in titan.labelblocksgroups:
         pprint.pprint(lbg.metadata, stream=fp)
     fp.close()
     # Loop over fittings[]
@@ -175,7 +172,7 @@ def tecan(  # type: ignore
         # Printout
         if verbose:
             try:
-                meta = tit.labelblocksgroups[i].metadata
+                meta = titan.labelblocksgroups[i].metadata
                 print("{:s}".format("-" * 79))
                 print(f"\nlabel{i:d}")
                 pprint.pprint(meta)
@@ -186,18 +183,8 @@ def tecan(  # type: ignore
         # Csv tables
         fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
         if "SA2" in fit:
-            out_cols = [
-                "K",
-                "sK",
-                "SA",
-                "sSA",
-                "SB",
-                "sSB",
-                "SA2",
-                "sSA2",
-                "SB2",
-                "sSB2",
-            ]
+            out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
+            out_cols.extend(["SA2", "sSA2", "SB2", "sSB2"])
         else:
             out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         fit[out_cols].sort_index().to_csv(
@@ -217,8 +204,7 @@ def tecan(  # type: ignore
                 f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(out / Path("ebarZ" + str(i) + ".png"))
     # ---------- ebar ---------------------------
-    if hasattr(tit.labelblocksgroups[0], "buffer"):
-        f = titan.plot_buffer(title=title)
-        f.savefig(out / Path("buffer.png"))
+    f = titan.plot_buffer(title=title)
+    f.savefig(out / Path("buffer.png"))
     if pdf:
         titan.plot_all_wells(out / Path("all_wells.pdf"))

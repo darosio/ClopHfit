@@ -70,12 +70,8 @@
    Titration --|> TecanfilesGroup
 
    class TitrationAnalysis{
-     #titration: Titration
-	 #schemefile: str|Path
 	 +scheme: pd.Series[Any]
-	 +conc: Sequence[float]
-	 +labelblocksgroups: list[LabelblocksGroup]
-	 +additions: Sequence[float]
+	 +load_scheme(Path)
 	 _get_heys()
 	 +fit()
 	 +plot_k()
@@ -86,7 +82,7 @@
 	 +plot_buffers()
    }
 
-   TitrationAnalysis "1" o-- Titration
+   TitrationAnalysis --|> Titration
 
 ..
    left to right direction

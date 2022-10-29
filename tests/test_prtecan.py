@@ -554,38 +554,34 @@ class TestTitrationAnalysis:
 
     def setup_class(self) -> None:
         """Initialize objects reading list.pH and scheme.txt."""
-        self.tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH")
-        df = pd.read_table(data_tests / "140220/additions.pH", names=["a"])
-        self.tit.additions = df["a"].to_list()
-        self.tit_an = prtecan.TitrationAnalysis(
-            self.tit, str(data_tests / "140220/scheme.txt")
+        self.titan: prtecan.TitrationAnalysis = prtecan.TitrationAnalysis.fromlistfile(
+            data_tests / "140220/list.pH"
         )
-        self.tit.buffer_wells = list(self.tit_an.scheme["buffer"])
-        self.lbg0 = self.tit_an.labelblocksgroups[0]
-        self.lbg1 = self.tit_an.labelblocksgroups[1]
+        self.titan.load_additions(data_tests / "140220/additions.pH")
+        self.titan.load_scheme(data_tests / "140220/scheme.txt")
+        self.lbg0 = self.titan.labelblocksgroups[0]
+        self.lbg1 = self.titan.labelblocksgroups[1]
 
     def test_scheme(self) -> None:
         """It finds well position for buffer samples."""
-        assert all(self.tit_an.scheme["buffer"] == ["D01", "E01", "D12", "E12"])
+        assert all(self.titan.scheme["buffer"] == ["D01", "E01", "D12", "E12"])
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises OSError when scheme file does not exist."""
         with pytest.raises(
             FileNotFoundError, match=r"No such file or directory: 'aax'"
         ):
-            prtecan.TitrationAnalysis(self.tit, "aax")
+            self.titan.load_scheme(Path("aax"))
 
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
-        bad_schemefile = str(data_tests / "140220/scheme0.txt")
+        bad_schemefile = data_tests / "140220/scheme0.txt"
         msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
         with pytest.raises(ValueError, match=re.escape(msg)):
-            prtecan.TitrationAnalysis(self.tit, bad_schemefile)
+            self.titan.load_scheme(bad_schemefile)
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
-        # self.tit_an.subtract_bg()
-        # assert self.lbg0.buffer["E01"] == [  # type: ignore
         assert self.lbg0.data["E01"] == [  # type: ignore
             11192.0,
             12092.0,
@@ -595,7 +591,6 @@ class TestTitrationAnalysis:
             12715.0,
             13146.0,
         ]
-        self.lbg0.buffer_wells = ["D01", "E01", "D12", "E12"]
         if self.lbg0.data_buffersubtracted:
             np.testing.assert_array_equal(
                 self.lbg0.data_buffersubtracted["A12"],
@@ -609,7 +604,6 @@ class TestTitrationAnalysis:
                     13775.0,
                 ],
             )
-        self.lbg1.buffer_wells = ["D01", "E01", "D12", "E12"]
         np.testing.assert_array_equal(
             self.lbg1.data_buffersubtracted["A12"],  # type: ignore
             [
@@ -625,18 +619,16 @@ class TestTitrationAnalysis:
 
     def test_dilution_correction(self) -> None:
         """It applies dilution correction read from file listing additions."""
-        # self.tit_an.dilution_correction(str(data_tests / "140220/additions.pH"))
-        np.testing.assert_array_equal(self.tit.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
+        np.testing.assert_array_equal(self.titan.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
         np.testing.assert_almost_equal(
-            self.tit.data_dilutioncorrected[1]["A12"],  # type: ignore
+            self.titan.data_dilutioncorrected[1]["A12"],  # type: ignore
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
     def test_metadata_normalization(self) -> None:
         """It normalizes data."""
-        # self.tit_an.metadata_normalization()
         np.testing.assert_almost_equal(
-            self.tit.data_dilutioncorrected_norm[0]["A12"],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[0]["A12"],  # type: ignore
             [
                 434.65053763,
                 651.77177419,
@@ -648,7 +640,7 @@ class TestTitrationAnalysis:
             ],
         )
         np.testing.assert_almost_equal(
-            self.tit.data_dilutioncorrected_norm[1]["A12"],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[1]["A12"],  # type: ignore
             [
                 871.27232143,
                 671.85669643,
@@ -662,10 +654,10 @@ class TestTitrationAnalysis:
 
     def test__get_keys(self) -> None:
         """It gets well positions for ctrl and unknown samples."""
-        self.tit_an.scheme.pop("buffer")
-        self.tit_an._get_keys()
-        assert set(self.tit_an.names_ctrl) == {"NTT", "G03", "V224Q", "S202N"}
-        assert self.tit_an.keys_ctrl == [
+        self.titan.scheme.pop("buffer")
+        self.titan._get_keys()
+        assert set(self.titan.names_ctrl) == {"NTT", "G03", "V224Q", "S202N"}
+        assert self.titan.keys_ctrl == [
             "A01",
             "B12",
             "H12",
@@ -682,15 +674,9 @@ class TestTitrationAnalysis:
 
     def test_fit(self) -> None:
         """It fits each label separately."""
-        for i, lbg in enumerate(self.tit_an.labelblocksgroups):
-            lbg.data = self.tit_an.titration.data_dilutioncorrected_norm[i]  # type: ignore
-            # for k in self.tit_an.scheme["buffer"]:
-            for k in self.tit.buffer_wells:
-                lbg.data.pop(k)
-        # self.tit_an.scheme.pop("buffer")  # Needed when testing only this function
-        self.tit_an.fit("pH")
-        fit0 = self.tit_an.fittings[0].sort_index()
-        fit1 = self.tit_an.fittings[1].sort_index()
+        self.titan.fit("pH")
+        fit0 = self.titan.fittings[0].sort_index()
+        fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
@@ -702,9 +688,9 @@ class TestTitrationAnalysis:
             atol=1e-3,
         )
         # 0:-1
-        self.tit_an.fit("pH", fin=-1)
-        fit0 = self.tit_an.fittings[0].sort_index()
-        fit1 = self.tit_an.fittings[1].sort_index()
+        self.titan.fit("pH", fin=-1)
+        fit0 = self.titan.fittings[0].sort_index()
+        fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1-1.csv", index_col=0)
         pd.testing.assert_frame_equal(
