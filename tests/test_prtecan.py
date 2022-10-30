@@ -558,27 +558,27 @@ class TestTitrationAnalysis:
             data_tests / "140220/list.pH"
         )
         self.titan.load_additions(data_tests / "140220/additions.pH")
-        self.titan.load_scheme(data_tests / "140220/scheme.txt")
+        self.titan.scheme = prtecan.PlateScheme(data_tests / "140220/scheme.txt")
         self.lbg0 = self.titan.labelblocksgroups[0]
         self.lbg1 = self.titan.labelblocksgroups[1]
 
     def test_scheme(self) -> None:
         """It finds well position for buffer samples."""
-        assert all(self.titan.scheme["buffer"] == ["D01", "E01", "D12", "E12"])
+        assert self.titan.scheme.buffer == {"D01", "E01", "D12", "E12"}
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises OSError when scheme file does not exist."""
         with pytest.raises(
             FileNotFoundError, match=r"No such file or directory: 'aax'"
         ):
-            self.titan.load_scheme(Path("aax"))
+            self.titan.scheme = prtecan.PlateScheme(Path("aax"))
 
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
         bad_schemefile = data_tests / "140220/scheme0.txt"
         msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
         with pytest.raises(ValueError, match=re.escape(msg)):
-            self.titan.load_scheme(bad_schemefile)
+            self.titan.scheme = prtecan.PlateScheme(bad_schemefile)
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
@@ -652,12 +652,10 @@ class TestTitrationAnalysis:
             ],
         )
 
-    def test__get_keys(self) -> None:
+    def test_keys(self) -> None:
         """It gets well positions for ctrl and unknown samples."""
-        self.titan.scheme.pop("buffer")
-        self.titan._get_keys()
-        assert set(self.titan.names_ctrl) == {"NTT", "G03", "V224Q", "S202N"}
-        assert self.titan.keys_ctrl == [
+        assert set(self.titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
+        assert self.titan.scheme.ctrl == {
             "A01",
             "B12",
             "H12",
@@ -670,7 +668,7 @@ class TestTitrationAnalysis:
             "B01",
             "G01",
             "A12",
-        ]
+        }
 
     def test_fit(self) -> None:
         """It fits each label separately."""

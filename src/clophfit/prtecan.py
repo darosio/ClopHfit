@@ -15,7 +15,6 @@ from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any  # , overload
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -992,6 +991,37 @@ class Titration(TecanfilesGroup):
 
 
 @dataclass
+class PlateScheme:
+    """Definition of wells of buffer, ctrl and unk as well as names of controls."""
+
+    file: Path | None
+    buffer: set[str] = field(init=False)
+    ctrl: set[str] = field(init=False)
+    names: dict[str, set[str]] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Complete initialization."""
+        if self.file:
+            df = pd.read_table(self.file)
+            if (
+                df.columns.tolist() != ["well", "sample"]
+                or df["well"].count() != df["sample"].count()
+            ):
+                msg = f"Check format [well sample] for schemefile: {self.file}"
+                raise ValueError(msg)
+            scheme = df.groupby("sample")["well"].unique()
+            self.buffer = set(scheme["buffer"])
+            self.ctrl = {
+                well for sample in scheme.tolist() for well in sample
+            } - self.buffer
+            self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
+        else:
+            self.buffer = set()
+            self.ctrl = set()
+            self.names = {}
+
+
+@dataclass
 class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
 
@@ -1009,7 +1039,7 @@ class TitrationAnalysis(Titration):
 
     """
 
-    _scheme: pd.Series[Any] = pd.Series({}, dtype=object)
+    _scheme: PlateScheme = PlateScheme(None)
     _datafit: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )  # [], empty list
@@ -1031,34 +1061,14 @@ class TitrationAnalysis(Titration):
         return cls(tecanfiles, conc)
 
     @property
-    def scheme(self) -> pd.Series[Any]:
+    def scheme(self) -> PlateScheme:
         """Scheme for known samples e.g. {'buffer', ['H12', 'H01']}."""
         return self._scheme
 
     @scheme.setter
-    def scheme(self, scheme: pd.Series[Any]) -> None:
-        self._scheme = scheme
-        self.buffer_wells = list(scheme["buffer"])
-
-    def load_scheme(self, scheme_file: Path) -> None:
-        """Load additions from file."""
-        df = pd.read_table(scheme_file)
-        if (
-            df.columns.tolist() != ["well", "sample"]
-            or df["well"].count() != df["sample"].count()
-        ):
-            raise ValueError(
-                f"Check format [well sample] for schemefile: {scheme_file}"
-            )
-        self.scheme = df.groupby("sample")["well"].unique()
-
-    def _get_keys(self) -> None:
-        """Get plate positions of crtl and unk samples."""
-        self.keys_ctrl = [k for ctr in self.scheme.tolist() for k in ctr]
-        self.names_ctrl = list(self.scheme.to_dict())
-        self.keys_unk = list(
-            self.labelblocksgroups[0].data_normalized.keys() - set(self.keys_ctrl)
-        )
+    def scheme(self, ps: PlateScheme) -> None:
+        self._scheme = ps
+        self.buffer_wells = list(ps.buffer)
 
     def fit(
         self,
@@ -1114,11 +1124,9 @@ class TitrationAnalysis(Titration):
         elif self.labelblocksgroups[0].data_normalized:
             self._datafit = [lbg.data_normalized for lbg in self.labelblocksgroups]
 
-        keys_fit = (  # Any Lbg at least contains normalized data.
-            self.labelblocksgroups[0].data_normalized.keys() - set(self.buffer_wells)
-            if self.buffer_wells
-            else self.labelblocksgroups[0].data_normalized.keys()
-        )
+        # Any Lbg at least contains normalized data.
+        keys_fit = self.labelblocksgroups[0].data_normalized.keys() - self.scheme.buffer
+        self.keys_unk = list(keys_fit - self.scheme.ctrl)
 
         for data in self._datafit:
             fitting = pd.DataFrame()
@@ -1172,12 +1180,11 @@ class TitrationAnalysis(Titration):
         fittings.append(fitting)
         # Write the name of the control e.g. S202N in the "ctrl" column
         for fitting in fittings:
-            for ctrl, v in self.scheme.items():
-                for k in v:
-                    fitting.loc[k, "ctrl"] = ctrl  # type: ignore
+            for ctrl_name, wells in self.scheme.names.items():
+                for well in wells:
+                    fitting.loc[well, "ctrl"] = ctrl_name
         # self.fittings and self.fz
         self.fittings = fittings
-        self._get_keys()  # XXX:
 
     def plot_k(
         self,
@@ -1213,8 +1220,8 @@ class TitrationAnalysis(Titration):
         f = plt.figure(figsize=(12, 16))
         # Ctrls
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-        if len(self.keys_ctrl) > 0:
-            res_ctrl = self.fittings[lb].loc[self.keys_ctrl]
+        if len(self.scheme.ctrl) > 0:
+            res_ctrl = self.fittings[lb].loc[list(self.scheme.ctrl)]
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1259,7 +1266,7 @@ class TitrationAnalysis(Titration):
         plt.grid(1, axis="both")
         if not xlim:
             xlim = (res_unk["K"].min(), res_unk["K"].max())
-            if len(self.keys_ctrl) > 0:
+            if len(self.scheme.ctrl) > 0:
                 xlim = (
                     0.99 * min(res_ctrl["K"].min(), xlim[0]),
                     1.01 * max(res_ctrl["K"].max(), xlim[1]),
@@ -1381,7 +1388,7 @@ class TitrationAnalysis(Titration):
             lw=1.5,
             color=colors[1],
         )
-        if key in self.keys_ctrl:
+        if key in self.scheme.ctrl:
             plt.title(
                 "Ctrl: " + df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
             )
@@ -1407,7 +1414,7 @@ class TitrationAnalysis(Titration):
         if not hasattr(self, "fittings"):
             raise Exception("run fit first")
         out = PdfPages(path)
-        for k in self.fittings[0].loc[self.keys_ctrl].index:
+        for k in self.fittings[0].loc[list(self.scheme.ctrl)].index:
             out.savefig(self.plot_well(k))
         for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
             out.savefig(self.plot_well(k))
@@ -1494,8 +1501,8 @@ class TitrationAnalysis(Titration):
             out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-        if len(self.keys_ctrl) > 0:
-            res_ctrl = df.loc[self.keys_ctrl]
+        if len(self.scheme.ctrl) > 0:
+            res_ctrl = df.loc[list(self.scheme.ctrl)]
             gr = res_ctrl.groupby("ctrl")
             print("    " + " ".join([f"{x:>7s}" for x in out]))
             for g in gr:
@@ -1508,7 +1515,7 @@ class TitrationAnalysis(Titration):
         df_print(res_unk.sort_index())
 
     def plot_buffer(self, title: str | None = None) -> plt.figure:
-        """Plot buffers (indicated in scheme) for all labelblocksgroups."""
+        """Plot buffers of all labelblocksgroups."""
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(10, 10))
         for i, lbg in enumerate(self.labelblocksgroups):

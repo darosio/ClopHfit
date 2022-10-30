@@ -148,7 +148,7 @@ def tecan(  # type: ignore
     """
     titan = prtecan.TitrationAnalysis.fromlistfile(list_file)
     if scheme:
-        titan.load_scheme(scheme)
+        titan.scheme = prtecan.PlateScheme(scheme)
         if bg:
             pass  # titan.subtract_bg()
         if dil:
