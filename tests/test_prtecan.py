@@ -114,8 +114,8 @@ class TestLabelblock:
 
     def test_data_normalized(self) -> None:
         """Normalize data using some metadata values."""
-        assert self.lb0.data_normalized["F06"] == pytest.approx(1051.1290323)
-        assert self.lb1.data_normalized["H12"] == pytest.approx(48.4821429)
+        assert self.lb0.data_norm["F06"] == pytest.approx(1051.1290323)
+        assert self.lb1.data_norm["H12"] == pytest.approx(48.4821429)
 
     def test_data_buffersubtracted(self) -> None:
         """Calculate buffer value from average of buffer wells and subtract from data."""
@@ -281,10 +281,10 @@ class TestLabelblocksGroup:
     def test_data_normalized(self) -> None:
         """Merge data_normalized."""
         np.testing.assert_almost_equal(
-            self.lbg2.data_normalized["H12"], [693.980, 714.495], 3
+            self.lbg2.data_norm["H12"], [693.980, 714.495], 3
         )
         np.testing.assert_almost_equal(
-            self.lbg1.data_normalized["A01"], [995.372, 908.936], 3
+            self.lbg1.data_norm["A01"], [995.372, 908.936], 3
         )
 
     def test_data_buffersubtracted(self) -> None:
@@ -386,10 +386,10 @@ class TestTecanfileGroup:
             assert lbg1.data is None
             # data_normalized
             np.testing.assert_almost_equal(
-                lbg1.data_normalized["A01"], [401.9387755, 446.9897959, 450.0]
+                lbg1.data_norm["A01"], [401.9387755, 446.9897959, 450.0]
             )
             np.testing.assert_almost_equal(
-                lbg1.data_normalized["H12"], [725.8163265, 693.9795918, 714.4949494]
+                lbg1.data_norm["H12"], [725.8163265, 693.9795918, 714.4949494]
             )
 
     class TestOnly1commonLbg:
@@ -458,36 +458,9 @@ class TestTitration:
         # pH9.3 is 93 Optimal not Manual
         assert lbg1.metadata["Gain"] == prtecan.Metadata(93.0)
         # data
-        assert lbg0.data["A01"] == [  # type: ignore
-            30344,
-            30072,
-            31010,
-            32678,
-            33731,
-            36506,
-            37967,
-            37725,
-        ]
-        assert lbg1.data["A01"] == [  # type: ignore
-            6289,
-            9165,
-            12326,
-            15591,
-            17726,
-            20788,
-            21781,
-            22534,
-        ]
-        assert lbg0.data["H12"] == [  # type: ignore
-            21287,
-            20888,
-            21209,
-            21711,
-            22625,
-            23397,
-            24791,
-            25045,
-        ]
+        assert lbg0.data["A01"][::2] == [30344, 31010, 33731, 37967]  # type: ignore
+        assert lbg1.data["A01"][1::2] == [9165, 15591, 20788, 22534]  # type: ignore
+        assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]  # type: ignore
         assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]  # type: ignore
 
     def test_labelblocksgroups_cl(self) -> None:
@@ -498,43 +471,16 @@ class TestTitration:
         # assert lbg.data["H12"] == [4477, 4705, 4850, 4918, 5007]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
 
-    def test_export_dat(self, tmp_path: Any) -> None:
+    def test_export_data(self, tmp_path: Any) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
         path = tmp_path / "dat"
         path.mkdir()
-        self.tit.export_dat(path)
+        self.tit.export_data(path)
         a01 = pd.read_csv(path / "A01.dat")
         h12 = pd.read_csv(path / "H12.dat")
-        assert a01["y1"].tolist() == [
-            30344,
-            30072,
-            31010,
-            32678,
-            33731,
-            36506,
-            37967,
-            37725,
-        ]
-        assert a01["y2"].tolist() == [
-            6289,
-            9165,
-            12326,
-            15591,
-            17726,
-            20788,
-            21781,
-            22534,
-        ]
-        assert h12["y1"].tolist() == [
-            21287,
-            20888,
-            21209,
-            21711,
-            22625,
-            23397,
-            24791,
-            25045,
-        ]
+        assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
+        assert a01["y2"].tolist()[1::2] == [9165, 15591, 20788, 22534]
+        assert h12["y1"].tolist()[1::2] == [20888, 21711, 23397, 25045]
         assert h12["y2"].tolist() == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
 
     def test_raise_listfilenotfound(self) -> None:
@@ -558,7 +504,7 @@ class TestTitrationAnalysis:
             data_tests / "140220/list.pH"
         )
         self.titan.load_additions(data_tests / "140220/additions.pH")
-        self.titan.scheme = prtecan.PlateScheme(data_tests / "140220/scheme.txt")
+        self.titan.load_scheme(data_tests / "140220/scheme.txt")
         self.lbg0 = self.titan.labelblocksgroups[0]
         self.lbg1 = self.titan.labelblocksgroups[1]
 
@@ -571,50 +517,32 @@ class TestTitrationAnalysis:
         with pytest.raises(
             FileNotFoundError, match=r"No such file or directory: 'aax'"
         ):
-            self.titan.scheme = prtecan.PlateScheme(Path("aax"))
+            self.titan.load_scheme(Path("aax"))
 
     def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
         bad_schemefile = data_tests / "140220/scheme0.txt"
         msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
         with pytest.raises(ValueError, match=re.escape(msg)):
-            self.titan.scheme = prtecan.PlateScheme(bad_schemefile)
+            self.titan.load_scheme(bad_schemefile)
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
-        assert self.lbg0.data["E01"] == [  # type: ignore
-            11192.0,
-            12092.0,
-            11932.0,
-            12106.0,
-            12543.0,
-            12715.0,
-            13146.0,
-        ]
+        np.testing.assert_almost_equal(
+            self.lbg0.data_norm["E01"][::2],
+            [601.72, 641.505, 674.355, 706.774],
+            3,
+        )
+        if self.lbg0.data:
+            assert self.lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
         if self.lbg0.data_buffersubtracted:
             np.testing.assert_array_equal(
-                self.lbg0.data_buffersubtracted["A12"],
-                [
-                    8084.5,
-                    11885.25,
-                    15715.75,
-                    16621.75,
-                    16801.75,
-                    16972.25,
-                    13775.0,
-                ],
+                self.lbg0.data_buffersubtracted["A12"][::3],
+                [8084.5, 16621.75, 13775.0],
             )
         np.testing.assert_array_equal(
-            self.lbg1.data_buffersubtracted["A12"],  # type: ignore
-            [
-                9758.25,
-                7377.25,
-                2960.75,
-                1334.0,
-                594.25,
-                365.75,
-                283.5,
-            ],
+            self.lbg1.data_buffersubtracted["A12"][::3],  # type: ignore
+            [9758.25, 1334.0, 283.5],
         )
 
     def test_dilution_correction(self) -> None:
@@ -625,50 +553,24 @@ class TestTitrationAnalysis:
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
-    def test_metadata_normalization(self) -> None:
+    def test_data_dilutioncorrected_norma(self) -> None:
         """It normalizes data."""
         np.testing.assert_almost_equal(
-            self.titan.data_dilutioncorrected_norm[0]["A12"],  # type: ignore
-            [
-                434.65053763,
-                651.77177419,
-                878.73010753,
-                947.26102151,
-                975.58548387,
-                1003.73521505,
-                829.46236559,
-            ],
+            self.titan.data_dilutioncorrected_norm[0]["A12"][::2],  # type: ignore
+            [434.65, 878.73, 975.58, 829.46],
+            2,
         )
         np.testing.assert_almost_equal(
-            self.titan.data_dilutioncorrected_norm[1]["A12"],  # type: ignore
-            [
-                871.27232143,
-                671.85669643,
-                274.92678571,
-                126.25357143,
-                57.30267857,
-                35.921875,
-                28.35,
-            ],
+            self.titan.data_dilutioncorrected_norm[1]["A12"][::2],  # type: ignore
+            [871.272, 274.927, 57.303, 28.35],
+            3,
         )
 
     def test_keys(self) -> None:
         """It gets well positions for ctrl and unknown samples."""
         assert set(self.titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
-        assert self.titan.scheme.ctrl == {
-            "A01",
-            "B12",
-            "H12",
-            "F01",
-            "C12",
-            "F12",
-            "C01",
-            "H01",
-            "G12",
-            "B01",
-            "G01",
-            "A12",
-        }
+        x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
+        assert self.titan.scheme.ctrl - {"A01", "A12"} == x
 
     def test_fit(self) -> None:
         """It fits each label separately."""

@@ -148,7 +148,7 @@ def tecan(  # type: ignore
     """
     titan = prtecan.TitrationAnalysis.fromlistfile(list_file)
     if scheme:
-        titan.scheme = prtecan.PlateScheme(scheme)
+        titan.load_scheme(scheme)
         if bg:
             pass  # titan.subtract_bg()
         if dil:
@@ -157,7 +157,7 @@ def tecan(  # type: ignore
                 titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))  # type: ignore
         if norm:
             pass  # titan.metadata_normalization()
-    titan.export_dat(out / dat)
+    titan.export_data(out / dat)
     # Fit
     if not fit:
         sys.exit(0)

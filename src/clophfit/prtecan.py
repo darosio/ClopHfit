@@ -435,7 +435,7 @@ class Labelblock:
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
-    _data_normalized: dict[str, float] | None = None
+    _data_norm: dict[str, float] | None = None
     _data_buffersubtracted: dict[str, float] | None = None
     _data_buffersubtracted_norm: dict[str, float] | None = None
     _buffer_wells: list[str] | None = None
@@ -511,9 +511,9 @@ class Labelblock:
     ]
 
     @property
-    def data_normalized(self) -> dict[str, float]:
+    def data_norm(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain."""
-        if self._data_normalized is None:
+        if self._data_norm is None:
             if (
                 isinstance(self.metadata["Gain"].value, (float, int))
                 and isinstance(self.metadata["Number of Flashes"].value, (float, int))
@@ -529,8 +529,8 @@ class Labelblock:
                 warnings.warn(
                     "Could not normalize for non numerical Gain, Number of Flashes or Integration time."
                 )  # pragma: no cover
-            self._data_normalized = {k: v * norm for k, v in self.data.items()}
-        return self._data_normalized
+            self._data_norm = {k: v * norm for k, v in self.data.items()}
+        return self._data_norm
 
     @property
     def buffer_wells(self) -> list[str] | None:
@@ -542,12 +542,8 @@ class Labelblock:
         self._buffer_wells = buffer_wells
         self._buffer = float(np.average([self.data[k] for k in buffer_wells]))
         self._sd_buffer = float(np.std([self.data[k] for k in buffer_wells]))
-        self._buffer_norm = float(
-            np.average([self.data_normalized[k] for k in buffer_wells])
-        )
-        self._sd_buffer_norm = float(
-            np.std([self.data_normalized[k] for k in buffer_wells])
-        )
+        self._buffer_norm = float(np.average([self.data_norm[k] for k in buffer_wells]))
+        self._sd_buffer_norm = float(np.std([self.data_norm[k] for k in buffer_wells]))
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
 
@@ -569,7 +565,7 @@ class Labelblock:
         if self._data_buffersubtracted_norm is None:
             if self.buffer_norm:
                 self._data_buffersubtracted_norm = {
-                    k: v - self.buffer_norm for k, v in self.data_normalized.items()
+                    k: v - self.buffer_norm for k, v in self.data_norm.items()
                 }
             else:
                 self._data_buffersubtracted_norm = {}
@@ -678,6 +674,8 @@ class Tecanfile:
 class LabelblocksGroup:
     """Group labelblocks with compatible metadata.
 
+    `data_norm` always exist.
+
     Parameters
     ----------
     labelblocks: list[Labelblock]
@@ -698,8 +696,8 @@ class LabelblocksGroup:
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: List of data in the same order of labelblocks.
-    data: dict[str, list[float]] | None = None
-    _data_normalized: dict[str, list[float]] | None = None
+    _data: dict[str, list[float]] | None = None
+    _data_norm: dict[str, list[float]] | None = None
     _data_buffersubtracted: dict[str, list[float]] | None = None
     _data_buffersubtracted_norm: dict[str, list[float]] | None = None
     _buffer_wells: list[str] | None = None
@@ -711,29 +709,34 @@ class LabelblocksGroup:
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
         if self.allequal:
-            self.data = defaultdict(list)
+            self._data = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    self.data[key].append(lb.data[key])
+                    self._data[key].append(lb.data[key])
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
-            self._data_normalized = defaultdict(list)
+            self._data_norm = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    self._data_normalized[key].append(lb.data_normalized[key])
+                    self._data_norm[key].append(lb.data_norm[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
         self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
 
     @property
-    def data_normalized(self) -> dict[str, list[float]]:
+    def data(self) -> dict[str, list[float]] | None:
+        """Return None or data."""
+        return self._data
+
+    @property
+    def data_norm(self) -> dict[str, list[float]]:
         """Normalize data by number of flashes, integration time and gain."""
-        if self._data_normalized is None:
-            self._data_normalized = defaultdict(list)
+        if self._data_norm is None:
+            self._data_norm = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    self._data_normalized[key].append(lb.data_normalized[key])
-        return self._data_normalized
+                    self._data_norm[key].append(lb.data_norm[key])
+        return self._data_norm
 
     @property
     def buffer_wells(self) -> list[str] | None:
@@ -752,7 +755,7 @@ class LabelblocksGroup:
     def data_buffersubtracted(self) -> dict[str, list[float]] | None:
         """Buffer subtracted data."""
         if self.data is None:
-            return None  # only normalized data can be grouped
+            return None
         if self._data_buffersubtracted is None:
             self._data_buffersubtracted = (
                 {
@@ -836,7 +839,7 @@ class TecanfilesGroup:
                 # if labelblocks are all 'equal'
                 else:
                     self.labelblocksgroups.append(gr)
-            files = [tf.path.name for tf in self.tecanfiles]
+            files = [tf.path for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
                 raise ValueError(f"No common labelblock in filenames: {files}.")
             else:
@@ -967,8 +970,15 @@ class Titration(TecanfilesGroup):
             ]
         return self._data_dilutioncorrected_norm
 
-    def export_dat(self, out_folder: Path) -> None:
+    def export_data(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
+
+        Remember that a Titration has at least 3 normalized Lbg dataset:
+        - normalized data;
+        - buffer subtracted and normalized data;
+        - dilution corrected, buffer subtracted and normalized data.
+
+        More Lbg dataset are possible and each can also exist without normalization.
 
         Parameters
         ----------
@@ -977,17 +987,53 @@ class Titration(TecanfilesGroup):
 
         """
         out_folder.mkdir(parents=True, exist_ok=True)
-        if self.labelblocksgroups[0].data:
-            for key, dy1 in self.labelblocksgroups[0].data.items():
-                df = pd.DataFrame({"x": self.conc, "y1": dy1})
-                for n, lbg in enumerate(self.labelblocksgroups[1:], start=2):
-                    if lbg.data:
-                        dy = lbg.data[key]
-                        df["y" + str(n)] = dy
+
+        def write(
+            conc: Sequence[float], data: list[dict[str, list[float]]], out_folder: Path
+        ) -> None:
+            """Write data."""
+            if any(data):
+                out_folder.mkdir(parents=True, exist_ok=True)
+                columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
+                for key in data[0].keys():
+                    dat = np.vstack((conc, [dt[key] for dt in data]))
+                    df = pd.DataFrame(dat.T, columns=columns)
                     df.to_csv(out_folder / Path(key).with_suffix(".dat"), index=False)
 
-
-# TODO: complete reacher export, including norm buffer subtracted ...
+        write(
+            self.conc,
+            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
+            out_folder,
+        )
+        write(
+            self.conc,
+            [
+                lbg.data_buffersubtracted
+                for lbg in self.labelblocksgroups
+                if lbg.data_buffersubtracted
+            ],
+            out_folder / "buf",
+        )
+        write(
+            self.conc,
+            [lbg.data_norm for lbg in self.labelblocksgroups],
+            out_folder / "raw_norm",
+        )
+        write(
+            self.conc,
+            [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
+            out_folder / "buf_norm",
+        )
+        if self.data_dilutioncorrected:
+            write(
+                self.conc,
+                [e for e in self.data_dilutioncorrected if e],
+                out_folder / "dil_buf",
+            )
+        if self.data_dilutioncorrected_norm:
+            write(
+                self.conc, self.data_dilutioncorrected_norm, out_folder / "dil_buf_norm"
+            )
 
 
 @dataclass
@@ -1065,10 +1111,10 @@ class TitrationAnalysis(Titration):
         """Scheme for known samples e.g. {'buffer', ['H12', 'H01']}."""
         return self._scheme
 
-    @scheme.setter
-    def scheme(self, ps: PlateScheme) -> None:
-        self._scheme = ps
-        self.buffer_wells = list(ps.buffer)
+    def load_scheme(self, schemefile: Path) -> None:
+        """Load scheme from file. Set buffer_wells."""
+        self._scheme = PlateScheme(schemefile)
+        self.buffer_wells = list(self._scheme.buffer)
 
     def fit(
         self,
@@ -1121,11 +1167,11 @@ class TitrationAnalysis(Titration):
             ]
         elif self.labelblocksgroups[0].data:
             self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-        elif self.labelblocksgroups[0].data_normalized:
-            self._datafit = [lbg.data_normalized for lbg in self.labelblocksgroups]
+        elif self.labelblocksgroups[0].data_norm:
+            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
 
         # Any Lbg at least contains normalized data.
-        keys_fit = self.labelblocksgroups[0].data_normalized.keys() - self.scheme.buffer
+        keys_fit = self.labelblocksgroups[0].data_norm.keys() - self.scheme.buffer
         self.keys_unk = list(keys_fit - self.scheme.ctrl)
 
         for data in self._datafit:
