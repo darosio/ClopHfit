@@ -473,11 +473,9 @@ class TestTitration:
 
     def test_export_data(self, tmp_path: Any) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
-        path = tmp_path / "dat"
-        path.mkdir()
-        self.tit.export_data(path)
-        a01 = pd.read_csv(path / "A01.dat")
-        h12 = pd.read_csv(path / "H12.dat")
+        self.tit.export_data(tmp_path)
+        a01 = pd.read_csv(tmp_path / "dat/A01.dat")
+        h12 = pd.read_csv(tmp_path / "dat/H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
         assert a01["y2"].tolist()[1::2] == [9165, 15591, 20788, 22534]
         assert h12["y1"].tolist()[1::2] == [20888, 21711, 23397, 25045]
@@ -574,7 +572,7 @@ class TestTitrationAnalysis:
 
     def test_fit(self) -> None:
         """It fits each label separately."""
-        self.titan.fit("pH")
+        self.titan.fit("pH", nrm=True, bg=True, dil=True)
         fit0 = self.titan.fittings[0].sort_index()
         fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
@@ -588,7 +586,7 @@ class TestTitrationAnalysis:
             atol=1e-3,
         )
         # 0:-1
-        self.titan.fit("pH", fin=-1)
+        self.titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
         fit0 = self.titan.fittings[0].sort_index()
         fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)

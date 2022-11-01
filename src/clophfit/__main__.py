@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pprint
 import sys
+import warnings
 from pathlib import Path
 
 import click
@@ -89,13 +90,6 @@ def eq1(  # type: ignore
     help="Path to output results.",
     show_default=True,
 )
-@click.option(
-    "--dat",
-    type=click.Path(path_type=Path),
-    default="./dat",
-    help="Path to output dat files.",
-    show_default=True,
-)
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
 @click.option("--title", "-t", default=None, help="Title for some plots.")
 @click.option(
@@ -120,7 +114,6 @@ def tecan(  # type: ignore
     kind,
     norm,
     out,
-    dat,
     weight,
     fit,
     confint,
@@ -145,23 +138,33 @@ def tecan(  # type: ignore
 
     - csv tables for all labelblocks and global fittings.
 
+    Notes: Buffer is always subtracted if scheme indicates buffer well positions.
+
     """
     titan = prtecan.TitrationAnalysis.fromlistfile(list_file)
     if scheme:
         titan.load_scheme(scheme)
-        if bg:
-            pass  # titan.subtract_bg()
         if dil:
             titan.load_additions(dil)
+            bg = True  # should not be needed but influence decimals of
+            # exported values; however ``dil imply bg```
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))  # type: ignore
-        if norm:
-            pass  # titan.metadata_normalization()
-    titan.export_data(out / dat)
+    titan.export_data(out)
     # Fit
     if not fit:
         sys.exit(0)
-    titan.fit(kind, no_weight=(not weight), tval=float(confint))
+    if bg and not scheme:
+        # ``as bg requires scheme even though scheme does not imply bg```
+        warnings.warn("Scheme is needed to compute buffer bg!")
+    titan.fit(
+        kind,
+        no_weight=(not weight),
+        tval=float(confint),
+        nrm=norm,
+        bg=bg,
+        dil=bool(dil),
+    )
     # metadata-labels.txt
     fp = open(out / "metadata-labels.txt", "w")
     for lbg in titan.labelblocksgroups:
@@ -204,7 +207,8 @@ def tecan(  # type: ignore
                 f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(out / Path("ebarZ" + str(i) + ".png"))
     # ---------- ebar ---------------------------
-    f = titan.plot_buffer(title=title)
+    if scheme:
+        f = titan.plot_buffer(title=title)
     f.savefig(out / Path("buffer.png"))
     if pdf:
         titan.plot_all_wells(out / Path("all_wells.pdf"))

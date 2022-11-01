@@ -973,12 +973,14 @@ class Titration(TecanfilesGroup):
     def export_data(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
 
-        Remember that a Titration has at least 3 normalized Lbg dataset:
-        - normalized data;
-        - buffer subtracted and normalized data;
-        - dilution corrected, buffer subtracted and normalized data.
+        Remember that a Titration has at least 1 normalized Lbg dataset `dat_nrm`.
 
-        More Lbg dataset are possible and each can also exist without normalization.
+        dat:            [d1, None] | [d1, d2]
+        dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_nrm:        [d1,d2]
+        dat_bg_nrm:     [{}, {}] | [d1, d2]
+        dat_bg_dil_nrm: [{}, {}] | [d1, d2]
 
         Parameters
         ----------
@@ -1003,7 +1005,12 @@ class Titration(TecanfilesGroup):
         write(
             self.conc,
             [lbg.data for lbg in self.labelblocksgroups if lbg.data],
-            out_folder,
+            out_folder / "dat",
+        )
+        write(
+            self.conc,
+            [lbg.data_norm for lbg in self.labelblocksgroups],
+            out_folder / "dat_nrm",
         )
         write(
             self.conc,
@@ -1012,27 +1019,24 @@ class Titration(TecanfilesGroup):
                 for lbg in self.labelblocksgroups
                 if lbg.data_buffersubtracted
             ],
-            out_folder / "buf",
-        )
-        write(
-            self.conc,
-            [lbg.data_norm for lbg in self.labelblocksgroups],
-            out_folder / "raw_norm",
+            out_folder / "dat_bg",
         )
         write(
             self.conc,
             [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
-            out_folder / "buf_norm",
+            out_folder / "dat_bg_nrm",
         )
         if self.data_dilutioncorrected:
             write(
                 self.conc,
                 [e for e in self.data_dilutioncorrected if e],
-                out_folder / "dil_buf",
+                out_folder / "dat_bg_dil",
             )
         if self.data_dilutioncorrected_norm:
             write(
-                self.conc, self.data_dilutioncorrected_norm, out_folder / "dil_buf_norm"
+                self.conc,
+                self.data_dilutioncorrected_norm,
+                out_folder / "dat_bg_dil_nrm",
             )
 
 
@@ -1123,6 +1127,9 @@ class TitrationAnalysis(Titration):
         fin: int | None = None,
         no_weight: bool = False,
         tval: float = 0.95,
+        nrm: bool = False,
+        bg: bool = False,
+        dil: bool = False,
     ) -> None:
         """Fit titrations.
 
@@ -1140,6 +1147,12 @@ class TitrationAnalysis(Titration):
             Do not use residues from single Labelblock fit as weight for global fitting.
         tval : float
             Only for tval different from default=0.95 for the confint calculation.
+        nrm: bool
+            Data normalization flag (default=False)
+        bg: bool
+            Buffer subtraction flag (default=False)
+        dil: bool
+            Dilution correction flag (default=False)
 
         Notes
         -----
@@ -1153,22 +1166,27 @@ class TitrationAnalysis(Titration):
         x = np.array(self.conc)
         fittings = []
         # datafit
-        if self.data_dilutioncorrected_norm:
-            self._datafit = self.data_dilutioncorrected_norm
-        elif self.data_dilutioncorrected:  # XXX: inverted temporarily
-            self._datafit = self.data_dilutioncorrected
-        elif self.labelblocksgroups[0].data_buffersubtracted:
-            self._datafit = [
-                lbg.data_buffersubtracted for lbg in self.labelblocksgroups
-            ]
-        elif self.labelblocksgroups[0].data_buffersubtracted_norm:
-            self._datafit = [
-                lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
-            ]
-        elif self.labelblocksgroups[0].data:
-            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-        elif self.labelblocksgroups[0].data_norm:
+        if dil:
+            if nrm and self.data_dilutioncorrected_norm:
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]])
+                self._datafit = self.data_dilutioncorrected_norm
+            elif self.data_dilutioncorrected:
+                self._datafit = self.data_dilutioncorrected
+            else:  # back up to dat_nrm
+                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        elif bg:
+            if nrm:
+                self._datafit = [
+                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+                ]
+            else:
+                self._datafit = [
+                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+                ]
+        elif nrm:
             self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        else:
+            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
 
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - self.scheme.buffer
@@ -1229,7 +1247,6 @@ class TitrationAnalysis(Titration):
             for ctrl_name, wells in self.scheme.names.items():
                 for well in wells:
                     fitting.loc[well, "ctrl"] = ctrl_name
-        # self.fittings and self.fz
         self.fittings = fittings
 
     def plot_k(
@@ -1580,7 +1597,7 @@ class TitrationAnalysis(Titration):
                     ]
                 ]
             ]
-            buf = {key: lbg.data[key] for key in self.buffer_wells}  # type: ignore
+            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
