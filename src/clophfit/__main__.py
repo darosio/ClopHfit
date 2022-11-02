@@ -19,11 +19,11 @@ def fit_routine(
     norm: bool,
     bg: bool,
     dil: bool,
-    verbose: bool,
+    verbose: int,
     out: Path,
-    klim: tuple[float, float],
-    title: str,
-    sel: tuple[float, float],
+    klim: tuple[float, float] | None,
+    title: str | None,
+    sel: tuple[float, float] | None,
     pdf: bool,
 ) -> None:
     """Help main."""
