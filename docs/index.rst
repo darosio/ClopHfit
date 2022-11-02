@@ -1,8 +1,8 @@
 
 .. toctree::
+   :hidden:
 
    README.md
-   :hidden:
 
 .. toctree::
    :hidden:

@@ -1,43 +1,20 @@
 """Parse Tecan files, group lists and fit titrations.
 
-(Titrations are described in list.pH or list.cl file.
-
-Builds 96 titrations and export them in txt files. In the case of 2 labelblocks
-performs a global fit saving a png and printing the fitting results.)
-
-:ref:`prtecan parse`:
-
-* Labelblock
-* Tecanfile
-
-:ref:`prtecan group`:
-
-* LabelblocksGroup
-* TecanfilesGroup
-* Titration
-* TitrationAnalysis
-
-Functions
----------
-.. autofunction:: fit_titration
-.. autofunction:: fz_Kd_singlesite
-.. autofunction:: fz_pK_singlesite
-.. autofunction:: extract_metadata
-.. autofunction:: strip_lines
+- Titration is described in list.pH or list.cl file.
+- Builds 96 titrations and export them in txt files.
+- In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
 
 """
 from __future__ import annotations
 
-import copy
 import hashlib
 import itertools
 import warnings
 from collections import defaultdict
+from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any  # , overload
-from typing import List
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -50,11 +27,69 @@ from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
 
-# after set([type(ll[i][j]) for i in range(len(ll)) for j in range(13)])
-list_of_lines = List[List[Any]]
+# list_of_lines
+# after set([type(x) for l in csvl for x in l]) = float | int | str
+DAT = "dat"
+DAT_NRM = "dat_nrm"
+DAT_BG = "dat_bg"
+DAT_BG_NRM = "dat_bg_nrm"
+DAT_BG_DIL = "dat_bg_dil"
+DAT_BG_DIL_NRM = "dat_bg_dil_nrm"
 
 
-def strip_lines(lines: list_of_lines) -> list_of_lines:
+def read_xls(path: Path) -> list[list[str | int | float]]:
+    """Read first sheet of an xls file.
+
+    Parameters
+    ----------
+    path : Path
+        Path to `.xls` file.
+
+    Returns
+    -------
+    list_of_lines
+        Lines.
+
+    """
+    df = pd.read_excel(path)
+    n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
+    df = pd.concat([n0, df], ignore_index=True)
+    df.fillna("", inplace=True)
+    return list(df.values.tolist())
+
+
+def lookup_listoflines(
+    csvl: list[list[str | int | float]], pattern: str = "Label: Label", col: int = 0
+) -> list[int]:
+    """Lookup line numbers (row index) where given pattern occurs.
+
+    Parameters
+    ----------
+    csvl : list_of_lines
+        Lines of a csv/xls file.
+    pattern : str
+        Pattern to be searched (default="Label: Label").
+    col : int
+        Column to search (default=0).
+
+    Returns
+    -------
+    list[int]
+        Row/line index for all occurrences of pattern. Empty list for no occurrences.
+
+    """
+    return [
+        tuple_i_line[0]
+        for tuple_i_line in list(
+            filter(
+                lambda x: pattern in x[1][0] if isinstance(x[1][0], str) else None,
+                enumerate(csvl),
+            )
+        )
+    ]
+
+
+def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | float]]:
     """Remove empty fields/cells from lines read from a csv file.
 
     Parameters
@@ -74,16 +109,25 @@ def strip_lines(lines: list_of_lines) -> list_of_lines:
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
 
     """
-    stripped_lines = []
-    for line in lines:
-        sl = [line[i] for i in range(len(line)) if line[i] != ""]
-        stripped_lines.append(sl)
-    return stripped_lines
+    return [[e for e in line if e != ""] for line in lines]
+
+
+# TODO with a filter ectract_metadata with a map
+
+
+@dataclass(frozen=False)
+class Metadata:
+    """Value type of a metadata dictionary."""
+
+    #: Value for the dictionary key.
+    value: int | str | float | None
+    #: First element is the unit, the following are somewhat unexpected.
+    unit: Sequence[str | float | int] | None = None
 
 
 def extract_metadata(
-    lines: list_of_lines,
-) -> dict[str, str | list[str | int | float]]:
+    lines: list[list[str | int | float]],
+) -> dict[str, Metadata]:
     """Extract metadata into both Tecanfile and Labelblock.
 
     From a list of stripped lines takes the first field as the **key** of the
@@ -104,45 +148,108 @@ def extract_metadata(
     --------
     >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
     >>> extract_metadata(lines)
-    {'Shaking (Linear) Amplitude:': [2, 'mm']}
+    {'Shaking (Linear) Amplitude:': Metadata(value=2, unit=['mm'])}
+
+    >>> lines = [['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', '']]
+    >>> extract_metadata(lines)
+    {'Temperature': Metadata(value=26.0, unit=['°C'])}
 
     >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
-    >>> lines.append(['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', ''])
     >>> extract_metadata(lines)
-    {'Excitation Wavelength': [400, 'nm'], 'Temperature': [26.0]}
+    {'Excitation Wavelength': Metadata(value=400, unit=['nm'])}
 
     >>> lines = [['Label: Label1', '', '', '', '', '', '', '', '', '', '', '', '']]
     >>> extract_metadata(lines)
-    {'Label': ['Label1']}
+    {'Label': Metadata(value='Label1', unit=None)}
 
     >>> lines = [['Mode', '', '', '', 'Fluorescence Top Reading', '', '', '', '', '']]
-    >>> extract_metadata(lines)
-    {'Mode': ['Fluorescence Top Reading']}
+    >>> extract_metadata(lines)['Mode'].value
+    'Fluorescence Top Reading'
 
     """
-    stripped_lines = strip_lines(lines)
-    temp: dict[str, list[float | int | str]] = {
-        "Temperature": [float(line[0].split(":")[1].split("°C")[0])]
-        for line in stripped_lines
-        if len(line) == 1 and "Temperature" in line[0]
-    }
-    labl: dict[str, list[str | int | float]] = {
-        "Label": [line[0].split(":")[1].strip()]
-        for line in stripped_lines
-        if len(line) == 1 and "Label" in line[0]
-    }
-    m1: dict[str, str | list[str | int | float]] = {
-        line[0]: line[0]
-        for line in stripped_lines
-        if len(line) == 1 and "Label" not in line[0] and "Temperature" not in line[0]
-    }
-    m2: dict[str, str | list[str | int | float]] = {
-        line[0]: line[1:] for line in stripped_lines if len(line) > 1
-    }
-    m2.update(m1)
-    m2.update(temp)
-    m2.update(labl)
-    return m2
+    md: dict[str, Metadata] = {}
+
+    for line in strip_lines(lines):
+        if len(line) > 2:
+            md.update({str(line[0]): Metadata(line[1], line[2:])})
+        elif len(line) == 2:
+            md.update({str(line[0]): Metadata(line[1])})
+        elif len(line) == 1 and isinstance(line[0], str) and ":" in line[0]:
+            k, v = line[0].split(":")
+            vals: list[str] = v.split()
+            val: float | str
+            try:
+                val = float(vals[0])
+            except ValueError:
+                val = vals[0]
+            if len(vals) == 1:
+                md.update({k: Metadata(val)})
+            else:
+                md.update({k: Metadata(val, vals[1:])})
+        elif line:
+            md.update({str(line[0]): Metadata(line[0])})
+
+    return md
+
+
+def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
+    """Merge a list of metadata dict if the key value is the same in the list."""
+    mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
+    # To account for the case 93"Optimal" and 93"Manual" in lb metadata
+    if mmd.get("Gain") is None and mds[0].get("Gain") is not None:
+        if all(mds[0]["Gain"].value == md["Gain"].value for md in mds[1:]):
+            mmd["Gain"] = Metadata(mds[0]["Gain"].value)
+    return mmd
+
+
+def calculate_conc(
+    additions: Sequence[float], conc_stock: float, conc_ini: float = 0.0
+) -> NDArray[np.float_]:
+    """Calculate concentration values.
+
+    additions[0]=vol_ini; Stock concentration is a parameter.
+
+    Parameters
+    ----------
+    additions : Sequence[float]
+        Initial volume and all subsequent additions.
+    conc_stock : float
+        Concentration of the stock used for additions.
+    conc_ini : float
+        Initial concentration (default=0).
+
+    Returns
+    -------
+    np.ndarray
+        Concentrations as vector.
+
+    """
+    vol_tot = np.cumsum(additions)
+    concs = np.ones(len(additions))
+    concs[0] = conc_ini
+    for i, add in enumerate(additions[1:], start=1):
+        concs[i] = (concs[i - 1] * vol_tot[i - 1] + conc_stock * float(add)) / vol_tot[
+            i
+        ]
+    return concs  # , vol_tot
+
+
+def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
+    """Apply dilution correction.
+
+    Parameters
+    ----------
+    additions: list[float]
+        List of initial volume (index=0) followed by all additions.
+
+    Returns
+    -------
+    NDArray[float]
+        Dilution correction vector.
+    """
+    volumes = np.cumsum(additions)
+    correction = volumes / volumes[0]
+    return np.array(correction)
 
 
 def fz_kd_singlesite(
@@ -310,17 +417,10 @@ class Labelblock:
 
     Parameters
     ----------
-    tecanfile : Tecanfile | None
-        Object containing (has-a) this Labelblock.
-    lines : list_of_lines
-        Lines for this Labelblock.
-
-    Attributes
-    ----------
-    metadata : dict
-        Metadata specific for this Labelblock.
-    data : Dict[str, float]
-        The 96 data values as {'well_name': value}.
+    lines : list[list[str | int | float]]
+        Lines to create this Labelblock.
+    path : Path, optional
+        File path to the tecanfile that contains this labelblock.
 
     Raises
     ------
@@ -330,26 +430,37 @@ class Labelblock:
     Warns
     -----
     Warning
-        When it replaces "OVER" with ``np.nan`` for any saturated value.
+        When it replaces "OVER" with ``np.nan`` for saturated values.
 
     """
 
-    tecanfile: Tecanfile | None
-    lines: list_of_lines
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
-    data: dict[str, float] = field(init=False, repr=True)
+    lines: InitVar[list[list[str | int | float]]]
+    path: Path | None = None
 
-    def __post_init__(self) -> None:
+    #: Metadata specific for this Labelblock.
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
+    #: The 96 data values as {'well_name', value}.
+    data: dict[str, float] = field(init=False, repr=True)
+    _data_norm: dict[str, float] | None = None
+    _data_buffersubtracted: dict[str, float] | None = None
+    _data_buffersubtracted_norm: dict[str, float] | None = None
+    _buffer_wells: list[str] | None = None
+    _buffer: float | None = None
+    _buffer_norm: float | None = None
+    _sd_buffer: float | None = None
+    _sd_buffer_norm: float | None = None
+
+    def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
-        if self.lines[14][0] == "<>" and self.lines[23] == self.lines[24] == [""] * 13:
-            stripped = strip_lines(self.lines)
+        if lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13:
+            stripped = strip_lines(lines)
             stripped[14:23] = []
             self.metadata = extract_metadata(stripped)
-            self.data = self._extract_data(self.lines[15:23])
+            self.data = self._extract_data(lines[15:23])
         else:
             raise ValueError("Cannot build Labelblock: not 96 wells?")
 
-    def _extract_data(self, lines: list_of_lines) -> dict[str, float]:
+    def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
         """Convert data into a dictionary.
 
         {'A01' : value}
@@ -387,11 +498,9 @@ class Labelblock:
                         data[row + f"{col:0>2}"] = float(lines[i][col])
                     except ValueError:
                         data[row + f"{col:0>2}"] = np.nan
-                        path = self.tecanfile.path if self.tecanfile else ""
                         warnings.warn(
-                            "OVER value in {}{:0>2} well for {} of tecanfile: {}".format(
-                                row, col, self.metadata["Label"], path
-                            )
+                            f"OVER\n Overvalue in {self.metadata['Label'].value}:"
+                            f"{row}{col:0>2} of tecanfile {self.path}"
                         )
         except AssertionError:
             raise ValueError("Cannot extract data in Labelblock: not 96 wells?")
@@ -407,6 +516,101 @@ class Labelblock:
         "Number of Flashes",
     ]
 
+    @property
+    def data_norm(self) -> dict[str, float]:
+        """Normalize data by number of flashes, integration time and gain."""
+        if self._data_norm is None:
+            if (
+                isinstance(self.metadata["Gain"].value, (float, int))
+                and isinstance(self.metadata["Number of Flashes"].value, (float, int))
+                and isinstance(self.metadata["Integration Time"].value, (float, int))
+            ):
+                norm = (
+                    1000.0
+                    / self.metadata["Gain"].value
+                    / self.metadata["Number of Flashes"].value
+                    / self.metadata["Integration Time"].value
+                )
+            else:
+                warnings.warn(
+                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time."
+                )  # pragma: no cover
+            self._data_norm = {k: v * norm for k, v in self.data.items()}
+        return self._data_norm
+
+    @property
+    def buffer_wells(self) -> list[str] | None:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        self._buffer = float(np.average([self.data[k] for k in buffer_wells]))
+        self._sd_buffer = float(np.std([self.data[k] for k in buffer_wells]))
+        self._buffer_norm = float(np.average([self.data_norm[k] for k in buffer_wells]))
+        self._sd_buffer_norm = float(np.std([self.data_norm[k] for k in buffer_wells]))
+        self._data_buffersubtracted = None
+        self._data_buffersubtracted_norm = None
+
+    @property
+    def data_buffersubtracted(self) -> dict[str, float]:
+        """Buffer subtracted data."""
+        if self._data_buffersubtracted is None:
+            if self.buffer:
+                self._data_buffersubtracted = {
+                    k: v - self.buffer for k, v in self.data.items()
+                }
+            else:
+                self._data_buffersubtracted = {}
+        return self._data_buffersubtracted
+
+    @property
+    def data_buffersubtracted_norm(self) -> dict[str, float]:
+        """Normalize buffer-subtracted data."""
+        if self._data_buffersubtracted_norm is None:
+            if self.buffer_norm:
+                self._data_buffersubtracted_norm = {
+                    k: v - self.buffer_norm for k, v in self.data_norm.items()
+                }
+            else:
+                self._data_buffersubtracted_norm = {}
+        return self._data_buffersubtracted_norm
+
+    @property
+    def buffer(self) -> float | None:
+        """Background value to be subtracted before dilution correction."""
+        return self._buffer
+
+    @buffer.setter
+    def buffer(self, value: float) -> None:
+        if self._buffer == value:
+            return None
+        self._data_buffersubtracted = None
+        self._buffer = value
+
+    @property
+    def buffer_norm(self) -> float | None:
+        """Background value to be subtracted before dilution correction."""
+        return self._buffer_norm
+
+    @buffer_norm.setter
+    def buffer_norm(self, value: float) -> None:
+        if self._buffer_norm == value:
+            return None
+        self._data_buffersubtracted_norm = None
+        self._buffer_norm = value
+
+    @property
+    def sd_buffer(self) -> float | None:
+        """Get standard deviation of buffer_wells values."""
+        return self._sd_buffer
+
+    @property
+    def sd_buffer_norm(self) -> float | None:
+        """Get standard deviation of normalized buffer_wells values."""
+        return self._sd_buffer_norm
+
     def __eq__(self, other: object) -> bool:
         """Two labelblocks are equal when metadata KEYS are identical."""
         if not isinstance(other, Labelblock):
@@ -415,7 +619,7 @@ class Labelblock:
         for k in Labelblock._KEYS:
             eq &= self.metadata[k] == other.metadata[k]
         # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
-        eq &= self.metadata["Gain"][0] == other.metadata["Gain"][0]
+        eq &= self.metadata["Gain"].value == other.metadata["Gain"].value
         return eq
 
     def __almost_eq__(self, other: Labelblock) -> bool:
@@ -428,59 +632,13 @@ class Labelblock:
 
 
 @dataclass
-class NormalizedLabelblock:
-    """Store normalized data for a labelblock.
-
-    Parameters
-    ----------
-    lb : Labelblock
-        Object containing data to be normalized.
-
-    Attributes
-    ----------
-    data : Dict[str, float]
-        Normalized data values as {'well_name': value}.
-
-    """
-
-    lb: Labelblock
-    data: dict[str, float] = field(init=False, repr=True)
-
-    def __post_init__(self) -> None:
-        """Normalize data by number of flashes, integration time and gain value."""
-        norm = (
-            1000.0
-            / float(self.lb.metadata["Gain"][0])
-            / float(self.lb.metadata["Number of Flashes"][0])
-            / float(self.lb.metadata["Integration Time"][0])
-        )
-        self.data = {k: v * norm for k, v in self.lb.data.items()}
-
-
-@dataclass
 class Tecanfile:
-    """Parse a .xls file as exported from Tecan.
+    """Parse a Tecan .xls file.
 
     Parameters
-    ----------
-    path
-        Path to the '.xls' file.
-
-    Attributes
     ----------
     path: Path
-        Tecan file path.
-    metadata : dict[str, str | list[str | int | float]]
-        General metadata for Tecanfile e.g. 'Date:' or 'Shaking Duration:'.
-    labelblocks : List[Labelblock]
-        All labelblocks contained in the file.
-
-    Methods
-    -------
-    read_xls(path) :
-        Read xls file at path.
-    lookup_csv_lines(csvl, pattern='Label: Label', col=0) :
-        Return row index for pattern found at col.
+        Path to `.xls` file.
 
     Raises
     ------
@@ -492,13 +650,16 @@ class Tecanfile:
     """
 
     path: Path
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+
+    #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
+    #: All labelblocks contained in this file.
     labelblocks: list[Labelblock] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Initialize."""
-        csvl = Tecanfile.read_xls(self.path)
-        idxs = Tecanfile.lookup_csv_lines(csvl, pattern="Label: Label", col=0)
+        csvl = read_xls(self.path)
+        idxs = lookup_listoflines(csvl, pattern="Label: Label", col=0)
         if len(idxs) == 0:
             raise ValueError("No Labelblock found.")
         self.metadata = extract_metadata(csvl[: idxs[0]])
@@ -506,7 +667,7 @@ class Tecanfile:
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
         for i in range(n_labelblocks):
-            labelblocks.append(Labelblock(self, csvl[idxs[i] : idxs[i + 1]]))
+            labelblocks.append(Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path))
         if any(
             labelblocks[i] == labelblocks[j]
             for i, j in itertools.combinations(range(n_labelblocks), 2)
@@ -514,91 +675,38 @@ class Tecanfile:
             warnings.warn("Repeated labelblocks")
         self.labelblocks = labelblocks
 
-    @classmethod
-    def read_xls(cls, path: Path) -> list_of_lines:
-        """Read first sheet of an xls file.
-
-        Parameters
-        ----------
-        path : Path
-            Path to .xls file.
-
-        Returns
-        -------
-        list_of_lines
-            Lines.
-
-        """
-        df = pd.read_excel(path)
-        n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
-        df = pd.concat([n0, df], ignore_index=True)
-        df.fillna("", inplace=True)
-        return list(df.values.tolist())
-
-    @classmethod
-    def lookup_csv_lines(
-        cls,
-        csvl: list_of_lines,
-        pattern: str = "Label: Label",
-        col: int = 0,
-    ) -> list[int]:
-        """Lookup the line number where given pattern occurs.
-
-        If nothing found return empty list.
-
-        Parameters
-        ----------
-        csvl : list_of_lines
-            Lines of a csv/xls file.
-        pattern : str
-            Pattern to be searched for., default="Label: Label"
-        col : int
-            Column to search (line-by-line).
-
-        Returns
-        -------
-        list[int]
-            Row/line index for all occurrences of pattern.
-
-        """
-        idxs = []
-        for i, line in enumerate(csvl):
-            if pattern in line[col]:
-                idxs.append(i)
-        return idxs
-
 
 @dataclass
 class LabelblocksGroup:
-    """Group of labelblocks with 'equal' metadata.
+    """Group labelblocks with compatible metadata.
+
+    `data_norm` always exist.
 
     Parameters
     ----------
-    labelblocks
-        List of labelblocks with 'equal' metadata.
-
-    Attributes
-    ----------
-    metadata : dict
-        The common metadata.
-    data : Dict[str, List[float]]
-        The usual dict for data (see Labelblock) with well name as key but with
-        list of values as value.
+    labelblocks: list[Labelblock]
+        Labelblocks to be grouped.
+    allequal: bool
+        True if labelblocks already tested equal.
 
     Raises
     ------
     Exception
-        If metadata are not all 'equal'.
+        When labelblocks are neither equal nor almost equal.
 
     """
 
     labelblocks: list[Labelblock]
     allequal: bool = False
-    metadata: dict[str, list[str | int | float | list[str | int]]] = field(
-        init=False, repr=True
-    )
-    data: dict[str, list[float]] = field(init=False, repr=True)
-    buffer: dict[str, list[float]] | None = None
+
+    #: Metadata shared by all labelblocks.
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
+    #: List of data in the same order of labelblocks.
+    _data: dict[str, list[float]] | None = None
+    _data_norm: dict[str, list[float]] | None = None
+    _data_buffersubtracted: dict[str, list[float]] | None = None
+    _data_buffersubtracted_norm: dict[str, list[float]] | None = None
+    _buffer_wells: list[str] | None = None
 
     def __post_init__(self) -> None:
         """Create common metadata and data."""
@@ -606,45 +714,78 @@ class LabelblocksGroup:
             self.allequal = all(
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
-        datagrp = defaultdict(list)
         if self.allequal:
-            # list of labelblocks with the same key metadata
-            self.metadata = self._merge_md(self.labelblocks)
+            self._data = defaultdict(list)
             for key in self.labelblocks[0].data.keys():
                 for lb in self.labelblocks:
-                    datagrp[key].append(lb.data[key])
-            self.data = datagrp
+                    self._data[key].append(lb.data[key])
+        # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
-            # list of labelblocks that can  be merged after normalization
-            self.metadata = self._merge_md(self.labelblocks)
-            norm_labelblocks = [NormalizedLabelblock(lb) for lb in self.labelblocks]
-            for key in norm_labelblocks[0].data.keys():
-                for nlb in norm_labelblocks:
-                    datagrp[key].append(nlb.data[key])
-            self.data = datagrp
+            self._data_norm = defaultdict(list)
+            for key in self.labelblocks[0].data.keys():
+                for lb in self.labelblocks:
+                    self._data_norm[key].append(lb.data_norm[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
+        self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
 
-    def _merge_md(
-        self, labelblocks: list[Labelblock]
-    ) -> dict[str, list[str | int | float | list[str | int]]]:
-        """Merge metadata from a list of labelblocks."""
-        mmd: dict[str, list[Any]] = defaultdict(list)
-        for lb in labelblocks:
-            for k, v in lb.metadata.items():
-                if len(v) == 1:
-                    mmd[k].append(v[0])
-                else:
-                    mmd[k].append(v)
-        for k, v in mmd.items():
-            if all([v[0] == val for val in v[1:]]):
-                if type(v[0]) is str or type(v[0]) is int:
-                    mmd[k] = [v[0]]
-                else:
-                    mmd[k] = v[0]  # type: ignore
-            else:
-                mmd[k] = v
-        return dict(mmd)
+    @property
+    def data(self) -> dict[str, list[float]] | None:
+        """Return None or data."""
+        return self._data
+
+    @property
+    def data_norm(self) -> dict[str, list[float]]:
+        """Normalize data by number of flashes, integration time and gain."""
+        if self._data_norm is None:
+            self._data_norm = defaultdict(list)
+            for key in self.labelblocks[0].data.keys():
+                for lb in self.labelblocks:
+                    self._data_norm[key].append(lb.data_norm[key])
+        return self._data_norm
+
+    @property
+    def buffer_wells(self) -> list[str] | None:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        for lb in self.labelblocks:
+            lb.buffer_wells = self.buffer_wells
+        self._data_buffersubtracted = None
+        self._data_buffersubtracted_norm = None
+
+    @property
+    def data_buffersubtracted(self) -> dict[str, list[float]] | None:
+        """Buffer subtracted data."""
+        if self.data is None:
+            return None
+        if self._data_buffersubtracted is None:
+            self._data_buffersubtracted = (
+                {
+                    key: [lb.data_buffersubtracted[key] for lb in self.labelblocks]
+                    for key in self.labelblocks[0].data.keys()
+                }
+                if self.buffer_wells
+                else {}
+            )
+        return self._data_buffersubtracted
+
+    @property
+    def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
+        """Buffer subtracted data."""
+        if self._data_buffersubtracted_norm is None:
+            self._data_buffersubtracted_norm = (
+                {
+                    key: [lb.data_buffersubtracted_norm[key] for lb in self.labelblocks]
+                    for key in self.labelblocks[0].data.keys()
+                }
+                if self.buffer_wells
+                else {}
+            )
+        return self._data_buffersubtracted_norm
 
 
 @dataclass
@@ -653,19 +794,13 @@ class TecanfilesGroup:
 
     Parameters
     ----------
-    filenames
-        List of xls (paths) filenames.
-
-    Attributes
-    ----------
-    labelblocksgroups : List[LabelblocksGroup]
-       Each group contains its own data like a titration.
+    tecanfiles: list[Tecanfile]
+        List of Tecanfiles.
 
     Raises
     ------
     Exception
-        When is not possible to build any LabelblocksGroup because nothing
-        in common between files (listed in filenames).
+        When all Labelblocks are not at least almost equal.
 
     Warns
     -----
@@ -679,8 +814,11 @@ class TecanfilesGroup:
     """
 
     tecanfiles: list[Tecanfile]
-    labelblocksgroups: list[LabelblocksGroup] = field(default_factory=list)
-    metadata: dict[str, str | list[str | int | float]] = field(init=False, repr=True)
+
+    #: Each group contains its own data like a titration. ??
+    labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
+    #: Metadata shared by all tecanfiles.
+    metadata: dict[str, Metadata] = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create metadata and labelblocksgroups."""
@@ -707,215 +845,284 @@ class TecanfilesGroup:
                 # if labelblocks are all 'equal'
                 else:
                     self.labelblocksgroups.append(gr)
-            files = [tf.path.name for tf in self.tecanfiles]
+            files = [tf.path for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
                 raise ValueError(f"No common labelblock in filenames: {files}.")
             else:
                 warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
-        self.metadata = self.tecanfiles[0].metadata
+        self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
 
 
-@dataclass(init=False)
+@dataclass
 class Titration(TecanfilesGroup):
-    """Group tecanfiles into a Titration as indicated by a listfile.
-
-    The script will work from any directory: list.pH list filenames relative to
-    its position.
+    """TecanfileGroup + concentrations.
 
     Parameters
     ----------
-    listfile
-        File path to the listfile ([tecan_file_path conc]).
-
-    Attributes
-    ----------
-    conc : List[float]
-        Concentration values common to all 96 titrations.
-    labelblocksgroups: List[LabelblocksGroup]
-        List of labelblocksgroups.
-
+    tecanfiles : list[Tecanfile]
+        Tecanfiles to be grouped.
+    conc : Sequence[float]
+        Concentration or pH values.
     """
 
-    conc: Sequence[float] = field(init=False, repr=True)
+    tecanfiles: list[Tecanfile]
+    conc: Sequence[float]
 
-    def __init__(self, listfile: Path) -> None:
+    _additions: list[float] | None = None
+    _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
+    _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
+    _buffer_wells: list[str] | None = None
+    _dil_corr: NDArray[np.float_] = field(init=False, repr=False)
+
+    @classmethod
+    def fromlistfile(cls, list_file: Path | str) -> Titration:
+        """Build `Titration` from a list[.pH|.Cl] file.
+
+        Parameters
+        ----------
+        list_file: Path | str
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        Titration
+        """
+        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        return cls(tecanfiles, conc)
+
+    @staticmethod
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], Sequence[float]]:
+        """Help construction from file.
+
+        Parameters
+        ----------
+        listfile: Path
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        tecanfiles and conc.
+
+        Raises
+        ------
+        FileNotFoundError
+            When cannot access `list_file`.
+        ValueError
+            For unexpected file format, e.g. length of filename column differs from
+            length of conc values.
+        """
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError:
             raise FileNotFoundError(f"Cannot find: {listfile}")
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
-        self.conc = df["conc"].tolist()
+        conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
-        super().__init__(tecanfiles)
+        return tecanfiles, conc
 
-    def export_dat(self, path: Path) -> None:
+    @property
+    def additions(self) -> list[float] | None:
+        """List of initial volume followed by additions."""
+        return self._additions
+
+    @additions.setter
+    def additions(self, additions: list[float]) -> None:
+        self._additions = additions
+        self._dil_corr = dilution_correction(additions)
+        self._data_dilutioncorrected = None
+        self._data_dilutioncorrected_norm = None
+
+    def load_additions(self, additions_file: Path) -> None:
+        """Load additions from file."""
+        df = pd.read_table(additions_file, names=["add"])
+        self.additions = df["add"].tolist()
+
+    @property
+    def buffer_wells(self) -> list[str] | None:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, buffer_wells: list[str]) -> None:
+        self._buffer_wells = buffer_wells
+        for lbg in self.labelblocksgroups:
+            lbg.buffer_wells = buffer_wells
+        self._data_dilutioncorrected = None
+        self._data_dilutioncorrected_norm = None
+
+    @property
+    def data_dilutioncorrected(self) -> list[dict[str, list[float]] | None] | None:
+        """Buffer subtracted data."""
+        if self._data_dilutioncorrected is None and self.additions:
+            self._data_dilutioncorrected = [
+                {k: v * self._dil_corr for k, v in lbg.data_buffersubtracted.items()}
+                if lbg.data_buffersubtracted
+                else None
+                for lbg in self.labelblocksgroups
+            ]
+        return self._data_dilutioncorrected
+
+    @property
+    def data_dilutioncorrected_norm(self) -> list[dict[str, list[float]]] | None:
+        """Buffer subtracted data."""
+        if self._data_dilutioncorrected_norm is None and self.additions:
+            self._data_dilutioncorrected_norm = [
+                {
+                    k: v * self._dil_corr
+                    for k, v in lbg.data_buffersubtracted_norm.items()
+                }
+                for lbg in self.labelblocksgroups
+            ]
+        return self._data_dilutioncorrected_norm
+
+    def export_data(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
+
+        Remember that a Titration has at least 1 normalized Lbg dataset `dat_nrm`.
+
+        dat:            [d1, None] | [d1, d2]
+        dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_nrm:        [d1,d2]
+        dat_bg_nrm:     [{}, {}] | [d1, d2]
+        dat_bg_dil_nrm: [{}, {}] | [d1, d2]
 
         Parameters
         ----------
-        path : Path
+        out_folder : Path
             Path to output folder.
 
         """
-        path.mkdir(parents=True, exist_ok=True)
-        for key, dy1 in self.labelblocksgroups[0].data.items():
-            df = pd.DataFrame({"x": self.conc, "y1": dy1})
-            for n, lb in enumerate(self.labelblocksgroups[1:], start=2):
-                dy = lb.data[key]
-                df["y" + str(n)] = dy
-            df.to_csv(path / Path(key).with_suffix(".dat"), index=False)
+        out_folder.mkdir(parents=True, exist_ok=True)
+
+        def write(
+            conc: Sequence[float], data: list[dict[str, list[float]]], out_folder: Path
+        ) -> None:
+            """Write data."""
+            if any(data):
+                out_folder.mkdir(parents=True, exist_ok=True)
+                columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
+                for key in data[0].keys():
+                    dat = np.vstack((conc, [dt[key] for dt in data]))
+                    df = pd.DataFrame(dat.T, columns=columns)
+                    df.to_csv(out_folder / Path(key).with_suffix(".dat"), index=False)
+
+        write(
+            self.conc,
+            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
+            out_folder / DAT,
+        )
+        write(
+            self.conc,
+            [lbg.data_norm for lbg in self.labelblocksgroups],
+            out_folder / DAT_NRM,
+        )
+        write(
+            self.conc,
+            [
+                lbg.data_buffersubtracted
+                for lbg in self.labelblocksgroups
+                if lbg.data_buffersubtracted
+            ],
+            out_folder / DAT_BG,
+        )
+        write(
+            self.conc,
+            [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
+            out_folder / DAT_BG_NRM,
+        )
+        if self.data_dilutioncorrected:
+            write(
+                self.conc,
+                [e for e in self.data_dilutioncorrected if e],
+                out_folder / DAT_BG_DIL,
+            )
+        if self.data_dilutioncorrected_norm:
+            write(
+                self.conc,
+                self.data_dilutioncorrected_norm,
+                out_folder / DAT_BG_DIL_NRM,
+            )
 
 
 @dataclass
-class TitrationAnalysis:
-    """Perform analysis of a titration.
+class PlateScheme:
+    """Definition of wells of buffer, ctrl and unk as well as names of controls."""
 
-    Parameters
-    ----------
-    titration
-        Titration object.
-    schemefile
-        File path to the schemefile (e.g. {"C01: 'V224Q'"}).
-
-    Attributes
-    ----------
-    scheme : pd.DataFrame or pd.Series FIXME
-        e.g. {'buffer': ['H12']}
-    conc : List[float]
-        Concentration values common to all 96 titrations.
-    labelblocksgroups : List[LabelblocksGroup]
-        Deepcopy from titration.
-
-    Methods
-    -------
-    subtract_bg
-
-    dilution_correction
-
-    metadata_normalization
-
-    calculate_conc
-
-    fit
-
-    """
-
-    titration: Titration
-    schemefile: str | None = None
-    scheme: pd.Series[Any] = field(init=False, repr=True)
-    conc: Sequence[float] = field(init=False, repr=True)
-    labelblocksgroups: list[LabelblocksGroup] = field(init=False, repr=True)
-    additions: Sequence[float] = field(init=False, repr=True)
+    file: Path | None
+    buffer: list[str] = field(init=False, default_factory=list)
+    ctrl: list[str] = field(init=False, default_factory=list)
+    names: dict[str, set[str]] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Create attributes."""
-        if self.schemefile is None:
-            self.scheme = pd.Series({"well": []})
-        else:
-            df = pd.read_table(self.schemefile)
+        """Complete initialization."""
+        if self.file:
+            df = pd.read_table(self.file)
             if (
                 df.columns.tolist() != ["well", "sample"]
                 or df["well"].count() != df["sample"].count()
             ):
-                raise ValueError(
-                    f"Check format [well sample] for schemefile: {self.schemefile}"
-                )
-            self.scheme = df.groupby("sample")["well"].unique()
-        self.conc = self.titration.conc
-        self.labelblocksgroups = copy.deepcopy(self.titration.labelblocksgroups)
+                msg = f"Check format [well sample] for schemefile: {self.file}"
+                raise ValueError(msg)
+            scheme = df.groupby("sample")["well"].unique()
+            self.buffer = list(scheme["buffer"])
+            self.ctrl = list(
+                {well for sample in scheme.tolist() for well in sample}
+                - set(self.buffer)
+            )
+            self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
+        # else: default_factory
 
-    def subtract_bg(self) -> None:
-        """Subtract average buffer values for each titration point."""
-        buffer_keys = self.scheme.pop("buffer")
-        for lbg in self.labelblocksgroups:
-            lbg.buffer = {}
-            for k in buffer_keys:
-                lbg.buffer[k] = lbg.data.pop(k)
-            bgs = list(lbg.buffer.values())
-            bg = np.mean(bgs, axis=0)
-            bg_sd = np.std(bgs, axis=0)
-            for k in lbg.data:
-                lbg.data[k] -= bg
-            lbg.buffer["bg"] = bg
-            lbg.buffer["bg_sd"] = bg_sd
 
-    def dilution_correction(self, additionsfile: str) -> None:
-        """Apply dilution correction.
+@dataclass
+class TitrationAnalysis(Titration):
+    """Perform analysis of a titration.
 
-        Parameters
-        ----------
-        additionsfile: str
-            File listing volume additions during titration.
+    Parameters
+    ----------
+    titration : Titration
+        Titration object.
+    schemefile : str | None
+        File path to the schemefile (e.g. {"C01: 'V224Q'"}).
 
-        """
-        if hasattr(self, "additions"):
-            warnings.warn("Dilution correction was already applied.")
-            return
-        df = pd.read_table(additionsfile, names=["add"])
-        self.additions = df["add"].tolist()
-        volumes = np.cumsum(self.additions)
-        corr = volumes / volumes[0]
-        for lbg in self.labelblocksgroups:
-            for k in lbg.data:
-                lbg.data[k] *= corr
+    Raises
+    ------
+    ValueError
+        For unexpected file format, e.g. header `names`.
+
+    """
+
+    _scheme: PlateScheme = PlateScheme(None)
+    _datafit: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
+    )  # [], empty list
 
     @classmethod
-    def calculate_conc(
-        cls,
-        additions: Sequence[float],
-        conc_stock: float,
-        conc_ini: float = 0.0,
-    ) -> NDArray[np.float_]:
-        """Calculate concentration values.
-
-        additions[0]=vol_ini; Stock concentration is a parameter.
+    def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
+        """Build `TitrationAnalysis` from a list[.pH|.Cl] file.
 
         Parameters
         ----------
-        additions : Sequence[float]
-            Initial volume and all subsequent additions.
-        conc_stock : float
-            Concentration of the stock used for additions.
-        conc_ini : float
-            Initial concentration (default=0).
+        list_file: Path | str
+            File path to the listfile ([fpath conc]).
 
         Returns
         -------
-        np.ndarray
-            Concentrations as vector.
-
+        TitrationAnalysis
         """
-        vol_tot = np.cumsum(additions)
-        concs = np.ones(len(additions))
-        concs[0] = conc_ini
-        for i, add in enumerate(additions[1:], start=1):
-            concs[i] = (
-                concs[i - 1] * vol_tot[i - 1] + conc_stock * float(add)
-            ) / vol_tot[i]
-        return concs  # , vol_tot
+        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        return cls(tecanfiles, conc)
 
-    def metadata_normalization(self) -> None:
-        """Normalize signal using gain, flashes and integration time."""
-        if hasattr(self, "normalized"):
-            warnings.warn("Normalization using metadata was already applied.")
-            return
-        for lbg in self.labelblocksgroups:
-            # new lbg metadata
-            corr = 1000 / float(lbg.metadata["Gain"][0][0])  # type: ignore
-            corr /= float(lbg.metadata["Integration Time"][0])  # type: ignore
-            corr /= float(lbg.metadata["Number of Flashes"][0])  # type: ignore
-            for k in lbg.data.keys():
-                lbg.data[k] = [v * corr for v in lbg.data[k]]
-        self.normalized = True
+    @property
+    def scheme(self) -> PlateScheme:
+        """Scheme for known samples e.g. {'buffer', ['H12', 'H01']}."""
+        return self._scheme
 
-    def _get_keys(self) -> None:
-        """Get plate positions of crtl and unk samples."""
-        self.keys_ctrl = [k for ctr in self.scheme.tolist() for k in ctr]
-        self.names_ctrl = list(self.scheme.to_dict())
-        self.keys_unk = list(
-            self.labelblocksgroups[0].data.keys() - set(self.keys_ctrl)
-        )
+    def load_scheme(self, schemefile: Path) -> None:
+        """Load scheme from file. Set buffer_wells."""
+        self._scheme = PlateScheme(schemefile)
+        self.buffer_wells = self._scheme.buffer
 
     def fit(
         self,
@@ -924,6 +1131,9 @@ class TitrationAnalysis:
         fin: int | None = None,
         no_weight: bool = False,
         tval: float = 0.95,
+        nrm: bool = False,
+        bg: bool = False,
+        dil: bool = False,
     ) -> None:
         """Fit titrations.
 
@@ -941,6 +1151,12 @@ class TitrationAnalysis:
             Do not use residues from single Labelblock fit as weight for global fitting.
         tval : float
             Only for tval different from default=0.95 for the confint calculation.
+        nrm: bool
+            Data normalization flag (default=False).
+        bg: bool
+            Buffer subtraction flag (default=False).
+        dil: bool
+            Dilution correction flag (default=False).
 
         Notes
         -----
@@ -953,23 +1169,54 @@ class TitrationAnalysis:
             self.fz = fz_pk_singlesite
         x = np.array(self.conc)
         fittings = []
-        for lbg in self.labelblocksgroups:
-            fitting = pd.DataFrame()
-            for k, y in lbg.data.items():
-                res = fit_titration(
-                    kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
-                )
-                res.index = pd.Index([k])
-                # fitting = fitting.append(res, sort=False) DDD
-                fitting = pd.concat([fitting, res], sort=False)
-                # TODO assert (fitting.columns == res.columns).all()
-                # better to refactor this function
+        # datafit
+        if dil:
+            if nrm and self.data_dilutioncorrected_norm:
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]])
+                self._datafit = self.data_dilutioncorrected_norm
+            elif self.data_dilutioncorrected:
+                self._datafit = self.data_dilutioncorrected
+            else:  # back up to dat_nrm
+                warnings.warn("No dilution corrected data found; use normalized data.")
+                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        elif bg:
+            if nrm:
+                self._datafit = [
+                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+                ]
+            else:
+                self._datafit = [
+                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+                ]
+        elif nrm:
+            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        else:
+            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
 
-            fittings.append(fitting)
-        # global weighted on relative residues of single fittings
+        # Any Lbg at least contains normalized data.
+        keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
+        self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
+
+        for data in self._datafit:
+            fitting = pd.DataFrame()
+            if data:
+                for k in keys_fit:
+                    y = data[k]
+                    res = fit_titration(
+                        kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
+                    )
+                    res.index = pd.Index([k])
+                    # fitting = fitting.append(res, sort=False) DDD
+                    fitting = pd.concat([fitting, res], sort=False)
+                    # TODO assert (fitting.columns == res.columns).all()
+                    # better to refactor this function
+                fittings.append(fitting)
+        # Global weighted on relative residues of single fittings.
         fitting = pd.DataFrame()
-        for k, y in self.labelblocksgroups[0].data.items():
-            y2 = np.array(self.labelblocksgroups[1].data[k])
+        for k in keys_fit:
+            # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
+            y = self._datafit[0][k]  # type: ignore
+            y2 = self._datafit[1][k]  # type: ignore
             residue = y - self.fz(
                 fittings[0]["K"].loc[k],
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
@@ -991,7 +1238,7 @@ class TitrationAnalysis:
                 kind,
                 self.conc[ini:fin],
                 np.array(y[ini:fin]),
-                y2=y2[ini:fin],
+                y2=np.array(y2[ini:fin]),
                 residue=residue[ini:fin],
                 residue2=residue2[ini:fin],
                 tval_conf=tval,
@@ -1002,12 +1249,10 @@ class TitrationAnalysis:
         fittings.append(fitting)
         # Write the name of the control e.g. S202N in the "ctrl" column
         for fitting in fittings:
-            for ctrl, v in self.scheme.items():
-                for k in v:
-                    fitting.loc[k, "ctrl"] = ctrl  # type: ignore
-        # self.fittings and self.fz
+            for ctrl_name, wells in self.scheme.names.items():
+                for well in wells:
+                    fitting.loc[well, "ctrl"] = ctrl_name
         self.fittings = fittings
-        self._get_keys()
 
     def plot_k(
         self,
@@ -1041,10 +1286,10 @@ class TitrationAnalysis:
             raise Exception("run fit first")
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
-        # Ctrls
+        # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-        if len(self.keys_ctrl) > 0:
-            res_ctrl = self.fittings[lb].loc[self.keys_ctrl]
+        if len(self.scheme.ctrl) > 0:
+            res_ctrl = self.fittings[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1056,40 +1301,40 @@ class TitrationAnalysis:
             plt.errorbar(
                 res_ctrl.K,
                 range(len(res_ctrl)),
-                xerr=res_ctrl.sK,  # xerr=res_ctrl.sK*res_ctrl.tval,
+                xerr=res_ctrl["sK"],  # xerr=res_ctrl.sK*res_ctrl.tval,
                 fmt=".",
                 c="lightgray",
                 lw=8,
             )
             plt.grid(1, axis="both")
-        # Unks
-        #  FIXME keys_unk is an attribute or a property
-        res_unk = self.fittings[lb].loc[self.keys_unk]
+        # Unk
+        res_unk = self.fittings[lb].loc[self.keys_unk].sort_index(ascending=False)
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
-            x=res_unk["K"].sort_index(),
+            x=res_unk["K"],
             y=res_unk.index,
             size=12,
             orient="h",
-            palette="Greys",
-            hue=res_unk["SA"].sort_index(),
+            lw=2,
+            palette="Blues",
+            hue=res_unk["SA"],
             ax=ax2,
         )
         plt.legend("")
         plt.errorbar(
-            res_unk["K"].sort_index(),
+            res_unk["K"],
             range(len(res_unk)),
-            xerr=res_unk["sK"].sort_index(),
+            xerr=res_unk["sK"],
             fmt=".",
             c="gray",
             lw=2,
         )
-        plt.yticks(range(len(res_unk)), res_unk.index.sort_values())
+        plt.yticks(range(len(res_unk)), res_unk.index)
         plt.ylim(-1, len(res_unk))
         plt.grid(1, axis="both")
         if not xlim:
             xlim = (res_unk["K"].min(), res_unk["K"].max())
-            if len(self.keys_ctrl) > 0:
+            if len(self.scheme.ctrl) > 0:
                 xlim = (
                     0.99 * min(res_ctrl["K"].min(), xlim[0]),
                     1.01 * max(res_ctrl["K"].max(), xlim[1]),
@@ -1139,9 +1384,9 @@ class TitrationAnalysis:
         f = plt.figure(figsize=(10, 7))
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
-        for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-            y = lbg.data[key]
-            # ## data
+        # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
+        for i, (datafit, df) in enumerate(zip(self._datafit, self.fittings)):
+            y = np.array(datafit[key]) if datafit else np.zeros_like(x)
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
                 x, y, "o", color=colors[i], markersize=12, label="label" + str(i)
@@ -1155,7 +1400,6 @@ class TitrationAnalysis:
                 alpha=0.8,
             )
             ax_data.set_xticks(ax_data.get_xticks()[1:-1])
-            # MAYBE ax_data.set_yscale('log')
             residues.append(
                 y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
             )
@@ -1195,7 +1439,7 @@ class TitrationAnalysis:
         ax1.grid(0, axis="y")  # switch off horizontal
         ax2.grid(1, axis="both")
         # ## only residues
-        y = self.labelblocksgroups[0].data[key]
+        y = self.labelblocksgroups[0].data[key]  # type: ignore
         ax1.plot(
             x,
             (y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)),
@@ -1203,7 +1447,7 @@ class TitrationAnalysis:
             lw=1.5,
             color=colors[0],
         )
-        y = self.labelblocksgroups[1].data[key]
+        y = self.labelblocksgroups[1].data[key]  # type: ignore
         ax2.plot(
             x,
             (y - self.fz(df.K.loc[key], [df.SA2.loc[key], df.SB2.loc[key]], x)),
@@ -1211,7 +1455,7 @@ class TitrationAnalysis:
             lw=1.5,
             color=colors[1],
         )
-        if key in self.keys_ctrl:
+        if key in self.scheme.ctrl:
             plt.title(
                 "Ctrl: " + df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
             )
@@ -1220,12 +1464,12 @@ class TitrationAnalysis:
         plt.close()
         return f
 
-    def plot_all_wells(self, path: str) -> None:
+    def plot_all_wells(self, path: Path) -> None:
         """Plot all wells into a pdf.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Where the pdf file is saved.
 
         Raises
@@ -1237,7 +1481,7 @@ class TitrationAnalysis:
         if not hasattr(self, "fittings"):
             raise Exception("run fit first")
         out = PdfPages(path)
-        for k in self.fittings[0].loc[self.keys_ctrl].index:
+        for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
             out.savefig(self.plot_well(k))
         for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
             out.savefig(self.plot_well(k))
@@ -1324,8 +1568,8 @@ class TitrationAnalysis:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-        if len(self.keys_ctrl) > 0:
-            res_ctrl = df.loc[self.keys_ctrl]
+        if len(self.scheme.ctrl) > 0:
+            res_ctrl = df.loc[self.scheme.ctrl]
             gr = res_ctrl.groupby("ctrl")
             print("    " + " ".join([f"{x:>7s}" for x in out]))
             for g in gr:
@@ -1338,17 +1582,28 @@ class TitrationAnalysis:
         df_print(res_unk.sort_index())
 
     def plot_buffer(self, title: str | None = None) -> plt.figure:
-        """Plot buffers (indicated in scheme) for all labelblocksgroups."""
+        """Plot buffers of all labelblocksgroups."""
         x = self.conc
-        f, ax = plt.subplots(2, 1, figsize=(10, 10))
+        f, ax = plt.subplots(2, 1, figsize=(9, 9))
         for i, lbg in enumerate(self.labelblocksgroups):
-            buf = copy.deepcopy(lbg.buffer)
-            bg = buf.pop("bg")  # type: ignore
-            bg_sd = buf.pop("bg_sd")  # type: ignore
+            if lbg.data_buffersubtracted:
+                bg = []
+                bg_sd = []
+                for lb in lbg.labelblocks:
+                    bg.append(lb.buffer)
+                    bg_sd.append(lb.sd_buffer)
             rowlabel = ["Temp"]
-            lines = [[f"{x:6.1f}" for x in lbg.metadata["Temperature"]]]
-            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))  # type: ignore
-            for j, (k, v) in enumerate(buf.items(), start=1):  # type: ignore
+            lines = [
+                [
+                    f"{x:6.1f}"
+                    for x in [
+                        lb.metadata["Temperature"].value for lb in lbg.labelblocks
+                    ]
+                ]
+            ]
+            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore
+            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
+            for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
                 lines.append([f"{x:6.1f}" for x in v])
                 ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])
@@ -1357,7 +1612,7 @@ class TitrationAnalysis:
                 bg,
                 yerr=bg_sd,
                 fmt="o-.",
-                markersize=15,
+                markersize=12,
                 lw=1,
                 elinewidth=3,
                 alpha=0.8,
@@ -1365,7 +1620,7 @@ class TitrationAnalysis:
                 label="label" + str(i),
             )
             plt.subplots_adjust(hspace=0.0)
-            ax[i].legend(fontsize=22)
+            ax[i].legend(fontsize=16)
             if x[0] > x[-1]:  # reverse
                 for line in lines:
                     line.reverse()
@@ -1380,7 +1635,6 @@ class TitrationAnalysis:
             ax[i].set_yticks(ax[i].get_yticks()[:-1])
         ax[0].set_yticks(ax[0].get_yticks()[1:])
         ax[0].set_xticklabels("")
-        if title:
-            f.suptitle(title, fontsize=18)
-        f.tight_layout(h_pad=5, rect=(0, 0, 1, 0.87))
+        f.suptitle(title, fontsize=16)
+        f.tight_layout()
         return f

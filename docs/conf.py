@@ -24,7 +24,7 @@ copyright = "2021, Daniele Arosio"
 author = "Daniele Arosio"
 
 # The full version, including alpha/beta/rc tags
-release = "0.3.9"
+release = "0.3.10"
 
 # -- General configuration ---------------------------------------------------
 
@@ -33,6 +33,7 @@ release = "0.3.9"
 # ones.
 extensions = [
     "sphinx.ext.autodoc",
+    "autodocsumm",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinxcontrib.plantuml",
@@ -41,16 +42,19 @@ extensions = [
     "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',
 ]
-napoleon_include_init_with_doc = False
-napoleon_include_private_with_doc = True
-napoleon_include_special_with_doc = True
-napoleon_use_rtype = False
 
-# autodoc_default_options \= {}
-#     'members': True
-#     'member-order': 'bysource
+# Napoleon settings to Default
+napoleon_use_ivar = False
+
+autodoc_default_options = {
+    "members": True,
+    "member-order": "bysource",
+    "undoc-members": False,
+    "autosummary": True,
+}
 
 autodoc_typehints = "description"
+
 # The suffix of source filenames.
 source_suffix = {
     ".rst": "restructuredtext",
