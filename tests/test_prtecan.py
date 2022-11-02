@@ -508,7 +508,7 @@ class TestTitrationAnalysis:
 
     def test_scheme(self) -> None:
         """It finds well position for buffer samples."""
-        assert self.titan.scheme.buffer == {"D01", "E01", "D12", "E12"}
+        assert self.titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises OSError when scheme file does not exist."""
@@ -568,7 +568,7 @@ class TestTitrationAnalysis:
         """It gets well positions for ctrl and unknown samples."""
         assert set(self.titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
-        assert self.titan.scheme.ctrl - {"A01", "A12"} == x
+        assert set(self.titan.scheme.ctrl) - {"A01", "A12"} == x
 
     def test_fit(self) -> None:
         """It fits each label separately."""

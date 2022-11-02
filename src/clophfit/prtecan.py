@@ -1045,9 +1045,9 @@ class PlateScheme:
     """Definition of wells of buffer, ctrl and unk as well as names of controls."""
 
     file: Path | None
-    buffer: set[str] = field(init=False)
-    ctrl: set[str] = field(init=False)
-    names: dict[str, set[str]] = field(init=False)
+    buffer: list[str] = field(init=False, default_factory=list)
+    ctrl: list[str] = field(init=False, default_factory=list)
+    names: dict[str, set[str]] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         """Complete initialization."""
@@ -1060,15 +1060,13 @@ class PlateScheme:
                 msg = f"Check format [well sample] for schemefile: {self.file}"
                 raise ValueError(msg)
             scheme = df.groupby("sample")["well"].unique()
-            self.buffer = set(scheme["buffer"])
-            self.ctrl = {
-                well for sample in scheme.tolist() for well in sample
-            } - self.buffer
+            self.buffer = list(scheme["buffer"])
+            self.ctrl = list(
+                {well for sample in scheme.tolist() for well in sample}
+                - set(self.buffer)
+            )
             self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
-        else:
-            self.buffer = set()
-            self.ctrl = set()
-            self.names = {}
+        # else: default_factory
 
 
 @dataclass
@@ -1118,7 +1116,7 @@ class TitrationAnalysis(Titration):
     def load_scheme(self, schemefile: Path) -> None:
         """Load scheme from file. Set buffer_wells."""
         self._scheme = PlateScheme(schemefile)
-        self.buffer_wells = list(self._scheme.buffer)
+        self.buffer_wells = self._scheme.buffer
 
     def fit(
         self,
@@ -1148,11 +1146,11 @@ class TitrationAnalysis(Titration):
         tval : float
             Only for tval different from default=0.95 for the confint calculation.
         nrm: bool
-            Data normalization flag (default=False)
+            Data normalization flag (default=False).
         bg: bool
-            Buffer subtraction flag (default=False)
+            Buffer subtraction flag (default=False).
         dil: bool
-            Dilution correction flag (default=False)
+            Dilution correction flag (default=False).
 
         Notes
         -----
@@ -1173,6 +1171,7 @@ class TitrationAnalysis(Titration):
             elif self.data_dilutioncorrected:
                 self._datafit = self.data_dilutioncorrected
             else:  # back up to dat_nrm
+                warnings.warn("No dilution corrected data found; use normalized data.")
                 self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
         elif bg:
             if nrm:
@@ -1189,8 +1188,8 @@ class TitrationAnalysis(Titration):
             self._datafit = [lbg.data for lbg in self.labelblocksgroups]
 
         # Any Lbg at least contains normalized data.
-        keys_fit = self.labelblocksgroups[0].data_norm.keys() - self.scheme.buffer
-        self.keys_unk = list(keys_fit - self.scheme.ctrl)
+        keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
+        self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
         for data in self._datafit:
             fitting = pd.DataFrame()
@@ -1281,10 +1280,10 @@ class TitrationAnalysis(Titration):
             raise Exception("run fit first")
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
-        # Ctrls
+        # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.fittings[lb].loc[list(self.scheme.ctrl)]
+            res_ctrl = self.fittings[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1296,35 +1295,35 @@ class TitrationAnalysis(Titration):
             plt.errorbar(
                 res_ctrl.K,
                 range(len(res_ctrl)),
-                xerr=res_ctrl.sK,  # xerr=res_ctrl.sK*res_ctrl.tval,
+                xerr=res_ctrl["sK"],  # xerr=res_ctrl.sK*res_ctrl.tval,
                 fmt=".",
                 c="lightgray",
                 lw=8,
             )
             plt.grid(1, axis="both")
-        # Unks
-        #  FIXME keys_unk is an attribute or a property
-        res_unk = self.fittings[lb].loc[self.keys_unk]
+        # Unk
+        res_unk = self.fittings[lb].loc[self.keys_unk].sort_index(ascending=False)
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
-            x=res_unk["K"].sort_index(),
+            x=res_unk["K"],
             y=res_unk.index,
             size=12,
             orient="h",
-            palette="Greys",
-            hue=res_unk["SA"].sort_index(),
+            lw=2,
+            palette="Blues",
+            hue=res_unk["SA"],
             ax=ax2,
         )
         plt.legend("")
         plt.errorbar(
-            res_unk["K"].sort_index(),
+            res_unk["K"],
             range(len(res_unk)),
-            xerr=res_unk["sK"].sort_index(),
+            xerr=res_unk["sK"],
             fmt=".",
             c="gray",
             lw=2,
         )
-        plt.yticks(range(len(res_unk)), res_unk.index.sort_values())
+        plt.yticks(range(len(res_unk)), res_unk.index)
         plt.ylim(-1, len(res_unk))
         plt.grid(1, axis="both")
         if not xlim:
@@ -1379,9 +1378,9 @@ class TitrationAnalysis(Titration):
         f = plt.figure(figsize=(10, 7))
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
-        for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-            y = lbg.data[key]  # type: ignore
-            # ## data
+        # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
+        for i, (datafit, df) in enumerate(zip(self._datafit, self.fittings)):
+            y = np.array(datafit[key]) if datafit else np.zeros_like(x)
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
                 x, y, "o", color=colors[i], markersize=12, label="label" + str(i)
@@ -1395,7 +1394,6 @@ class TitrationAnalysis(Titration):
                 alpha=0.8,
             )
             ax_data.set_xticks(ax_data.get_xticks()[1:-1])
-            # MAYBE ax_data.set_yscale('log')
             residues.append(
                 y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
             )
@@ -1460,12 +1458,12 @@ class TitrationAnalysis(Titration):
         plt.close()
         return f
 
-    def plot_all_wells(self, path: str) -> None:
+    def plot_all_wells(self, path: Path) -> None:
         """Plot all wells into a pdf.
 
         Parameters
         ----------
-        path : str
+        path : Path
             Where the pdf file is saved.
 
         Raises
@@ -1477,7 +1475,7 @@ class TitrationAnalysis(Titration):
         if not hasattr(self, "fittings"):
             raise Exception("run fit first")
         out = PdfPages(path)
-        for k in self.fittings[0].loc[list(self.scheme.ctrl)].index:
+        for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
             out.savefig(self.plot_well(k))
         for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
             out.savefig(self.plot_well(k))
@@ -1565,7 +1563,7 @@ class TitrationAnalysis(Titration):
         else:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = df.loc[list(self.scheme.ctrl)]
+            res_ctrl = df.loc[self.scheme.ctrl]
             gr = res_ctrl.groupby("ctrl")
             print("    " + " ".join([f"{x:>7s}" for x in out]))
             for g in gr:
@@ -1580,7 +1578,7 @@ class TitrationAnalysis(Titration):
     def plot_buffer(self, title: str | None = None) -> plt.figure:
         """Plot buffers of all labelblocksgroups."""
         x = self.conc
-        f, ax = plt.subplots(2, 1, figsize=(10, 10))
+        f, ax = plt.subplots(2, 1, figsize=(9, 9))
         for i, lbg in enumerate(self.labelblocksgroups):
             if lbg.data_buffersubtracted:
                 bg = []
@@ -1608,7 +1606,7 @@ class TitrationAnalysis(Titration):
                 bg,
                 yerr=bg_sd,
                 fmt="o-.",
-                markersize=15,
+                markersize=12,
                 lw=1,
                 elinewidth=3,
                 alpha=0.8,
@@ -1616,7 +1614,7 @@ class TitrationAnalysis(Titration):
                 label="label" + str(i),
             )
             plt.subplots_adjust(hspace=0.0)
-            ax[i].legend(fontsize=22)
+            ax[i].legend(fontsize=16)
             if x[0] > x[-1]:  # reverse
                 for line in lines:
                     line.reverse()
@@ -1631,7 +1629,6 @@ class TitrationAnalysis(Titration):
             ax[i].set_yticks(ax[i].get_yticks()[:-1])
         ax[0].set_yticks(ax[0].get_yticks()[1:])
         ax[0].set_xticklabels("")
-        if title:
-            f.suptitle(title, fontsize=18)
-        f.tight_layout(h_pad=5, rect=(0, 0, 1, 0.87))
+        f.suptitle(title, fontsize=16)
+        f.tight_layout()
         return f
