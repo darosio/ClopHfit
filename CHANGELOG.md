@@ -1,7 +1,26 @@
 # Changelog
 
-###
 
+## v0.3.10 (2022-11-02)
+
+### Feat
+- Add --fit-all flag exporting fit along with data.
+- Always export all available data (directory hard coded).
+
+### Refactor
+- Avoid code introspection.
+- Use fit_routine() in __main__.
+- Add Metadata and PlateScheme dataclasses.
+- `Map` and `filter` for metadata manipulation.
+- TitrationAnalysis inherits from Titration.
+- Class method moved out of class into module level function.
+- tit and titan .data can be None -> many type ignore required.
+- buffer_wells set to components.
+- slots and InitVar for lines in Labelblock, but dataclass slots works only in py3.10.
+- Labelblock is created by a list-of-lines.
+- Considered: LabelblockList(OrderedList).
+
+### Update
 build(deps): bump seaborn from 0.12.0 to 0.12.1 (#29)
 build(deps): bump scipy from 1.9.1 to 1.9.3 (#28)
 build(deps): bump pandas from 1.5.0 to 1.5.1 (#27)

@@ -29,6 +29,12 @@ from numpy.typing import NDArray
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
+DAT = "dat"
+DAT_NRM = "dat_nrm"
+DAT_BG = "dat_bg"
+DAT_BG_NRM = "dat_bg_nrm"
+DAT_BG_DIL = "dat_bg_dil"
+DAT_BG_DIL_NRM = "dat_bg_dil_nrm"
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -1005,12 +1011,12 @@ class Titration(TecanfilesGroup):
         write(
             self.conc,
             [lbg.data for lbg in self.labelblocksgroups if lbg.data],
-            out_folder / "dat",
+            out_folder / DAT,
         )
         write(
             self.conc,
             [lbg.data_norm for lbg in self.labelblocksgroups],
-            out_folder / "dat_nrm",
+            out_folder / DAT_NRM,
         )
         write(
             self.conc,
@@ -1019,24 +1025,24 @@ class Titration(TecanfilesGroup):
                 for lbg in self.labelblocksgroups
                 if lbg.data_buffersubtracted
             ],
-            out_folder / "dat_bg",
+            out_folder / DAT_BG,
         )
         write(
             self.conc,
             [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
-            out_folder / "dat_bg_nrm",
+            out_folder / DAT_BG_NRM,
         )
         if self.data_dilutioncorrected:
             write(
                 self.conc,
                 [e for e in self.data_dilutioncorrected if e],
-                out_folder / "dat_bg_dil",
+                out_folder / DAT_BG_DIL,
             )
         if self.data_dilutioncorrected_norm:
             write(
                 self.conc,
                 self.data_dilutioncorrected_norm,
-                out_folder / "dat_bg_dil_nrm",
+                out_folder / DAT_BG_DIL_NRM,
             )
 
 
