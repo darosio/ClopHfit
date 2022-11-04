@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ClopHfit"
-version = "0.3.10"
+version = "0.3.11"
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
 authors = ["daniele arosio <daniele.arosio@cnr.it>"]
 license = "BSD-3-Clause"
@@ -129,7 +129,7 @@ known_first_party="clophfit"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.3.10"
+version = "0.3.11"
 tag_format = "v$version"
 version_files = [
   "pyproject.toml:version",

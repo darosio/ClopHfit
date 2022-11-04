@@ -1,6 +1,15 @@
 # Changelog
 
 
+## v0.3.11 (2022-11-04)
+
+### Fix
+- docs build and update deps
+
+### Update
+build(deps): bump virtualenv in /.github/workflows (#43)
+build(deps): bump actions/setup-python from 1 to 4 (#42)
+
 ## v0.3.10 (2022-11-02)
 
 ### Feat
