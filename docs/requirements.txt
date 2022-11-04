@@ -5,3 +5,4 @@ nbsphinx==0.8.9
 sphinx-autodoc-typehints==1.19.2
 pydata-sphinx-theme==0.10.1
 sphinxcontrib-plantuml==0.24
+autodocsumm==0.2.9
