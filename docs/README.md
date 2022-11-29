@@ -68,7 +68,8 @@ Prepare a virtual development environment and test first installation:
 
 Make sure:
 
-    pre-commit install
+	~~pre-commit install~~
+	nox --session=pre-commit -- install
     pre-commit install --hook-type commit-msg
 
 For [Jupyter](https://jupyter.org/):

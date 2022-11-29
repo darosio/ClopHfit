@@ -1,5 +1,19 @@
 # Changelog
 
+### Fix
+docs: pre-commit install instruction in readme.
+
+### Feat
+docs: pages.yml generates gh-pages.
+
+### Update
+build: manual update poetry deps
+build(deps): bump virtualenv in /.github/workflows (#53)
+build(deps): bump nox from 2022.8.7 to 2022.11.21 in /.github/workflows (#50)
+build(deps): bump numpy from 1.23.4 to 1.23.5 (#52)
+build(deps): bump pandas from 1.5.1 to 1.5.2 (#51)
+build(deps): bump rpy2 from 3.5.5 to 3.5.6 (#49)
+build(deps): bump pip from 22.3 to 22.3.1 in /.github/workflows (#47)
 
 ## v0.3.11 (2022-11-04)
 
