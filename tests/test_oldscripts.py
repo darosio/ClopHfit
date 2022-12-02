@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import typing
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ _expected = _data / "output"
 Rscript = Tuple[Tuple[str, str, List[str]], Any]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 class TestTitrationFit:
     """Test the old ``fit_titration.py`` script."""
 
@@ -97,6 +99,7 @@ SB =  -0.274\nsSB =  0.002\n""",
             raise ImageComparisonFailure(msg)  # pragma: no cover
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 @typing.no_type_check
 class TestTitrationFitGlobal:
     """It test the old ``fit_titration_global.py`` script."""

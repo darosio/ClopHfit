@@ -13,3 +13,11 @@ python:
   install:
     - requirements: docs/requirements.txt
     - path: .
+# .readthedocs.yml
+# python:
+#   version: "3.10"
+#   install:
+#     - method: pip
+#       path: .
+#       extra_requirements:
+#         - docs

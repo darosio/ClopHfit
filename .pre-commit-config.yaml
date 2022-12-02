@@ -1,73 +1,151 @@
-# exclude: ^tests/data/.
----
 exclude: ^src/clophfit/old/.
+ci:
+  autoupdate_commit_msg: "chore: update pre-commit hooks"
+  autofix_commit_msg: "style: pre-commit fixes"
+
 repos:
-  - repo: local
+  - repo: https://github.com/psf/black
+    rev: 22.12.0
     hooks:
-      - id: trailing-whitespace
-        name: Trim Trailing Whitespace
-        entry: trailing-whitespace-fixer
-        language: system
-        types: [text]
-        stages: [commit, push, manual]
-      - id: end-of-file-fixer
-        name: Fix End of Files
-        entry: end-of-file-fixer
-        language: system
-        types: [text]
-        stages: [commit, push, manual]
-      - id: check-yaml
-        name: Check Yaml
-        entry: check-yaml
-        language: system
-        types: [yaml]
-      - id: check-toml
-        name: Check Toml
-        entry: check-toml
-        language: system
-        types: [toml]
-      - id: check-added-large-files
-        name: Check for added large files
-        entry: check-added-large-files
-        language: system
+      # - id: black-jupyter
       - id: black
-        name: black
-        entry: black
-        language: system
-        types: [python]
         require_serial: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-added-large-files  # hyper
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml  # hyper
+      - id: check-toml  # hyper
+      - id: debug-statements
+      - id: end-of-file-fixer   # hyper
+      - id: mixed-line-ending
+      - id: name-tests-test
+        args: ["--pytest-test-first"]
+      - id: requirements-txt-fixer
+      - id: trailing-whitespace  # hyper
+
+  - repo: https://github.com/pre-commit/pygrep-hooks
+    rev: v1.9.0
+    hooks:
+      - id: python-check-blanket-noqa
+      # - id: python-check-blanket-type-ignore
+      - id: python-no-eval
+      - id: python-use-type-annotations
+      - id: rst-backticks
+      - id: rst-directive-colons
+      - id: rst-inline-touching-normal
+
+  # - repo: https://github.com/pre-commit/mirrors-prettier
+  #   rev: "v2.7.1"
+  #   hooks:
+  #     - id: prettier
+  #       types_or: [markdown, html, css, scss, javascript, json]
+  #       args: [--prose-wrap=always]
+
+  # - repo: https://github.com/adrienverge/yamllint.git
+  #   rev: v1.17.0
+  #   hooks:
+  #     - id: yamllint
+
+  - repo: https://github.com/asottile/blacken-docs
+    rev: v1.12.1
+    hooks:
+      - id: blacken-docs
+        additional_dependencies: [black==22.8.0]
+        exclude: docs/tutorials/usage.*.rst
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.10.1
+    hooks:
       - id: isort
-        name: isort
-        entry: isort
+        #         types_or: [cython, pyi, python]
+        args: ["--filter-files"]
+        # args: ["-a", "from __future__ import annotations"] # Python 3.7+
         require_serial: true
-        language: system
-        types_or: [cython, pyi, python]
-        args: ["--profile", "black", "--filter-files"]
-        # args: ["--filter-files"]
-      - id: flake8
-        name: flake8
-        entry: flake8
-        language: system
-        types: [python]
-        require_serial: true
-        args: [--darglint-ignore-regex, .*]
-      - id: darglint
-        name: darglint
-        entry: darglint
-        language: system
-        types: [python]
-        stages: [manual]
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.3.1
+    hooks:
       - id: pyupgrade
-        name: pyupgrade
-        description: Automatically upgrade syntax for newer versions.
-        entry: pyupgrade
-        language: system
-        types: [python]
-        args: [--py37-plus]
+        args: ["--py37-plus"]
+
+  # avoid unused imports
+  - repo: https://github.com/hadialqattan/pycln
+    rev: v2.1.2
+    hooks:
+      - id: pycln
+        additional_dependencies: [click<8.1]
+        args: [--all]
+        stages: [manual]
+
+  - repo: https://github.com/asottile/yesqa
+    rev: v1.4.0
+    hooks:
+      - id: yesqa
+        exclude: docs/conf.py
+        additional_dependencies: &flake8_dependencies
+          - flake8-bugbear
+          - flake8-print
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        # exclude: docs/conf.py
+        additional_dependencies: [flake8-bandit, flake8-bugbear, flake8-comprehensions, flake8-docstrings, flake8-rst-docstrings, flake8-pytest-style, pep8-naming]
+          # - flake8-eradicate  # require flake8 5.0.4
+        require_serial: true
+#         args: [--darglint-ignore-regex, .*]
+
+  - repo: https://github.com/terrencepreilly/darglint
+    rev: v1.8.1
+    hooks:
+    - id: darglint
+      stages: [manual]
+
+  # TODO: is using .toml conf but remains to clarify deps...
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v0.991
+  #   hooks:
+  #     - id: mypy
+  #       # files: src, tests
+  #       # args: []
+  #       # additional_dependencies: [mypy]
+  #       additional_dependencies: [click, jinja2, numpy, pandas_stubs, pytest, types-setuptools]
+  #       stages: [manual]
+  #       exclude: "noxfile.py"
+  #       # use require_serial so that script
+  #       # is only called once per commit
+  #       require_serial: true
+  #       # Print the number of files as sanity-check
+  #       verbose: true
+  #       # entry: pdm run mypy
+
+  # - repo: https://github.com/codespell-project/codespell
+  #   rev: v2.2.2
+  #   hooks:
+  #     - id: codespell
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.8.0.4
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v2.37.1
+    hooks:
       - id: commitizen
-        name: My commitizen check
-        entry: cz
-        args: ['check', '--commit-msg-file', '.git/COMMIT_EDITMSG']
-        pass_filenames: false
-        language: system
-        stages: [commit-msg]
+      - id: commitizen-branch
+        stages: [push]
+
+  # export python requirements
+  - repo: https://github.com/pdm-project/pdm
+    rev: 2.3.2
+    hooks:
+      - id: pdm-export
+        args: ['-o', 'constraints.txt', '--without-hashes', "--group", "tests", "--group", "docs", "--group", "dev"]
+      - id: pdm-lock-check

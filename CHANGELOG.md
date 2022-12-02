@@ -1,5 +1,9 @@
 # Changelog
 
+### CI Changes
+- Drop poetry in favor of PDM.
+- Taken inspiration from [scikit-hep](https://github.com/scikit-hep/cookie).
+
 ### Fix
 docs: pre-commit install instruction in readme.
 
