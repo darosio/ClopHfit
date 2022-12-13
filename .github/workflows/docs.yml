@@ -3,16 +3,10 @@ name: Docs
 
 on:
   push:
-    branches:
-      - main
-      - poetrying
+    # branches:
+    #   - main
   workflow_dispatch:
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
-permissions:
-  contents: read
-  pages: write
-  id-token: write
 # Allow one concurrent deployment
 concurrency:
   group: "pages"
@@ -46,18 +40,28 @@ jobs:
           name: docs
           path: docs/_build
 
-  # deploy:
-  #   environment:
-  #     name: github-pages
-  #     url: ${{ steps.deployment.outputs.page_url }}
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Setup Pages
-  #       uses: actions/configure-pages@v2
-  #     - name: Upload artifact
-  #       uses: actions/upload-pages-artifact@v1
-  #       with:
-  #         path: docs/_build
-  #     # - name: Deploy to GitHub Pages
-  #     #   if: ${{ github.branches }} == main
-  #     #   uses: actions/deploy-pages@v1
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Download coverage data
+        uses: actions/download-artifact@v3
+        with:
+          name: docs
+      - name: Setup Pages
+        uses: actions/configure-pages@v2
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: docs/_build
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1

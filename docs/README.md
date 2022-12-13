@@ -1,5 +1,5 @@
 [![PyPI](https://img.shields.io/pypi/v/ClopHfit.svg)](https://pypi.org/project/ClopHfit/)
-[![Tests](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml)
+[![CI](https://github.com/darosio/ClopHfit/actions/workflows/ci.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/darosio/ClopHfit/branch/main/graph/badge.svg?token=OU6F9VFUQ6)](https://codecov.io/gh/darosio/ClopHfit)
 [![RtD](https://readthedocs.org/projects/clophfit/badge/)](https://clophfit.readthedocs.io/)
 [![zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.6354112.svg)](https://doi.org/10.5281/zenodo.6354112)
@@ -9,44 +9,43 @@
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
--   Version: "0.3.12"
+- Version: "0.3.12"
 
 ## Features
 
--   Plate Reader data Parser.
--   Perform non-linear least square fitting.
--   Extract and fit pH and chloride titrations of GFP libraries.
-    -   For 2 labelblocks (e.g. 400, 485 nm) fit data separately and
-        globally.
-    -   Estimate uncertainty using bootstrap.
-    -   Subtract buffer for each titration point.
-    -   Report controls e.g. S202N, E2 and V224Q.
-    -   Correct for dilution of titration additions.
-    -   Plot data when fitting fails and save txt file anyway.
+- Plate Reader data Parser.
+- Perform non-linear least square fitting.
+- Extract and fit pH and chloride titrations of GFP libraries.
+  - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
+  - Estimate uncertainty using bootstrap.
+  - Subtract buffer for each titration point.
+  - Report controls e.g. S202N, E2 and V224Q.
+  - Correct for dilution of titration additions.
+  - Plot data when fitting fails and save txt file anyway.
 
 ## Usage
 
--   Extract and fit titrations from a list of tecan files collected at
-    various pH or chloride concentrations:
+- Extract and fit titrations from a list of tecan files collected at various
+  pH or chloride concentrations:
 
-        clop prtecan --help
+      clop prtecan --help
 
-    For example:
+  For example:
 
-        clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm \
-          --out prova2 --Klim 6.8,8.4 --sel 7.6,20
+      clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH \
+        --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
 
-    To reproduce older pr.tecan add [\--no-weight]{.title-ref} option:
+  To reproduce older pr.tecan add [\--no-weight]{.title-ref} option:
 
-        clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
-          --out 4old --Klim 6.8,8.4 --sel 7.6,20
+      clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
+        --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
--   Predict chloride dissociation constant [K_d]{.title-ref} at given
-    pH:
+- Predict chloride dissociation constant [K_d]{.title-ref} at given
+  pH:
 
-        clop eq1 --help
+      clop eq1 --help
 
-To use clophfit in a project:
+To use clophfit in your python:
 
     from clophfit import prtecan, binding
 
@@ -86,8 +85,8 @@ You need the following requirements:
   to check all files. If pre-commit fails during pushing upstream then stage
   changes, Commit Extend (into previous commit), and repeat pushing.
 
-For maximum reproducibility they are also pinned in
-../.github/workflows/constraints.txt.
+`pip`, `nox`, `pdm` and `pre-commit` are pinned in
+.github/workflows/constraints.txt for consistency with CI/CD.
 
 ### Setting up a development environment manually
 
