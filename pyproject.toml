@@ -11,7 +11,7 @@ authors = [
 license = "BSD-3-Clause"
 readme = "docs/README.md"
 requires-python = ">=3.8, <3.12"
-version = "0.3.11"
+version = "0.3.12"
 keywords = [
   "svd",
   "ClopHensor",
@@ -144,7 +144,7 @@ known_first_party="clophfit"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.3.11"
+version = "0.3.12"
 tag_format = "v$version"
 version_files = [
   "pyproject.toml:version",

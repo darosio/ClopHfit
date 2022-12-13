@@ -1,8 +1,12 @@
 # Changelog
 
+## v0.3.12 (2022-12-13)
+
 ### CI Changes
 - Drop poetry in favor of PDM.
 - Taken inspiration from [scikit-hep](https://github.com/scikit-hep/cookie).
+- PDM, pre-commit and nox are required on the local system e.g. archlinux.
+- Many format checkers are pinned in .pre-commit-config.yaml.
 
 ### Fix
 docs: pre-commit install instruction in readme.
