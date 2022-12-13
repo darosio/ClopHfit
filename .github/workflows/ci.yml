@@ -5,7 +5,6 @@ on:
   pull_request:
   push:
     branches:
-      - poetrying
       - main
   release:
     types:
@@ -32,7 +31,6 @@ jobs:
         include:
           - {python: "3.10", os: "ubuntu-latest", session: "lint"}
           - {python: "3.10", os: "ubuntu-latest", session: "typeguard"}
-          # - {python: "3.10", os: "ubuntu-latest", session: "docs"}
     env:
       NOXSESSION: ${{ matrix.session }}
       FORCE_COLOR: "1"
@@ -46,21 +44,9 @@ jobs:
         run: |
           pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
           nox --version
-      # - name: Install binaries for docs
-      #   if: matrix.session == 'docs'
-      #   run: |
-      #     sudo apt-get update
-      #     sudo apt-get install -y pandoc
-      #     sudo apt-get install -y plantuml
       - name: Run Nox
         run: |
           nox --python=${{ matrix.python }}
-      # - name: Upload documentation
-      #   if: matrix.session == 'docs'
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: docs
-      #     path: docs/_build
 
 
   tests:
