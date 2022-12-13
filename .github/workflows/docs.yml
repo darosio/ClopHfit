@@ -38,7 +38,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: docs
-          path: docs/_build
+          path: './docs/_build'
 
   deploy:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
-          path: docs/_build
+          path: './docs/_build'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v1
