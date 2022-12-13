@@ -32,13 +32,11 @@ fluorescence spectra.
 
   For example:
 
-      clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH \
-        --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
+      clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
 
   To reproduce older pr.tecan add [\--no-weight]{.title-ref} option:
 
-      clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
-        --out 4old --Klim 6.8,8.4 --sel 7.6,20
+      clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
 - Predict chloride dissociation constant [K_d]{.title-ref} at given
   pH:

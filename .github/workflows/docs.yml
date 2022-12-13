@@ -34,11 +34,16 @@ jobs:
       - name: Run Nox
         run: |
           nox -s docs
-      - name: Upload documentation
-        uses: actions/upload-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
         with:
-          name: docs
           path: './docs/_build'
+
+      # - name: Upload documentation
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: docs
+      #     path: './docs/_build'
 
   deploy:
     runs-on: ubuntu-latest
@@ -52,16 +57,12 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - name: Download coverage data
+      - name: Download artifact
         uses: actions/download-artifact@v3
         with:
-          name: docs
+          name: github-pages
       - name: Setup Pages
         uses: actions/configure-pages@v2
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
-        with:
-          path: './docs/_build'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v1
