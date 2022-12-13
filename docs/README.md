@@ -25,8 +25,8 @@ fluorescence spectra.
 
 ## Usage
 
-- Extract and fit titrations from a list of tecan files collected at various
-  pH or chloride concentrations:
+- Extract and fit titrations from a list of tecan files collected at various pH
+  or chloride concentrations:
 
       clop prtecan --help
 
@@ -38,8 +38,7 @@ fluorescence spectra.
 
       clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
-- Predict chloride dissociation constant [K_d]{.title-ref} at given
-  pH:
+- Predict chloride dissociation constant [K_d]{.title-ref} at given pH:
 
       clop eq1 --help
 
@@ -49,20 +48,21 @@ To use clophfit in your python:
 
 ## Installation
 
-	pipx install clophfit
+    pipx install clophfit
 
-You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/):
+You can get the library directly from
+[PyPI](https://pypi.org/project/ClopHfit/):
 
     pip install clophfit
 
 ## Development
 
 You need the following requirements:
-- `nox` for test automation. If you don't have nox, you can use `pipx run
-  nox` to run it without installing, or `pipx install nox`. To use, run
-  `nox`. This will lint and test using every installed version of Python on
-  your system, skipping ones that are not installed. You can also run
-  specific jobs:
+
+- `nox` for test automation. If you don't have nox, you can use `pipx run nox`
+  to run it without installing, or `pipx install nox`. To use, run `nox`. This
+  will lint and test using every installed version of Python on your system,
+  skipping ones that are not installed. You can also run specific jobs:
   ```bash
   nox -l  # list available tests
   nox -s lint  # Lint only
@@ -73,9 +73,9 @@ You need the following requirements:
   Nox handles everything for you, including setting up an temporary virtual
   environment for each run.
 - `pdm` for package dependency managements;
-- `pre-commit` for all style and consistency checking. While you can run it
-  with nox, this is such an important tool that it deserves to be installed
-  on its own. Install pre-commit and run:
+- `pre-commit` for all style and consistency checking. While you can run it with
+  nox, this is such an important tool that it deserves to be installed on its
+  own. Install pre-commit and run:
   ```bash
   pre-commit install --hook-type commit-msg --hook-type pre-push
   pre-commit run -a
@@ -95,9 +95,10 @@ python3 -m venv .venv
 source ./.venv/bin/activate
 pip install -v -e .[dev,tests,docs]
 ```
+
 For using [Jupyter](https://jupyter.org/) during development:
 
-	pdm run jupiter notebook
+    pdm run jupiter notebook
 
 And only in case you need a system wide easy accessible kernel:
 
@@ -107,25 +108,25 @@ And only in case you need a system wide easy accessible kernel:
 
 Use pytest to run the unit checks:
 
-	pytest
+    pytest
 
 Use `coverage` to generate coverage reports:
 
-	coverage run --parallel -m pytest
+    coverage run --parallel -m pytest
 
 Or use nox:
 
-	nox -rs tests typeguard xdoctest
+    nox -rs tests typeguard xdoctest
 
 ### Building docs
 
 You can build the docs using:
 
-	nox -s docs
+    nox -s docs
 
 You can see a preview with:
 
-	nox -s docs -- serve
+    nox -s docs -- serve
 
 When needed (e.g. API updates):
 
@@ -135,11 +136,11 @@ When needed (e.g. API updates):
 
 I can bump and upload build to test.pypi using:
 
-	nox -rs bump
+    nox -rs bump
 
 I can test new dist in local venv using:
 
-	python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit
+    python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit
 
 - Revise changelog, stage files, commit and push
 - gh pr create (wait for test completion)
@@ -150,16 +151,18 @@ I can test new dist in local venv using:
 
 Basically use commitizen and github-cli to release:
 
-	pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
+    pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
     gh release create (--target devel) v0.3.0a0
 
 ### Configuration files
 
 Manually updated pinned dependencies for CI/CD:
+
 - docs/requirements.txt
 - .github/workflows/constraints.txt
 
 Configuration files:
+
 - pre-commit configured in .pre-commit-config.yaml;
 - flake8 configured in .flake8 (pinned in pre-commit);
 - black configured in pyproject.toml (pinned in pre-commit);
@@ -167,9 +170,11 @@ Configuration files:
 - darglint configured in .darglint (pinned in pre-commit);
 - coverage configured in pyproject.toml (tests deps);
 - mypy configured in pyproject.toml (tests deps);
-- commitizen in pyproject.toml (after `cz init`) (both pinned in pre-commit and test deps).
+- commitizen in pyproject.toml (after `cz init`) (both pinned in pre-commit and
+  test deps).
 
-pre-commit ensures up-to-date constraints.txt pin/freeze all packages in “.[dev,docs,tests]”.
+pre-commit ensures up-to-date constraints.txt pin/freeze all packages in
+“.[dev,docs,tests]”.
 
 ## TODO
 

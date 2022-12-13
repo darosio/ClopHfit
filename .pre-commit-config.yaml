@@ -14,19 +14,19 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
-      - id: check-added-large-files  # hyper
+      - id: check-added-large-files # hyper
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-symlinks
-      - id: check-yaml  # hyper
-      - id: check-toml  # hyper
+      - id: check-yaml # hyper
+      - id: check-toml # hyper
       - id: debug-statements
-      - id: end-of-file-fixer   # hyper
+      - id: end-of-file-fixer # hyper
       - id: mixed-line-ending
       - id: name-tests-test
         args: ["--pytest-test-first"]
       - id: requirements-txt-fixer
-      - id: trailing-whitespace  # hyper
+      - id: trailing-whitespace # hyper
 
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.9.0
@@ -39,17 +39,13 @@ repos:
       - id: rst-directive-colons
       - id: rst-inline-touching-normal
 
-  # - repo: https://github.com/pre-commit/mirrors-prettier
-  #   rev: "v2.7.1"
-  #   hooks:
-  #     - id: prettier
-  #       types_or: [markdown, html, css, scss, javascript, json]
-  #       args: [--prose-wrap=always]
-
-  # - repo: https://github.com/adrienverge/yamllint.git
-  #   rev: v1.17.0
-  #   hooks:
-  #     - id: yamllint
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: "v2.7.1"
+    hooks:
+      - id: prettier
+        # types_or: [markdown, html, css, scss, javascript, json]
+        types_or: [yaml, markdown, html, css, scss, javascript, json]
+        args: [--prose-wrap=always]
 
   - repo: https://github.com/asottile/blacken-docs
     rev: v1.12.1
@@ -96,16 +92,25 @@ repos:
     hooks:
       - id: flake8
         # exclude: docs/conf.py
-        additional_dependencies: [flake8-bandit, flake8-bugbear, flake8-comprehensions, flake8-docstrings, flake8-rst-docstrings, flake8-pytest-style, pep8-naming]
+        additional_dependencies:
+          [
+            flake8-bandit,
+            flake8-bugbear,
+            flake8-comprehensions,
+            flake8-docstrings,
+            flake8-rst-docstrings,
+            flake8-pytest-style,
+            pep8-naming,
+          ]
           # - flake8-eradicate  # require flake8 5.0.4
         require_serial: true
-#         args: [--darglint-ignore-regex, .*]
+  #         args: [--darglint-ignore-regex, .*]
 
   - repo: https://github.com/terrencepreilly/darglint
     rev: v1.8.1
     hooks:
-    - id: darglint
-      stages: [manual]
+      - id: darglint
+        stages: [manual]
 
   # TODO: is using .toml conf but remains to clarify deps...
   # - repo: https://github.com/pre-commit/mirrors-mypy
@@ -147,5 +152,16 @@ repos:
     rev: 2.3.2
     hooks:
       - id: pdm-export
-        args: ['-o', 'constraints.txt', '--without-hashes', "--group", "tests", "--group", "docs", "--group", "dev"]
+        args:
+          [
+            "-o",
+            "constraints.txt",
+            "--without-hashes",
+            "--group",
+            "tests",
+            "--group",
+            "docs",
+            "--group",
+            "dev",
+          ]
       - id: pdm-lock-check
