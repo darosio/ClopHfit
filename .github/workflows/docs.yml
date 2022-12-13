@@ -3,8 +3,6 @@ name: Docs
 
 on:
   push:
-    # branches:
-    #   - main
   workflow_dispatch:
 
 # Allow one concurrent deployment
@@ -13,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -38,12 +37,6 @@ jobs:
         uses: actions/upload-pages-artifact@v1
         with:
           path: './docs/_build'
-
-      # - name: Upload documentation
-      #   uses: actions/upload-artifact@v3
-      #   with:
-      #     name: docs
-      #     path: './docs/_build'
 
   deploy:
     runs-on: ubuntu-latest
