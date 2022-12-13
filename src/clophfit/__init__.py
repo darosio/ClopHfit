@@ -1,1 +1,1 @@
-"""Parse plate-reader and fit ClopHensor titrations."""
+"""ClopHfit: Parse plate-reader and fit ClopHensor titrations."""

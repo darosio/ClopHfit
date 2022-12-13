@@ -9,7 +9,7 @@
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
--   Version: "0.3.11"
+-   Version: "0.3.12"
 
 ## Features
 
@@ -52,116 +52,134 @@ To use clophfit in a project:
 
 ## Installation
 
-You can get the library directly from
-[![PyPI](https://img.shields.io/pypi/v/ClopHfit.svg)](https://pypi.org/project/ClopHfit/):
+	pipx install clophfit
+
+You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/):
 
     pip install clophfit
 
 ## Development
 
-Prepare a virtual development environment and test first installation:
+You need the following requirements:
+- `nox` for test automation. If you don't have nox, you can use `pipx run
+  nox` to run it without installing, or `pipx install nox`. To use, run
+  `nox`. This will lint and test using every installed version of Python on
+  your system, skipping ones that are not installed. You can also run
+  specific jobs:
+  ```bash
+  nox -l  # list available tests
+  nox -s lint  # Lint only
+  nox -s tests-3.9  # Python 3.9 tests only
+  nox -s docs -- serve  # Build and serve the docs
+  nox -s build  # Make an SDist and wheel
+  ```
+  Nox handles everything for you, including setting up an temporary virtual
+  environment for each run.
+- `pdm` for package dependency managements;
+- `pre-commit` for all style and consistency checking. While you can run it
+  with nox, this is such an important tool that it deserves to be installed
+  on its own. Install pre-commit and run:
+  ```bash
+  pre-commit install --hook-type commit-msg --hook-type pre-push
+  pre-commit run -a
+  ```
+  to check all files. If pre-commit fails during pushing upstream then stage
+  changes, Commit Extend (into previous commit), and repeat pushing.
 
-    pyenv install 3.10.2
-    poetry env use 3.10
-    poetry install
-    poetry run pytest -v
+For maximum reproducibility they are also pinned in
+../.github/workflows/constraints.txt.
 
-Make sure:
+### Setting up a development environment manually
 
-	~~pre-commit install~~
-	nox --session=pre-commit -- install
-    pre-commit install --hook-type commit-msg
+You can set up a development environment by running:
 
-For [Jupyter](https://jupyter.org/):
+```bash
+python3 -m venv .venv
+source ./.venv/bin/activate
+pip install -v -e .[dev,tests,docs]
+```
+For using [Jupyter](https://jupyter.org/) during development:
 
-    poetry run python -m ipykernel install --user --name="cloph-310"
+	pdm run jupiter notebook
 
-To generate docs:
+And only in case you need a system wide easy accessible kernel:
 
-    poetry run nox -rs docs
+    pdm run python -m ipykernel install --user --name="cloph-310"
+
+### Testing and coverage
+
+Use pytest to run the unit checks:
+
+	pytest
+
+Use `coverage` to generate coverage reports:
+
+	coverage run --parallel -m pytest
+
+Or use nox:
+
+	nox -rs tests typeguard xdoctest
+
+### Building docs
+
+You can build the docs using:
+
+	nox -s docs
+
+You can see a preview with:
+
+	nox -s docs -- serve
 
 When needed (e.g. API updates):
 
     sphinx-apidoc -f -o docs/api/ src/clophfit/
 
-Use commitizen and github-cli to release:
+### Bump and releasing
 
-    poetry run cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
+I can bump and upload build to test.pypi using:
+
+	nox -rs bump
+
+I can test new dist in local venv using:
+
+	python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit
+
+- Revise changelog, stage files, commit and push
+- gh pr create (wait for test completion)
+- git co main
+- pr merge --squash --delete-branch -t "fix| refactor| ci: msg" #number
+- gh release create ”v0.3.12”
+- git pull --tags
+
+Basically use commitizen and github-cli to release:
+
+	pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
     gh release create (--target devel) v0.3.0a0
 
-Remember!!! Update::
-- ClopHfit/docs/requirements.txt
-- ClopHfit/.github/workflows/constraints.txt
+### Configuration files
 
-### Development environment
+Manually updated pinned dependencies for CI/CD:
+- docs/requirements.txt
+- .github/workflows/constraints.txt
 
--   Test automation requires nox and nox-poetry.
+Configuration files:
+- pre-commit configured in .pre-commit-config.yaml;
+- flake8 configured in .flake8 (pinned in pre-commit);
+- black configured in pyproject.toml (pinned in pre-commit);
+- isort configured in pyproject.toml (pinned in pre-commit);
+- darglint configured in .darglint (pinned in pre-commit);
+- coverage configured in pyproject.toml (tests deps);
+- mypy configured in pyproject.toml (tests deps);
+- commitizen in pyproject.toml (after `cz init`) (both pinned in pre-commit and test deps).
 
--   Formatting with black\[jupyter\] configured in pyproject.
+pre-commit ensures up-to-date constraints.txt pin/freeze all packages in “.[dev,docs,tests]”.
 
--   Linters are configured in .flake8 .darglint and .isort.cfg and
-    include:
+## TODO
 
-        - flake8-isort
-        - flake8-bugbear
-        - flake8-docstrings
-        - darglint
-        - flake8-eradicate
-        - flake8-comprehensions
-        - flake8-pytest-style
-        - flake8-annotations (see mypy)
-        - flake8-rst-docstrings
+- mypy into lint?
 
-    > -   rst-lint
+- clean all commented leftover
 
--   pre-commit configured in .pre-commit-config.yaml activated with:
-
-        - pre-commit install
-        - commitizen install --hook-type commit-msg
-
--   Tests coverage (pytest-cov) configured in .coveragerc.
-
--   Type annotation configured in mypy.ini.
-
--   [Commitizen](https://commitizen-tools.github.io/commitizen/) also
-    used to bump version:
-
-        cz bump --changelog-to-stdout --files-only --prerelease alpha --increment MINOR
-
-    -   need one-time initialization:
-
-            (cz init)
-
--   xdoctest
-
--   sphinx with pydata-sphinx-theme and sphinx-autodoc-typehints.
-    (nbsphinx, sphinxcontrib-plantuml):
-
-        mkdir docs; cd docs
-        sphinx-quickstart
-
-    Edit conf.py \[\"sphinx.ext.autodoc\"\] and index.rst \[e.g.
-    api/modules\]:
-
-        sphinx-apidoc -f -o docs/api/ src/clophfit/
-
--   CI/CD configured in .github/workflows:
-
-        tests.yml
-        release.yml
-
-    Remember to update tools version e.g. nox_poetry==0.9.
-
-### What is missing to [modernize](https://cjolowicz.github.io/posts/hypermodern-python-06-ci-cd/):
-
--   coveralls/Codecov
--   release drafter; maybe useful when merging pr into main.
--   readthedocs or ghpages?
-    <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
-
-## Code of Conduct
-
-Everyone interacting in the readme_renderer project\'s codebases, issue
-trackers, chat rooms, and mailing lists is expected to follow the [PSF
-Code of
-Conduct](https://github.com/pypa/.github/blob/main/CODE_OF_CONDUCT.md).
+- release drafter; maybe useful when merging pr into main.
+- readthedocs or ghpages?
+  <https://www.docslikecode.com/articles/github-pages-python-sphinx/>

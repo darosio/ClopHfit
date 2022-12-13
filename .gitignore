@@ -70,4 +70,13 @@ coverage.xml
 tests/data/_tmpoutput
 README.tmp.html
 
+# MyPy cache
 .mypy_cache
+
+# Venvs
+.env
+.venv
+
+# pdm and pep582
+.pdm.toml
+__pypackages__/

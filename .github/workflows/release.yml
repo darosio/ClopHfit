@@ -4,33 +4,21 @@ on:
   release:
     types: [published]
 jobs:
-  release:
+  dist:
+    name: Publish to PyPI
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
         uses: actions/checkout@v3
-      - name: Install pandoc
-        run: sudo apt-get install -y pandoc
-      - name: Set up Python ${{ matrix.python }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          architecture: x64
-      - name: Upgrade pip
-        run: |
-          pip install --constraint=.github/workflows/constraints.txt pip
-          pip --version
-      - name: Upgrade pip in virtual environments
-        shell: python
-        run: |
-          import os
-          import pip
-
-          with open(os.environ["GITHUB_ENV"], mode="a") as io:
-              print(f"VIRTUALENV_PIP={pip.__version__}", file=io)
-      - name: Install Poetry
-        run: |
-          pipx install --pip-args=--constraint=.github/workflows/constraints.txt poetry
-          poetry --version
-      - run: poetry build
-      - run: poetry publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}
+      - run: |
+          pipx run pdm publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}
+      # # - name: Set up Python ${{ matrix.python }}
+      # #   uses: actions/setup-python@v4
+      # #   with:
+      # #     python-version: '3.x'
+      # - name: Install PDM
+      #   run: |
+      #     pipx install --pip-args=--constraint=.github/workflows/constraints.txt pdm
+      #     pdm --version
+      # - run: |
+      #     pdm publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}

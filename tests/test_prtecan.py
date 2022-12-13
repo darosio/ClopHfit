@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -570,6 +571,7 @@ class TestTitrationAnalysis:
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
         assert set(self.titan.scheme.ctrl) - {"A01", "A12"} == x
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
     def test_fit(self) -> None:
         """It fits each label separately."""
         self.titan.fit("pH", nrm=True, bg=True, dil=True)
