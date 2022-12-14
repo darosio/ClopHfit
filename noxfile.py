@@ -132,24 +132,29 @@ def clean(session: Session) -> None:
 @nox.session
 def bump(session: Session) -> None:
     """Bump repository and upload to testpypi."""
+    args = session.posargs  # or ["--increment", "PATCH"]
     session.install("--constraint=constraints.txt", "commitizen")
     session.run(
         "cz",
         "bump",
+        "--major-version-zero",
         "-ch",
         "--files-only",
-        # "--no-verify",
-        "--increment",
-        "PATCH",
-        # "-pr",
-        # "rc",
+        # "--no-verify",  # bypass pre-commit and commit-msg hooks
+        *args,
     )
-    session.run("pdm", "publish", "-r", "testpypi", external=True)
+    # session.run("pdm", "publish", "-r", "testpypi", external=True)
+
+
+@nox.session
+def ch(session: Session) -> None:
+    """Bump repository and upload to testpypi."""
+    args = session.posargs or ["HEAD"]
+    session.install("--constraint=constraints.txt", "commitizen")
+    session.run("cz", "ch", "--incremental", "--unreleased-version", *args)
 
 
 # # https://nox.thea.codes/en/stable/cookbook.html?highlight=input#the-auto-release
-
-
 @nox.session
 def build(session: nox.Session) -> None:
     """Build an SDist and wheel."""
