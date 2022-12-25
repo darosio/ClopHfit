@@ -14,6 +14,7 @@ package = "clophfit"
 locations = "src", "tests", "./noxfile.py", "docs/conf.py"
 python_versions = ["3.8", "3.9", "3.10"]
 nox.options.sessions = ("lint", "mypy", "tests", "xdoctest", "typeguard", "docs")
+nox.options.force_venv_backend = "venv"
 
 
 @nox.session(name="lint", python=python_versions[-1])
@@ -52,6 +53,7 @@ def mypy(session: Session) -> None:
 def tests(session: Session) -> None:
     """Run the test suite."""
     session.install("--constraint=constraints.txt", "coverage[toml]", "pytest", ".")
+    # session.run("pdm", "install", "-G", "tests", external=True)
     try:
         session.run("coverage", "run", "--parallel", "-m", "pytest", *session.posargs)
     finally:
@@ -143,7 +145,7 @@ def bump(session: Session) -> None:
         # "--no-verify",  # bypass pre-commit and commit-msg hooks
         *args,
     )
-    # session.run("pdm", "publish", "-r", "testpypi", external=True)
+    session.run("pdm", "publish", "-r", "testpypi", external=True)
 
 
 @nox.session

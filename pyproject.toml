@@ -38,7 +38,7 @@ dependencies = [
   "seaborn >=0.11.2",
   "matplotlib >=3.2",
   "lmfit ==1.0.3",
-  "numpy >=1.17",
+  "numpy >=1.17,<1.24",         # gh actions on ubuntu-20[22].04
   "scipy >=1.7.1",
   "pandas >=1.3.3",
   "emcee >=3.1.1",
@@ -142,15 +142,15 @@ force_single_line = true
 lines_after_imports = 2
 known_first_party="clophfit"
 
-# [tool.pytest.ini_options]
-# minversion = "6.0"
-# addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 # xfail_strict = true
-# filterwarnings = ["error"]
-# log_cli_level = "INFO"
-# testpaths = [
-#   "tests",
-# ]
+# filterwarnings = ["error", "ignore::DeprecationWarning"]
+log_cli_level = "INFO"
+testpaths = [
+  "tests",
+]
 
 [tool.mypy]
 strict = true
