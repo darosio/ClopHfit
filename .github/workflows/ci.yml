@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-  release:
-    types:
-      - published
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,7 +37,6 @@ jobs:
         python: ["3.8", "3.9", "3.10"]
         session: ["mypy", "xdoctest"]
         include:
-          # - { python: "3.10", os: "ubuntu-latest", session: "lint" }
           - { python: "3.10", os: "ubuntu-latest", session: "typeguard" }
     env:
       NOXSESSION: ${{ matrix.session }}

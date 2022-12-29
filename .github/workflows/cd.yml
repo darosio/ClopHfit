@@ -1,0 +1,53 @@
+---
+name: CD
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  testpypi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+      - run: |
+          ver=`echo ${{ github.ref }} | cut -f 3 -d "/" | cut -f 2 -d "v"`
+          python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit==$ver
+          clop --version
+          clop prtecan tests/Tecan/list.pH
+          cat out2/metadata-labels.txt
+
+  release:
+    name: Release to github
+    needs: testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+      - name: Install commitizen
+        run: |
+          pipx install --pip-args=--constraint=constraints.txt commitizen
+      - name: Release CHANGELOG
+        run: |
+          cz -n cz_customize ch $ver --file-name release.md
+          cat release.md
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          bodyFile: "release.md"
+
+  publish:
+    name: Publish to PyPI
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+      - run: |
+          pipx run pdm publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}

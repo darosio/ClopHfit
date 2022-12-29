@@ -141,7 +141,7 @@ def bump(session: Session) -> None:
         "bump",
         "--major-version-zero",
         "-ch",
-        "--files-only",
+        # "--files-only",
         # "--no-verify",  # bypass pre-commit and commit-msg hooks
         *args,
     )
