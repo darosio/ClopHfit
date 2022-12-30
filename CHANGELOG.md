@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.13 (2022-12-30)
+
+### Style
+
+- prettify .yml and .md files
+
+### Build
+
+- **deps**: pdm update
+- **pre-commit**: autoupdate prettier isort cz pdm shellcheck
+- **cz**: to bump and generate changelog
+
+### CI/CD
+
+- automating CD
+- test cleaning workflows
+
 ## v0.3.12 (2022-12-13)
 
 ### CI Changes
