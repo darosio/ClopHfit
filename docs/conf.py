@@ -24,7 +24,7 @@ copyright = "2021, Daniele Arosio"
 author = "Daniele Arosio"
 
 # The full version, including alpha/beta/rc tags
-release = "0.3.12"
+release = "0.3.13"
 
 # -- General configuration ---------------------------------------------------
 

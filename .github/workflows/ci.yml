@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-  release:
-    types:
-      - published
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +13,19 @@ env:
   FORCE_COLOR: 3
 
 jobs:
+  pre-commit:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - uses: pre-commit/action@v3.0.0
+        with:
+          extra_args: --hook-stage manual --all-files --show-diff-on-failure
 
   checks:
     name: Check ${{ matrix.session }}-${{ matrix.python }} on ${{ matrix.os }}
@@ -27,8 +37,7 @@ jobs:
         python: ["3.8", "3.9", "3.10"]
         session: ["mypy", "xdoctest"]
         include:
-          - {python: "3.10", os: "ubuntu-latest", session: "lint"}
-          - {python: "3.10", os: "ubuntu-latest", session: "typeguard"}
+          - { python: "3.10", os: "ubuntu-latest", session: "typeguard" }
     env:
       NOXSESSION: ${{ matrix.session }}
       FORCE_COLOR: "1"
@@ -46,27 +55,35 @@ jobs:
         run: |
           nox --python=${{ matrix.python }}
 
-
   tests:
-    name: Tests Python-${{ matrix.python-version }} on ${{ matrix.runs-on }}
-    runs-on: ${{ matrix.runs-on }}
+    name: Tests Python-${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.8", "3.9", "3.10"]
-        runs-on: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.8", "3.9", "3.10"]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python }}
+      # - name: Install
+      #   run: |
+      #     pip install --constraint=constraints.txt coverage[toml] pytest
+      #     pip install --constraint=constraints.txt .
+      # - name: Run test
+      #   run: |
+      #     # coverage run --parallel -m pytest
+      #     pytest
+
       - name: Install Nox
         run: |
           pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
           nox --version
       - name: Run Nox
         run: |
-          nox -s tests-${{ matrix.python-version }}
+          nox -s tests --python=${{ matrix.python }}
       - name: Upload coverage data
         uses: "actions/upload-artifact@v3"
         with:

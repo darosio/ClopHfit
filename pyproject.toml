@@ -11,7 +11,7 @@ authors = [
 license = "BSD-3-Clause"
 readme = "docs/README.md"
 requires-python = ">=3.8, <3.12"
-version = "0.3.12"
+version = "0.3.13"
 keywords = [
   "svd",
   "ClopHensor",
@@ -38,7 +38,7 @@ dependencies = [
   "seaborn >=0.11.2",
   "matplotlib >=3.2",
   "lmfit ==1.0.3",
-  "numpy >=1.17",
+  "numpy >=1.17,<1.24",         # gh actions on ubuntu-20[22].04
   "scipy >=1.7.1",
   "pandas >=1.3.3",
   "emcee >=3.1.1",
@@ -142,26 +142,15 @@ force_single_line = true
 lines_after_imports = 2
 known_first_party="clophfit"
 
-[tool.commitizen]
-name = "cz_conventional_commits"
-version = "0.3.12"
-tag_format = "v$version"
-version_files = [
-  "pyproject.toml:version",
-  "docs/conf.py:release",
-  "docs/README.md:Version",
-  ]
-changelog_incremental = true
-
-# [tool.pytest.ini_options]
-# minversion = "6.0"
-# addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 # xfail_strict = true
-# filterwarnings = ["error"]
-# log_cli_level = "INFO"
-# testpaths = [
-#   "tests",
-# ]
+# filterwarnings = ["error", "ignore::DeprecationWarning"]
+log_cli_level = "INFO"
+testpaths = [
+  "tests",
+]
 
 [tool.mypy]
 strict = true
@@ -184,4 +173,100 @@ live_mode = true
 dmypy = false
 strict = true
 
+[tool.commitizen]
+name = "cz_customize"
+version = "0.3.13"
+tag_format = "v$version"
+version_files = [
+  "pyproject.toml:version",
+  "docs/conf.py:release",
+  "docs/README.md:Version",
+  ]
+
+[tool.commitizen.customize]
+message_template = "{{change_type}}:{% if show_message %} {{message}}{% endif %}"
+example = """fix(parser): correct minor typos in code\n
+see the issue for details on the typos fixed\n
+closes issue #12
+"""
+schema = """
+<type>(<scope>): <subject>
+<BLANK LINE>
+<body>
+<BLANK LINE>
+(BREAKING CHANGE: )<footer>
+"""
+schema_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|bump)(?:\\(([^()\r\n]*)\\)|\\()?(!)?:\\s(.*)?"
+bump_pattern = "^(BREAKING CHANGE|feat|fix|perf)"
+bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
+change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
+info_path = "cz_customize_info.txt"
+commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
+changelog_pattern = "^(feat|fix|docs|style|perf|test|build|ci)?(\\(.*\\))?(!)?"
+change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
+
+[[tool.commitizen.customize.questions]]
+type = "list"
+name = "change_type"
+choices = [
+{value = "feat", name = "feat: A new feature. Correlates with MINOR in SemVer"},
+{value = "fix", name = "fix: A bug fix. Correlates with PATCH in SemVer"},
+{value = "perf", name = "perf: A code change that improves performance. Correlates with PATCH in SemVer"},
+{value = "docs", name = "docs: Documentation only changes"},
+{value = "style", name = "style: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)"},
+{value = "refactor", name = "refactor: A code change that neither fixes a bug nor adds a feature"},
+{value = "test", name = "test: Adding missing or correcting existing tests"},
+{value = "build", name = "build: Changes that update the build system, development tools or external dependencies"},
+{value = "ci", name = "ci: Changes to our CI configuration files and scripts (example scopes: GitLabCI)"},
+{value = "revert", name = "revert: Reverting to previous commit(s)."}
+]
+message = "Select the type of change you are committing"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "message"
+message = "Body."
+
+[[tool.commitizen.customize.questions]]
+type = "confirm"
+name = "show_message"
+message = "Do you want to add body message in commit?"
+
 [tool.pdm]
+
+[tool.pylint]
+master.py-version = "3.10"
+master.ignore-paths= ["src/clophfit/_version.py", "src/clophfit/old"]
+reports.output-format = "colorized"
+similarities.ignore-imports = "yes"
+messages_control.disable = [
+  "invalid-name",
+  "design",
+  "line-too-long",
+  "too-many-lines",
+  "inconsistent-return-statements",
+  "import-error",
+  "fixme",
+  # "consider-using-f-string",
+  # "unnecessary-pass",
+  # "unspecified-encoding",
+  # "unused-argument",
+  # "raise-missing-from",
+  # "use-a-generator",
+  # "consider-using-generator",
+  # "no-else-raise",
+  # "protected-access",
+  # "unidiomatic-typecheck",
+  # "attribute-defined-outside-init",
+  # # "all",
+  # # https://pylint.pycqa.org/en/latest/user_guide/checkers/features.html
+  # # for tests
+  # "pointless-string-statement",
+  # "consider-using-with",
+  # "comparison-with-itself",
+  # "comparison-of-constants",
+  # "consider-using-with",
+  # "use-maxsplit-arg",
+  # "unnecessary-dunder-call",
+]
+# messages_control.enable = ["raise-missing-from"]
