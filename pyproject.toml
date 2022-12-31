@@ -54,8 +54,8 @@ dependencies = [
 Homepage = "https://github.com/darosio/ClopHfit"
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
 Discussions = "https://github.com/darosio/ClopHfit/discussions"
-# Source = "https://github.com/unknown/jj"
-Changelog = "https://github.com/darosio/ClopHfit/releases"
+Changelog = "https://darosio.github.io/ClopHfit/misc/CHANGELOG.html"
+"Github releases" = "https://github.com/darosio/ClopHfit/releases"
 Documentation = "https://clophfit.readthedocs.io"
 
 # [tool.hatch.envs.default]
