@@ -13,19 +13,19 @@ env:
   FORCE_COLOR: 3
 
 jobs:
-  # pre-commit:
-  #   name: Lint
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v3
-  #       with:
-  #         fetch-depth: 0
-  #     - uses: actions/setup-python@v4
-  #       with:
-  #         python-version: "3.x"
-  #     - uses: pre-commit/action@v3.0.0
-  #       with:
-  #         extra_args: --hook-stage manual --all-files --show-diff-on-failure
+  pre-commit:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+      - uses: pre-commit/action@v3.0.0
+        with:
+          extra_args: --hook-stage manual --all-files --show-diff-on-failure
 
   checks:
     name: Check ${{ matrix.session }}-${{ matrix.python }} on ${{ matrix.os }}
@@ -38,7 +38,7 @@ jobs:
         session: ["mypy", "xdoctest"]
         include:
           - { python: "3.11", os: "ubuntu-latest", session: "typeguard" }
-          - { python: "3.11", os: "ubuntu-latest", session: "lint" }
+          # - { python: "3.11", os: "ubuntu-latest", session: "lint" }
     env:
       NOXSESSION: ${{ matrix.session }}
       FORCE_COLOR: "1"

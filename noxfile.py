@@ -20,7 +20,7 @@ nox.options.force_venv_backend = "venv"
 @nox.session(name="lint", python=python_versions[-1])
 def pre_commit(session: nox.Session) -> None:
     """Run the linter in pre-commit."""
-    session.install("--constraint=.github/workflows/constraints.txt", "pre-commit", ".")
+    session.install("--constraint=.github/workflows/constraints.txt", "pre-commit")
     session.run(
         "pre-commit",
         "run",
