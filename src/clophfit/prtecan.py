@@ -1048,9 +1048,9 @@ class Titration(TecanfilesGroup):
 
 @dataclass
 class PlateScheme:
-    """Definition of wells of buffer, ctrl and unk as well as names of controls."""
+    """Define buffer, ctrl and unk wells, and ctrl names."""
 
-    file: Path | None
+    file: Path | None = None
     buffer: list[str] = field(init=False, default_factory=list)
     ctrl: list[str] = field(init=False, default_factory=list)
     names: dict[str, set[str]] = field(init=False, default_factory=dict)
@@ -1093,7 +1093,7 @@ class TitrationAnalysis(Titration):
 
     """
 
-    _scheme: PlateScheme = PlateScheme(None)
+    _scheme: PlateScheme = field(default_factory=PlateScheme)
     _datafit: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )  # [], empty list
