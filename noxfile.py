@@ -12,7 +12,7 @@ os.environ.update({"PDM_IGNORE_SAVED_PYTHON": "1"})
 
 package = "clophfit"
 locations = "src", "tests", "./noxfile.py", "docs/conf.py"
-python_versions = ["3.8", "3.9", "3.10"]
+python_versions = ["3.8", "3.9", "3.10", "3.11"]
 nox.options.sessions = ("lint", "mypy", "tests", "xdoctest", "typeguard", "docs")
 nox.options.force_venv_backend = "venv"
 
