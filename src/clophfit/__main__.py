@@ -40,11 +40,11 @@ def fit_routine(
         if verbose:
             try:
                 meta = titan.labelblocksgroups[i].metadata
-                print("{:s}".format("-" * 79))
+                print("-" * 79)
                 print(f"\nlabel{i:d}")
                 pprint.pprint(meta)
             except IndexError:
-                print("{:s}".format("-" * 79))
+                print("-" * 79)
                 print("\nGlobal on both labels")
             titan.print_fitting(i)
         # Csv tables

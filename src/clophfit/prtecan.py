@@ -1404,7 +1404,9 @@ class TitrationAnalysis(Titration):
                 y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
             )
             # Print out.
-            line = ["%1.2f" % v for v in list(df[out].loc[key])]
+            line = [
+                f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out].loc[key])
+            ]
             for _i in range(4):
                 line.append("")
             lines.append(line)
@@ -1422,7 +1424,9 @@ class TitrationAnalysis(Titration):
         ax_data.legend()
         # global
         df = self.fittings[-1]
-        lines.append(["%1.2f" % v for v in list(df[out2].loc[key])])
+        lines.append(
+            [f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out2].loc[key])]
+        )
         ax_data.plot(
             xfit,
             self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
