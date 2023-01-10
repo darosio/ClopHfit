@@ -15,6 +15,7 @@ from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import Callable
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -502,8 +503,10 @@ class Labelblock:
                             f"OVER\n Overvalue in {self.metadata['Label'].value}:"
                             f"{row}{col:0>2} of tecanfile {self.path}"
                         )
-        except AssertionError:
-            raise ValueError("Cannot extract data in Labelblock: not 96 wells?")
+        except AssertionError as exc:
+            raise ValueError(
+                "Cannot extract data in Labelblock: not 96 wells?"
+            ) from exc
         return data
 
     _KEYS = [
@@ -913,8 +916,8 @@ class Titration(TecanfilesGroup):
         """
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Cannot find: {listfile}")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"Cannot find: {listfile}") from exc
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         conc = df["conc"].tolist()
@@ -1097,6 +1100,12 @@ class TitrationAnalysis(Titration):
     _datafit: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )  # [], empty list
+    keys_unk: list[str] = field(init=False, default_factory=list)
+    fz: Callable[
+        [float, NDArray[np.float_] | Sequence[float], NDArray[np.float_]],
+        NDArray[np.float_],
+    ] = fz_pk_singlesite
+    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
