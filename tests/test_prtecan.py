@@ -16,6 +16,23 @@ from clophfit import prtecan
 data_tests = Path(__file__).parent / "Tecan"
 
 
+def test_lookup_listoflines() -> None:
+    """It returns indexes for pattern match on col in list of lines."""
+    csvl: list[list[str | int | float]] = [
+        ["pp", "xy", 1, 2.0],
+        ["pp", "xx", 1, 2],
+        ["pp", 12, 1, 2],
+        ["pp", "yy", 1, 2.0],
+        ["a"],
+        ["pp", "xy", 1, 2],
+    ]
+    assert prtecan.lookup_listoflines(csvl, pattern="pp") == [0, 1, 2, 3, 5]
+    assert prtecan.lookup_listoflines(csvl, pattern="xy") == []
+    assert prtecan.lookup_listoflines(csvl, pattern="xy", col=1) == [0, 5]
+    assert prtecan.lookup_listoflines(csvl, pattern="yy", col=1) == [3]
+    assert prtecan.lookup_listoflines(csvl, pattern="yy", col=2) == []
+
+
 def test_strip_lines() -> None:
     """It strips empty fields."""
     lines: list[list[float | int | str]] = [
@@ -215,7 +232,7 @@ class TestTecanfile:
         assert len(self.csvl) == 74
 
     def test_lookup_listoflines(self) -> None:
-        """It finds Label occurrences using cls method."""
+        """It finds Label occurrences using module function."""
         assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
 
     def test_labelblocks(self) -> None:

@@ -78,15 +78,15 @@ def lookup_listoflines(
         Row/line index for all occurrences of pattern. Empty list for no occurrences.
 
     """
-    return [
-        tuple_i_line[0]
-        for tuple_i_line in list(
-            filter(
-                lambda x: pattern in x[1][0] if isinstance(x[1][0], str) else None,
-                enumerate(csvl),
-            )
-        )
-    ]
+    indexes = []
+    for i, line in enumerate(csvl):
+        try:
+            if isinstance(line[col], str):
+                if pattern in str(line[col]):
+                    indexes.append(i)
+        except IndexError:
+            continue
+    return indexes
 
 
 def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | float]]:
@@ -1534,7 +1534,7 @@ class TitrationAnalysis(Titration):
             df = df[~np.isnan(df[y])]
             for idx, xv, yv, l in zip(df.index, df[x], df[y], df["ctrl"]):
                 # x or y do not exhist.# try:
-                if type(l) == str:
+                if isinstance(l, str):
                     color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:
