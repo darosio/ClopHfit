@@ -827,7 +827,7 @@ class TecanfilesGroup:
         """Create metadata and labelblocksgroups."""
         n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
         tf0 = self.tecanfiles[0]
-        if all([tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]]):
+        if all(tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]):
             # Same number and order of labelblocks
             for i, _lb in enumerate(tf0.labelblocks):
                 self.labelblocksgroups.append(
@@ -837,7 +837,7 @@ class TecanfilesGroup:
                 )
         else:
             # Create as many as possible groups of labelblocks
-            rngs = tuple([range(n) for n in n_labelblocks])
+            rngs = tuple(range(n) for n in n_labelblocks)
             for idx in itertools.product(*rngs):
                 try:
                     gr = LabelblocksGroup(
@@ -851,8 +851,7 @@ class TecanfilesGroup:
             files = [tf.path for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
                 raise ValueError(f"No common labelblock in filenames: {files}.")
-            else:
-                warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
+            warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
         self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
 
 
@@ -890,7 +889,8 @@ class Titration(TecanfilesGroup):
         -------
         Titration
         """
-        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        # tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        tecanfiles, conc = Titration._listfile(Path(list_file))
         return cls(tecanfiles, conc)
 
     @staticmethod
