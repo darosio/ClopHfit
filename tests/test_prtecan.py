@@ -64,7 +64,7 @@ def test_extract_metadata() -> None:
     assert metadata == expected_metadata
 
 
-def test__merge_md() -> None:
+def test_merge_md() -> None:
     """Merge metadata of both labelblocks and tecanfiles."""
     md1 = {
         "Gain": prtecan.Metadata(93, ["Manual"]),
