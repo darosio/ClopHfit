@@ -74,7 +74,7 @@ def test__merge_md() -> None:
         "Gain": prtecan.Metadata(93, ["Optimal"]),
         "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
     }
-    mmd = prtecan._merge_md([md1, md2])
+    mmd = prtecan.merge_md([md1, md2])
     assert mmd["Gain"] == prtecan.Metadata(93)
     assert mmd["Shaking (Linear) Amplitude:"] == prtecan.Metadata(2, ["mm"])
 

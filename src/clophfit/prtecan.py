@@ -193,7 +193,7 @@ def extract_metadata(
     return md
 
 
-def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
+def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
     """Merge a list of metadata dict if the key value is the same in the list."""
     mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
@@ -730,7 +730,7 @@ class LabelblocksGroup:
                     self._data_norm[key].append(lb.data_norm[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
-        self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
+        self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
 
     @property
     def data(self) -> dict[str, list[float]] | None:
@@ -852,7 +852,7 @@ class TecanfilesGroup:
             if len(self.labelblocksgroups) == 0:  # == []
                 raise ValueError(f"No common labelblock in filenames: {files}.")
             warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
-        self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
+        self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
 
 
 @dataclass
