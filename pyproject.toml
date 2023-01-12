@@ -267,6 +267,6 @@ messages_control.disable = [
   # "comparison-of-constants",
   # "consider-using-with",
   # "use-maxsplit-arg",
-  # "unnecessary-dunder-call",
+  "unnecessary-dunder-call",
 ]
 # messages_control.enable = ["raise-missing-from"]

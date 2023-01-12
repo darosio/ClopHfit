@@ -76,12 +76,11 @@ def fit_routine(
 
 @click.group()
 @click.version_option()
-def clop() -> None:
+def clop() -> None:  # pragma: no cover
     """Group command."""
 
 
 @clop.command()
-@click.option("--some", flag_value="bello", is_flag=False, show_default="LLL")
 @click.argument("kd1", type=float)
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
@@ -89,11 +88,8 @@ def eq1(  # type: ignore
     kd1,
     pka,
     ph,
-    some,
 ):
     """pH-deps for Kd."""
-    if some:
-        print(some)
     print(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 

@@ -54,19 +54,19 @@ SB =  -0.274\nsSB =  0.002\n""",
         """Run the script as class fixture."""
         cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
-        process = subprocess.Popen(
+        with subprocess.Popen(
             [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]
             + request.param[2],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
-        )
-        yield request.param, process.communicate()
-        if (_data / "bs.txt").exists():
-            (_data / "bs.txt").unlink()
-        for fp in _expected.glob("*_pdf.png"):
-            fp.unlink()
+        ) as process:
+            yield request.param, process.communicate()
+            if (_data / "bs.txt").exists():
+                (_data / "bs.txt").unlink()
+            for fp in _expected.glob("*_pdf.png"):
+                fp.unlink()
 
     def test_stdout(self, run_script: Rscript) -> None:
         """It print out results."""
@@ -85,8 +85,6 @@ SB =  -0.274\nsSB =  0.002\n""",
         """Test stderr for band."""
         if run_script[0][2][1] == "band":
             assert run_script[1][1] == ""
-        else:
-            assert 1 == 1
 
     def test_pdf(self, run_script: Rscript) -> None:
         """It saves pdf file."""
@@ -130,19 +128,19 @@ bootstrap:""",
             (dat_files[1], res[1], ["--boot", "3", "-t", "cl"]),
         ],
     )
-    def run_script(self, request: Any) -> Rscript:
+    def run_script(self, request: Any) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration_global.py"
         dat_file = request.param[0]
-        process = subprocess.Popen(
+        with subprocess.Popen(
             [cli, dat_file, "_tmpoutput"] + request.param[2],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
             shell=False,
-        )
-        return request.param, process.communicate()
+        ) as process:
+            yield request.param, process.communicate()
 
     def test_stdout(self, run_script: Rscript) -> None:
         """It print out results."""
@@ -158,7 +156,7 @@ bootstrap:""",
     def test_png(self, run_script: Rscript) -> None:
         """It saves pdf file."""
         f = ".".join([run_script[0][0], "png"])
-        fp_test = tmpoutput / f.split("/")[-1]
+        fp_test = tmpoutput / f.rsplit("/", maxsplit=1)[-1]
         fp_expected = _expected / f.lstrip("./")
         msg = mpltc.compare_images(fp_test, fp_expected, 1.01)
         if msg:  # pragma: no cover
