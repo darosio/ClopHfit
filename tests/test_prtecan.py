@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 import sys
-import typing as t
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ from clophfit import prtecan
 
 
 data_tests = Path(__file__).parent / "Tecan"
+pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 
 
 def test_lookup_listoflines() -> None:
@@ -108,83 +108,73 @@ def test_fit_titration() -> None:
         prtecan.fit_titration("unk", x, y)
 
 
-@pytest.fixture(name="lbs", scope="class")
-def fixture_lbs() -> t.Iterator[
-    tuple[prtecan.Labelblock, prtecan.Labelblock]
-]:  # pragma: no cover
-    """Simulate csvl with 2 labelblocks."""
-    csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
-    idxs = prtecan.lookup_listoflines(csvl)
-    lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
-    lb1 = prtecan.Labelblock(csvl[idxs[1] :])
-    lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
-    lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
-    yield lb0, lb1
-    print("teardown")
-
-
 @pytest.mark.filterwarnings("ignore:OVER")
 class TestLabelblock:
     """Test labelblock class."""
 
-    def test_metadata(self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]) -> None:
+    @pytest.fixture(autouse=True)
+    def _init(self) -> None:
+        """Simulate csvl with 2 labelblocks."""
+        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
+        lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        lb1 = prtecan.Labelblock(csvl[idxs[1] :])
+        lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
+        lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        # pylint: disable=W0201
+        self.lb0 = lb0
+        self.lb1 = lb1
+
+    def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
-        assert lbs[0].metadata["Temperature"].value == 25.6
-        assert lbs[1].metadata["Temperature"].value == 25.3
+        assert self.lb0.metadata["Temperature"].value == 25.6
+        assert self.lb1.metadata["Temperature"].value == 25.3
 
-    def test_data(self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]) -> None:
+    def test_data(self) -> None:
         """It parses data values."""
-        assert lbs[0].data["F06"] == 19551
-        assert lbs[1].data["H12"] == 543
+        assert self.lb0.data["F06"] == 19551
+        assert self.lb1.data["H12"] == 543
 
-    def test_data_normalized(
-        self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]
-    ) -> None:
+    def test_data_normalized(self) -> None:
         """Normalize data using some metadata values."""
-        assert lbs[0].data_norm["F06"] == pytest.approx(1051.1290323)
-        assert lbs[1].data_norm["H12"] == pytest.approx(48.4821429)
+        assert self.lb0.data_norm["F06"] == pytest.approx(1051.1290323)
+        assert self.lb1.data_norm["H12"] == pytest.approx(48.4821429)
 
-    def test_data_buffersubtracted(
-        self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]
-    ) -> None:
+    def test_data_buffersubtracted(self) -> None:
         """Calculate buffer value from average of buffer wells and subtract from data."""
-        assert lbs[0].buffer == 11889.25
-        assert lbs[1].buffer == 56.75
-        assert lbs[0].sd_buffer == pytest.approx(450.2490)
-        assert lbs[1].sd_buffer == pytest.approx(4.43706)
-        assert lbs[0].data_buffersubtracted["F06"] == pytest.approx(7661.75)
-        assert lbs[1].data_buffersubtracted["H12"] == pytest.approx(486.25)
+        assert self.lb0.buffer == 11889.25
+        assert self.lb1.buffer == 56.75
+        assert self.lb0.sd_buffer == pytest.approx(450.2490)
+        assert self.lb1.sd_buffer == pytest.approx(4.43706)
+        assert self.lb0.data_buffersubtracted["F06"] == pytest.approx(7661.75)
+        assert self.lb1.data_buffersubtracted["H12"] == pytest.approx(486.25)
         # Can also assign a buffer value.
-        lbs[0].buffer = 1
-        lbs[1].buffer = 2.9
-        assert lbs[0].data_buffersubtracted["F06"] == 19550
-        assert lbs[1].data_buffersubtracted["H12"] == 540.1
+        self.lb0.buffer = 1
+        self.lb1.buffer = 2.9
+        assert self.lb0.data_buffersubtracted["F06"] == 19550
+        assert self.lb1.data_buffersubtracted["H12"] == 540.1
 
-    def test_data_buffersubtracted_norm(
-        self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]
-    ) -> None:
+    def test_data_buffersubtracted_norm(self) -> None:
         """Calculate normalized buffer value from average of buffer wells and subtract from data."""
-        assert lbs[0].buffer_norm == pytest.approx(639.20699)
-        assert lbs[1].buffer_norm == pytest.approx(5.06696)
-        assert lbs[0].sd_buffer_norm == pytest.approx(24.20694)
-        assert lbs[1].sd_buffer_norm == pytest.approx(0.396166)
-        assert lbs[0].data_buffersubtracted_norm["F06"] == pytest.approx(411.922)
-        assert lbs[1].data_buffersubtracted_norm["H12"] == pytest.approx(43.4152)
+        assert self.lb0.buffer_norm == pytest.approx(639.20699)
+        assert self.lb1.buffer_norm == pytest.approx(5.06696)
+        assert self.lb0.sd_buffer_norm == pytest.approx(24.20694)
+        assert self.lb1.sd_buffer_norm == pytest.approx(0.396166)
+        assert self.lb0.data_buffersubtracted_norm["F06"] == pytest.approx(411.922)
+        assert self.lb1.data_buffersubtracted_norm["H12"] == pytest.approx(43.4152)
         # Can also assign a buffer_norm value.
-        lbs[0].buffer_norm = 1
-        lbs[1].buffer_norm = 0.4821
-        assert lbs[0].data_buffersubtracted_norm["F06"] == pytest.approx(1050.13)
-        assert lbs[1].data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
+        self.lb0.buffer_norm = 1
+        self.lb1.buffer_norm = 0.4821
+        assert self.lb0.data_buffersubtracted_norm["F06"] == pytest.approx(1050.13)
+        assert self.lb1.data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
 
-    def test___eq__(self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]) -> None:
+    def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        assert lbs[0] == lbs[0]
-        assert lbs[0] != lbs[1]
-        assert lbs[0].__eq__(1) == NotImplemented
+        assert self.lb0 == self.lb0
+        assert self.lb0 != self.lb1
+        assert self.lb0.__eq__(1) == NotImplemented
 
-    def test___almost_eq__(
-        self, lbs: tuple[prtecan.Labelblock, prtecan.Labelblock]
-    ) -> None:
+    def test___almost_eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
         csvl = prtecan.read_xls(data_tests / "290513_7.2.xls")  # Gain=98
         idxs = prtecan.lookup_listoflines(csvl)
@@ -194,7 +184,7 @@ class TestLabelblock:
         lb12 = prtecan.Labelblock(csvl[idxs[1] :])
         assert lb11 != lb12
         assert lb11.__almost_eq__(lb12)
-        assert not lb11.__almost_eq__(lbs[0])
+        assert not lb11.__almost_eq__(self.lb0)
 
     def test_overvalue(self) -> None:
         """It detects saturated data ("OVER")."""
@@ -224,54 +214,45 @@ class TestLabelblock:
             prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
 
-@pytest.fixture(name="csvl", scope="class")
-def fixture_csvl() -> list[list[str | int | float]]:  # pragma: no cover
-    """Yield list of lines (csvl)."""
-    csvl = prtecan.read_xls(data_tests / "140220/pH8.3_200214.xls")
-    return csvl
-
-
 class TestCsvlFunctions:
     """Test TecanFile reading and parsing functions."""
 
-    def test_read_xls(self, csvl: list[list[str | int | float]]) -> None:
+    csvl = prtecan.read_xls(data_tests / "140220/pH8.3_200214.xls")
+
+    def test_read_xls(self) -> None:
         """The test reads the xls file using cls method."""
-        assert len(csvl) == 74
+        assert len(self.csvl) == 74
 
-    def test_lookup_listoflines(self, csvl: list[list[str | int | float]]) -> None:
+    def test_lookup_listoflines(self) -> None:
         """It finds Label occurrences using module function."""
-        assert prtecan.lookup_listoflines(csvl) == [14, 44]
-
-
-@pytest.fixture(name="tf", scope="class")
-def fixture_tf() -> prtecan.Tecanfile:  # pragma: no cover
-    """Yield a tecan-file with 2 label-blocks."""
-    return prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+        assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
 
 
 class TestTecanfile:
     """Test TecanFile class."""
 
-    def test_path(self, tf: prtecan.Tecanfile) -> None:
+    tf = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+
+    def test_path(self) -> None:
         """It reads the file path."""
-        assert tf.path == data_tests / "140220/pH8.3_200214.xls"
+        assert self.tf.path == data_tests / "140220/pH8.3_200214.xls"
 
-    def test_metadata(self, tf: prtecan.Tecanfile) -> None:
+    def test_metadata(self) -> None:
         """It parses the Date."""
-        assert tf.metadata["Date:"].value == "20/02/2014"
+        assert self.tf.metadata["Date:"].value == "20/02/2014"
 
-    def test_labelblocks(self, tf: prtecan.Tecanfile) -> None:
+    def test_labelblocks(self) -> None:
         """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert tf.labelblocks[0].metadata["Temperature"].value == 25.3
-        assert tf.labelblocks[1].metadata["Temperature"].value == 25.7
-        assert tf.labelblocks[0].data["A01"] == 17260
-        assert tf.labelblocks[1].data["H12"] == 4196
+        assert self.tf.labelblocks[0].metadata["Temperature"].value == 25.3
+        assert self.tf.labelblocks[1].metadata["Temperature"].value == 25.7
+        assert self.tf.labelblocks[0].data["A01"] == 17260
+        assert self.tf.labelblocks[1].data["H12"] == 4196
 
-    def test___eq__(self, tf: prtecan.Tecanfile) -> None:
+    def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        assert tf == prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+        assert self.tf == prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
         tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
-        assert tf2 != tf
+        assert tf2 != self.tf
 
     def test_warn(self) -> None:
         """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
@@ -289,7 +270,6 @@ class TestTecanfile:
             prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
-# dict[str, prtecan.Metadata], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
 @pytest.fixture(name="lbgs", scope="class")
 def fixture_lbgs() -> tuple[
     list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
@@ -528,30 +508,21 @@ class TestTecanfileGroup:
                 prtecan.TecanfilesGroup(tecanfiles)
 
 
-@pytest.fixture(name="tit_ph", scope="class")
-def fixture_tit() -> prtecan.Titration:  # pragma: no cover
-    """Initialize pH titration from list.pH."""
-    return prtecan.Titration.fromlistfile(data_tests / "list.pH")
-
-
-@pytest.fixture(name="tit_cl", scope="class")
-def fixture_tit_cl() -> prtecan.Titration:  # pragma: no cover
-    """Initialize Cl titration from list.cl."""
-    return prtecan.Titration.fromlistfile(data_tests / "list.cl20")
-
-
 class TestTitration:
     """Test Titration class."""
 
-    @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
-    def test_conc(self, tit_ph: prtecan.Titration) -> None:
-        """It reads pH values."""
-        assert tit_ph.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+    tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH")
+    tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20")
 
-    def test_labelblocksgroups(self, tit_ph: prtecan.Titration) -> None:
+    @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
+    def test_conc(self) -> None:
+        """It reads pH values."""
+        assert self.tit_ph.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+
+    def test_labelblocksgroups(self) -> None:
         """It reads labelblocksgroups data and metadata."""
-        lbg0 = tit_ph.labelblocksgroups[0]
-        lbg1 = tit_ph.labelblocksgroups[1]
+        lbg0 = self.tit_ph.labelblocksgroups[0]
+        lbg1 = self.tit_ph.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"].value == 10.0
         # pH9.3 is 93 Optimal not Manual
@@ -562,17 +533,17 @@ class TestTitration:
         assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]  # type: ignore
         assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]  # type: ignore
 
-    def test_labelblocksgroups_cl(self, tit_cl: prtecan.Titration) -> None:
+    def test_labelblocksgroups_cl(self) -> None:
         """It reads labelblocksgroups data for Cl too."""
-        lbg = tit_cl.labelblocksgroups[0]
+        lbg = self.tit_cl.labelblocksgroups[0]
         # assert lbg.data["A01"] == [6289, 6462, 6390, 6465, 6774]
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]  # type: ignore
         # assert lbg.data["H12"] == [4477, 4705, 4850, 4918, 5007]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
 
-    def test_export_data(self, tit_ph: prtecan.Titration, tmp_path: Any) -> None:
+    def test_export_data(self, tmp_path: Any) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
-        tit_ph.export_data(tmp_path)
+        self.tit_ph.export_data(tmp_path)
         a01 = pd.read_csv(tmp_path / "dat/A01.dat")
         h12 = pd.read_csv(tmp_path / "dat/H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
@@ -591,41 +562,43 @@ class TestTitration:
             prtecan.Titration.fromlistfile(data_tests / "list.pH2")
 
 
-@pytest.fixture(name="titan", scope="class")
-def fixture_titan() -> prtecan.TitrationAnalysis:  # pragma: no cover
-    """Initialize Titration analysis (TitAn)."""
-    titan = prtecan.TitrationAnalysis.fromlistfile(data_tests / "140220/list.pH")
-    titan.load_additions(data_tests / "140220/additions.pH")
-    titan.load_scheme(data_tests / "140220/scheme.txt")
-    return titan
-
-
 @pytest.mark.filterwarnings("ignore:OVER")
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
-    def test_scheme(self, titan: prtecan.TitrationAnalysis) -> None:
-        """It finds well position for buffer samples."""
-        assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
+    @pytest.fixture(autouse=True)
+    def _init(self) -> None:
+        """Set up test class."""
+        # Use fixture to capture UserWarning "OVER"
+        # pylint: disable=W0201
+        self.titan = prtecan.TitrationAnalysis.fromlistfile(
+            data_tests / "140220/list.pH"
+        )
+        self.titan.load_additions(data_tests / "140220/additions.pH")
+        self.titan.load_scheme(data_tests / "140220/scheme.txt")
 
-    def test_raise_listfilenotfound(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_scheme(self) -> None:
+        """It finds well position for buffer samples."""
+        assert self.titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
+
+    def test_raise_listfilenotfound(self) -> None:
         """It raises OSError when scheme file does not exist."""
         with pytest.raises(
             FileNotFoundError, match=r"No such file or directory: 'aax'"
         ):
-            titan.load_scheme(Path("aax"))
+            self.titan.load_scheme(Path("aax"))
 
-    def test_raise_listfile_exception(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_raise_listfile_exception(self) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
         bad_schemefile = data_tests / "140220/scheme0.txt"
         msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
         with pytest.raises(ValueError, match=re.escape(msg)):
-            titan.load_scheme(bad_schemefile)
+            self.titan.load_scheme(bad_schemefile)
 
-    def test_subtract_bg(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
-        lbg0 = titan.labelblocksgroups[0]
-        lbg1 = titan.labelblocksgroups[1]
+        lbg0 = self.titan.labelblocksgroups[0]
+        lbg1 = self.titan.labelblocksgroups[1]
         np.testing.assert_almost_equal(
             lbg0.data_norm["E01"][::2],
             [601.72, 641.505, 674.355, 706.774],
@@ -643,41 +616,39 @@ class TestTitrationAnalysis:
             [9758.25, 1334.0, 283.5],
         )
 
-    def test_dilution_correction(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_dilution_correction(self) -> None:
         """It applies dilution correction read from file listing additions."""
-        np.testing.assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
+        np.testing.assert_array_equal(self.titan.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
         np.testing.assert_almost_equal(
-            titan.data_dilutioncorrected[1]["A12"],  # type: ignore
+            self.titan.data_dilutioncorrected[1]["A12"],  # type: ignore
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
-    def test_data_dilutioncorrected_norma(
-        self, titan: prtecan.TitrationAnalysis
-    ) -> None:
+    def test_data_dilutioncorrected_norma(self) -> None:
         """It normalizes data."""
         np.testing.assert_almost_equal(
-            titan.data_dilutioncorrected_norm[0]["A12"][::2],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[0]["A12"][::2],  # type: ignore
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         np.testing.assert_almost_equal(
-            titan.data_dilutioncorrected_norm[1]["A12"][::2],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[1]["A12"][::2],  # type: ignore
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
 
-    def test_keys(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_keys(self) -> None:
         """It gets well positions for ctrl and unknown samples."""
-        assert set(titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
+        assert set(self.titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
-        assert set(titan.scheme.ctrl) - {"A01", "A12"} == x
+        assert set(self.titan.scheme.ctrl) - {"A01", "A12"} == x
 
     @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
-    def test_fit(self, titan: prtecan.TitrationAnalysis) -> None:
+    def test_fit(self) -> None:
         """It fits each label separately."""
-        titan.fit("pH", nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
+        self.titan.fit("pH", nrm=True, bg=True, dil=True)
+        fit0 = self.titan.fittings[0].sort_index()
+        fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
@@ -689,9 +660,9 @@ class TestTitrationAnalysis:
             atol=1e-3,
         )
         # 0:-1
-        titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
+        self.titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
+        fit0 = self.titan.fittings[0].sort_index()
+        fit1 = self.titan.fittings[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1-1.csv", index_col=0)
         pd.testing.assert_frame_equal(
