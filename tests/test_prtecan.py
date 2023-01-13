@@ -270,140 +270,73 @@ class TestTecanfile:
             prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
-@pytest.fixture(name="lbgs", scope="class")
-def fixture_lbgs() -> tuple[
-    list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-]:  # pragma: no cover
-    """Yield a tecan-file with 2 label-blocks."""
-    tf1 = prtecan.Tecanfile(data_tests / "290513_5.5.xls")
-    tf2 = prtecan.Tecanfile(data_tests / "290513_7.2.xls")
-    tf3 = prtecan.Tecanfile(data_tests / "290513_8.8.xls")
-    lbg1 = prtecan.LabelblocksGroup([tf1.labelblocks[0], tf2.labelblocks[0]])
-    lbg2 = prtecan.LabelblocksGroup([tf2.labelblocks[1], tf3.labelblocks[1]])
-    lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-    lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-    # metadata = tf2.labelblocks[0].metadata
-    # yield metadata, lbg1, lbg2
-    return [tf1, tf2, tf3], lbg1, lbg2
-
-
 class TestLabelblocksGroup:
     """Test LabelBlocksGroup class."""
 
-    def test_metadata(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    @pytest.fixture(name="tfs", scope="class")
+    def fixture_tfs(self) -> list[prtecan.Tecanfile]:  # pragma: no cover
+        """Return a list of `Tecan` files."""
+        tf1 = prtecan.Tecanfile(data_tests / "290513_5.5.xls")
+        tf2 = prtecan.Tecanfile(data_tests / "290513_7.2.xls")
+        tf3 = prtecan.Tecanfile(data_tests / "290513_8.8.xls")
+        return [tf1, tf2, tf3]
+
+    @pytest.fixture(autouse=True)
+    def _init(self, tfs: list[prtecan.Tecanfile]) -> None:  # pragma: no cover
+        """Return 2 label-block groups."""
+        lbg1 = prtecan.LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
+        lbg2 = prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
+        lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        self.lbg0 = lbg1
+        self.lbg1 = lbg2
+
+    def test_metadata(self) -> None:
         """Merge only shared metadata."""
-        assert lbgs[1].metadata.get("Temperature") is None
-        assert lbgs[2].metadata.get("Temperature") is None
-        assert lbgs[2].metadata.get("Gain") is None
-        assert lbgs[2].labelblocks[0].metadata["Gain"].value == 98
-        assert lbgs[2].labelblocks[1].metadata["Gain"].value == 99
+        assert self.lbg0.metadata.get("Temperature") is None
+        assert self.lbg1.metadata.get("Temperature") is None
+        assert self.lbg1.metadata.get("Gain") is None
+        assert self.lbg1.labelblocks[0].metadata["Gain"].value == 98
+        assert self.lbg1.labelblocks[1].metadata["Gain"].value == 99
         # Common metadata.
-        assert lbgs[1].metadata["Gain"].value == 94
-        assert lbgs[1].metadata["Number of Flashes"].value == 10
+        assert self.lbg0.metadata["Gain"].value == 94
+        assert self.lbg0.metadata["Number of Flashes"].value == 10
 
-    def test_data(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    def test_data(self) -> None:
         """Merge data."""
-        assert lbgs[1].data["A01"] == [18713, 17088]  # type: ignore
-        assert lbgs[1].data["H12"] == [28596, 25771]  # type: ignore
-        assert lbgs[2].data is None
+        assert self.lbg0.data["A01"] == [18713, 17088]  # type: ignore
+        assert self.lbg0.data["H12"] == [28596, 25771]  # type: ignore
+        assert self.lbg1.data is None
 
-    def test_data_normalized(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    def test_data_normalized(self) -> None:
         """Merge data_normalized."""
-        np.testing.assert_almost_equal(lbgs[2].data_norm["H12"], [693.980, 714.495], 3)
-        np.testing.assert_almost_equal(lbgs[1].data_norm["A01"], [995.372, 908.936], 3)
+        np.testing.assert_almost_equal(
+            self.lbg1.data_norm["H12"], [693.980, 714.495], 3
+        )
+        np.testing.assert_almost_equal(
+            self.lbg0.data_norm["A01"], [995.372, 908.936], 3
+        )
 
-    def test_data_buffersubtracted(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    def test_data_buffersubtracted(self) -> None:
         """Merge data_buffersubtracted."""
         np.testing.assert_almost_equal(
-            lbgs[1].data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
+            self.lbg0.data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
         )
-        assert lbgs[2].data_buffersubtracted is None
+        assert self.lbg1.data_buffersubtracted is None
 
-    def test_data_buffersubtracted_norm(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    def test_data_buffersubtracted_norm(self) -> None:
         """Merge data_buffersubtracted."""
         np.testing.assert_almost_equal(
-            lbgs[1].data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
+            self.lbg0.data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
         )
         np.testing.assert_almost_equal(
-            lbgs[2].data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
+            self.lbg1.data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
         )
 
-    def test_notequal_labelblocks(
-        self,
-        lbgs: tuple[
-            list[prtecan.Tecanfile], prtecan.LabelblocksGroup, prtecan.LabelblocksGroup
-        ],
-    ) -> None:
+    def test_notequal_labelblocks(self, tfs: list[prtecan.Tecanfile]) -> None:
         """It raises Exception when concatenating unequal labelblocks."""
         with pytest.raises(ValueError, match="Creation of labelblock group failed."):
-            prtecan.LabelblocksGroup(
-                [lbgs[0][1].labelblocks[0], lbgs[0][2].labelblocks[1]]
-            )
-
-
-@pytest.fixture(name="tfg", scope="class")
-def fixture_tfg() -> prtecan.TecanfilesGroup:  # pragma: no cover
-    """Initialize Tfg with 2 LbG in the same order."""
-    filenames = ["290513_5.5.xls", "290513_7.2.xls"]
-    tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-    return prtecan.TecanfilesGroup(tecanfiles)
-
-
-@pytest.fixture(name="tfg_1", scope="class")
-def fixture_tfg_1() -> tuple[
-    prtecan.TecanfilesGroup, pytest.WarningsRecorder
-]:  # pragma: no cover
-    """Initialize Tfg when 1 LbG equal and a second with almost equal labelblocks."""
-    filenames = [
-        "290513_5.5.xls",  # Label1 and Label2
-        "290513_7.2.xls",  # Label1 and Label2
-        "290513_8.8.xls",  # Label1 and Label2 with different metadata
-    ]
-    tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-    with pytest.warns(UserWarning) as record:
-        group = prtecan.TecanfilesGroup(tecanfiles)
-    return group, record
-
-
-@pytest.fixture(name="tfg_2", scope="class")
-def fixture_tfg_2() -> tuple[
-    prtecan.TecanfilesGroup, pytest.WarningsRecorder
-]:  # pragma: no cover
-    """Initialize Tfg with different number of labelblocks, but mergeable."""
-    filenames = [
-        "290212_5.78.xls",  # Label1 and Label2
-        "290212_20.xls",  # Label2 only
-        "290212_100.xls",  # Label2 only
-    ]
-    tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-    with pytest.warns(UserWarning) as record:
-        group = prtecan.TecanfilesGroup(tecanfiles)
-    return group, record
+            prtecan.LabelblocksGroup([tfs[1].labelblocks[0], tfs[2].labelblocks[1]])
 
 
 class TestTecanfileGroup:
@@ -411,6 +344,13 @@ class TestTecanfileGroup:
 
     class TestAllEqLbgs:
         """Test TfG with 2 LbG in the same order."""
+
+        @pytest.fixture(name="tfg", scope="class")
+        def fixture_tfg(self) -> prtecan.TecanfilesGroup:  # pragma: no cover
+            """Initialize Tfg with 2 LbG in the same order."""
+            filenames = ["290513_5.5.xls", "290513_7.2.xls"]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            return prtecan.TecanfilesGroup(tecanfiles)
 
         def test_metadata(self, tfg: prtecan.TecanfilesGroup) -> None:
             """Parse general metadata."""
@@ -434,19 +374,28 @@ class TestTecanfileGroup:
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        def test_warn(
-            self, tfg_1: tuple[prtecan.TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> None:
+        @pytest.fixture(autouse=True)
+        def _init(self) -> None:  # pragma: no cover
+            """Initialize Tfg when 1 LbG equal and a second with almost equal labelblocks."""
+            filenames = [
+                "290513_5.5.xls",  # Label1 and Label2
+                "290513_7.2.xls",  # Label1 and Label2
+                "290513_8.8.xls",  # Label1 and Label2 with different metadata
+            ]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            # pylint: disable=W0201
+            with pytest.warns(UserWarning) as self.record:
+                self.group = prtecan.TecanfilesGroup(tecanfiles)
+
+        def test_warn(self) -> None:
             """Warn about labelblocks anomaly."""
             assert "Different LabelblocksGroup among filenames:" in str(
-                tfg_1[1][0].message
+                self.record[0].message
             )
 
-        def test_labelblocksgroups(
-            self, tfg_1: tuple[prtecan.TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> None:
+        def test_labelblocksgroups(self) -> None:
             """Generate 1 LbG with .data and .metadata."""
-            lbg0 = tfg_1[0].labelblocksgroups[0]
+            lbg0 = self.group.labelblocksgroups[0]
             # metadata
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg0.metadata["Gain"].value == 94
@@ -454,11 +403,9 @@ class TestTecanfileGroup:
             assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]  # type: ignore
             assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]  # type: ignore
 
-        def test_mergeable_labelblocksgroups(
-            self, tfg_1: tuple[prtecan.TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> None:
+        def test_mergeable_labelblocksgroups(self) -> None:
             """Generate 1 Lbg only with .data_normalized and only common .metadata."""
-            lbg1 = tfg_1[0].labelblocksgroups[1]
+            lbg1 = self.group.labelblocksgroups[1]
             # metadata
             assert lbg1.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata.get("Gain") is None
@@ -474,19 +421,28 @@ class TestTecanfileGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        def test_warn(
-            self, tfg_2: tuple[prtecan.TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> None:
+        @pytest.fixture(autouse=True)
+        def _init(self) -> None:
+            """Initialize Tfg with different number of labelblocks, but mergeable."""
+            filenames = [
+                "290212_5.78.xls",  # Label1 and Label2
+                "290212_20.xls",  # Label2 only
+                "290212_100.xls",  # Label2 only
+            ]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            # pylint: disable=W0201
+            with pytest.warns(UserWarning) as self.record:
+                self.group = prtecan.TecanfilesGroup(tecanfiles)
+
+        def test_warn(self) -> None:
             """Warn about labelblocks anomaly."""
             assert "Different LabelblocksGroup among filenames" in str(
-                tfg_2[1][0].message
+                self.record[0].message
             )
 
-        def test_labelblocksgroups(
-            self, tfg_2: tuple[prtecan.TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> None:
+        def test_labelblocksgroups(self) -> None:
             """Generates 1 LbG with .data and .metadata."""
-            lbg = tfg_2[0].labelblocksgroups[0]
+            lbg = self.group.labelblocksgroups[0]
             # metadata
             assert lbg.metadata["Number of Flashes"].value == 10.0
             assert lbg.metadata["Gain"].value == 93.0
