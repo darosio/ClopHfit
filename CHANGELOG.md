@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.15 (2023-01-13)
+
+### Refactor
+
+- tests and src for pylint
+- **py3.11**: include py3.11 in supported versions
+
 ## v0.3.14 (2023-01-01)
 
 ### CI/CD

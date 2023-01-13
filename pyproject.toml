@@ -11,7 +11,7 @@ authors = [
 license = "BSD-3-Clause"
 readme = "docs/README.md"
 requires-python = ">=3.8, <3.12"
-version = "0.3.14"
+version = "0.3.15"
 keywords = [
   "svd",
   "ClopHensor",
@@ -176,7 +176,7 @@ strict = true
 
 [tool.commitizen]
 name = "cz_customize"
-version = "0.3.14"
+version = "0.3.15"
 tag_format = "v$version"
 version_files = [
   "pyproject.toml:version",
@@ -198,12 +198,12 @@ schema = """
 (BREAKING CHANGE: )<footer>
 """
 schema_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|bump)(?:\\(([^()\r\n]*)\\)|\\()?(!)?:\\s(.*)?"
-bump_pattern = "^(BREAKING CHANGE|feat|fix|perf)"
+bump_pattern = "^(BREAKING CHANGE|feat|fix|perf|refactor)"
 bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
 change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
 info_path = "cz_customize_info.txt"
 commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
-changelog_pattern = "^(feat|fix|docs|style|perf|test|build|ci)?(\\(.*\\))?(!)?"
+changelog_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci)?(\\(.*\\))?(!)?"
 change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
 
 [[tool.commitizen.customize.questions]]
