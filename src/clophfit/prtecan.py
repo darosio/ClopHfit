@@ -15,6 +15,7 @@ from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import Callable
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -78,15 +79,15 @@ def lookup_listoflines(
         Row/line index for all occurrences of pattern. Empty list for no occurrences.
 
     """
-    return [
-        tuple_i_line[0]
-        for tuple_i_line in list(
-            filter(
-                lambda x: pattern in x[1][0] if isinstance(x[1][0], str) else None,
-                enumerate(csvl),
-            )
-        )
-    ]
+    indexes = []
+    for i, line in enumerate(csvl):
+        try:
+            if isinstance(line[col], str):
+                if pattern in str(line[col]):
+                    indexes.append(i)
+        except IndexError:
+            continue
+    return indexes
 
 
 def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | float]]:
@@ -192,7 +193,7 @@ def extract_metadata(
     return md
 
 
-def _merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
+def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
     """Merge a list of metadata dict if the key value is the same in the list."""
     mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
@@ -502,8 +503,10 @@ class Labelblock:
                             f"OVER\n Overvalue in {self.metadata['Label'].value}:"
                             f"{row}{col:0>2} of tecanfile {self.path}"
                         )
-        except AssertionError:
-            raise ValueError("Cannot extract data in Labelblock: not 96 wells?")
+        except AssertionError as exc:
+            raise ValueError(
+                "Cannot extract data in Labelblock: not 96 wells?"
+            ) from exc
         return data
 
     _KEYS = [
@@ -727,7 +730,7 @@ class LabelblocksGroup:
                     self._data_norm[key].append(lb.data_norm[key])
         else:
             raise ValueError("Creation of labelblock group failed.")
-        self.metadata = _merge_md([lb.metadata for lb in self.labelblocks])
+        self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
 
     @property
     def data(self) -> dict[str, list[float]] | None:
@@ -824,7 +827,7 @@ class TecanfilesGroup:
         """Create metadata and labelblocksgroups."""
         n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
         tf0 = self.tecanfiles[0]
-        if all([tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]]):
+        if all(tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]):
             # Same number and order of labelblocks
             for i, _lb in enumerate(tf0.labelblocks):
                 self.labelblocksgroups.append(
@@ -834,7 +837,7 @@ class TecanfilesGroup:
                 )
         else:
             # Create as many as possible groups of labelblocks
-            rngs = tuple([range(n) for n in n_labelblocks])
+            rngs = tuple(range(n) for n in n_labelblocks)
             for idx in itertools.product(*rngs):
                 try:
                     gr = LabelblocksGroup(
@@ -848,9 +851,8 @@ class TecanfilesGroup:
             files = [tf.path for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
                 raise ValueError(f"No common labelblock in filenames: {files}.")
-            else:
-                warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
-        self.metadata = _merge_md([tf.metadata for tf in self.tecanfiles])
+            warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
+        self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
 
 
 @dataclass
@@ -887,7 +889,8 @@ class Titration(TecanfilesGroup):
         -------
         Titration
         """
-        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        # tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
+        tecanfiles, conc = Titration._listfile(Path(list_file))
         return cls(tecanfiles, conc)
 
     @staticmethod
@@ -913,8 +916,8 @@ class Titration(TecanfilesGroup):
         """
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Cannot find: {listfile}")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"Cannot find: {listfile}") from exc
         if df["filenames"].count() != df["conc"].count():
             raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
         conc = df["conc"].tolist()
@@ -1097,6 +1100,12 @@ class TitrationAnalysis(Titration):
     _datafit: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )  # [], empty list
+    keys_unk: list[str] = field(init=False, default_factory=list)
+    fz: Callable[
+        [float, NDArray[np.float_] | Sequence[float], NDArray[np.float_]],
+        NDArray[np.float_],
+    ] = fz_pk_singlesite
+    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -1404,7 +1413,9 @@ class TitrationAnalysis(Titration):
                 y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
             )
             # Print out.
-            line = ["%1.2f" % v for v in list(df[out].loc[key])]
+            line = [
+                f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out].loc[key])
+            ]
             for _i in range(4):
                 line.append("")
             lines.append(line)
@@ -1422,7 +1433,9 @@ class TitrationAnalysis(Titration):
         ax_data.legend()
         # global
         df = self.fittings[-1]
-        lines.append(["%1.2f" % v for v in list(df[out2].loc[key])])
+        lines.append(
+            [f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out2].loc[key])]
+        )
         ax_data.plot(
             xfit,
             self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
@@ -1530,7 +1543,7 @@ class TitrationAnalysis(Titration):
             df = df[~np.isnan(df[y])]
             for idx, xv, yv, l in zip(df.index, df[x], df[y], df["ctrl"]):
                 # x or y do not exhist.# try:
-                if type(l) == str:
+                if isinstance(l, str):
                     color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:

@@ -14,6 +14,24 @@ from clophfit import prtecan
 
 
 data_tests = Path(__file__).parent / "Tecan"
+pytestmark = pytest.mark.filterwarnings("ignore:OVER")
+
+
+def test_lookup_listoflines() -> None:
+    """It returns indexes for pattern match on col in list of lines."""
+    csvl: list[list[str | int | float]] = [
+        ["pp", "xy", 1, 2.0],
+        ["pp", "xx", 1, 2],
+        ["pp", 12, 1, 2],
+        ["pp", "yy", 1, 2.0],
+        ["a"],
+        ["pp", "xy", 1, 2],
+    ]
+    assert prtecan.lookup_listoflines(csvl, pattern="pp") == [0, 1, 2, 3, 5]
+    assert not prtecan.lookup_listoflines(csvl, pattern="xy")  # == []
+    assert prtecan.lookup_listoflines(csvl, pattern="xy", col=1) == [0, 5]
+    assert prtecan.lookup_listoflines(csvl, pattern="yy", col=1) == [3]
+    assert not prtecan.lookup_listoflines(csvl, pattern="yy", col=2)  # == []
 
 
 def test_strip_lines() -> None:
@@ -46,7 +64,7 @@ def test_extract_metadata() -> None:
     assert metadata == expected_metadata
 
 
-def test__merge_md() -> None:
+def test_merge_md() -> None:
     """Merge metadata of both labelblocks and tecanfiles."""
     md1 = {
         "Gain": prtecan.Metadata(93, ["Manual"]),
@@ -56,7 +74,7 @@ def test__merge_md() -> None:
         "Gain": prtecan.Metadata(93, ["Optimal"]),
         "Shaking (Linear) Amplitude:": prtecan.Metadata(2, ["mm"]),
     }
-    mmd = prtecan._merge_md([md1, md2])
+    mmd = prtecan.merge_md([md1, md2])
     assert mmd["Gain"] == prtecan.Metadata(93)
     assert mmd["Shaking (Linear) Amplitude:"] == prtecan.Metadata(2, ["mm"])
 
@@ -94,14 +112,18 @@ def test_fit_titration() -> None:
 class TestLabelblock:
     """Test labelblock class."""
 
-    def setup_class(self) -> None:
-        """Initialize a labelblock from an .xls file."""
+    @pytest.fixture(autouse=True)
+    def _init(self) -> None:
+        """Simulate csvl with 2 labelblocks."""
         csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
         idxs = prtecan.lookup_listoflines(csvl)
-        self.lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
-        self.lb1 = prtecan.Labelblock(csvl[idxs[1] :])
-        self.lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
-        self.lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        lb1 = prtecan.Labelblock(csvl[idxs[1] :])
+        lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
+        lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        # pylint: disable=W0201
+        self.lb0 = lb0
+        self.lb1 = lb1
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
@@ -192,43 +214,45 @@ class TestLabelblock:
             prtecan.Labelblock(csvl[idxs[0] : len(csvl)])
 
 
-class TestTecanfile:
-    """Test TecanFile class."""
+class TestCsvlFunctions:
+    """Test TecanFile reading and parsing functions."""
 
-    def setup_class(self) -> None:
-        """Initialize a tecan file and read the corresponding xls file."""
-        self.tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
-        self.tfpath = data_tests / "140220/pH8.3_200214.xls"
-        self.tf1 = prtecan.Tecanfile(self.tfpath)
-        self.csvl = prtecan.read_xls(self.tfpath)
-
-    def test_path(self) -> None:
-        """It reads the file path."""
-        assert self.tf1.path == self.tfpath
-
-    def test_metadata(self) -> None:
-        """It parses the Date."""
-        assert self.tf1.metadata["Date:"].value == "20/02/2014"
+    csvl = prtecan.read_xls(data_tests / "140220/pH8.3_200214.xls")
 
     def test_read_xls(self) -> None:
         """The test reads the xls file using cls method."""
         assert len(self.csvl) == 74
 
     def test_lookup_listoflines(self) -> None:
-        """It finds Label occurrences using cls method."""
+        """It finds Label occurrences using module function."""
         assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
+
+
+class TestTecanfile:
+    """Test TecanFile class."""
+
+    tf = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+
+    def test_path(self) -> None:
+        """It reads the file path."""
+        assert self.tf.path == data_tests / "140220/pH8.3_200214.xls"
+
+    def test_metadata(self) -> None:
+        """It parses the Date."""
+        assert self.tf.metadata["Date:"].value == "20/02/2014"
 
     def test_labelblocks(self) -> None:
         """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert self.tf1.labelblocks[0].metadata["Temperature"].value == 25.3
-        assert self.tf1.labelblocks[1].metadata["Temperature"].value == 25.7
-        assert self.tf1.labelblocks[0].data["A01"] == 17260
-        assert self.tf1.labelblocks[1].data["H12"] == 4196
+        assert self.tf.labelblocks[0].metadata["Temperature"].value == 25.3
+        assert self.tf.labelblocks[1].metadata["Temperature"].value == 25.7
+        assert self.tf.labelblocks[0].data["A01"] == 17260
+        assert self.tf.labelblocks[1].data["H12"] == 4196
 
     def test___eq__(self) -> None:
         """It is equal to itself. TODO and different from other."""
-        assert self.tf1 == self.tf1
-        assert self.tf2 != self.tf1
+        assert self.tf == prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+        tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
+        assert tf2 != self.tf
 
     def test_warn(self) -> None:
         """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
@@ -249,69 +273,71 @@ class TestTecanfile:
 class TestLabelblocksGroup:
     """Test LabelBlocksGroup class."""
 
-    def setup_class(self) -> None:
-        """Initialize a labelblocksgroup reading (and concatenating) 2 xls files."""
-        self.tf1 = prtecan.Tecanfile(data_tests / "290513_5.5.xls")
-        self.tf2 = prtecan.Tecanfile(data_tests / "290513_7.2.xls")
-        self.tf3 = prtecan.Tecanfile(data_tests / "290513_8.8.xls")
-        self.metadata = self.tf2.labelblocks[0].metadata
-        self.lbg1 = prtecan.LabelblocksGroup(
-            [self.tf1.labelblocks[0], self.tf2.labelblocks[0]]
-        )
-        self.lbg2 = prtecan.LabelblocksGroup(
-            [self.tf2.labelblocks[1], self.tf3.labelblocks[1]]
-        )
+    @pytest.fixture(name="tfs", scope="class")
+    def fixture_tfs(self) -> list[prtecan.Tecanfile]:  # pragma: no cover
+        """Return a list of `Tecan` files."""
+        tf1 = prtecan.Tecanfile(data_tests / "290513_5.5.xls")
+        tf2 = prtecan.Tecanfile(data_tests / "290513_7.2.xls")
+        tf3 = prtecan.Tecanfile(data_tests / "290513_8.8.xls")
+        return [tf1, tf2, tf3]
+
+    @pytest.fixture(autouse=True)
+    def _init(self, tfs: list[prtecan.Tecanfile]) -> None:  # pragma: no cover
+        """Return 2 label-block groups."""
+        lbg1 = prtecan.LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
+        lbg2 = prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
+        lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        # pylint: disable=W0201
+        self.lbg0 = lbg1
+        self.lbg1 = lbg2
 
     def test_metadata(self) -> None:
         """Merge only shared metadata."""
+        assert self.lbg0.metadata.get("Temperature") is None
         assert self.lbg1.metadata.get("Temperature") is None
-        assert self.lbg2.metadata.get("Temperature") is None
-        assert self.lbg2.metadata.get("Gain") is None
-        assert self.lbg2.labelblocks[0].metadata["Gain"].value == 98
-        assert self.lbg2.labelblocks[1].metadata["Gain"].value == 99
+        assert self.lbg1.metadata.get("Gain") is None
+        assert self.lbg1.labelblocks[0].metadata["Gain"].value == 98
+        assert self.lbg1.labelblocks[1].metadata["Gain"].value == 99
         # Common metadata.
-        assert self.lbg1.metadata["Gain"].value == 94
-        assert self.lbg1.metadata["Number of Flashes"].value == 10
+        assert self.lbg0.metadata["Gain"].value == 94
+        assert self.lbg0.metadata["Number of Flashes"].value == 10
 
     def test_data(self) -> None:
         """Merge data."""
-        assert self.lbg1.data["A01"] == [18713, 17088]  # type: ignore
-        assert self.lbg1.data["H12"] == [28596, 25771]  # type: ignore
-        assert self.lbg2.data is None
+        assert self.lbg0.data["A01"] == [18713, 17088]  # type: ignore
+        assert self.lbg0.data["H12"] == [28596, 25771]  # type: ignore
+        assert self.lbg1.data is None
 
     def test_data_normalized(self) -> None:
         """Merge data_normalized."""
         np.testing.assert_almost_equal(
-            self.lbg2.data_norm["H12"], [693.980, 714.495], 3
+            self.lbg1.data_norm["H12"], [693.980, 714.495], 3
         )
         np.testing.assert_almost_equal(
-            self.lbg1.data_norm["A01"], [995.372, 908.936], 3
+            self.lbg0.data_norm["A01"], [995.372, 908.936], 3
         )
 
     def test_data_buffersubtracted(self) -> None:
         """Merge data_buffersubtracted."""
-        self.lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-        self.lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
         np.testing.assert_almost_equal(
-            self.lbg1.data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
+            self.lbg0.data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
         )
-        assert self.lbg2.data_buffersubtracted is None
+        assert self.lbg1.data_buffersubtracted is None
 
     def test_data_buffersubtracted_norm(self) -> None:
         """Merge data_buffersubtracted."""
-        self.lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-        self.lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
         np.testing.assert_almost_equal(
-            self.lbg1.data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
+            self.lbg0.data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
         )
         np.testing.assert_almost_equal(
-            self.lbg2.data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
+            self.lbg1.data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
         )
 
-    def test_notequal_labelblocks(self) -> None:
+    def test_notequal_labelblocks(self, tfs: list[prtecan.Tecanfile]) -> None:
         """It raises Exception when concatenating unequal labelblocks."""
         with pytest.raises(ValueError, match="Creation of labelblock group failed."):
-            prtecan.LabelblocksGroup([self.tf1.labelblocks[0], self.tf2.labelblocks[1]])
+            prtecan.LabelblocksGroup([tfs[1].labelblocks[0], tfs[2].labelblocks[1]])
 
 
 class TestTecanfileGroup:
@@ -320,47 +346,47 @@ class TestTecanfileGroup:
     class TestAllEqLbgs:
         """Test TfG with 2 LbG in the same order."""
 
-        def setup_class(self) -> None:
-            """Initialize Tfg."""
+        @pytest.fixture(name="tfg", scope="class")
+        def fixture_tfg(self) -> prtecan.TecanfilesGroup:  # pragma: no cover
+            """Initialize Tfg with 2 LbG in the same order."""
             filenames = ["290513_5.5.xls", "290513_7.2.xls"]
             tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
-            self.group = prtecan.TecanfilesGroup(tecanfiles)
+            return prtecan.TecanfilesGroup(tecanfiles)
 
-        def test_metadata(self) -> None:
+        def test_metadata(self, tfg: prtecan.TecanfilesGroup) -> None:
             """Parse general metadata."""
-            assert (
-                self.group.metadata["Plate"].value
-                == "PE 96 Flat Bottom White   [PE.pdfx]"
-            )
-            assert self.group.metadata["System"].value == "TECANROBOT"
+            assert tfg.metadata["Plate"].value == "PE 96 Flat Bottom White   [PE.pdfx]"
+            assert tfg.metadata["System"].value == "TECANROBOT"
 
-        def test_labelblocksgroups(self) -> None:
+        def test_labelblocksgroups(self, tfg: prtecan.TecanfilesGroup) -> None:
             """Generate 2 LbG with .data and .metadata."""
-            lbg0 = self.group.labelblocksgroups[0]
-            lbg1 = self.group.labelblocksgroups[1]
+            lbg0 = tfg.labelblocksgroups[0]
+            lbg1 = tfg.labelblocksgroups[1]
             # metadata
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata["Gain"].value == 98.0
+            # data normalized ... enough in lbg
             # data
             assert lbg0.data["A01"] == [18713, 17088]  # type: ignore
             assert lbg0.data["H12"] == [28596, 25771]  # type: ignore
             assert lbg1.data["A01"] == [7878, 8761]  # type: ignore
             assert lbg1.data["H12"] == [14226, 13602]  # type: ignore
-            # data normalized ... enough in lbg
 
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        def setup_class(self) -> None:
-            """Initialize TfG."""
+        @pytest.fixture(autouse=True)
+        def _init(self) -> None:  # pragma: no cover
+            """Initialize Tfg when 1 LbG equal and a second with almost equal labelblocks."""
             filenames = [
                 "290513_5.5.xls",  # Label1 and Label2
                 "290513_7.2.xls",  # Label1 and Label2
                 "290513_8.8.xls",  # Label1 and Label2 with different metadata
             ]
-            self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            # pylint: disable=W0201
             with pytest.warns(UserWarning) as self.record:
-                self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+                self.group = prtecan.TecanfilesGroup(tecanfiles)
 
         def test_warn(self) -> None:
             """Warn about labelblocks anomaly."""
@@ -396,16 +422,18 @@ class TestTecanfileGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        def setup_class(self) -> None:
-            """Initialize TfG."""
+        @pytest.fixture(autouse=True)
+        def _init(self) -> None:
+            """Initialize Tfg with different number of labelblocks, but mergeable."""
             filenames = [
                 "290212_5.78.xls",  # Label1 and Label2
                 "290212_20.xls",  # Label2 only
                 "290212_100.xls",  # Label2 only
             ]
-            self.tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+            # pylint: disable=W0201
             with pytest.warns(UserWarning) as self.record:
-                self.group = prtecan.TecanfilesGroup(self.tecanfiles)
+                self.group = prtecan.TecanfilesGroup(tecanfiles)
 
         def test_warn(self) -> None:
             """Warn about labelblocks anomaly."""
@@ -440,20 +468,18 @@ class TestTecanfileGroup:
 class TestTitration:
     """Test Titration class."""
 
-    def setup_class(self) -> None:
-        """Initialize pH and Cl titration from list.pH and list.cl files."""
-        self.tit = prtecan.Titration.fromlistfile(data_tests / "list.pH")
-        self.tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20")
+    tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH")
+    tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20")
 
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
         """It reads pH values."""
-        assert self.tit.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+        assert self.tit_ph.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
 
     def test_labelblocksgroups(self) -> None:
         """It reads labelblocksgroups data and metadata."""
-        lbg0 = self.tit.labelblocksgroups[0]
-        lbg1 = self.tit.labelblocksgroups[1]
+        lbg0 = self.tit_ph.labelblocksgroups[0]
+        lbg1 = self.tit_ph.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"].value == 10.0
         # pH9.3 is 93 Optimal not Manual
@@ -474,7 +500,7 @@ class TestTitration:
 
     def test_export_data(self, tmp_path: Any) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
-        self.tit.export_data(tmp_path)
+        self.tit_ph.export_data(tmp_path)
         a01 = pd.read_csv(tmp_path / "dat/A01.dat")
         h12 = pd.read_csv(tmp_path / "dat/H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
@@ -497,15 +523,16 @@ class TestTitration:
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
-    def setup_class(self) -> None:
-        """Initialize objects reading list.pH and scheme.txt."""
-        self.titan: prtecan.TitrationAnalysis = prtecan.TitrationAnalysis.fromlistfile(
+    @pytest.fixture(autouse=True)
+    def _init(self) -> None:
+        """Set up test class."""
+        # Use fixture to capture UserWarning "OVER"
+        # pylint: disable=W0201
+        self.titan = prtecan.TitrationAnalysis.fromlistfile(
             data_tests / "140220/list.pH"
         )
         self.titan.load_additions(data_tests / "140220/additions.pH")
         self.titan.load_scheme(data_tests / "140220/scheme.txt")
-        self.lbg0 = self.titan.labelblocksgroups[0]
-        self.lbg1 = self.titan.labelblocksgroups[1]
 
     def test_scheme(self) -> None:
         """It finds well position for buffer samples."""
@@ -527,20 +554,22 @@ class TestTitrationAnalysis:
 
     def test_subtract_bg(self) -> None:
         """It subtracts buffer average values."""
+        lbg0 = self.titan.labelblocksgroups[0]
+        lbg1 = self.titan.labelblocksgroups[1]
         np.testing.assert_almost_equal(
-            self.lbg0.data_norm["E01"][::2],
+            lbg0.data_norm["E01"][::2],
             [601.72, 641.505, 674.355, 706.774],
             3,
         )
-        if self.lbg0.data:
-            assert self.lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
-        if self.lbg0.data_buffersubtracted:
+        if lbg0.data:
+            assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
+        if lbg0.data_buffersubtracted:
             np.testing.assert_array_equal(
-                self.lbg0.data_buffersubtracted["A12"][::3],
+                lbg0.data_buffersubtracted["A12"][::3],
                 [8084.5, 16621.75, 13775.0],
             )
         np.testing.assert_array_equal(
-            self.lbg1.data_buffersubtracted["A12"][::3],  # type: ignore
+            lbg1.data_buffersubtracted["A12"][::3],  # type: ignore
             [9758.25, 1334.0, 283.5],
         )
 

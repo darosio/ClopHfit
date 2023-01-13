@@ -76,6 +76,9 @@ README.tmp.html
 # Venvs
 .env
 .venv
+# direnv
+.direnv
+.envrc
 
 # pdm and pep582
 .pdm.toml
