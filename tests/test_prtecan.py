@@ -288,6 +288,7 @@ class TestLabelblocksGroup:
         lbg2 = prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
         lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
         lbg2.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        # pylint: disable=W0201
         self.lbg0 = lbg1
         self.lbg1 = lbg2
 
