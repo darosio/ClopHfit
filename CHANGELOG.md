@@ -190,7 +190,7 @@
 
       poetry show --outdated
 
-  with required minor changes in old scipts.
+  with required minor changes in old scripts.
 
 - nox-poetry.
 - pandas.rpy (\<=0.19) now lives in rpy2.
