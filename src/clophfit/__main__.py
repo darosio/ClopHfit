@@ -75,7 +75,7 @@ def fit_routine(
 
 
 @click.group()
-@click.version_option()
+@click.version_option(message="%(version)s")
 def clop() -> None:  # pragma: no cover
     """Group command."""
 
