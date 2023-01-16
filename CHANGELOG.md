@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.16 (2023-01-16)
+
+### Fix
+
+- clop --version after click updates (#68)
+
+### Style
+
+- correct few typos (#69)
+
 ## v0.3.15 (2023-01-13)
 
 ### Refactor
