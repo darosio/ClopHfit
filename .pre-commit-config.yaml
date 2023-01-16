@@ -129,10 +129,10 @@ repos:
   #       verbose: true
   #       # entry: pdm run mypy
 
-  # - repo: https://github.com/codespell-project/codespell
-  #   rev: v2.2.2
-  #   hooks:
-  #     - id: codespell
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.2
+    hooks:
+      - id: codespell
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.9.0.2

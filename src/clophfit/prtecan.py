@@ -808,7 +808,7 @@ class TecanfilesGroup:
     Warns
     -----
     Warning
-        The Tecanfiles listed in *filenames* are suppossed to contain the
+        The Tecanfiles listed in *filenames* are supposed to contain the
         "same" list (of length N) of Labelblocks. So, N labelblocksgroups
         will be normally created. A warn will raise if not all Tecanfiles
         contains the same number of Labelblocks ('equal' mergeable) in the
@@ -1542,14 +1542,14 @@ class TitrationAnalysis(Titration):
             df = df[~np.isnan(df[x])]
             df = df[~np.isnan(df[y])]
             for idx, xv, yv, l in zip(df.index, df[x], df[y], df["ctrl"]):
-                # x or y do not exhist.# try:
+                # x or y do not exist.# try:
                 if isinstance(l, str):
                     color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
                     plt.text(xv, yv, l, fontsize=13, color=color)
                 else:
                     plt.text(xv, yv, idx, fontsize=12)
-                # x or y do not exhist.# except:
-                # x or y do not exhist.# continue
+                # x or y do not exist.# except:
+                # x or y do not exist.# continue
             plt.yscale("log")
             # min(x) can be = NaN
             min_x = min(max([0.01, df[x].min()]), 14)

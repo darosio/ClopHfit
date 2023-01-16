@@ -1,6 +1,5 @@
 """Nox sessions."""
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -156,13 +155,17 @@ def ch(session: Session) -> None:
     session.run("cz", "ch", "--incremental", "--unreleased-version", *args)
 
 
-# # https://nox.thea.codes/en/stable/cookbook.html?highlight=input#the-auto-release
 @nox.session
-def build(session: nox.Session) -> None:
-    """Build an SDist and wheel."""
-    build_p = Path(__file__).parent.resolve().joinpath("build")
-    if build_p.exists():
-        shutil.rmtree(build_p)
-
-    session.install("build")
-    session.run("python", "-m", "build")
+def init(session: nox.Session) -> None:
+    """Install pre-commit hooks."""
+    args = session.posargs
+    session.run("pre-commit", "install", *args, external=True)
+    session.run(
+        "pre-commit",
+        "install",
+        "--hook-type",
+        "commit-msg",
+        "--hook-type",
+        "pre-push",
+        external=True,
+    )
