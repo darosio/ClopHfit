@@ -112,7 +112,7 @@ def eq1(  # type: ignore
     show_default="scheme.txt",
     help="Positions of buffer and controls wells.",
 )
-@click.option("--bg", is_flag=True, help="Substract buffer (scheme wells=='buffer').")
+@click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
 @click.option(
     "--kind",
     "-k",

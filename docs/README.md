@@ -9,7 +9,7 @@
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
-- Version: "0.3.14"
+- Version: "0.3.15"
 
 ## Features
 
@@ -78,6 +78,7 @@ You need the following requirements:
   own. Install pre-commit and run:
   ```bash
   pre-commit install --hook-type commit-msg --hook-type pre-push
+  (or: nox -s init)
   pre-commit run -a
   ```
   to check all files. If pre-commit fails during pushing upstream then stage
