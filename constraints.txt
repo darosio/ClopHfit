@@ -143,7 +143,7 @@ tornado==6.2
 tqdm==4.64.1
 traitlets==5.7.0
 typeguard==2.13.3
-types-pytz==2022.6.0.1
+types-pytz==2022.7.1.0
 typing-extensions==4.4.0
 tzdata==2022.7
 tzlocal==4.2
