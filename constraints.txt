@@ -62,7 +62,7 @@ kiwisolver==1.4.4
 lmfit==1.0.3
 markdown-it-py==2.1.0
 MarkupSafe==2.1.1
-matplotlib==3.6.2
+matplotlib==3.6.3
 matplotlib-inline==0.1.6
 mdit-py-plugins==0.3.3
 mdurl==0.1.2
