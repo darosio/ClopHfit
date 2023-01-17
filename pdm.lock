@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "commitizen"
-version = "2.38.0"
+version = "2.39.1"
 requires_python = ">=3.6.2,<4.0.0"
 summary = "Python commitizen client tool"
 dependencies = [
@@ -347,7 +347,7 @@ summary = "iniconfig: brain-dead simple config-ini parsing"
 
 [[package]]
 name = "ipykernel"
-version = "6.19.2"
+version = "6.20.2"
 requires_python = ">=3.8"
 summary = "IPython Kernel for Jupyter"
 dependencies = [
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "ipython"
-version = "8.7.0"
+version = "8.8.0"
 requires_python = ">=3.8"
 summary = "IPython: Productive Interactive Computing"
 dependencies = [
@@ -1637,9 +1637,9 @@ content_hash = "sha256:e905eccc27b30ca95d913122bf70f1321b5d79ea568144cdfa34521f0
     {url = "https://files.pythonhosted.org/packages/60/5b/0e55c73beb88043811601050c87e871bd1f6cab78c869dc077fa5d0a5b5b/comm-0.1.2.tar.gz", hash = "sha256:3e2f5826578e683999b93716285b3b1f344f157bf75fa9ce0a797564e742f062"},
     {url = "https://files.pythonhosted.org/packages/fc/04/e740a61ec9df8975bcb32e6698663bc9efa945ac6b2a585728deed6dcced/comm-0.1.2-py3-none-any.whl", hash = "sha256:9f3abf3515112fa7c55a42a6a5ab358735c9dccc8b5910a9d8e3ef5998130666"},
 ]
-"commitizen 2.38.0" = [
-    {url = "https://files.pythonhosted.org/packages/a6/d6/6a10d85eff70020b934b70886dbc1f0ae5c01dc458934f09291367f65e5d/commitizen-2.38.0-py3-none-any.whl", hash = "sha256:401e1d6907d752dbb00fd5a8b0d0201ff36bc110870168776d49de20bf5b8b61"},
-    {url = "https://files.pythonhosted.org/packages/e9/ab/4d8e8deee17589c91f87583333ccc7f29d83070cc11562eba2ddc2f05008/commitizen-2.38.0.tar.gz", hash = "sha256:7daa217f703f330c18548304400d133a834840fd01bc79ef2966426c74bdbf1f"},
+"commitizen 2.39.1" = [
+    {url = "https://files.pythonhosted.org/packages/2f/84/76fbd7850082bcfeeef3f9f94b8122eaf33d7a5adaa9836949cf9c17ebde/commitizen-2.39.1-py3-none-any.whl", hash = "sha256:2678c51ed38676435a4ba02e164605b0aacfefcc3f7e0c8d11dd39e367e20577"},
+    {url = "https://files.pythonhosted.org/packages/68/f7/bae25705cf7566f6ac86d033abe7e90c8fac253b7abae25c32bd5cafc137/commitizen-2.39.1.tar.gz", hash = "sha256:1f4b77a6b6cf43fc75e7fc604081add66026a5031c2a5032b2b9e8202bc57d47"},
 ]
 "contourpy 1.0.6" = [
     {url = "https://files.pythonhosted.org/packages/04/8d/2480368c04465982c9b247a1ea09436bf5682c81c895c1343f817dc3bafa/contourpy-1.0.6-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f4052a8a4926d4468416fc7d4b2a7b2a3e35f25b39f4061a7e2a3a2748c4fc48"},
@@ -1863,13 +1863,13 @@ content_hash = "sha256:e905eccc27b30ca95d913122bf70f1321b5d79ea568144cdfa34521f0
     {url = "https://files.pythonhosted.org/packages/23/a2/97899f6bd0e873fed3a7e67ae8d3a08b21799430fb4da15cfedf10d6e2c2/iniconfig-1.1.1.tar.gz", hash = "sha256:bc3af051d7d14b2ee5ef9969666def0cd1a000e121eaea580d4a313df4b37f32"},
     {url = "https://files.pythonhosted.org/packages/9b/dd/b3c12c6d707058fa947864b67f0c4e0c39ef8610988d7baea9578f3c48f3/iniconfig-1.1.1-py2.py3-none-any.whl", hash = "sha256:011e24c64b7f47f6ebd835bb12a743f2fbe9a26d4cecaa7f53bc4f35ee9da8b3"},
 ]
-"ipykernel 6.19.2" = [
-    {url = "https://files.pythonhosted.org/packages/27/6b/97ac4e9c67730f95b58c67f43283ae1f7b081a5095098016b916c21fd386/ipykernel-6.19.2-py3-none-any.whl", hash = "sha256:1374a55c57ca7a7286c3d8b15799cd76e1a2381b6b1fea99c494b955988926b6"},
-    {url = "https://files.pythonhosted.org/packages/4f/c1/ecbef51d6f0bccabcdb788962538d9958e0d672adc063e0c18438081283c/ipykernel-6.19.2.tar.gz", hash = "sha256:1ab68d3d3654196266baa93990055413e167263ffbe4cfe834f871bcd3d3506d"},
+"ipykernel 6.20.2" = [
+    {url = "https://files.pythonhosted.org/packages/87/c0/16e5656247203e7ae67e528f580561c9b54166145c10b46e3ad117984902/ipykernel-6.20.2.tar.gz", hash = "sha256:1893c5b847033cd7a58f6843b04a9349ffb1031bc6588401cadc9adb58da428e"},
+    {url = "https://files.pythonhosted.org/packages/af/32/9594d9b081250cea091b687c7d8ecb2304a06293956f032d89336385c0d3/ipykernel-6.20.2-py3-none-any.whl", hash = "sha256:5d0675d5f48bf6a95fd517d7b70bcb3b2c5631b2069949b5c2d6e1d7477fb5a0"},
 ]
-"ipython 8.7.0" = [
-    {url = "https://files.pythonhosted.org/packages/24/ef/af8899488ae62a35b0815aa955779db25e616defb0061a478203fc460f40/ipython-8.7.0-py3-none-any.whl", hash = "sha256:352042ddcb019f7c04e48171b4dd78e4c4bb67bf97030d170e154aac42b656d9"},
-    {url = "https://files.pythonhosted.org/packages/82/2b/026af47da09998404f51064d328f5f1f68c78829082d2945be489343fde6/ipython-8.7.0.tar.gz", hash = "sha256:882899fe78d5417a0aa07f995db298fa28b58faeba2112d2e3a4c95fe14bb738"},
+"ipython 8.8.0" = [
+    {url = "https://files.pythonhosted.org/packages/1f/aa/a6509b4059359edd00308e3f068212dca53b7252940862cc40981a2bd713/ipython-8.8.0-py3-none-any.whl", hash = "sha256:da01e6df1501e6e7c32b5084212ddadd4ee2471602e2cf3e0190f4de6b0ea481"},
+    {url = "https://files.pythonhosted.org/packages/f5/39/89664d8c3e4dfb0a73862cbbff8eb4028a1e3d4305da80ab0a493848ed9b/ipython-8.8.0.tar.gz", hash = "sha256:f3bf2c08505ad2c3f4ed5c46ae0331a8547d36bf4b21a451e8ae80c0791db95b"},
 ]
 "ipython-genutils 0.2.0" = [
     {url = "https://files.pythonhosted.org/packages/e8/69/fbeffffc05236398ebfcfb512b6d2511c622871dca1746361006da310399/ipython_genutils-0.2.0.tar.gz", hash = "sha256:eb2e116e75ecef9d4d228fdc66af54269afa26ab4463042e33785b887c628ba8"},
