@@ -40,7 +40,8 @@ def mypy(session: Session) -> None:
         "pytest",
         "pandas-stubs",
         "types-setuptools",
-        "importlib_metadata",  # avoid error in 3.10 when `nox -s mypy`
+        "tomli",  # avoid error in 3.11 when `nox -s mypy`
+        "exceptiongroup",  # avoid error in 3.11 when `nox -s mypy`
         ".",
     )
     session.run("mypy", *args)

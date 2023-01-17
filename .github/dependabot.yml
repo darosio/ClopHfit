@@ -14,9 +14,8 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-    versioning-strategy: lockfile-only
+      time: "05:00"
+      timezone: "Europe/Rome"
     allow:
-      - dependency-type: "direct"
-      # - dependency-type: "production"
-    target-branch: "deps"
+      - dependency-type: "production"
     open-pull-requests-limit: 15
