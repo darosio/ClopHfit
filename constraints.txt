@@ -7,7 +7,7 @@ arrow==1.2.3
 asteval==0.9.28
 asttokens==2.2.1
 attrs==22.1.0
-autodocsumm==0.2.9
+autodocsumm==0.2.10
 babel==2.11.0
 backcall==0.2.0
 beautifulsoup4==4.11.1

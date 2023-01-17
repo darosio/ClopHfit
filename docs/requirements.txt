@@ -1,4 +1,4 @@
-autodocsumm==0.2.9
+autodocsumm==0.2.10
 myst-parser==0.18.1
 nbsphinx==0.8.9
 pydata-sphinx-theme==0.10.1
