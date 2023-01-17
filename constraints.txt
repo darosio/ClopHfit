@@ -134,7 +134,7 @@ sphinxcontrib-qthelp==1.0.3
 sphinxcontrib-serializinghtml==1.1.5
 stack-data==0.6.2
 sympy==1.11.1
-termcolor==2.1.1
+termcolor==2.2.0
 terminado==0.17.1
 tinycss2==1.2.1
 tomli==2.0.1
