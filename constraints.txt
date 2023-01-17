@@ -6,7 +6,7 @@ argon2-cffi-bindings==21.2.0
 arrow==1.2.3
 asteval==0.9.28
 asttokens==2.2.1
-attrs==22.1.0
+attrs==22.2.0
 autodocsumm==0.2.9
 babel==2.11.0
 backcall==0.2.0
