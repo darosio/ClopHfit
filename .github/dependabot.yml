@@ -14,8 +14,8 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-    allow:
-      - dependency-type: "direct"
-      # - dependency-type: "production"
-    target-branch: "deps"
+    # allow:
+    #   - dependency-type: "direct"
+    # - dependency-type: "production"
+    # target-branch: "deps"
     open-pull-requests-limit: 15
