@@ -107,7 +107,7 @@ python-json-logger==2.0.4
 pytz==2022.6
 pytz-deprecation-shim==0.1.0.post0
 pyyaml==6.0
-pyzmq==24.0.1
+pyzmq==25.0.0
 qtconsole==5.4.0
 qtpy==2.3.0
 questionary==1.10.0
