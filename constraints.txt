@@ -39,7 +39,7 @@ fqdn==1.5.1
 future==0.18.2
 idna==3.4
 imagesize==1.4.1
-iniconfig==1.1.1
+iniconfig==2.0.0
 ipykernel==6.19.2
 ipython==8.7.0
 ipython-genutils==0.2.0
