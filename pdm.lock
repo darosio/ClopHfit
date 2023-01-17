@@ -76,11 +76,11 @@ summary = "Classes Without Boilerplate"
 
 [[package]]
 name = "autodocsumm"
-version = "0.2.9"
+version = "0.2.10"
 requires_python = ">=3.7"
 summary = "Extended sphinx autodoc including automatic autosummaries"
 dependencies = [
-    "Sphinx<6.0,>=2.2",
+    "Sphinx<7.0,>=2.2",
 ]
 
 [[package]]
@@ -768,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "nbsphinx"
-version = "0.8.10"
+version = "0.8.11"
 requires_python = ">=3.6"
 summary = "Jupyter Notebook Tools for Sphinx"
 dependencies = [
@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "sphinx-autodoc-typehints"
-version = "1.19.5"
+version = "1.21.1"
 requires_python = ">=3.7"
 summary = "Type hints (PEP 484) support for the Sphinx autodoc extension"
 dependencies = [
@@ -1513,9 +1513,9 @@ content_hash = "sha256:e905eccc27b30ca95d913122bf70f1321b5d79ea568144cdfa34521f0
     {url = "https://files.pythonhosted.org/packages/1a/cb/c4ffeb41e7137b23755a45e1bfec9cbb76ecf51874c6f1d113984ecaa32c/attrs-22.1.0.tar.gz", hash = "sha256:29adc2665447e5191d0e7c568fde78b21f9672d344281d0c6e1ab085429b22b6"},
     {url = "https://files.pythonhosted.org/packages/f2/bc/d817287d1aa01878af07c19505fafd1165cd6a119e9d0821ca1d1c20312d/attrs-22.1.0-py2.py3-none-any.whl", hash = "sha256:86efa402f67bf2df34f51a335487cf46b1ec130d02b8d39fd248abfd30da551c"},
 ]
-"autodocsumm 0.2.9" = [
-    {url = "https://files.pythonhosted.org/packages/89/cd/d69e77fbf0dd85f19b8ab95f30abb0857ba7c1d855e9051394ee75787253/autodocsumm-0.2.9.tar.gz", hash = "sha256:b2917f43e20b892891164d8cc2ef675dbd37553ecefdfb23f0890505b7110546"},
-    {url = "https://files.pythonhosted.org/packages/8c/7e/4546370c2cf82592408a9581b9edff74f63c81e6f015e2830c952acd4ae4/autodocsumm-0.2.9-py3-none-any.whl", hash = "sha256:bb12dd4d9041da527656ac73341d473b4220462c9680de63e61b4a63911c34ee"},
+"autodocsumm 0.2.10" = [
+    {url = "https://files.pythonhosted.org/packages/30/a2/745e121bb48e492d1e8e630bb083951506a5754cbc6d9d196a67df40d6db/autodocsumm-0.2.10-py3-none-any.whl", hash = "sha256:cac15a879e7cf2ebac00fe05ec691ae48d7c5b8e75eceae2f61f98905ac0c2d8"},
+    {url = "https://files.pythonhosted.org/packages/37/e6/460708e4ed614d75bc1c04f61907c391696bef3eabd575a8c2359696e87e/autodocsumm-0.2.10.tar.gz", hash = "sha256:6c28527687e9b5496c586115baadb91d99c30bb637010f4d5f497e51b1acabd8"},
 ]
 "babel 2.11.0" = [
     {url = "https://files.pythonhosted.org/packages/92/f7/86301a69926e11cd52f73396d169554d09b20b1723a040c2dcc1559ef588/Babel-2.11.0-py3-none-any.whl", hash = "sha256:1ad3eca1c885218f6dce2ab67291178944f810a10a9b5f3cb8382a5a232b64fe"},
@@ -2174,9 +2174,9 @@ content_hash = "sha256:e905eccc27b30ca95d913122bf70f1321b5d79ea568144cdfa34521f0
     {url = "https://files.pythonhosted.org/packages/5c/9f/957655d02f43b8bff77e6da08c94472b1229c13e7455bbd662163c9b78c0/nbformat-5.7.0-py3-none-any.whl", hash = "sha256:1b05ec2c552c2f1adc745f4eddce1eac8ca9ffd59bb9fd859e827eaa031319f9"},
     {url = "https://files.pythonhosted.org/packages/9c/54/5b39dfc6585e1dfc8c119252754c19dd85ee974606b73e3fa8a2242413d2/nbformat-5.7.0.tar.gz", hash = "sha256:1d4760c15c1a04269ef5caf375be8b98dd2f696e5eb9e603ec2bf091f9b0d3f3"},
 ]
-"nbsphinx 0.8.10" = [
-    {url = "https://files.pythonhosted.org/packages/0b/c8/138ec8990f16f765c30a4c350e0fb559eb7698d3ab3b52000773c00ad163/nbsphinx-0.8.10-py3-none-any.whl", hash = "sha256:6076fba58020420927899362579f12779a43091eb238f414519ec25b4a8cfc96"},
-    {url = "https://files.pythonhosted.org/packages/59/1e/e32044d3fce06fdfdc83227e00109d7973b8aed673687cfa21e5cc8a12b1/nbsphinx-0.8.10.tar.gz", hash = "sha256:a8d68046f8aab916e2940b9b3819bd3ef9ddce868aa38845ea366645cabb6254"},
+"nbsphinx 0.8.11" = [
+    {url = "https://files.pythonhosted.org/packages/c1/fd/cba6885b1244a6fc1e0c05bad26a1374d52e56d57ee585dfd1ef169e6ea7/nbsphinx-0.8.11.tar.gz", hash = "sha256:abe18c04b33d9bcdfb3d66f1195f6b0d51eeca463ecb07f6061de497e43316e4"},
+    {url = "https://files.pythonhosted.org/packages/f4/f7/a0f94baf48db757c5de1788fcc7e4971e109c1f04ab0331945dbe7cd04fe/nbsphinx-0.8.11-py3-none-any.whl", hash = "sha256:e5c6c76b12fbc425d5538d4b8c0d6fb0c134c28459d4a1b54f41d704b34b4bd1"},
 ]
 "nest-asyncio 1.5.6" = [
     {url = "https://files.pythonhosted.org/packages/35/76/64c51c1cbe704ad79ef6ec82f232d1893b9365f2ff194111787dc91b004f/nest_asyncio-1.5.6.tar.gz", hash = "sha256:d267cc1ff794403f7df692964d1d2a3fa9418ffea2a3f6859a439ff482fef290"},
@@ -2670,9 +2670,9 @@ content_hash = "sha256:e905eccc27b30ca95d913122bf70f1321b5d79ea568144cdfa34521f0
     {url = "https://files.pythonhosted.org/packages/67/a7/01dd6fd9653c056258d65032aa09a615b5d7b07dd840845a9f41a8860fbc/sphinx-5.3.0-py3-none-any.whl", hash = "sha256:060ca5c9f7ba57a08a1219e547b269fadf125ae25b06b9fa7f66768efb652d6d"},
     {url = "https://files.pythonhosted.org/packages/af/b2/02a43597980903483fe5eb081ee8e0ba2bb62ea43a70499484343795f3bf/Sphinx-5.3.0.tar.gz", hash = "sha256:51026de0a9ff9fc13c05d74913ad66047e104f56a129ff73e174eb5c3ee794b5"},
 ]
-"sphinx-autodoc-typehints 1.19.5" = [
-    {url = "https://files.pythonhosted.org/packages/5f/d3/a17a03dd27541a7c57e0e55a1bbc544b81ed56922039d0edea1409c63989/sphinx_autodoc_typehints-1.19.5-py3-none-any.whl", hash = "sha256:ea55b3cc3f485e3a53668bcdd08de78121ab759f9724392fdb5bf3483d786328"},
-    {url = "https://files.pythonhosted.org/packages/a6/f5/c323564c935979cc87db0bc46c86fce6e5c1fdf658fcdec48bca48761b49/sphinx_autodoc_typehints-1.19.5.tar.gz", hash = "sha256:38a227378e2bc15c84e29af8cb1d7581182da1107111fd1c88b19b5eb7076205"},
+"sphinx-autodoc-typehints 1.21.1" = [
+    {url = "https://files.pythonhosted.org/packages/8c/4e/244562164457c9abc2204a8badfa042775f70a56f842f5341325b2785d10/sphinx_autodoc_typehints-1.21.1-py3-none-any.whl", hash = "sha256:75454c09ffcfb22bb8151ef6d0a6031975cdb0b70498b06abaee751c04d9371d"},
+    {url = "https://files.pythonhosted.org/packages/dd/bf/7a87672d8697e3ebe0daa7794e9263db9d946e0a23a8f4ff432f982d9cf3/sphinx_autodoc_typehints-1.21.1.tar.gz", hash = "sha256:bb4293eeb009ece3e0a2fea5070728e34c6165fdb25d830635b4d7fc13d94640"},
 ]
 "sphinx-click 4.4.0" = [
     {url = "https://files.pythonhosted.org/packages/48/bf/8e5c3e7865d909a64ed2bd89dcc835f3c542fec857c8bdf38ee8b682af14/sphinx-click-4.4.0.tar.gz", hash = "sha256:cc67692bd28f482c7f01531c61b64e9d2f069bfcf3d24cbbb51d4a84a749fa48"},
