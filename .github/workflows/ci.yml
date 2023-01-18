@@ -10,51 +10,77 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FORCE_COLOR: 3
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
 
 jobs:
   pre-commit:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: "ubuntu-latest"
     steps:
       - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
-      - uses: pre-commit/action@v3.0.0
+          python-version: "3.11"
+      - name: Install pip and hatch
+        run: |
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip install --constraint=.github/workflows/constraints.txt hatch
+          pip --version
+          hatch --version
+      - name: Run
+        run: hatch run lint:run
+      # - uses: pre-commit/action@v3.0.0
+      #   with:
+      #     extra_args: --hook-stage manual --all-files --show-diff-on-failure
+
+  typeguard:
+    name: Typeguard
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
-          extra_args: --hook-stage manual --all-files --show-diff-on-failure
+          python-version: "3.11"
+      - name: Install pip, hatch and hatch-pip-deepfreeze
+        run: |
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip install --constraint=.github/workflows/constraints.txt hatch
+          pip install --constraint=.github/workflows/constraints.txt hatch-pip-deepfreeze
+          pip --version
+          hatch --version
+      - name: Run
+        run: hatch run typeguard:run
 
   checks:
-    name: Check ${{ matrix.session }}-${{ matrix.python }} on ${{ matrix.os }}
+    name:
+      Mypy and xdoctest ${{ matrix.python }} on ${{ startsWith(matrix.os,
+      'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' ||
+      'Linux' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.8", "3.9", "3.10", "3.11"]
-        session: ["mypy", "xdoctest"]
-        include:
-          - { python: "3.11", os: "ubuntu-latest", session: "typeguard" }
-          # - { python: "3.11", os: "ubuntu-latest", session: "lint" }
-    env:
-      NOXSESSION: ${{ matrix.session }}
-      FORCE_COLOR: "1"
-      PRE_COMMIT_COLOR: "always"
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python }}
-      - name: Install Nox
+      - name: Install pip(-deepfreeze) and hatch
         run: |
-          pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
-          nox --version
-      - name: Run Nox
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip install --constraint=.github/workflows/constraints.txt pip-deepfreeze
+          pip install --constraint=.github/workflows/constraints.txt hatch
+          pip --version
+          hatch --version
+      - name: Run
         run: |
-          nox --python=${{ matrix.python }}
+          hatch run tests.py${{ matrix.python }}:init # needed to use locked deps
+          hatch run tests.py${{ matrix.python }}:type
+          hatch run tests.py${{ matrix.python }}:xdoc
 
   tests:
     name: Tests Python-${{ matrix.python }} on ${{ matrix.os }}
@@ -62,29 +88,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.8", "3.9", "3.10", "3.11"]
         os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.8", "3.9", "3.10", "3.11"]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python }}
-      # - name: Install
-      #   run: |
-      #     pip install --constraint=constraints.txt coverage[toml] pytest
-      #     pip install --constraint=constraints.txt .
-      # - name: Run test
-      #   run: |
-      #     # coverage run --parallel -m pytest
-      #     pytest
+      - name: Install pip
+        run: |
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip --version
+      - name: Install
+        run: |
+          pip install --constraint=requirements-tests.txt coverage[toml] pytest
+          pip install --constraint=requirements.txt .
+      - name: Run test
+        run: |
+          coverage run --parallel -m pytest
 
-      - name: Install Nox
-        run: |
-          pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
-          nox --version
-      - name: Run Nox
-        run: |
-          nox -s tests --python=${{ matrix.python }}
       - name: Upload coverage data
         uses: "actions/upload-artifact@v3"
         with:
@@ -101,19 +123,20 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
-      - name: Install Nox
+      - name: Install pip and hatch
         run: |
-          pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
-          nox --version
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip install --constraint=.github/workflows/constraints.txt hatch
+          pip --version
+          hatch --version
       - name: Download coverage data
         uses: actions/download-artifact@v3
         with:
           name: coverage-data
-      - name: Combine coverage data and display human readable report
-        run: |
-          nox --session=coverage
       - name: Create coverage report
         run: |
-          nox --session=coverage -- xml
+          hatch run coverage:combine
+          hatch run coverage:report
+          hatch run coverage:xml
       - name: Upload coverage report
         uses: codecov/codecov-action@v3.1.1

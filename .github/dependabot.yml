@@ -4,12 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-    target-branch: "deps"
   - package-ecosystem: pip
     directory: "/.github/workflows"
     schedule:
       interval: daily
-    target-branch: "deps"
   - package-ecosystem: pip
     directory: "/"
     schedule:

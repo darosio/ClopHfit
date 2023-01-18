@@ -7,7 +7,7 @@ on:
 
 # Allow one concurrent deployment
 concurrency:
-  group: "pages"
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.x"
@@ -25,13 +25,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pandoc
           sudo apt-get install -y plantuml
-      - name: Install Nox
+      - name: Install pip, hatch and hatch-pip-deepfreeze
         run: |
-          pipx install --pip-args=--constraint=.github/workflows/constraints.txt nox
-          nox --version
-      - name: Run Nox
+          python -m pip install --constraint=.github/workflows/constraints.txt pip
+          pip install --constraint=.github/workflows/constraints.txt hatch
+          pip install --constraint=.github/workflows/constraints.txt hatch-pip-deepfreeze
+          pip --version
+          hatch --version
+      - name: Run hatch
         run: |
-          nox -s docs
+          hatch run docs:build
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
