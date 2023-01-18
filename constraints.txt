@@ -21,7 +21,7 @@ comm==0.1.2
 commitizen==2.39.1
 contourpy==1.0.6
 corner==2.2.1
-coverage==6.5.0
+coverage==7.0.5
 cycler==0.11.0
 debugpy==1.6.4
 decli==0.5.2
@@ -83,7 +83,7 @@ numpy==1.23.5
 openpyxl==3.0.10
 packaging==22.0
 pandas==1.5.2
-pandas-stubs==1.5.2.221124
+pandas-stubs==1.5.2.230105
 pandocfilters==1.5.0
 parso==0.8.3
 pexpect==4.8.0
@@ -98,10 +98,10 @@ ptyprocess==0.7.0
 pure-eval==0.2.2
 pycparser==2.21
 pydata-sphinx-theme==0.12.0
-Pygments==2.13.0
+Pygments==2.14.0
 pyparsing==3.0.9
 pyrsistent==0.19.2
-pytest==7.2.0
+pytest==7.2.1
 python-dateutil==2.8.2
 python-json-logger==2.0.4
 pytz==2022.6
