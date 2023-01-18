@@ -1495,9 +1495,9 @@ class TitrationAnalysis(Titration):
             raise Exception("run fit first")
         out = PdfPages(path)
         for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-            out.savefig(self.plot_well(k))
+            out.savefig(self.plot_well(str(k)))
         for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
-            out.savefig(self.plot_well(k))
+            out.savefig(self.plot_well(str(k)))
         out.close()
 
     def plot_ebar(
