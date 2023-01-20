@@ -82,7 +82,7 @@ notebook-shim==0.2.2
 numpy==1.23.5
 openpyxl==3.0.10
 packaging==22.0
-pandas==1.5.2
+pandas==1.5.3
 pandas-stubs==1.5.2.230105
 pandocfilters==1.5.0
 parso==0.8.3
