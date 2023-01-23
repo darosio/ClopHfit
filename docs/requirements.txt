@@ -3,6 +3,6 @@ myst-parser==0.18.1
 nbsphinx==0.8.9
 pydata-sphinx-theme==0.10.1
 sphinx==5.2.3
-sphinx-autodoc-typehints==1.19.2
+sphinx-autodoc-typehints==1.21.7
 sphinx-click==4.3.0
 sphinxcontrib-plantuml==0.24
