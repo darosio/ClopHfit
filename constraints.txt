@@ -21,7 +21,7 @@ comm==0.1.2
 commitizen==2.39.1
 contourpy==1.0.6
 corner==2.2.1
-coverage==7.0.5
+coverage==7.1.0
 cycler==0.11.0
 debugpy==1.6.4
 decli==0.5.2
