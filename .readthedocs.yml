@@ -6,16 +6,15 @@ build:
     python: "3.10"
   apt_packages:
     - r-base
+    - pandoc
+    - plantuml
 sphinx:
   configuration: docs/conf.py
 formats: all
 python:
   install:
-    - requirements: docs/requirements.txt
+    - requirements: requirements-docs.txt
     - path: .
-# .readthedocs.yml
-# python:
-#   version: "3.10"
 #   install:
 #     - method: pip
 #       path: .

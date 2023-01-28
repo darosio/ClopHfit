@@ -112,10 +112,6 @@ bump = [
      "hatch publish -r test",
      ]
 
-[tool.hatch.envs.noxes]
-detached = true
-[tool.hatch.envs.noxes.scripts]
-
 [tool.hatch.envs.tests]
 template = "tests"
 features = ["tests"]
@@ -150,7 +146,6 @@ detached = true
 dependencies = ["pre-commit>=3.0.1"]
 [tool.hatch.envs.lint.scripts]
 run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
-python = "3.11"
 
 [tool.hatch.envs.docs]
 type = "pip-deepfreeze"

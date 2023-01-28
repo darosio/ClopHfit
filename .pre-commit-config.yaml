@@ -53,14 +53,14 @@ repos:
         additional_dependencies: [black]
         exclude: docs/tutorials/usage.*.rst
 
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.11.4
-    hooks:
-      - id: isort
-        #         types_or: [cython, pyi, python]
-        args: ["--filter-files"]
-        # args: ["-a", "from __future__ import annotations"] # Python 3.7+
-        require_serial: true
+  # - repo: https://github.com/PyCQA/isort
+  #   rev: 5.11.4
+  #   hooks:
+  #     - id: isort
+  #       #         types_or: [cython, pyi, python]
+  #       args: ["--filter-files"]
+  #       # args: ["-a", "from __future__ import annotations"] # Python 3.7+
+  #       require_serial: true
 
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.3.1
