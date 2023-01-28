@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.20 (2023-01-28)
+
+### Build
+
+- bump jupyter-client from 7.4.9 to 8.0.1 (#143)
+
+### CI/CD
+
+- fix rtd and sudden lint failing isort installation
+
 ## v0.3.19 (2023-01-28)
 
 ### Fix
