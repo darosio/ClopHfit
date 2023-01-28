@@ -122,7 +122,7 @@ repos:
       - id: shellcheck
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v2.39.1
+    rev: v2.40.0
     hooks:
       - id: commitizen
       - id: commitizen-branch
