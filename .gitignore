@@ -3,12 +3,6 @@
 # Learn more about .gitignore:
 #     https://www.atlassian.com/git/tutorials/saving-changes/gitignore
 
-# Node artifact files
-node_modules/
-dist/
-
-# Compiled Java class files
-*.class
 
 # Compiled Python bytecode
 *.py[cod]
@@ -16,11 +10,7 @@ dist/
 # Log files
 *.log
 
-# Package files
-*.jar
-
-# Maven
-target/
+# Dist
 dist/
 
 # JetBrains IDE
@@ -68,7 +58,6 @@ coverage.xml
 .hypothesis/
 
 tests/data/_tmpoutput
-README.tmp.html
 
 # MyPy cache
 .mypy_cache
@@ -79,7 +68,3 @@ README.tmp.html
 # direnv
 .direnv
 .envrc
-
-# pdm and pep582
-.pdm.toml
-__pypackages__/

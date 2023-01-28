@@ -56,4 +56,4 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v3
       - run: |
-          pipx run pdm publish --username=__token__ --password=${{ secrets.PYPI_TOKEN }}
+          pipx run hatch publish --user=__token__ --auth=${{ secrets.PYPI_TOKEN }}
