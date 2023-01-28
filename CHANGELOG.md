@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.18 (2023-01-28)
+
+### CI/CD
+
+- fix CD publish
+
 ## v0.3.17 (2023-01-28)
 
 ### Fix
