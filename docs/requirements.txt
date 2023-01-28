@@ -1,8 +1,1 @@
-autodocsumm==0.2.9
-myst-parser==0.18.1
-nbsphinx==0.8.12
-pydata-sphinx-theme==0.10.1
-sphinx==5.2.3
-sphinx-autodoc-typehints==1.21.8
-sphinx-click==4.3.0
-sphinxcontrib-plantuml==0.24
+../requirements-docs.txt
