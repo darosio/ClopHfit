@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.17 (2023-01-28)
+
+### Fix
+
+- mypy after updates
+
+### Style
+
+- pyproject deps and updates
+
+### Build
+
+- **commitizen**: pre-commit autoupdate
+- **ci**: dropped nox and pdm in favor of hatch (#141)
+- bump websocket-client from 1.4.2 to 1.5.0 (#140)
+- bump nbclassic from 0.4.8 to 0.5.1 (#139)
+- bump jupyter-client from 7.4.8 to 8.0.1 (#138)
+- bump prometheus-client from 0.15.0 to 0.16.0 (#130)
+- bump sphinxcontrib-applehelp from 1.0.2 to 1.0.4 (#129)
+- bump jupyter-core from 5.1.0 to 5.1.5 (#134)
+- bump nbconvert from 7.2.6 to 7.2.9 (#136)
+- bump debugpy from 1.6.4 to 1.6.6 (#131)
+- bump sphinx-autodoc-typehints from 1.21.1 to 1.21.8 (#135)
+- bump commitizen from 2.39.1 to 2.40.0 (#127)
+- bump bleach from 5.0.1 to 6.0.0 (#128)
+- bump nbsphinx from 0.8.11 to 0.8.12 (#125)
+- bump coverage from 7.0.5 to 7.1.0 (#137)
+- bump pandas from 1.5.2 to 1.5.3 (#123)
+- bump markupsafe from 2.1.1 to 2.1.2 (#118)
+
 ## v0.3.16 (2023-01-16)
 
 ### Fix
