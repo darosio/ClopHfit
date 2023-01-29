@@ -12,7 +12,6 @@ import pytest
 
 from clophfit import prtecan
 
-
 data_tests = Path(__file__).parent / "Tecan"
 pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 

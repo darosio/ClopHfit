@@ -14,7 +14,6 @@ import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-
 _data = Path(__file__).parent / "data"
 tmpoutput = _data / "_tmpoutput"
 _expected = _data / "output"

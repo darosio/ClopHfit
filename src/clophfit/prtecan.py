@@ -27,7 +27,6 @@ import seaborn as sb  # type: ignore
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
-
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
 DAT = "dat"

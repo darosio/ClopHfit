@@ -13,14 +13,13 @@
 import os
 import sys
 
-
 sys.path.insert(0, os.path.abspath("../.."))
 
 
 # -- Project information -----------------------------------------------------
 
 project = "ClopHfit"
-copyright = "2021, Daniele Arosio"
+copyright = "2021, Daniele Arosio"  # noqa: A001
 author = "Daniele Arosio"
 
 # The full version, including alpha/beta/rc tags
