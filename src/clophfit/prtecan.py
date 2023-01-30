@@ -323,7 +323,8 @@ def fit_titration(
     elif kind == "Cl":
         fz = fz_kd_singlesite
     else:
-        raise NameError("kind= pH or Cl")
+        msg = "kind= pH or Cl"
+        raise NameError(msg)
 
     def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> NDArray[np.float_]:
         df = pd.DataFrame({"x": x, "y": y})
@@ -458,7 +459,8 @@ class Labelblock:
             self.metadata = extract_metadata(stripped)
             self.data = self._extract_data(lines[15:23])
         else:
-            raise ValueError("Cannot build Labelblock: not 96 wells?")
+            msg = "Cannot build Labelblock: not 96 wells?"
+            raise ValueError(msg)
 
     def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
         """Convert data into a dictionary.
@@ -503,9 +505,8 @@ class Labelblock:
                             f"{row}{col:0>2} of tecanfile {self.path}"
                         )
         except AssertionError as exc:
-            raise ValueError(
-                "Cannot extract data in Labelblock: not 96 wells?"
-            ) from exc
+            msg = "Cannot extract data in Labelblock: not 96 wells?"
+            raise ValueError(msg) from exc
         return data
 
     _KEYS = [
@@ -663,7 +664,8 @@ class Tecanfile:
         csvl = read_xls(self.path)
         idxs = lookup_listoflines(csvl, pattern="Label: Label", col=0)
         if len(idxs) == 0:
-            raise ValueError("No Labelblock found.")
+            msg = "No Labelblock found."
+            raise ValueError(msg)
         self.metadata = extract_metadata(csvl[: idxs[0]])
         labelblocks = []
         n_labelblocks = len(idxs)
@@ -728,7 +730,8 @@ class LabelblocksGroup:
                 for lb in self.labelblocks:
                     self._data_norm[key].append(lb.data_norm[key])
         else:
-            raise ValueError("Creation of labelblock group failed.")
+            msg = "Creation of labelblock group failed."
+            raise ValueError(msg)
         self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
 
     @property
@@ -849,7 +852,8 @@ class TecanfilesGroup:
                     self.labelblocksgroups.append(gr)
             files = [tf.path for tf in self.tecanfiles]
             if len(self.labelblocksgroups) == 0:  # == []
-                raise ValueError(f"No common labelblock in filenames: {files}.")
+                msg = f"No common labelblock in filenames: {files}."
+                raise ValueError(msg)
             warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
         self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
 
@@ -915,9 +919,11 @@ class Titration(TecanfilesGroup):
         try:
             df = pd.read_table(listfile, names=["filenames", "conc"])
         except FileNotFoundError as exc:
-            raise FileNotFoundError(f"Cannot find: {listfile}") from exc
+            msg = f"Cannot find: {listfile}"
+            raise FileNotFoundError(msg) from exc
         if df["filenames"].count() != df["conc"].count():
-            raise ValueError(f"Check format [filenames conc] for listfile: {listfile}")
+            msg = f"Check format [filenames conc] for listfile: {listfile}"
+            raise ValueError(msg)
         conc = df["conc"].tolist()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
         return tecanfiles, conc
@@ -1074,6 +1080,13 @@ class PlateScheme:
             )
             self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
         # else: default_factory
+
+
+class FitFirstError(Exception):
+    """Error when plotting before fitting."""
+
+    def __init__(self) -> None:
+        super().__init__("Run fit first")
 
 
 @dataclass
@@ -1290,7 +1303,7 @@ class TitrationAnalysis(Titration):
 
         """
         if not hasattr(self, "fittings"):
-            raise Exception("run fit first")
+            raise FitFirstError()
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrl
@@ -1379,7 +1392,7 @@ class TitrationAnalysis(Titration):
 
         """
         if not hasattr(self, "fittings"):
-            raise Exception("run fit first")
+            raise FitFirstError()
         plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
         out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         out2 = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
@@ -1490,7 +1503,7 @@ class TitrationAnalysis(Titration):
 
         """
         if not hasattr(self, "fittings"):
-            raise Exception("run fit first")
+            raise FitFirstError()
         out = PdfPages(path)
         for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
             out.savefig(self.plot_well(str(k)))
@@ -1512,7 +1525,7 @@ class TitrationAnalysis(Titration):
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
         if not hasattr(self, "fittings"):
-            raise Exception("run fit first")
+            raise FitFirstError()
         df = self.fittings[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))

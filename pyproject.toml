@@ -347,7 +347,8 @@ select = [
     "D",
     "DTZ",
     "E",
-    # "EM",
+    "TRY",
+    "EM",
     "ERA",                      # eradicate
     "F",
     # "FBT",
@@ -364,7 +365,6 @@ select = [
     # "S",                        # bandit
     "SIM",    # NEXT
     # "TID",
-    # "TRY",    # NEXT
     # "UP",                       # pyupgrade
     "YTT",
     "W",
