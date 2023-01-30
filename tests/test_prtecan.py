@@ -492,9 +492,7 @@ class TestTitration:
     def test_labelblocksgroups_cl(self) -> None:
         """It reads labelblocksgroups data for Cl too."""
         lbg = self.tit_cl.labelblocksgroups[0]
-        # assert lbg.data["A01"] == [6289, 6462, 6390, 6465, 6774]
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]  # type: ignore
-        # assert lbg.data["H12"] == [4477, 4705, 4850, 4918, 5007]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
 
     def test_export_data(self, tmp_path: Any) -> None:
@@ -615,7 +613,7 @@ class TestTitrationAnalysis:
             check_categorical=False,
             atol=1e-3,
         )
-        # 0:-1
+        # fit up to the second-last data point
         self.titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
         fit0 = self.titan.fittings[0].sort_index()
         fit1 = self.titan.fittings[1].sort_index()

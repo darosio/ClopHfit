@@ -11,6 +11,7 @@ import hashlib
 import itertools
 import warnings
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
@@ -81,9 +82,8 @@ def lookup_listoflines(
     indexes = []
     for i, line in enumerate(csvl):
         try:
-            if isinstance(line[col], str):
-                if pattern in str(line[col]):
-                    indexes.append(i)
+            if isinstance(line[col], str) and pattern in str(line[col]):
+                indexes.append(i)
         except IndexError:
             continue
     return indexes
@@ -196,7 +196,7 @@ def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
     """Merge a list of metadata dict if the key value is the same in the list."""
     mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
-    if mmd.get("Gain") is None and mds[0].get("Gain") is not None:
+    if mmd.get("Gain") is None and mds[0].get("Gain") is not None:  # noqa: SIM102
         if all(mds[0]["Gain"].value == md["Gain"].value for md in mds[1:]):
             mmd["Gain"] = Metadata(mds[0]["Gain"].value)
     return mmd
@@ -718,13 +718,13 @@ class LabelblocksGroup:
             )
         if self.allequal:
             self._data = defaultdict(list)
-            for key in self.labelblocks[0].data.keys():
+            for key in self.labelblocks[0].data:
                 for lb in self.labelblocks:
                     self._data[key].append(lb.data[key])
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
             self._data_norm = defaultdict(list)
-            for key in self.labelblocks[0].data.keys():
+            for key in self.labelblocks[0].data:
                 for lb in self.labelblocks:
                     self._data_norm[key].append(lb.data_norm[key])
         else:
@@ -741,7 +741,7 @@ class LabelblocksGroup:
         """Normalize data by number of flashes, integration time and gain."""
         if self._data_norm is None:
             self._data_norm = defaultdict(list)
-            for key in self.labelblocks[0].data.keys():
+            for key in self.labelblocks[0].data:
                 for lb in self.labelblocks:
                     self._data_norm[key].append(lb.data_norm[key])
         return self._data_norm
@@ -768,7 +768,7 @@ class LabelblocksGroup:
             self._data_buffersubtracted = (
                 {
                     key: [lb.data_buffersubtracted[key] for lb in self.labelblocks]
-                    for key in self.labelblocks[0].data.keys()
+                    for key in self.labelblocks[0].data
                 }
                 if self.buffer_wells
                 else {}
@@ -782,7 +782,7 @@ class LabelblocksGroup:
             self._data_buffersubtracted_norm = (
                 {
                     key: [lb.data_buffersubtracted_norm[key] for lb in self.labelblocks]
-                    for key in self.labelblocks[0].data.keys()
+                    for key in self.labelblocks[0].data
                 }
                 if self.buffer_wells
                 else {}
@@ -888,7 +888,6 @@ class Titration(TecanfilesGroup):
         -------
         Titration
         """
-        # tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
         tecanfiles, conc = Titration._listfile(Path(list_file))
         return cls(tecanfiles, conc)
 
@@ -1005,7 +1004,7 @@ class Titration(TecanfilesGroup):
             if any(data):
                 out_folder.mkdir(parents=True, exist_ok=True)
                 columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
-                for key in data[0].keys():
+                for key in data[0]:
                     dat = np.vstack((conc, [dt[key] for dt in data]))
                     df = pd.DataFrame(dat.T, columns=columns)
                     df.to_csv(out_folder / Path(key).with_suffix(".dat"), index=False)
@@ -1523,7 +1522,7 @@ class TitrationAnalysis(Titration):
                 df = df[df[x] < xmax]
             if ymin:
                 df = df[df[y] > ymin]
-            try:
+            with suppress(ValueError):
                 plt.errorbar(
                     df[x],
                     df[y],
@@ -1534,8 +1533,6 @@ class TitrationAnalysis(Titration):
                     markersize=10,
                     alpha=0.7,
                 )
-            except ValueError:
-                pass
             if "ctrl" not in df:
                 df["ctrl"] = 0
             df = df[~np.isnan(df[x])]
@@ -1576,7 +1573,7 @@ class TitrationAnalysis(Titration):
                 print()
 
         df = self.fittings[lb]
-        if "SA2" in df.keys():
+        if "SA2" in df:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB"]

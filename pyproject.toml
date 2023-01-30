@@ -348,7 +348,7 @@ select = [
     "DTZ",
     "E",
     # "EM",
-    # "ERA",    # eradicate
+    "ERA",                      # eradicate
     "F",
     # "ICN",
     # "ISC",
@@ -359,10 +359,10 @@ select = [
     # "PL",                       # pylint
     # "PGH",                      #pygrep NEXT
     "PT",
-    # "PTH",      # NEXT
+    # "PTH",                      # pathlib
     "Q",
     "RUF",
-    # "SIM",    # NEXT
+    "SIM",    # NEXT
     # "S",                        # bandit
     # "UP",                       # pyupgrade
     "YTT",
