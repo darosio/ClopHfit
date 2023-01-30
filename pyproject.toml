@@ -336,38 +336,38 @@ ignore = [
 ]
 line-length = 88
 select = [
-    "A",
-    "ANN",
-    "ARG",
+    "A",                        # builtins
+    "ANN",                      # typing annotation
+    "ARG",                      # unused arguments
     "B",                        # bugbear
     "C",
     "C4",                       # comprehensions
     "C90",                      # mccabe
-    # "COM",
-    "D",
-    "DTZ",
-    "E",
-    "TRY",
-    "EM",
+    # "COM", commas
+    "D",                        # pydocstyle
+    "DTZ",                      # dates
+    "E",                        # pycodestyle
+    "TRY",                      # exceptions
+    "EM",                       # exceptions
     "ERA",                      # eradicate
-    "F",
-    # "FBT",
-    "I",
-    # "ICN",
-    # "ISC",
-    "N",
-    # "PD",                       #2DO
-    # "PGH",                      #pygrep NEXT
-    "PT",
+    "F",                        # pyflakes
+    # "FBT", boolean trap TODO
+    "I",                        # isort
+    # "ICN", import conventions
+    "ISC",                      # implicit-str-concat
+    "N",                        # pep8-naming
+    "PD",
+    # "PGH",   # pygrep NEXT
+    "PT",                       # pytest-style
     # "PTH",                      # pathlib
     "Q",
     "RUF",
-    # "S",                        # bandit
-    "SIM",    # NEXT
+    # "S",     # bandit NEXT
+    "SIM",                      # simplify
     # "TID",
-    # "UP",                       # pyupgrade
+    # "UP",    # pyupgrade NEXT
     "YTT",
-    "W",
+    "W",                        # pycodestyle
 ]
 extend-exclude = ["src/clophfit/old/"]
 force-exclude = true

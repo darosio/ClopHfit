@@ -52,11 +52,11 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
         Lines.
 
     """
-    df = pd.read_excel(path)
-    n0 = pd.DataFrame([[np.nan] * len(df.columns)], columns=df.columns)
-    df = pd.concat([n0, df], ignore_index=True)
-    df.fillna("", inplace=True)
-    return list(df.values.tolist())
+    sheet = pd.read_excel(path)
+    n0 = pd.DataFrame([[np.nan] * len(sheet.columns)], columns=sheet.columns)
+    sheet = pd.concat([n0, sheet], ignore_index=True)
+    sheet = sheet.fillna("")
+    return list(sheet.to_numpy().tolist())
 
 
 def lookup_listoflines(
@@ -327,17 +327,17 @@ def fit_titration(
         raise NameError(msg)
 
     def compute_p0(x: Sequence[float], y: NDArray[np.float_]) -> NDArray[np.float_]:
-        df = pd.DataFrame({"x": x, "y": y})
-        p0sa = df.y[df.x == min(df.x)].values[0]
-        p0sb = df.y[df.x == max(df.x)].values[0]
+        data = pd.DataFrame({"x": x, "y": y})
+        p0sa = data.y[data.x == min(data.x)].to_numpy()[0]
+        p0sb = data.y[data.x == max(data.x)].to_numpy()[0]
         p0k = np.average([max(y), min(y)])
         try:
-            x1, y1 = df[df["y"] >= p0k].values[0]
+            x1, y1 = data[data["y"] >= p0k].to_numpy()[0]
         except IndexError:
             x1 = np.nan
             y1 = np.nan
         try:
-            x2, y2 = df[df["y"] <= p0k].values[0]
+            x2, y2 = data[data["y"] <= p0k].to_numpy()[0]
         except IndexError:
             x2 = np.nan
             y2 = np.nan
@@ -917,15 +917,15 @@ class Titration(TecanfilesGroup):
             length of conc values.
         """
         try:
-            df = pd.read_table(listfile, names=["filenames", "conc"])
+            table = pd.read_csv(listfile, sep="\t", names=["filenames", "conc"])
         except FileNotFoundError as exc:
             msg = f"Cannot find: {listfile}"
             raise FileNotFoundError(msg) from exc
-        if df["filenames"].count() != df["conc"].count():
+        if table["filenames"].count() != table["conc"].count():
             msg = f"Check format [filenames conc] for listfile: {listfile}"
             raise ValueError(msg)
-        conc = df["conc"].tolist()
-        tecanfiles = [Tecanfile(listfile.parent / f) for f in df["filenames"]]
+        conc = table["conc"].tolist()
+        tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
         return tecanfiles, conc
 
     @property
@@ -942,8 +942,8 @@ class Titration(TecanfilesGroup):
 
     def load_additions(self, additions_file: Path) -> None:
         """Load additions from file."""
-        df = pd.read_table(additions_file, names=["add"])
-        self.additions = df["add"].tolist()
+        additions = pd.read_csv(additions_file, names=["add"])
+        self.additions = additions["add"].tolist()
 
     @property
     def buffer_wells(self) -> list[str] | None:
@@ -1012,8 +1012,10 @@ class Titration(TecanfilesGroup):
                 columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
                 for key in data[0]:
                     dat = np.vstack((conc, [dt[key] for dt in data]))
-                    df = pd.DataFrame(dat.T, columns=columns)
-                    df.to_csv(out_folder / Path(key).with_suffix(".dat"), index=False)
+                    datxy = pd.DataFrame(dat.T, columns=columns)
+                    datxy.to_csv(
+                        out_folder / Path(key).with_suffix(".dat"), index=False
+                    )
 
         write(
             self.conc,
@@ -1065,14 +1067,14 @@ class PlateScheme:
     def __post_init__(self) -> None:
         """Complete initialization."""
         if self.file:
-            df = pd.read_table(self.file)
+            table = pd.read_csv(self.file, sep="\t")
             if (
-                df.columns.tolist() != ["well", "sample"]
-                or df["well"].count() != df["sample"].count()
+                table.columns.tolist() != ["well", "sample"]
+                or table["well"].count() != table["sample"].count()
             ):
                 msg = f"Check format [well sample] for schemefile: {self.file}"
                 raise ValueError(msg)
-            scheme = df.groupby("sample")["well"].unique()
+            scheme = table.groupby("sample")["well"].unique()
             self.buffer = list(scheme["buffer"])
             self.ctrl = list(
                 {well for sample in scheme.tolist() for well in sample}
@@ -1298,8 +1300,8 @@ class TitrationAnalysis(Titration):
 
         Raises
         ------
-        Exception
-            When no fitting results are available (in this object).
+        FitFirstError
+            When no fitting results are yet available.
 
         """
         if not hasattr(self, "fittings"):
@@ -1387,8 +1389,8 @@ class TitrationAnalysis(Titration):
 
         Raises
         ------
-        Exception
-            When fit is not yet run.
+        FitFirstError
+            When no fitting results are yet available.
 
         """
         if not hasattr(self, "fittings"):
@@ -1443,19 +1445,21 @@ class TitrationAnalysis(Titration):
         ax1.set_xlim(ax_data.get_xlim())
         ax_data.legend()
         # global
-        df = self.fittings[-1]
+        fit_df = self.fittings[-1]
         lines.append(
-            [f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out2].loc[key])]
+            [f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(fit_df[out2].loc[key])]
         )
         ax_data.plot(
             xfit,
-            self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
+            self.fz(fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], xfit),
             "b--",
             lw=0.5,
         )
         ax_data.plot(
             xfit,
-            self.fz(df.K.loc[key], [df.SA2.loc[key], df.SB2.loc[key]], xfit),
+            self.fz(
+                fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], xfit
+            ),
             "b--",
             lw=0.5,
         )
@@ -1466,7 +1470,12 @@ class TitrationAnalysis(Titration):
         y = self.labelblocksgroups[0].data[key]  # type: ignore
         ax1.plot(
             x,
-            (y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)),
+            (
+                y
+                - self.fz(
+                    fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], x
+                )
+            ),
             "--",
             lw=1.5,
             color=colors[0],
@@ -1474,14 +1483,19 @@ class TitrationAnalysis(Titration):
         y = self.labelblocksgroups[1].data[key]  # type: ignore
         ax2.plot(
             x,
-            (y - self.fz(df.K.loc[key], [df.SA2.loc[key], df.SB2.loc[key]], x)),
+            (
+                y
+                - self.fz(
+                    fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], x
+                )
+            ),
             "--",
             lw=1.5,
             color=colors[1],
         )
         if key in self.scheme.ctrl:
             plt.title(
-                "Ctrl: " + df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
+                "Ctrl: " + fit_df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
             )
         else:
             plt.title(key, {"fontsize": 16})
@@ -1498,8 +1512,8 @@ class TitrationAnalysis(Titration):
 
         Raises
         ------
-        Exception
-            When fit is not yet run.
+        FitFirstError
+            When no fitting results are yet available.
 
         """
         if not hasattr(self, "fittings"):
@@ -1526,31 +1540,33 @@ class TitrationAnalysis(Titration):
         """Plot SA vs. K with errorbar for the whole plate."""
         if not hasattr(self, "fittings"):
             raise FitFirstError()
-        df = self.fittings[lb]
+        fit_df = self.fittings[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
-                df = df[df[x] > xmin]
+                fit_df = fit_df[fit_df[x] > xmin]
             if xmax:
-                df = df[df[x] < xmax]
+                fit_df = fit_df[fit_df[x] < xmax]
             if ymin:
-                df = df[df[y] > ymin]
+                fit_df = fit_df[fit_df[y] > ymin]
             with suppress(ValueError):
                 plt.errorbar(
-                    df[x],
-                    df[y],
-                    xerr=df[xerr],
-                    yerr=df[yerr],
+                    fit_df[x],
+                    fit_df[y],
+                    xerr=fit_df[xerr],
+                    yerr=fit_df[yerr],
                     fmt="o",
                     elinewidth=1,
                     markersize=10,
                     alpha=0.7,
                 )
-            if "ctrl" not in df:
-                df["ctrl"] = 0
-            df = df[~np.isnan(df[x])]
-            df = df[~np.isnan(df[y])]
-            for idx, xv, yv, l in zip(df.index, df[x], df[y], df["ctrl"]):
+            if "ctrl" not in fit_df:
+                fit_df["ctrl"] = 0
+            fit_df = fit_df[~np.isnan(fit_df[x])]
+            fit_df = fit_df[~np.isnan(fit_df[y])]
+            for idx, xv, yv, l in zip(
+                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"]
+            ):
                 # x or y do not exist.# try:
                 if isinstance(l, str):
                     color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
@@ -1561,10 +1577,10 @@ class TitrationAnalysis(Titration):
                 # x or y do not exist.# continue
             plt.yscale("log")
             # min(x) can be = NaN
-            min_x = min(max([0.01, df[x].min()]), 14)
-            min_y = min(max([0.01, df[y].min()]), 5000)
-            plt.xlim(0.99 * min_x, 1.01 * df[x].max())
-            plt.ylim(0.90 * min_y, 1.10 * df[y].max())
+            min_x = min(max([0.01, fit_df[x].min()]), 14)
+            min_y = min(max([0.01, fit_df[y].min()]), 5000)
+            plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
+            plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
             plt.grid(1, axis="both")
             plt.ylabel(y)
             plt.xlabel(x)
@@ -1585,19 +1601,19 @@ class TitrationAnalysis(Titration):
                     print(f"{r[k]:7.0f}", end=" ")
                 print()
 
-        df = self.fittings[lb]
-        if "SA2" in df:
+        fit_df = self.fittings[lb]
+        if "SA2" in fit_df:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = df.loc[self.scheme.ctrl]
+            res_ctrl = fit_df.loc[self.scheme.ctrl]
             gr = res_ctrl.groupby("ctrl")
             print("    " + " ".join([f"{x:>7s}" for x in out]))
             for g in gr:
                 print(" ", g[0])
                 df_print(g[1][out])
-        res_unk = df.loc[self.keys_unk]
+        res_unk = fit_df.loc[self.keys_unk]
         print()
         print("    " + " ".join([f"{x:>7s}" for x in out]))
         print("  UNK")
