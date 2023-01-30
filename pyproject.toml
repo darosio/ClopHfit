@@ -102,7 +102,7 @@ c = "echo 'ciao' {args:{name}{root}}"
 display = "echo {pwd}"
 
 ch = "cz ch --incremental --unreleased-version HEAD"
-clean = "rm -rf .coverage ./__pycache__ ./.nox ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
+clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
 init =  ["pre-commit install",
         "pre-commit install --hook-type commit-msg --hook-type pre-push"]
 sync = "pip-df sync -x dev,docs,tests"

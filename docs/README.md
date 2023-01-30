@@ -34,11 +34,11 @@ fluorescence spectra.
 
       clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
 
-  To reproduce older pr.tecan add [\--no-weight]{.title-ref} option:
+  To reproduce older pr.tecan add `--no-weight` option:
 
       clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
-- Predict chloride dissociation constant [K_d]{.title-ref} at given pH:
+- Predict chloride dissociation constant `K_d` at given pH:
 
       clop eq1 --help
 
@@ -59,33 +59,33 @@ You can get the library directly from
 
 You need the following requirements:
 
-- `nox` for test automation. If you don't have nox, you can use `pipx run nox`
-  to run it without installing, or `pipx install nox`. To use, run `nox`. This
-  will lint and test using every installed version of Python on your system,
-  skipping ones that are not installed. You can also run specific jobs:
+- `hatch` for test automation and package dependency managements. If you don't
+  have hatch, you can use `pipx run hatch` to run it without installing, or
+  `pipx install hatch`. Dependencies are locked thanks to
+  [pip-deepfreeze](https://pypi.org/project/pip-deepfreeze/). You can run
+  `hatch env show` to list available environments and scripts.
   ```bash
-  nox -l  # list available tests
-  nox -s lint  # Lint only
-  nox -s tests-3.9  # Python 3.9 tests only
-  nox -s docs -- serve  # Build and serve the docs
-  nox -s build  # Make an SDist and wheel
+  hatch run init  # init repo with pre-commit hooks
+  hatch run sync  # sync venv with deepfreeze
+  # other examples
+  hatch run lint:run
+  hatch run tests.py3.10:all
   ```
-  Nox handles everything for you, including setting up an temporary virtual
+  Hatch handles everything for you, including setting up an temporary virtual
   environment for each run.
-- `pdm` for package dependency managements;
 - `pre-commit` for all style and consistency checking. While you can run it with
   nox, this is such an important tool that it deserves to be installed on its
-  own. Install pre-commit and run:
-  ```bash
-  pre-commit install --hook-type commit-msg --hook-type pre-push
-  (or: nox -s init)
-  pre-commit run -a
-  ```
-  to check all files. If pre-commit fails during pushing upstream then stage
-  changes, Commit Extend (into previous commit), and repeat pushing.
+  own. If pre-commit fails during pushing upstream then stage changes, Commit
+  Extend (into previous commit), and repeat pushing.
 
-`pip`, `nox`, `pdm` and `pre-commit` are pinned in
+`pip`, `pip-deepfreeze` and `hatch` are pinned in
 .github/workflows/constraints.txt for consistency with CI/CD.
+
+```bash
+pipx install pre-commit
+pipx install hatch
+pipx runpip hatch install hatch-pip-deepfreeze
+```
 
 ### Setting up a development environment manually
 
@@ -97,13 +97,13 @@ source ./.venv/bin/activate
 pip install -v -e .[dev,tests,docs]
 ```
 
-For using [Jupyter](https://jupyter.org/) during development:
+With direnv for using [Jupyter](https://jupyter.org/) during development:
 
-    pdm run jupiter notebook
+    jupiter notebook
 
 And only in case you need a system wide easy accessible kernel:
 
-    pdm run python -m ipykernel install --user --name="cloph-310"
+    python -m ipykernel install --user --name="cloph-310"
 
 ### Testing and coverage
 
@@ -115,19 +115,22 @@ Use `coverage` to generate coverage reports:
 
     coverage run --parallel -m pytest
 
-Or use nox:
+Or use hatch:
 
-    nox -rs tests typeguard xdoctest
+    hatch run tests:full
+    hatch run coverage:combine
+    hatch run coverage:report
 
 ### Building docs
 
 You can build the docs using:
 
-    nox -s docs
+    hatch run docs:sync
+    hatch run docs:build
 
 You can see a preview with:
 
-    nox -s docs -- serve
+    hatch run docs:serve
 
 When needed (e.g. API updates):
 
@@ -135,54 +138,56 @@ When needed (e.g. API updates):
 
 ### Bump and releasing
 
-I can bump and upload build to test.pypi using:
+To bump version and upload build to test.pypi using:
 
-    nox -rs bump
+    hatch run bump
 
-I can test new dist in local venv using:
+Usually after:
 
-    python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit
+    gh pr create --fill
+    gh pr merge --squash --delete-branch [-t “fix|ci|feat: msg”]
 
-- Revise changelog, stage files, commit and push
-- gh pr create (wait for test completion)
-- git co main
-- pr merge --squash --delete-branch -t "fix| refactor| ci: msg" #number
-- gh release create ”v0.3.12”
-- git pull --tags
+To update only changelog:
 
-Basically use commitizen and github-cli to release:
+    gatch run ch
+
+Alternatively:
 
     pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
-    gh release create (--target devel) v0.3.0a0
 
 ### Configuration files
 
 Manually updated pinned dependencies for CI/CD:
 
-- docs/requirements.txt
-- .github/workflows/constraints.txt
+- .github/workflows/constraints.txt (testing dependabot)
 
 Configuration files:
 
 - pre-commit configured in .pre-commit-config.yaml;
-- flake8 configured in .flake8 (pinned in pre-commit);
+- flake8 (for rst-docstrings and bandit) configured in .flake8 (pinned in
+  pre-commit);
 - black configured in pyproject.toml (pinned in pre-commit);
-- isort configured in pyproject.toml (pinned in pre-commit);
+- ruff configured in pyproject.toml (pinned in pre-commit);
 - darglint configured in .darglint (pinned in pre-commit);
+- codespell configured in .codespellrc (pinned in pre-commit);
 - coverage configured in pyproject.toml (tests deps);
 - mypy configured in pyproject.toml (tests deps);
-- commitizen in pyproject.toml (after `cz init`) (both pinned in pre-commit and
-  test deps).
+- commitizen in pyproject.toml (dev deps and pinned in pre-commit).
 
-pre-commit ensures up-to-date constraints.txt pin/freeze all packages in
-“.[dev,docs,tests]”.
+pip-df generates requirements[-dev,docs,tests].txt.
 
 ## TODO
 
-- mypy into lint?
+- Print sorted output.
+- Add info to results report:
+  - Brightness;
+  - flatness (SA - SB)/SA - fluorescence is constant? GREAT;
+  - presence of isosbestic (the fitting line cross / SA1 < SB1 and SA2 > SB2
+    sometime they do not cross anyway).
+- Robust fit considering sigma pH.
+- check metadata and report the diff REMEMBER 8.8 (2013-05-29); metadata
+  rescaled; dataframe groupby per meta_pre, ma anche enspire
 
-- clean all commented leftover
-
-- release drafter; maybe useful when merging pr into main.
-- readthedocs or ghpages?
-  <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
+- development
+  - readthedocs or ghpages?
+    <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
