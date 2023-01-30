@@ -7,5 +7,4 @@ Miscellaneous Pages
 
    license
    CHANGELOG.md
-   TODO
-   contributing
+   CONTRIBUTING.md

@@ -1,16 +1,8 @@
 [flake8]
-ignore = E203,E501,W503,DAR000,S101,ANN101,ANN102,ANN001,ANN201,DAR101
-# extend-ignore = E203, E501, E722, B950
-# extend-select = B9
+ignore = E203,E501,W503,S101,
 per-file-ignores =
-				 tests/*:ANN101,ANN102,S101,E800,
+				 tests/*:S101
 				 tests/test_oldscripts.py:S404,S603
-				 noxfile.py:E800,
-				 src/*:RST499,DAR103
 rst-directives = autosummary
 rst-roles = ref,
 max-line-length = 88
-max-complexity = 33
-import-order-style = pycharm
-application-import-names = clophfit,tests
-docstring-convention = numpy

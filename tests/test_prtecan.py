@@ -12,7 +12,6 @@ import pytest
 
 from clophfit import prtecan
 
-
 data_tests = Path(__file__).parent / "Tecan"
 pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 
@@ -94,16 +93,16 @@ def test_fit_titration() -> None:
     """It fits pH and Cl titrations."""
     x = [3.0, 5, 7, 9, 11.0]
     y = np.array([1.9991, 1.991, 1.5, 1.009, 1.0009])
-    df = prtecan.fit_titration("pH", x, y)
-    assert abs(df["K"][0] - 7) < 0.0000000001
-    assert abs(df["SA"][0] - 2) < 0.0001
-    assert abs(df["SB"][0] - 1) < 0.0001
+    fit = prtecan.fit_titration("pH", x, y)
+    assert abs(fit["K"][0] - 7) < 0.0000000001
+    assert abs(fit["SA"][0] - 2) < 0.0001
+    assert abs(fit["SB"][0] - 1) < 0.0001
     x = [0, 5.0, 10, 40, 160, 1000]
     y = np.array([2.0, 1.33333333, 1.0, 0.4, 0.11764706, 0.01980198])
-    df = prtecan.fit_titration("Cl", x, y)
-    assert abs(df["K"][0] - 10) < 0.0000001
-    assert abs(df["SA"][0] - 2) < 0.000000001
-    assert abs(df["SB"][0] - 0) < 0.00000001
+    fit = prtecan.fit_titration("Cl", x, y)
+    assert abs(fit["K"][0] - 10) < 0.0000001
+    assert abs(fit["SA"][0] - 2) < 0.000000001
+    assert abs(fit["SB"][0] - 0) < 0.00000001
     with pytest.raises(NameError, match="kind= pH or Cl"):
         prtecan.fit_titration("unk", x, y)
 
@@ -493,12 +492,10 @@ class TestTitration:
     def test_labelblocksgroups_cl(self) -> None:
         """It reads labelblocksgroups data for Cl too."""
         lbg = self.tit_cl.labelblocksgroups[0]
-        # assert lbg.data["A01"] == [6289, 6462, 6390, 6465, 6774]
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]  # type: ignore
-        # assert lbg.data["H12"] == [4477, 4705, 4850, 4918, 5007]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
 
-    def test_export_data(self, tmp_path: Any) -> None:
+    def test_export_data(self, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
         self.tit_ph.export_data(tmp_path)
         a01 = pd.read_csv(tmp_path / "dat/A01.dat")
@@ -616,7 +613,7 @@ class TestTitrationAnalysis:
             check_categorical=False,
             atol=1e-3,
         )
-        # 0:-1
+        # fit up to the second-last data point
         self.titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
         fit0 = self.titan.fittings[0].sort_index()
         fit1 = self.titan.fittings[1].sort_index()

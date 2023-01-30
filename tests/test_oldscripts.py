@@ -14,7 +14,6 @@ import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-
 _data = Path(__file__).parent / "data"
 tmpoutput = _data / "_tmpoutput"
 _expected = _data / "output"
@@ -29,16 +28,12 @@ class TestTitrationFit:
     note_fp = "./NTT-A04-Cl_note"
     csv_files = ["./Meas/A04 Cl_A.csv", "./Meas/A04 Cl_B.csv"]
     res_svd = [
-        "K =  17.035\nsK =  0.666\nSA =  -0.0\nsSA =  0.007\n"
-        + "SB =  -0.275\nsSB =  0.002",
-        """K =  14.824\nsK =  0.708\nSA =  0.019\nsSA =  0.004
-SB =  -0.274\nsSB =  0.002\n""",
+        "K =  17.035\nsK =  0.666\nSA =  -0.0\nsSA =  0.007\nSB =  -0.275\nsSB =  0.002",
+        "K =  14.824\nsK =  0.708\nSA =  0.019\nsSA =  0.004\nSB =  -0.274\nsSB =  0.002",
     ]
     res_band = [
-        "K =  15.205\nsK =  0.549\nSA =  205506.748\nsSA =  1862.684\n"
-        + "SB =  1781.387\nsSB =  1249.163",
-        "K =  15.015\nsK =  0.701\nSA =  253789.494\nsSA =  3055.602\n"
-        + "SB =  -4381.091\nsSB =  2040.904",
+        "K =  15.205\nsK =  0.549\nSA =  205506.748\nsSA =  1862.684\nSB =  1781.387\nsSB =  1249.163",
+        "K =  15.015\nsK =  0.701\nSA =  253789.494\nsSA =  3055.602\nSB =  -4381.091\nsSB =  2040.904",
     ]
 
     @pytest.fixture(
@@ -50,7 +45,7 @@ SB =  -0.274\nsSB =  0.002\n""",
             (csv_files[1], res_band[1], ["-m", "band", "-b", "480", "530"]),
         ],
     )
-    def run_script(self, request: Any) -> Iterator[Rscript]:
+    def run_script(self, request: pytest.FixtureRequest) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
@@ -128,7 +123,7 @@ bootstrap:""",
             (dat_files[1], res[1], ["--boot", "3", "-t", "cl"]),
         ],
     )
-    def run_script(self, request: Any) -> Iterator[Rscript]:
+    def run_script(self, request: pytest.FixtureRequest) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration_global.py"
         dat_file = request.param[0]

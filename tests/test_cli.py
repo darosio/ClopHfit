@@ -1,7 +1,7 @@
 """Test ``clop`` cli."""
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -18,7 +18,7 @@ def test_eq1() -> None:
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
-def test_prtecan(tmp_path: Any) -> None:
+def test_prtecan(tmp_path: Path) -> None:
     """It runs XXX pr.tecan and generates correct results and graphs."""
     out = tmp_path / "out3"
     out.mkdir()
@@ -29,7 +29,7 @@ def test_prtecan(tmp_path: Any) -> None:
             "prtecan",
             "tests/Tecan/140220/list.pH",
             "--out",
-            out,
+            str(out),
             "--fit",
             "--scheme",
             "tests/Tecan/140220/scheme.txt",
