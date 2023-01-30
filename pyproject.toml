@@ -136,10 +136,12 @@ xml = "coverage xml"
 type = "pip-deepfreeze"
 template = "typeguard"
 features = ["tests"]
+python = "3.11"
 [tool.hatch.envs.typeguard.scripts]
 # guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}
+sync = "pip-df sync -x tests"
 run = "pytest --typeguard-packages=clophfit {args}"
-python = "3.11"
+all = ["sync", "run"]
 
 [tool.hatch.envs.lint]
 detached = true
@@ -148,12 +150,14 @@ dependencies = ["pre-commit>=3.0.1"]
 run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 
 [tool.hatch.envs.docs]
-type = "pip-deepfreeze"
+# type = "pip-deepfreeze"
 detached = true
 features = ["docs"]
 [tool.hatch.envs.docs.scripts]
+sync = "pip-df sync -x docs"
 build = "sphinx-build docs docs/_build"
 serve = "python -m http.server 8000 -d docs/_build"
+all = ["sync", "build"]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
