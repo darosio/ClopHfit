@@ -495,7 +495,7 @@ class TestTitration:
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]  # type: ignore
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
 
-    def test_export_data(self, tmp_path: Any) -> None:
+    def test_export_data(self, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
         self.tit_ph.export_data(tmp_path)
         a01 = pd.read_csv(tmp_path / "dat/A01.dat")

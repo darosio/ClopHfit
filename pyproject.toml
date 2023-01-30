@@ -337,8 +337,8 @@ ignore = [
 line-length = 88
 select = [
     "A",
-    # "ANN",
-    # "ARG",
+    "ANN",
+    "ARG",
     "B",                        # bugbear
     "C",
     "C4",                       # comprehensions
@@ -350,24 +350,23 @@ select = [
     # "EM",
     "ERA",                      # eradicate
     "F",
-    # "ICN",
-    # "ISC",
     # "FBT",
     "I",
+    # "ICN",
+    # "ISC",
     "N",
     # "PD",                       #2DO
-    # "PL",                       # pylint
     # "PGH",                      #pygrep NEXT
     "PT",
     # "PTH",                      # pathlib
     "Q",
     "RUF",
-    "SIM",    # NEXT
     # "S",                        # bandit
-    # "UP",                       # pyupgrade
-    "YTT",
+    "SIM",    # NEXT
     # "TID",
     # "TRY",    # NEXT
+    # "UP",                       # pyupgrade
+    "YTT",
     "W",
 ]
 extend-exclude = ["src/clophfit/old/"]

@@ -49,7 +49,7 @@ SB =  -0.274\nsSB =  0.002\n""",
             (csv_files[1], res_band[1], ["-m", "band", "-b", "480", "530"]),
         ],
     )
-    def run_script(self, request: Any) -> Iterator[Rscript]:
+    def run_script(self, request: pytest.FixtureRequest) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
@@ -127,7 +127,7 @@ bootstrap:""",
             (dat_files[1], res[1], ["--boot", "3", "-t", "cl"]),
         ],
     )
-    def run_script(self, request: Any) -> Iterator[Rscript]:
+    def run_script(self, request: pytest.FixtureRequest) -> Iterator[Rscript]:
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration_global.py"
         dat_file = request.param[0]
