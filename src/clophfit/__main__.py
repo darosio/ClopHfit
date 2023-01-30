@@ -210,7 +210,7 @@ def tecan(  # type: ignore
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))  # type: ignore
     titan.export_data(out)
-    with open(out / "metadata-labels.txt", "w", encoding="utf-8") as fp:
+    with (out / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in titan.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
     if scheme:

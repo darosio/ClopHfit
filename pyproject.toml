@@ -351,22 +351,22 @@ select = [
     "EM",                       # exceptions
     "ERA",                      # eradicate
     "F",                        # pyflakes
-    # "FBT", boolean trap TODO
+    # "FBT",                      # boolean-trap
     "I",                        # isort
     # "ICN", import conventions
     "ISC",                      # implicit-str-concat
     "N",                        # pep8-naming
-    "PD",
-    # "PGH",   # pygrep NEXT
+    "PD",                       # pandas-vet
+    # "PGH",  # pygrep WAIT
     "PT",                       # pytest-style
-    # "PTH",                      # pathlib
-    "Q",
-    "RUF",
-    # "S",     # bandit NEXT
+    "PTH",                      # use-pathlib
+    "Q",                        # quotes
+    "RUF",                      # Ruff
+    # "S",    # bandit WAIT
     "SIM",                      # simplify
-    # "TID",
-    # "UP",    # pyupgrade NEXT
-    "YTT",
+    "TID",                      # tidy-imports
+    # "UP",   # pyupgrade WAIT
+    "YTT",                      # 2020
     "W",                        # pycodestyle
 ]
 extend-exclude = ["src/clophfit/old/"]
