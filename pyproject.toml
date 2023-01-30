@@ -116,11 +116,11 @@ bump = [
 template = "tests"
 features = ["tests"]
 [tool.hatch.envs.tests.scripts]
-init = "pip-df sync -x tests"
+sync = "pip-df sync -x tests"
 test = "coverage run --parallel -m pytest"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
-full = ["init", "test", "type", "xdoc"]
+full = ["sync", "test", "type", "xdoc"]
 [[tool.hatch.envs.tests.matrix]]
 python = ["3.11", "3.10", "3.9", "3.8"] #reverse order to ensure the presence in older python of module included in newer versions
 
@@ -133,7 +133,6 @@ report = "coverage report"
 xml = "coverage xml"
 
 [tool.hatch.envs.typeguard]
-type = "pip-deepfreeze"
 template = "typeguard"
 features = ["tests"]
 python = "3.11"
@@ -150,7 +149,6 @@ dependencies = ["pre-commit>=3.0.1"]
 run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 
 [tool.hatch.envs.docs]
-# type = "pip-deepfreeze"
 detached = true
 features = ["docs"]
 [tool.hatch.envs.docs.scripts]
