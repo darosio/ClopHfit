@@ -15,7 +15,7 @@ idna==3.4
 imagesize==1.4.1
 jsonschema==4.17.3
 jupyter_client==8.0.1
-jupyter_core==5.1.5
+jupyter_core==5.2.0
 jupyterlab-pygments==0.2.2
 markdown-it-py==2.1.0
 mdit-py-plugins==0.3.3
