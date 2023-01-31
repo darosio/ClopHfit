@@ -117,7 +117,7 @@ Use `coverage` to generate coverage reports:
 
 Or use hatch:
 
-    hatch run tests:full
+    hatch run tests:all
     hatch run coverage:combine
     hatch run coverage:report
 
