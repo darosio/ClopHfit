@@ -12,8 +12,9 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-      time: "09:00"
+      time: "14:01"
       timezone: "Europe/Rome"
-    # allow:
+    allow:
+      - dependency-type: "all"
     #   - dependency-type: "production"
     open-pull-requests-limit: 15
