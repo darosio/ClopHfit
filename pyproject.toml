@@ -56,13 +56,13 @@ dependencies = [
   'xlrd<2.0.2',
 ]
 optional-dependencies.tests = [
-  "coverage[toml]>=7.1.0",
-  "mypy>=0.991",
-  "pandas-stubs>=1.5.2.230105",
-  "Pygments>=2.14.0",
-  "pytest>=7.2.1",
-  "typeguard>=2.13.3",
-  "xdoctest>=1.1.0",
+  "coverage[toml] < 7.1.1",
+  "mypy < 0.992",
+  "pandas-stubs == 1.5.2.230105",
+  "Pygments < 2.14.1",
+  "pytest == 7.2.1",
+  "typeguard < 2.13.4",
+  "xdoctest < 1.1.1",
 ]
 optional-dependencies.dev = [
     "commitizen < 2.40.1",
@@ -124,7 +124,7 @@ python = ["3.11", "3.10", "3.9", "3.8"] #reverse order to ensure the presence in
 
 [tool.hatch.envs.coverage]
 detached = true
-dependencies = ["coverage[toml]>=7.1.0"]
+dependencies = ["coverage[toml]>=7.1.0"]  # XXX:
 [tool.hatch.envs.coverage.scripts]
 combine = "coverage combine {args}"
 report = "coverage report"
@@ -136,25 +136,20 @@ features = ["tests"]
 python = "3.11"
 [tool.hatch.envs.typeguard.scripts]
 # guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}
-sync = "pip-df sync -x tests"
 run = "pytest --typeguard-packages=clophfit {args}"
-all = ["sync", "run"]
 
 [tool.hatch.envs.lint]
 detached = true
-dependencies = ["pre-commit>=3.0.1"]
+dependencies = ["pre-commit>=3.0.1"]  # XXX:
 [tool.hatch.envs.lint.scripts]
 run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 
 [tool.hatch.envs.docs]
-# detached = true
 template = "docs"
 features = ["docs"]
 [tool.hatch.envs.docs.scripts]
-sync = "pip-df sync -x docs"
 build = "sphinx-build docs docs/_build"
 serve = "python -m http.server 8000 -d docs/_build"
-all = ["sync", "build"]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
