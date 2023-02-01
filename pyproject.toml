@@ -40,27 +40,27 @@ classifiers = [
 requires-python = ">=3.8, <3.12"
 version = "0.4.0"
 dependencies = [
-  'click<8.1.4',
-  'corner<2.2.2',
-  'emcee<3.1.5',
-  'lmfit==1.0.3',
-  'matplotlib<3.6.4',
-  'numpy<1.24.2',
-  'openpyxl<3.1.1',
-  'pandas<1.5.4',
-  'rpy2<3.5.8',
-  'scipy<1.10.1',
-  'seaborn<0.12.3',
-  'sympy<1.11.2',
-  'tqdm<4.64.2',
-  'xlrd<2.0.2',
+  'click < 8.1.4',
+  'corner < 2.2.2',
+  'emcee < 3.1.5',
+  'lmfit < 1.1.1',
+  'matplotlib < 3.6.4',
+  'numpy < 1.24.2',
+  'openpyxl < 3.1.1',
+  'pandas < 1.5.4',
+  'rpy2 < 3.5.8',
+  'scipy < 1.10.1',
+  'seaborn < 0.12.3',
+  'sympy < 1.11.2',
+  'tqdm < 4.64.2',
+  'xlrd < 2.0.2',
 ]
 optional-dependencies.tests = [
   "coverage[toml] < 7.1.1",
   "mypy < 0.992",
-  "pandas-stubs == 1.5.2.230105",
+  "pandas-stubs == 1.5.2.230105",  # XXX:
   "Pygments < 2.14.1",
-  "pytest == 7.2.1",
+  "pytest == 7.2.1",  # XXX: pdm show pytest
   "typeguard < 2.13.4",
   "xdoctest < 1.1.2",
 ]
@@ -70,6 +70,7 @@ optional-dependencies.dev = [
     "ipython < 8.9.1",
     "jupyter < 1.0.1",
 ]
+# XXX: docs/requirements-docs for RTD
 optional-dependencies.docs = [
   "autodocsumm < 0.2.11",
   "myst-parser < 0.18.2",
@@ -97,7 +98,7 @@ python = "3.10"
 # full = "_cov -n auto --reruns 5 --reruns-delay 3 -r aR {args:tests}"
 # [tool.hatch.envs.default.overrides]
 # env.GITHUB_ACTIONS.env-vars = "COVERAGE_REPORT="
-ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"
+ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"  # XXX:
 
 ch = "cz ch --incremental --unreleased-version HEAD"
 clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
@@ -114,7 +115,7 @@ bump = [
 template = "tests"
 features = ["tests"]
 [tool.hatch.envs.tests.scripts]
-sync = "pip-df sync -x tests"
+sync = "pip-df sync -x tests"  # XXX:
 test = "coverage run --parallel -m pytest"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
@@ -135,7 +136,7 @@ template = "typeguard"
 features = ["tests"]
 python = "3.11"
 [tool.hatch.envs.typeguard.scripts]
-# guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}
+# guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}  # XXX:
 run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.hatch.envs.lint]
@@ -384,7 +385,7 @@ known-first-party = ["src", "clophfit"]
 
 [tool.ruff.per-file-ignores]
 "tests/*" = [
-    "ANN101",
+    "ANN101",  # XXX:
     "ANN102",
     "S101",
 ]

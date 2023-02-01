@@ -12,7 +12,7 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-      time: "09:55"
+      time: "12:46"
       timezone: "Europe/Rome"
     # allow:
     # - dependency-type: "all"
