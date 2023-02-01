@@ -87,6 +87,13 @@ pipx install hatch
 pipx runpip hatch install hatch-pip-deepfreeze
 ```
 
+### Setting up a development with direnv
+
+```bash
+echo "layout hatch" > .envrc
+hatch run init
+```
+
 ### Setting up a development environment manually
 
 You can set up a development environment by running:
