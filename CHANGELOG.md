@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.4.1 (2023-02-01)
+
+### Fix
+
+- **docs**: CI badge
+
+### Docs
+
+- venv with hatch and pre-commit init instruction
+
+### Build
+
+- bumping lmfit from 1.0.3 to 1.1.0
+- update xdoctest requirement from <1.1.1 to <1.1.2 (#155)
+- update openpyxl requirement from <3.0.11 to <3.1.1 (#154)
+- update ipython requirement from <8.8.1 to <8.9.1 (#152)
+- update emcee requirement from <3.1.4 to <3.1.5 (#151)
+- bump pip from 22.3.1 to 23.0 in /.github/workflows (#148)
+- dropped pip-df
+- **deps**: bump numpy 1.24.1
+
 ## v0.4.0 (2023-01-30)
 
 ### Feat
