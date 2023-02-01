@@ -62,7 +62,7 @@ optional-dependencies.tests = [
   "Pygments < 2.14.1",
   "pytest == 7.2.1",
   "typeguard < 2.13.4",
-  "xdoctest < 1.1.1",
+  "xdoctest < 1.1.2",
 ]
 optional-dependencies.dev = [
     "commitizen < 2.40.1",
