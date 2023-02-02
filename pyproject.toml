@@ -67,7 +67,7 @@ optional-dependencies.tests = [
 optional-dependencies.dev = [
     "commitizen < 2.40.1",
     "ipykernel < 6.20.3",
-    "ipython < 8.9.1",
+    # "ipython < 8.9.1",
     "jupyter < 1.0.1",
 ]
 # XXX: docs/requirements-docs for RTD
