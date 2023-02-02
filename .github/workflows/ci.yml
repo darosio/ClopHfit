@@ -1,3 +1,4 @@
+# Run lint, typeguard, mypy and xdoctest, and pytest which triggers coverage
 name: CI
 
 on:
@@ -30,9 +31,6 @@ jobs:
           hatch --version
       - name: Run
         run: hatch run lint:run
-      # - uses: pre-commit/action@v3.0.0
-      #   with:
-      #     extra_args: --hook-stage manual --all-files --show-diff-on-failure
 
   typeguard:
     name: Typeguard
@@ -76,7 +74,6 @@ jobs:
           hatch --version
       - name: Run
         run: |
-          # hatch run tests.py${{ matrix.python }}:sync # needed to use locked deps
           hatch run tests.py${{ matrix.python }}:type
           hatch run tests.py${{ matrix.python }}:xdoc
 
@@ -99,8 +96,6 @@ jobs:
           pip --version
       - name: Install
         run: |
-          # pip install --constraint=requirements-tests.txt coverage[toml] pytest
-          # pip install --constraint=requirements.txt .
           pip install .[tests]
       - name: Run test
         run: |
@@ -120,8 +115,6 @@ jobs:
         uses: actions/checkout@v3
       - name: Set up Python
         uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
       - name: Install pip and hatch
         run: |
           python -m pip install --constraint=.github/workflows/constraints.txt pip
