@@ -100,13 +100,13 @@ resMC = lmfit.minimize(residual, method='emcee', steps=3000,
                        params=res.params, args=(df.x, df.y1), progress=True)
 #+end_src
 
-#+begin_src python
+#+begin_src python :file ../_static/emcee-01.png
 plt.plot(resMC.acceptance_fraction, 'o')
 plt.xlabel('walker')
 plt.ylabel('acceptance frac')
 #+end_src
 
-#+begin_src python
+#+begin_src python :file ../_static/emcee-02.png
 import corner
 
 tr = [v for v in resMC.params.valuesdict().values()]
@@ -305,14 +305,14 @@ lmfit.report_fit(res_emcee)
 #+end_src
 
 
-#+begin_src python
+#+begin_src python :file ../_static/emcee-11.png
 plt.plot(gresMC.acceptance_fraction, 'o')
 plt.xlabel('walker')
 plt.ylabel('acceptance frac')
 #+end_src
 
 
-#+begin_src python
+#+begin_src python :file ../_static/emcee-12.png
 import corner
 
 tr = [v for v in gresMC.params.valuesdict().values()]
@@ -326,7 +326,7 @@ lmfit.report_fit(gresMC.params)
 #+end_src
 
 
-#+begin_src python
+#+begin_src python :eval never-export
 highest_prob = np.argmax(gresMC.lnprob)
 hp_loc = np.unravel_index(highest_prob, gresMC.lnprob.shape)
 mle_soln = gresMC.chain[hp_loc]
@@ -343,7 +343,7 @@ for name, param in pg.items():
 #+end_src
 
 
-#+begin_src python
+#+begin_src python 
 print('\nError estimates from emcee:')
 print('------------------------------------------------------')
 print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')

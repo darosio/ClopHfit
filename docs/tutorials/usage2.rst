@@ -161,7 +161,7 @@ emcee
 
 ::
 
-    100% 3000/3000 [00:16<00:00, 184.59it/s]
+    100% 3000/3000 [00:36<00:00, 81.99it/s]
     The chain is shorter than 50 times the integrated autocorrelation time for 4 parameter(s). Use this estimate with caution and run a longer chain!
     N/50 = 60;
     tau: [ 89.90422082 126.15518337 114.08544671  82.49207071]
@@ -173,7 +173,7 @@ emcee
     plt.xlabel('walker')
     plt.ylabel('acceptance frac')
 
-.. image:: ./.ob-jupyter/980e33ade27f41595fa6db4ad0bd7e9dfc774293.png
+.. image:: ../_static/emcee-01.png
 
 .. code:: python
 
@@ -190,7 +190,7 @@ emcee
     WARNING:root:Too few points to create valid contours
     WARNING:root:Too few points to create valid contours
 
-.. image:: ./.ob-jupyter/d35e1e712f89341b88241ada7bc2557a99438c81.png
+.. image:: ../_static/emcee-02.png
 
 global
 ~~~~~~
@@ -433,7 +433,7 @@ Now global.
 
     ---------------------------------------------------------------------------
     ValueError                                Traceback (most recent call last)
-    Cell In[73], line 16
+    Cell In[79], line 16
          14 plt.plot(df.x, df.y1, "o", xfit, yfit1, "--")
          15 plt.plot(df.x, df.y2, "s", xfit, yfit2, "--")
     ---> 16 ci = lmfit.conf_interval(gmini, gres, sigmas=[1, 0.95])
@@ -493,7 +493,7 @@ Now global.
        1123 self.fab[:] = [fa, fb]
        1125 return _EINPROGRESS, sum(self.ab) / 2.0
 
-    ValueError: a, b must bracket a root f(7.844528e+00)=3.045473e-01, f(7.906050e+00)=2.673105e-01
+    ValueError: a, b must bracket a root f(7.844528e+00)=3.045473e-01, f(7.906050e+00)=2.673105e-01 
 
 .. image:: ../_static/glmfit1.png
 
@@ -544,7 +544,7 @@ emcee
 
 ::
 
-    100% 1800/1800 [03:52<00:00,  7.73it/s]
+    100% 1800/1800 [05:17<00:00,  5.66it/s]
     The chain is shorter than 50 times the integrated autocorrelation time for 5 parameter(s). Use this estimate with caution and run a longer chain!
     N/50 = 36;
     tau: [ 25.20679429  64.86628075  40.01735791  82.79200202 114.97290655
@@ -566,7 +566,8 @@ This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_e
 
 ::
 
-    100% 500/500 [01:08<00:00,  7.35it/s]The chain is shorter than 50 times the integrated autocorrelation time for 6 parameter(s). Use this estimate with caution and run a longer chain!
+    100% 500/500 [01:34<00:00,  5.30it/s]
+    The chain is shorter than 50 times the integrated autocorrelation time for 6 parameter(s). Use this estimate with caution and run a longer chain!
     N/50 = 10;
     tau: [29.23479726 21.62881729 35.43287521 36.66580039 29.46506312 60.95433911]
 
@@ -616,7 +617,7 @@ This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_e
     plt.xlabel('walker')
     plt.ylabel('acceptance frac')
 
-.. image:: ./.ob-jupyter/377ce7593849341ec06c5140ce0a09eb3fb03295.png
+.. image:: ../_static/emcee-11.png
 
 
 .. code:: python
@@ -646,7 +647,7 @@ This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_e
     WARNING:root:Too few points to create valid contours
     WARNING:root:Too few points to create valid contours
 
-.. image:: ./.ob-jupyter/2c0ed839257c12bde8d15706dc2d4b8b251ede85.png
+.. image:: ../_static/emcee-12.png
 
 .. code:: python
 
@@ -694,28 +695,6 @@ This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_e
         print(fmt(name, param.value, gresMC.params[name].value,
                   gresMC.params[name].stderr))
 
-::
-
-
-    Maximum Likelihood Estimation from emcee
-    -------------------------------------------------
-    Parameter  MLE Value   Median Value   Uncertainty
-      K_1        8.07254     8.07257       0.00019
-      S0_1   26601.76042 26601.25423       3.55016
-      S1_1   54034.60852 54034.80793       1.60777
-
-::
-
-    ---------------------------------------------------------------------------
-    TypeError                                 Traceback (most recent call last)
-    Cell In[82], line 12
-         10 fmt = '  {:5s}  {:11.5f} {:11.5f}   {:11.5f}'.format
-         11 for name, param in pg.items():
-    ---> 12     print(fmt(name, param.value, gresMC.params[name].value,
-         13               gresMC.params[name].stderr))
-
-    TypeError: unsupported format string passed to NoneType.__format__
-
 
 .. code:: python
 
@@ -734,65 +713,6 @@ This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_e
         fmt = '  {:5s}   {:8.4f} {:8.4f} {:8.4f} {:8.4f} {:8.4f}'.format
         print(fmt(name, err_m2, err_m1, median, err_p1, err_p2))
 
-::
-
-
-    Error estimates from emcee:
-    ------------------------------------------------------
-    Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma
-      K_1      -0.0585  -0.0002   8.0726   0.0002   0.0290
-      S0_1    -56.6761  -3.3350 26601.2542   3.7673 7942.5507
-      S1_1    -96.6702  -1.3315 54034.8079   1.8852 631.6440
-
-::
-
-    ---------------------------------------------------------------------------
-    KeyError                                  Traceback (most recent call last)
-    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/indexes/base.py:3802, in Index.get_loc(self, key, method, tolerance)
-       3801 try:
-    -> 3802     return self._engine.get_loc(casted_key)
-       3803 except KeyError as err:
-
-    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/_libs/index.pyx:138, in pandas._libs.index.IndexEngine.get_loc()
-
-    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/_libs/index.pyx:165, in pandas._libs.index.IndexEngine.get_loc()
-
-    File pandas/_libs/hashtable_class_helper.pxi:5745, in pandas._libs.hashtable.PyObjectHashTable.get_item()
-
-    File pandas/_libs/hashtable_class_helper.pxi:5753, in pandas._libs.hashtable.PyObjectHashTable.get_item()
-
-    KeyError: 'K_2'
-
-    The above exception was the direct cause of the following exception:
-
-    KeyError                                  Traceback (most recent call last)
-    Cell In[83], line 6
-          3 print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')
-          5 for name in pg.keys():
-    ----> 6     quantiles = np.percentile(gresMC.flatchain[name],
-          7                               [2.275, 15.865, 50, 84.135, 97.275])
-          8     median = quantiles[2]
-          9     err_m2 = quantiles[0] - median
-
-    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/frame.py:3807, in DataFrame.__getitem__(self, key)
-       3805 if self.columns.nlevels > 1:
-       3806     return self._getitem_multilevel(key)
-    -> 3807 indexer = self.columns.get_loc(key)
-       3808 if is_integer(indexer):
-       3809     indexer = [indexer]
-
-    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/indexes/base.py:3804, in Index.get_loc(self, key, method, tolerance)
-       3802     return self._engine.get_loc(casted_key)
-       3803 except KeyError as err:
-    -> 3804     raise KeyError(key) from err
-       3805 except TypeError:
-       3806     # If we have a listlike key, _check_indexing_error will raise
-       3807     #  InvalidIndexError. Otherwise we fall through and re-raise
-       3808     #  the TypeError.
-       3809     self._check_indexing_error(key)
-
-    KeyError: 'K_2'
-
 bootstrap con pandas
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -803,11 +723,6 @@ bootstrap con pandas
         tdf = pd.DataFrame([(j, i) for i in range(7) for j in range(2)]).sample(14, replace=True, ignore_index=False)
         df1 = df[["x", "y1"]].iloc[np.array(tdf[tdf[0]==0][1])]
         df2 = df[["x", "y2"]].iloc[np.array(tdf[tdf[0]==1][1])]
-
-::
-
-    181 ms ± 6.61 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
-
 
 
 .. code:: python
@@ -961,7 +876,7 @@ using R
     Formula: V2 ~ (SB + SA * 10^(pK - V1))/(1 + 10^(pK - V1))
 
     Parameters:
-        Estimate Std. Error t value Pr(>|t|)
+        Estimate Std. Error t value Pr(>|t|)    
     SB 2.664e+04  2.456e+03   10.85  0.00041 ***
     SA 5.404e+04  9.800e+02   55.15 6.47e-07 ***
     pK 8.070e+00  1.494e-01   54.01 7.03e-07 ***
@@ -970,7 +885,7 @@ using R
 
     Residual standard error: 1754 on 4 degrees of freedom
 
-    Number of iterations to convergence: 9
+    Number of iterations to convergence: 9 
     Achieved convergence tolerance: 1.51e-06
 
 .. code:: R
@@ -1072,26 +987,26 @@ using R
 
 
     ------
-    Formula: y ~ mcon1 * (SB1 + SA1 * 10^(pK - V1))/(1 + 10^(pK - V1)) + mcon2 *
+    Formula: y ~ mcon1 * (SB1 + SA1 * 10^(pK - V1))/(1 + 10^(pK - V1)) + mcon2 * 
         (SB2 + SA2 * 10^(pK - V1))/(1 + 10^(pK - V1))
 
     Parameters:
-         Estimate Std. Error t value Pr(>|t|)
+         Estimate Std. Error t value Pr(>|t|)    
     SB1 2.660e+04  1.426e+03  18.658 1.67e-08 ***
     SA1 5.403e+04  6.276e+02  86.092 1.95e-14 ***
     SB2 2.508e+04  1.337e+03  18.760 1.60e-08 ***
-    SA2 1.474e+03  6.169e+02   2.389   0.0407 *
+    SA2 1.474e+03  6.169e+02   2.389   0.0407 *  
     pK  8.073e+00  7.601e-02 106.207 2.95e-15 ***
     ---
     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
     Residual standard error: 1177 on 9 degrees of freedom
 
-    Number of iterations to convergence: 7
+    Number of iterations to convergence: 7 
     Achieved convergence tolerance: 7.71e-07
 
     ------
-    Residual sum of squares: 12500000
+    Residual sum of squares: 12500000 
 
     ------
     t-based confidence interval:
@@ -1175,7 +1090,7 @@ using R
     ------
     Bootstrap statistics
            Estimate   Std. error
-    SB 26516.059610 1930.5821819
+    SB 26516.059610 1930.5821817
     SA 54049.694523  745.3580575
     pK     8.071597    0.1121147
 
@@ -1216,8 +1131,8 @@ using R
 
     ------
     Influential values
-    * Observation 7 is influential on SB
-    * Observation 1 is influential on SA
+    * Observation 7 is influential on SB 
+    * Observation 1 is influential on SA 
     * Observation 7 is influential on pK
 
 lmfit.Model
@@ -1704,20 +1619,20 @@ using R
     Formula: R ~ (R1 * cl + R0 * Kd)/(Kd + cl)
 
     Parameters:
-        Estimate Std. Error t value Pr(>|t|)
+        Estimate Std. Error t value Pr(>|t|)    
     R0  0.607106   0.006197  97.965 0.000104 ***
-    R1  0.043904   0.010314   4.257 0.051000 .
-    Kd 13.661249   0.895076  15.263 0.004265 **
+    R1  0.043904   0.010314   4.257 0.051000 .  
+    Kd 13.661249   0.895076  15.263 0.004265 ** 
     ---
     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
     Residual standard error: 0.006231 on 2 degrees of freedom
 
-    Number of iterations to convergence: 5
+    Number of iterations to convergence: 5 
     Achieved convergence tolerance: 2.164e-06
 
     ------
-    Residual sum of squares: 7.76e-05
+    Residual sum of squares: 7.76e-05 
 
     ------
     t-based confidence interval:
@@ -1837,12 +1752,12 @@ using R
 
     ------
     Influential values
-    * Observation 1 is influential on R0
-    * Observation 1 is influential on R1
-    * Observation 2 is influential on R1
-    * Observation 5 is influential on R1
-    * Observation 1 is influential on Kd
-    * Observation 2 is influential on Kd
+    * Observation 1 is influential on R0 
+    * Observation 1 is influential on R1 
+    * Observation 2 is influential on R1 
+    * Observation 5 is influential on R1 
+    * Observation 1 is influential on Kd 
+    * Observation 2 is influential on Kd 
     * Observation 5 is influential on Kd
 
 Old scripts

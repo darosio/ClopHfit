@@ -4,6 +4,7 @@
 
 * How to use this file                                                  :noexport:
 =C-c C-e r r= to export to usage.rst file, which will be used by sphinx.
+When prompted start R in docs/tutorials.
 
 * Fitting
 Requires:
