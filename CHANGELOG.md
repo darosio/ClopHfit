@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.4 (2023-02-03)
+
+### Fix
+
+- **docs**: emcee sections
+
 ## v0.4.3 (2023-02-03)
 
 ### Build
