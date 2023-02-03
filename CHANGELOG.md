@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.4.3 (2023-02-03)
+
+### Build
+
+- update ipykernel requirement from <6.20.3 to <6.21.2 (#156)
+- **docs**: use stable-python 3.11; update docs and style cleaning
+
 ## v0.4.2 (2023-02-01)
 
 ### Fix
