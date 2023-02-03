@@ -493,7 +493,7 @@ Now global.
        1123 self.fab[:] = [fa, fb]
        1125 return _EINPROGRESS, sum(self.ab) / 2.0
 
-    ValueError: a, b must bracket a root f(7.844528e+00)=3.045473e-01, f(7.906050e+00)=2.673105e-01 
+    ValueError: a, b must bracket a root f(7.844528e+00)=3.045473e-01, f(7.906050e+00)=2.673105e-01
 
 .. image:: ../_static/glmfit1.png
 
@@ -876,7 +876,7 @@ using R
     Formula: V2 ~ (SB + SA * 10^(pK - V1))/(1 + 10^(pK - V1))
 
     Parameters:
-        Estimate Std. Error t value Pr(>|t|)    
+        Estimate Std. Error t value Pr(>|t|)
     SB 2.664e+04  2.456e+03   10.85  0.00041 ***
     SA 5.404e+04  9.800e+02   55.15 6.47e-07 ***
     pK 8.070e+00  1.494e-01   54.01 7.03e-07 ***
@@ -885,7 +885,7 @@ using R
 
     Residual standard error: 1754 on 4 degrees of freedom
 
-    Number of iterations to convergence: 9 
+    Number of iterations to convergence: 9
     Achieved convergence tolerance: 1.51e-06
 
 .. code:: R
@@ -987,26 +987,26 @@ using R
 
 
     ------
-    Formula: y ~ mcon1 * (SB1 + SA1 * 10^(pK - V1))/(1 + 10^(pK - V1)) + mcon2 * 
+    Formula: y ~ mcon1 * (SB1 + SA1 * 10^(pK - V1))/(1 + 10^(pK - V1)) + mcon2 *
         (SB2 + SA2 * 10^(pK - V1))/(1 + 10^(pK - V1))
 
     Parameters:
-         Estimate Std. Error t value Pr(>|t|)    
+         Estimate Std. Error t value Pr(>|t|)
     SB1 2.660e+04  1.426e+03  18.658 1.67e-08 ***
     SA1 5.403e+04  6.276e+02  86.092 1.95e-14 ***
     SB2 2.508e+04  1.337e+03  18.760 1.60e-08 ***
-    SA2 1.474e+03  6.169e+02   2.389   0.0407 *  
+    SA2 1.474e+03  6.169e+02   2.389   0.0407 *
     pK  8.073e+00  7.601e-02 106.207 2.95e-15 ***
     ---
     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
     Residual standard error: 1177 on 9 degrees of freedom
 
-    Number of iterations to convergence: 7 
+    Number of iterations to convergence: 7
     Achieved convergence tolerance: 7.71e-07
 
     ------
-    Residual sum of squares: 12500000 
+    Residual sum of squares: 12500000
 
     ------
     t-based confidence interval:
@@ -1131,8 +1131,8 @@ using R
 
     ------
     Influential values
-    * Observation 7 is influential on SB 
-    * Observation 1 is influential on SA 
+    * Observation 7 is influential on SB
+    * Observation 1 is influential on SA
     * Observation 7 is influential on pK
 
 lmfit.Model
@@ -1619,20 +1619,20 @@ using R
     Formula: R ~ (R1 * cl + R0 * Kd)/(Kd + cl)
 
     Parameters:
-        Estimate Std. Error t value Pr(>|t|)    
+        Estimate Std. Error t value Pr(>|t|)
     R0  0.607106   0.006197  97.965 0.000104 ***
-    R1  0.043904   0.010314   4.257 0.051000 .  
-    Kd 13.661249   0.895076  15.263 0.004265 ** 
+    R1  0.043904   0.010314   4.257 0.051000 .
+    Kd 13.661249   0.895076  15.263 0.004265 **
     ---
     Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
 
     Residual standard error: 0.006231 on 2 degrees of freedom
 
-    Number of iterations to convergence: 5 
+    Number of iterations to convergence: 5
     Achieved convergence tolerance: 2.164e-06
 
     ------
-    Residual sum of squares: 7.76e-05 
+    Residual sum of squares: 7.76e-05
 
     ------
     t-based confidence interval:
@@ -1752,12 +1752,12 @@ using R
 
     ------
     Influential values
-    * Observation 1 is influential on R0 
-    * Observation 1 is influential on R1 
-    * Observation 2 is influential on R1 
-    * Observation 5 is influential on R1 
-    * Observation 1 is influential on Kd 
-    * Observation 2 is influential on Kd 
+    * Observation 1 is influential on R0
+    * Observation 1 is influential on R1
+    * Observation 2 is influential on R1
+    * Observation 5 is influential on R1
+    * Observation 1 is influential on Kd
+    * Observation 2 is influential on Kd
     * Observation 5 is influential on Kd
 
 Old scripts

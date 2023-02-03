@@ -343,7 +343,7 @@ for name, param in pg.items():
 #+end_src
 
 
-#+begin_src python 
+#+begin_src python
 print('\nError estimates from emcee:')
 print('------------------------------------------------------')
 print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')
