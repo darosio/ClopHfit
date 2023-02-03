@@ -6,6 +6,8 @@ on:
   #   workflows: ["CI"]
   #   types:
   #     - completed
+env:
+  STABLE_PYTHON_VERSION: "3.11"
 
 jobs:
   testpypi:
@@ -16,8 +18,10 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v3
-      - name: Set up Python
+      - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
         uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.STABLE_PYTHON_VERSION }}
       - name: Get version
         id: version
         run: |
