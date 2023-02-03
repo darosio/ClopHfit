@@ -1,4 +1,4 @@
-#+PROPERTY: header-args:python :kernel cloph-310 :pandoc t
+#+PROPERTY: header-args:python :kernel python3 :pandoc t
 #+PROPERTY: header-args :outputs both :results output :exports both
 #+OPTIONS: toc:nil num:nil
 
@@ -89,10 +89,10 @@ lmfit.printfuncs.report_ci(ci)
 print(lmfit.ci_report(ci, with_offset=False, ndigits=2))
 #+end_src
 
-*** emcee                                                               :noexport:
-:PROPERTIES:
-:header-args: :eval never-export
-:END:
+*** emcee
+# :PROPERTIES:
+# :header-args: :eval never-export
+# :END:
 #+begin_src python
 res.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(1e4))
 resMC = lmfit.minimize(residual, method='emcee', steps=3000,
@@ -219,7 +219,6 @@ plt.plot(df.x, df.y1, "o", df.x, fit, "--")
 ci = lmfit.conf_interval(mini, res, sigmas=[1, 2])
 lmfit.printfuncs.report_ci(ci)
 #+end_src
-
 Now global.
 
 #+begin_src python :file ../_static/glmfit1.png
@@ -241,7 +240,6 @@ plt.plot(df.x, df.y2, "s", xfit, yfit2, "--")
 ci = lmfit.conf_interval(gmini, gres, sigmas=[1, 0.95])
 print(lmfit.ci_report(ci, with_offset=False, ndigits=2))
 #+end_src
-
 To plot ci for the 5 parameters.
 
 #+begin_src python :file ../_static/glmfit2.png
@@ -273,10 +271,10 @@ axes[3].set_ylabel('pK1')
 plt.plot(np.r_[df.x, df.x], gres.residual, "o")
 #+end_src
 
-**** emcee                                                              :noexport:
-:PROPERTIES:
-:header-args: :eval never-export
-:END:
+**** emcee
+# :PROPERTIES:
+# :header-args: :eval never-export
+# :END:
 #+begin_src python
 gmini.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(2))
 gresMC = lmfit.minimize(gobjective, method='emcee', steps=1800, #workers=8,
@@ -322,7 +320,6 @@ emcee_plot = corner.corner(gresMC.flatchain, labels=gresMC.var_names,
                             # truths=list(gresMC.params.valuesdict().values()))
                             truths=tr[:-1])
 #+end_src
-
 
 #+begin_src python
 lmfit.report_fit(gresMC.params)
@@ -515,6 +512,7 @@ fz <- function(x, SA1, SB1, SA2, SB2, pK){
 https://stats.stackexchange.com/questions/44246/nls-curve-fitting-of-nested-shared-parameters
 
 #+begin_src R :session "global"
+library("nlstools")
 n1 <- length(d$V2)
 n2 <- length(d$V3)
 

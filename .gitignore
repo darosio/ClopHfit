@@ -45,6 +45,9 @@ docs/_build/
 .ipynb*
 .ob-jupyter
 
+# R
+.Rhistory
+
 # Emacs buffers
 .#*
 

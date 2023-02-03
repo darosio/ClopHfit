@@ -131,12 +131,12 @@ It computes the Jacobian of the fz. Mind that the residual (i.e. y - fz) will be
         C(S1, K)  = -0.455
         C(S0, S1) = 0.205
     None
-    /home/dan/.cache/pypoetry/virtualenvs/clophfit-wybmBk-3-py3.10/lib/python3.10/site-packages/lmfit/confidence.py:317: UserWarning: Bound reached with prob(S0=0.0) = 0.9944737517916578 < max(sigmas)
+    /home/dan/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/lmfit/confidence.py:317: UserWarning: Bound reached with prob(S0=0.0) = 0.9944737517813054 < max(sigmas)
       warn(errmsg)
            99.73%    95.45%    68.27%    _BEST_    68.27%    95.45%    99.73%
-     S0:      -inf-8376.31272-2895.8160526638.83771+2559.08132+5999.44849+12360.75466
-     S1:-6192.81252-2734.36804-1098.2700354043.35921+1113.02721+2829.64900+6725.55802
-     K :  -0.98141  -0.40198  -0.15954   8.06961  +0.16277  +0.42601  +1.17275
+     S0:      -inf-8376.38956-2895.5618126638.83771+2558.77424+5999.31275+12360.60692
+     S1:-6192.81418-2734.30623-1098.2204254043.35921+1113.18257+2829.54298+6725.37841
+     K :  -0.98139  -0.40197  -0.15949   8.06961  +0.16276  +0.42591  +1.17272
 
 .. code:: python
 
@@ -145,9 +145,52 @@ It computes the Jacobian of the fz. Mind that the residual (i.e. y - fz) will be
 ::
 
        99.73% 95.45% 68.27% _BEST_ 68.27% 95.45% 99.73%
-    S0:   -inf18262.5223743.0226638.8429197.9232638.2938999.59
-    S1:47850.5551308.9952945.0954043.3655156.3956873.0160768.92
+    S0:   -inf18262.4523743.2826638.8429197.6132638.1538999.44
+    S1:47850.5551309.0552945.1454043.3655156.5456872.9060768.74
     K :   7.09   7.67   7.91   8.07   8.23   8.50   9.24
+
+emcee
+^^^^^
+
+.. code:: python
+
+    res.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(1e4))
+    resMC = lmfit.minimize(residual, method='emcee', steps=3000,
+                            nan_policy='omit', is_weighted=False, burn=300, thin=1,
+                           params=res.params, args=(df.x, df.y1), progress=True)
+
+::
+
+    100% 3000/3000 [00:16<00:00, 184.59it/s]
+    The chain is shorter than 50 times the integrated autocorrelation time for 4 parameter(s). Use this estimate with caution and run a longer chain!
+    N/50 = 60;
+    tau: [ 89.90422082 126.15518337 114.08544671  82.49207071]
+
+
+.. code:: python
+
+    plt.plot(resMC.acceptance_fraction, 'o')
+    plt.xlabel('walker')
+    plt.ylabel('acceptance frac')
+
+.. image:: ./.ob-jupyter/980e33ade27f41595fa6db4ad0bd7e9dfc774293.png
+
+.. code:: python
+
+    import corner
+
+    tr = [v for v in resMC.params.valuesdict().values()]
+    emcee_plot = corner.corner(resMC.flatchain, labels=resMC.var_names,
+                                truths=list(resMC.params.valuesdict().values()))
+                                # truths=tr[:-1])
+
+::
+
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+
+.. image:: ./.ob-jupyter/d35e1e712f89341b88241ada7bc2557a99438c81.png
 
 global
 ~~~~~~
@@ -214,10 +257,10 @@ using lmfit with np.r\_ trick
         C(S1_1, S1_2) = -0.114
           95.00% 68.00% _BEST_ 68.00% 95.00%
      K   :   7.91   7.99   8.07   8.15   8.24
-     S0_1:23211.0525078.8626601.3428045.6029623.57
-     S0_2:22232.9323723.8825084.4226514.6328263.50
-     S1_1:52628.9553378.2154034.5854695.3355460.20
-     S1_2:  72.04 824.011473.582118.962855.89
+     S0_1:23210.9025078.6226601.3428045.4929623.53
+     S0_2:22232.9723723.9425084.4226514.8828263.75
+     S1_1:52629.0453378.2454034.5854695.2655460.17
+     S1_2:  72.04 824.011473.582118.982855.89
 
 .. code:: python
 
@@ -313,7 +356,7 @@ Here single.
 
     [[Fit Statistics]]
         # fitting method   = leastsq
-        # function evals   = 21
+        # function evals   = 25
         # data points      = 7
         # variables        = 3
         chi-square         = 12308015.2
@@ -321,18 +364,18 @@ Here single.
         Akaike info crit   = 106.658958
         Bayesian info crit = 106.496688
     [[Variables]]
-        K_1:   8.06960613 +/- 0.14940741 (1.85%) (init = 7)
-        S0_1:  26638.8986 +/- 2456.00903 (9.22%) (init = 29657)
-        S1_1:  54043.3735 +/- 979.988299 (1.81%) (init = 51205)
+        K_1:   8.06961101 +/- 0.14940677 (1.85%) (init = 7)
+        S0_1:  26638.8364 +/- 2455.91626 (9.22%) (init = 29657)
+        S1_1:  54043.3589 +/- 979.996129 (1.81%) (init = 51205)
     [[Correlations]] (unreported correlations are < 0.100)
         C(K_1, S0_1)  = -0.775
         C(K_1, S1_1)  = -0.455
         C(S0_1, S1_1) = 0.205
     None
              95.45%    68.27%    _BEST_    68.27%    95.45%
-     K_1 :  -0.40198  -0.15949   8.06961  +0.16280  +0.42600
-     S0_1:-8376.44818-2895.6394026638.89865+2558.73767+5999.17525
-     S1_1:-2734.33515-1098.1520854043.37347+1113.16573+2829.73022
+     K_1 :  -0.40197  -0.15949   8.06961  +0.16276  +0.42592
+     S0_1:-8376.38827-2895.5605426638.83642+2558.77552+5999.33126
+     S1_1:-2734.30657-1098.2200654043.35891+1113.18279+2829.55530
 
 .. image:: ../_static/glmfit0.png
 
@@ -385,12 +428,72 @@ Now global.
         C(S1_1, S0_2) = -0.226
         C(S0_1, S1_2) = -0.215
         C(S1_1, S1_2) = -0.114
-          68.27% 95.00% _BEST_ 95.00% 68.27%
-     K_1 :   7.99   7.91   8.07   8.24   8.15
-     S0_1:25069.5423210.8726601.3429623.5528053.90
-     S1_1:53374.3452629.0554034.5855460.7554699.26
-     S0_2:23716.0522232.9625084.4228263.6826523.38
-     S1_2: 820.17  72.041473.582855.882122.77
+
+::
+
+    ---------------------------------------------------------------------------
+    ValueError                                Traceback (most recent call last)
+    Cell In[73], line 16
+         14 plt.plot(df.x, df.y1, "o", xfit, yfit1, "--")
+         15 plt.plot(df.x, df.y2, "s", xfit, yfit2, "--")
+    ---> 16 ci = lmfit.conf_interval(gmini, gres, sigmas=[1, 0.95])
+         17 print(lmfit.ci_report(ci, with_offset=False, ndigits=2))
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/lmfit/confidence.py:143, in conf_interval(minimizer, result, p_names, sigmas, trace, maxiter, verbose, prob_func)
+        139     sigmas = [1, 2, 3]
+        141 ci = ConfidenceInterval(minimizer, result, p_names, prob_func, sigmas,
+        142                         trace, verbose, maxiter)
+    --> 143 output = ci.calc_all_ci()
+        144 if trace:
+        145     return output, ci.trace_dict
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/lmfit/confidence.py:218, in ConfidenceInterval.calc_all_ci(self)
+        215 out = {}
+        217 for p in self.p_names:
+    --> 218     out[p] = (self.calc_ci(p, -1)[::-1] +
+        219               [(0., self.params[p].value)] +
+        220               self.calc_ci(p, 1))
+        221 if self.trace:
+        222     self.trace_dict = map_trace_to_names(self.trace_dict, self.params)
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/lmfit/confidence.py:258, in ConfidenceInterval.calc_ci(self, para, direction)
+        255     ret.append((prob, direction*np.inf))
+        256     continue
+    --> 258 sol = root_scalar(calc_prob, method='toms748', bracket=sorted([limit, a_limit]), rtol=.5e-4, args=(prob,))
+        259 if sol.converged:
+        260     val = sol.root
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/scipy/optimize/_root_scalar.py:275, in root_scalar(f, args, method, bracket, fprime, fprime2, x0, x1, xtol, rtol, maxiter, options)
+        272         raise ValueError('Bracket needed for %s' % method)
+        274     a, b = bracket[:2]
+    --> 275     r, sol = methodc(f, a, b, args=args, **kwargs)
+        276 elif meth in ['secant']:
+        277     if x0 is None:
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/scipy/optimize/_zeros_py.py:1374, in toms748(f, a, b, args, k, xtol, rtol, maxiter, full_output, disp)
+       1372     args = (args,)
+       1373 solver = TOMS748Solver()
+    -> 1374 result = solver.solve(f, a, b, args=args, k=k, xtol=xtol, rtol=rtol,
+       1375                       maxiter=maxiter, disp=disp)
+       1376 x, function_calls, iterations, flag = result
+       1377 return _results_select(full_output, (x, function_calls, iterations, flag))
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/scipy/optimize/_zeros_py.py:1221, in TOMS748Solver.solve(self, f, a, b, args, xtol, rtol, k, maxiter, disp)
+       1219 r"""Solve f(x) = 0 given an interval containing a zero."""
+       1220 self.configure(xtol=xtol, rtol=rtol, maxiter=maxiter, disp=disp, k=k)
+    -> 1221 status, xn = self.start(f, a, b, args)
+       1222 if status == _ECONVERGED:
+       1223     return self.get_result(xn)
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/scipy/optimize/_zeros_py.py:1121, in TOMS748Solver.start(self, f, a, b, args)
+       1118     return _ECONVERGED, b
+       1120 if np.sign(fb) * np.sign(fa) > 0:
+    -> 1121     raise ValueError("a, b must bracket a root f(%e)=%e, f(%e)=%e " %
+       1122                      (a, fa, b, fb))
+       1123 self.fab[:] = [fa, fb]
+       1125 return _EINPROGRESS, sum(self.ab) / 2.0
+
+    ValueError: a, b must bracket a root f(7.844528e+00)=3.045473e-01, f(7.906050e+00)=2.673105e-01
 
 .. image:: ../_static/glmfit1.png
 
@@ -429,6 +532,267 @@ To plot ci for the 5 parameters.
 
 .. image:: ../_static/glmfit3.png
 
+emcee
+:::::
+
+.. code:: python
+
+    gmini.params.add('__lnsigma', value=np.log(.1), min=np.log(0.001), max=np.log(2))
+    gresMC = lmfit.minimize(gobjective, method='emcee', steps=1800, #workers=8,
+                            nan_policy='omit', burn=30, is_weighted=False, #thin=20,
+                            params=gmini.params, args=([df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]), progress=True)
+
+::
+
+    100% 1800/1800 [03:52<00:00,  7.73it/s]
+    The chain is shorter than 50 times the integrated autocorrelation time for 5 parameter(s). Use this estimate with caution and run a longer chain!
+    N/50 = 36;
+    tau: [ 25.20679429  64.86628075  40.01735791  82.79200202 114.97290655
+      87.1914766 ]
+
+
+
+This next block comes from: `https://lmfit.github.io/lmfit-py/examples/example_emcee_Model_interface.html?highlight=emcee <https://lmfit.github.io/lmfit-py/examples/example_emcee_Model_interface.html?highlight=emcee>`_
+
+.. code:: python
+
+    emcee_kws = dict(steps=5000, burn=500, thin=20, is_weighted=False,)
+    emcee_params = gmini.params.copy()
+    emcee_params.add('__lnsigma', value=np.log(0.1), min=np.log(0.001), max=np.log(2.0))
+
+    mi = lmfit.Minimizer(gobjective, emcee_params, fcn_args=([df.x, df.x], [df.y1, df.y2], [titration_pH, titration_pH]))
+
+    res_emcee = mi.minimize(method="emcee", steps=500, burn=50, thin=20, is_weighted=False)
+
+::
+
+    100% 500/500 [01:08<00:00,  7.35it/s]The chain is shorter than 50 times the integrated autocorrelation time for 6 parameter(s). Use this estimate with caution and run a longer chain!
+    N/50 = 10;
+    tau: [29.23479726 21.62881729 35.43287521 36.66580039 29.46506312 60.95433911]
+
+
+
+.. code:: python
+
+    # result_emcee = model.fit(data=y, x=x, params=emcee_params, method='emcee',
+    #                          nan_policy='omit', fit_kws=emcee_kws)
+
+    lmfit.report_fit(res_emcee)
+
+::
+
+    [[Fit Statistics]]
+        # fitting method   = emcee
+        # function evals   = 50000
+        # data points      = 14
+        # variables        = 6
+        chi-square         = 3126257.04
+        reduced chi-square = 390782.130
+        Akaike info crit   = 184.428056
+        Bayesian info crit = 188.262400
+    [[Variables]]
+        K_1:        8.07253629 +/- 0.02377606 (0.29%) (init = 8.072551)
+        S0_1:       26607.0352 +/- 221.686080 (0.83%) (init = 26601.34)
+        S1_1:       54031.8395 +/- 593.213078 (1.10%) (init = 54034.58)
+        K_2:        8.07253629 == 'K_1'
+        S0_2:       25011.8630 +/- 1294.50486 (5.18%) (init = 25084.42)
+        S1_2:       1473.83633 +/- 88.7501077 (6.02%) (init = 1473.579)
+        __lnsigma:  0.69209236 +/- 0.11961456 (17.28%) (init = -2.302585)
+    [[Correlations]] (unreported correlations are < 0.100)
+        C(S1_1, S0_2) = 0.913
+        C(S0_1, S0_2) = -0.666
+        C(S0_1, S1_1) = -0.632
+        C(K_1, S0_1)  = -0.373
+        C(K_1, S1_1)  = -0.265
+        C(S0_2, S1_2) = -0.239
+        C(K_1, S1_2)  = 0.238
+        C(S1_1, S1_2) = -0.215
+        C(K_1, S0_2)  = -0.201
+
+
+.. code:: python
+
+    plt.plot(gresMC.acceptance_fraction, 'o')
+    plt.xlabel('walker')
+    plt.ylabel('acceptance frac')
+
+.. image:: ./.ob-jupyter/377ce7593849341ec06c5140ce0a09eb3fb03295.png
+
+
+.. code:: python
+
+    import corner
+
+    tr = [v for v in gresMC.params.valuesdict().values()]
+    emcee_plot = corner.corner(gresMC.flatchain, labels=gresMC.var_names,
+                                # truths=list(gresMC.params.valuesdict().values()))
+                                truths=tr[:-1])
+
+::
+
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+    WARNING:root:Too few points to create valid contours
+
+.. image:: ./.ob-jupyter/2c0ed839257c12bde8d15706dc2d4b8b251ede85.png
+
+.. code:: python
+
+    lmfit.report_fit(gresMC.params)
+
+::
+
+    [[Variables]]
+        K_1:        8.07256863 +/- 1.8571e-04 (0.00%) (init = 8.072551)
+        S0_1:       26601.2542 +/- 3.55016167 (0.01%) (init = 26601.34)
+        S1_1:       54034.8079 +/- 1.60777173 (0.00%) (init = 54034.58)
+        K_2:        8.07256863 == 'K_1'
+        S0_2:       25084.6292 +/- 3.32916391 (0.01%) (init = 25084.42)
+        S1_2:       1473.87013 +/- 4.74264114 (0.32%) (init = 1473.579)
+        __lnsigma:  0.69314685 +/- 2.5390e-05 (0.00%) (init = -2.302585)
+    [[Correlations]] (unreported correlations are < 0.100)
+        C(S0_1, S1_2)      = 0.914
+        C(S0_2, S1_2)      = 0.698
+        C(K_1, S0_1)       = -0.587
+        C(K_1, S1_1)       = -0.545
+        C(S0_1, S1_1)      = 0.479
+        C(S0_1, S0_2)      = 0.475
+        C(S1_1, S1_2)      = 0.465
+        C(K_1, S1_2)       = -0.379
+        C(S0_2, __lnsigma) = -0.165
+        C(S0_1, __lnsigma) = -0.157
+        C(S1_1, S0_2)      = 0.156
+        C(S1_2, __lnsigma) = -0.156
+        C(K_1, __lnsigma)  = 0.133
+
+
+.. code:: python
+
+    highest_prob = np.argmax(gresMC.lnprob)
+    hp_loc = np.unravel_index(highest_prob, gresMC.lnprob.shape)
+    mle_soln = gresMC.chain[hp_loc]
+    for i, par in enumerate(pg):
+        pg[par].value = mle_soln[i]
+
+    print('\nMaximum Likelihood Estimation from emcee       ')
+    print('-------------------------------------------------')
+    print('Parameter  MLE Value   Median Value   Uncertainty')
+    fmt = '  {:5s}  {:11.5f} {:11.5f}   {:11.5f}'.format
+    for name, param in pg.items():
+        print(fmt(name, param.value, gresMC.params[name].value,
+                  gresMC.params[name].stderr))
+
+::
+
+
+    Maximum Likelihood Estimation from emcee
+    -------------------------------------------------
+    Parameter  MLE Value   Median Value   Uncertainty
+      K_1        8.07254     8.07257       0.00019
+      S0_1   26601.76042 26601.25423       3.55016
+      S1_1   54034.60852 54034.80793       1.60777
+
+::
+
+    ---------------------------------------------------------------------------
+    TypeError                                 Traceback (most recent call last)
+    Cell In[82], line 12
+         10 fmt = '  {:5s}  {:11.5f} {:11.5f}   {:11.5f}'.format
+         11 for name, param in pg.items():
+    ---> 12     print(fmt(name, param.value, gresMC.params[name].value,
+         13               gresMC.params[name].stderr))
+
+    TypeError: unsupported format string passed to NoneType.__format__
+
+
+.. code:: python
+
+    print('\nError estimates from emcee:')
+    print('------------------------------------------------------')
+    print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')
+
+    for name in pg.keys():
+        quantiles = np.percentile(gresMC.flatchain[name],
+                                  [2.275, 15.865, 50, 84.135, 97.275])
+        median = quantiles[2]
+        err_m2 = quantiles[0] - median
+        err_m1 = quantiles[1] - median
+        err_p1 = quantiles[3] - median
+        err_p2 = quantiles[4] - median
+        fmt = '  {:5s}   {:8.4f} {:8.4f} {:8.4f} {:8.4f} {:8.4f}'.format
+        print(fmt(name, err_m2, err_m1, median, err_p1, err_p2))
+
+::
+
+
+    Error estimates from emcee:
+    ------------------------------------------------------
+    Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma
+      K_1      -0.0585  -0.0002   8.0726   0.0002   0.0290
+      S0_1    -56.6761  -3.3350 26601.2542   3.7673 7942.5507
+      S1_1    -96.6702  -1.3315 54034.8079   1.8852 631.6440
+
+::
+
+    ---------------------------------------------------------------------------
+    KeyError                                  Traceback (most recent call last)
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/indexes/base.py:3802, in Index.get_loc(self, key, method, tolerance)
+       3801 try:
+    -> 3802     return self._engine.get_loc(casted_key)
+       3803 except KeyError as err:
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/_libs/index.pyx:138, in pandas._libs.index.IndexEngine.get_loc()
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/_libs/index.pyx:165, in pandas._libs.index.IndexEngine.get_loc()
+
+    File pandas/_libs/hashtable_class_helper.pxi:5745, in pandas._libs.hashtable.PyObjectHashTable.get_item()
+
+    File pandas/_libs/hashtable_class_helper.pxi:5753, in pandas._libs.hashtable.PyObjectHashTable.get_item()
+
+    KeyError: 'K_2'
+
+    The above exception was the direct cause of the following exception:
+
+    KeyError                                  Traceback (most recent call last)
+    Cell In[83], line 6
+          3 print('Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma')
+          5 for name in pg.keys():
+    ----> 6     quantiles = np.percentile(gresMC.flatchain[name],
+          7                               [2.275, 15.865, 50, 84.135, 97.275])
+          8     median = quantiles[2]
+          9     err_m2 = quantiles[0] - median
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/frame.py:3807, in DataFrame.__getitem__(self, key)
+       3805 if self.columns.nlevels > 1:
+       3806     return self._getitem_multilevel(key)
+    -> 3807 indexer = self.columns.get_loc(key)
+       3808 if is_integer(indexer):
+       3809     indexer = [indexer]
+
+    File ~/workspace/ClopHfit/.hatch/clophfit/lib/python3.10/site-packages/pandas/core/indexes/base.py:3804, in Index.get_loc(self, key, method, tolerance)
+       3802     return self._engine.get_loc(casted_key)
+       3803 except KeyError as err:
+    -> 3804     raise KeyError(key) from err
+       3805 except TypeError:
+       3806     # If we have a listlike key, _check_indexing_error will raise
+       3807     #  InvalidIndexError. Otherwise we fall through and re-raise
+       3808     #  the TypeError.
+       3809     self._check_indexing_error(key)
+
+    KeyError: 'K_2'
+
 bootstrap con pandas
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -439,6 +803,11 @@ bootstrap con pandas
         tdf = pd.DataFrame([(j, i) for i in range(7) for j in range(2)]).sample(14, replace=True, ignore_index=False)
         df1 = df[["x", "y1"]].iloc[np.array(tdf[tdf[0]==0][1])]
         df2 = df[["x", "y2"]].iloc[np.array(tdf[tdf[0]==1][1])]
+
+::
+
+    181 ms ± 6.61 ms per loop (mean ± std. dev. of 7 runs, 1 loop each)
+
 
 
 .. code:: python
@@ -503,7 +872,7 @@ bootstrap con pandas
 
 ::
 
-    array([7.97738269, 8.0781979 , 8.64988786])
+    array([7.97738191, 8.0781979 , 8.64995886])
 
 
 .. code:: python
@@ -631,6 +1000,7 @@ using R
 
 .. code:: R
 
+    library("nlstools")
     n1 <- length(d$V2)
     n2 <- length(d$V3)
 
@@ -659,10 +1029,20 @@ using R
 
 ::
 
-    Error in confint2(fitg) : could not find function "confint2"
-    Error in confint2(fit1) : could not find function "confint2"
-    Error in confint2(fit2) : could not find function "confint2"
-
+               2.5 %       97.5 %
+    SB1 23376.154137 29826.554415
+    SA1 52614.760849 55454.403951
+    SB2 22059.687893 28109.136342
+    SA2    77.955582  2869.198281
+    pK      7.900608     8.244491
+              2.5 %      97.5 %
+    SB1 19820.10513 33457.59221
+    SA1 51322.45855 56764.26498
+    pK      7.65479     8.48443
+               2.5 %       97.5 %
+    SB2 24352.669239 25919.322982
+    SA2  1175.819778  1795.244474
+    pK      8.022244     8.132196
 
 .. code:: R
 
@@ -865,6 +1245,7 @@ It is not possible to do global fitting. In the documentation it is stressed the
         reduced chi-square = 3077003.79
         Akaike info crit   = 106.658958
         Bayesian info crit = 106.496688
+        R-squared          = 0.97973543
     [[Variables]]
         SB:  26638.8739 +/- 2455.97231 (9.22%) (init = 7000)
         SA:  54043.3677 +/- 979.991414 (1.81%) (init = 10000)
@@ -890,9 +1271,9 @@ It is not possible to do global fitting. In the documentation it is stressed the
 ::
 
           99.73%    95.45%    68.27%    _BEST_    68.27%    95.45%    99.73%
-    SB:-85235.84240-8376.51674-2895.7710426638.87391+2559.04377+5999.41226+12360.71867
-    SA:-6192.82104-2734.37653-1098.2784954043.36770+1113.01884+2829.64051+6725.54942
-    pK:  -0.98141  -0.40197  -0.15954   8.06961  +0.16276  +0.42586  +1.50915
+    SB:-85235.77732-8376.43993-2895.5980126638.87391+2558.73803+5999.27655+12360.57068
+    SA:-6192.82267-2734.31472-1098.2289154043.36770+1113.17408+2829.53449+6725.36991
+    pK:  -0.98139  -0.40197  -0.15948   8.06961  +0.16277  +0.42592  +1.50918
 
 
 which is faster but still I failed to find the way to global fitting.
@@ -934,17 +1315,18 @@ which is faster but still I failed to find the way to global fitting.
         Model(tit_pH, prefix='ds1_')
     [[Fit Statistics]]
         # fitting method   = leastsq
-        # function evals   = 21
+        # function evals   = 25
         # data points      = 7
         # variables        = 3
         chi-square         = 12308015.2
         reduced chi-square = 3077003.79
         Akaike info crit   = 106.658958
         Bayesian info crit = 106.496688
+        R-squared          = 0.97973543
     [[Variables]]
-        ds1_S0:  26638.8986 +/- 2456.00903 (9.22%) (init = 29657)
-        ds1_S1:  54043.3735 +/- 979.988299 (1.81%) (init = 51205)
-        ds1_K:   8.06960613 +/- 0.14940741 (1.85%) (init = 7)
+        ds1_S0:  26638.8364 +/- 2455.91626 (9.22%) (init = 29657)
+        ds1_S1:  54043.3589 +/- 979.996129 (1.81%) (init = 51205)
+        ds1_K:   8.06961101 +/- 0.14940677 (1.85%) (init = 7)
     [[Correlations]] (unreported correlations are < 0.100)
         C(ds1_S0, ds1_K)  = -0.775
         C(ds1_S1, ds1_K)  = -0.455
@@ -960,6 +1342,7 @@ which is faster but still I failed to find the way to global fitting.
         reduced chi-square = 39995.1326
         Akaike info crit   = 76.2582808
         Bayesian info crit = 76.0960112
+        R-squared          = 0.99963719
     [[Variables]]
         ds2_S0:  25135.9917 +/- 282.132353 (1.12%) (init = 29657)
         ds2_S1:  1485.53109 +/- 111.550019 (7.51%) (init = 51205)
@@ -1021,6 +1404,7 @@ Please mind the difference in the uncertainty between the 2 label blocks.
         reduced chi-square = 1385719.25
         Akaike info crit   = 201.798560
         Bayesian info crit = 204.993846
+        R-squared          = 0.99794717
     [[Variables]]
         S0_1:  26601.3422 +/- 1425.69369 (5.36%) (init = 29657)
         S0_2:  25084.4220 +/- 1337.07555 (5.33%) (init = 22885)
@@ -1067,10 +1451,10 @@ Please mind the difference in the uncertainty between the 2 label blocks.
 
 ::
 
-       95.45% _BEST_ 95.45%
-    SA:4511.626052.527512.33
-    SB:34609.5935544.4436492.96
-    pK:   6.60   6.70   6.80
+       99.73% 95.45% 68.27% _BEST_ 68.27% 95.45% 99.73%
+    SA:2338.404511.625450.156052.536642.137512.329321.96
+    SB:33406.9634609.8235170.9935544.4435920.0736492.8937756.24
+    pK:   6.47   6.60   6.66   6.70   6.74   6.80   6.93
 
 .. image:: ../_static/lmodel_H04.png
 
@@ -1087,10 +1471,10 @@ Please mind the difference in the uncertainty between the 2 label blocks.
 
 ::
 
-          95.45%    _BEST_    95.45%
-    SA:-1540.903016052.52164+1459.80893
-    SB:-934.8492835544.43676+948.52351
-    pK:  -0.10028   6.70122  +0.09995
+          99.73%    95.45%    68.27%    _BEST_    68.27%    95.45%    99.73%
+    SA:-3714.12523-1540.90611-602.372266052.52642+589.60360+1459.79555+3269.43112
+    SB:-2137.47471-934.62390-373.4473135544.43896+375.63195+948.44897+2211.80126
+    pK:  -0.23398  -0.10021  -0.03976   6.70122  +0.03971  +0.09989  +0.23227
 
 
 .. code:: python
@@ -1108,25 +1492,26 @@ Please mind the difference in the uncertainty between the 2 label blocks.
 
     The chain is shorter than 50 times the integrated autocorrelation time for 4 parameter(s). Use this estimate with caution and run a longer chain!
     N/50 = 40;
-    tau: [45.13662208 48.5948378  43.81592881 89.67607899]
+    tau: [46.79373445 51.93012345 40.4955552  89.70949742]
     [[Fit Statistics]]
         # fitting method   = emcee
         # function evals   = 200000
         # data points      = 7
         # variables        = 4
-        chi-square         = 3.33395359
-        reduced chi-square = 1.11131786
-        Akaike info crit   = 2.80774100
-        Bayesian info crit = 2.59138160
+        chi-square         = 3.33295342
+        reduced chi-square = 1.11098447
+        Akaike info crit   = 2.80564072
+        Bayesian info crit = 2.58928132
+        R-squared          = 1.00000000
     [[Variables]]
-        SA:         6039.88879 +/- 600.701038 (9.95%) (init = 6052.522)
-        SB:         35533.6767 +/- 370.890635 (1.04%) (init = 35544.44)
-        pK:         6.69956323 +/- 0.04013893 (0.60%) (init = 6.701225)
-        __lnsigma:  6.30228514 +/- 0.37848873 (6.01%) (init = -2.302585)
+        SA:         6033.16338 +/- 597.312717 (9.90%) (init = 6052.526)
+        SB:         35545.1923 +/- 379.344928 (1.07%) (init = 35544.44)
+        pK:         6.70058390 +/- 0.03921574 (0.59%) (init = 6.701225)
+        __lnsigma:  6.30231251 +/- 0.38825321 (6.16%) (init = -2.302585)
     [[Correlations]] (unreported correlations are < 0.100)
-        C(SA, pK) = 0.724
-        C(SB, pK) = 0.519
-        C(SA, SB) = 0.199
+        C(SA, pK) = 0.717
+        C(SB, pK) = 0.518
+        C(SA, SB) = 0.200
 
 .. code:: python
 
@@ -1160,13 +1545,13 @@ Please mind the difference in the uncertainty between the 2 label blocks.
 
     Maximum Likelihood Estimation (MLE):
     ----------------------------------
-    SA: 6098.450
-    SB: 35553.796
-    pK: 6.702
-    __lnsigma: 5.910
+    SA: 6019.885
+    SB: 35528.699
+    pK: 6.699
+    __lnsigma: 5.939
 
 
-    1 sigma spread = 0.040
+    1 sigma spread = 0.039
     2 sigma spread = 0.098
 
 TODO See also this tutorial
@@ -1211,10 +1596,10 @@ using lmfit.model
 
 ::
 
-       95.45% _BEST_ 95.45%
-    R0:   0.58   0.61   0.64
-    R1:  -0.01   0.04   0.09
-    Kd:  10.09  13.66  18.49
+       99.73% 95.45% 68.27% _BEST_ 68.27% 95.45% 99.73%
+    R0:   0.49   0.58   0.60   0.61   0.62   0.64   0.73
+    R1:  -0.30  -0.01   0.03   0.04   0.06   0.09   0.20
+    Kd:   2.95  10.09  12.51  13.66  14.91  18.49  59.97
 
 .. image:: ../_static/ratio2P-lmodel1.png
 
@@ -1249,6 +1634,7 @@ using lmfit.model
         reduced chi-square = 1.01491984
         Akaike info crit   = 0.02685860
         Bayesian info crit = -1.53538975
+        R-squared          = -6.14152912
     [[Variables]]
         R0:         0.60540963 +/- 0.01716324 (2.83%) (init = 0.6071065)
         R1:         0.04245431 +/- 0.02352093 (55.40%) (init = 0.04390401)

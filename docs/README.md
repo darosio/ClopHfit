@@ -110,7 +110,7 @@ With direnv for using [Jupyter](https://jupyter.org/) during development:
 
 And only in case you need a system wide easy accessible kernel:
 
-    python -m ipykernel install --user --name="cloph-310"
+    python -m ipykernel install --user --name="clop"
 
 ### Testing and coverage
 
