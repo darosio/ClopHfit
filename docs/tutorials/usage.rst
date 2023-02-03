@@ -8,8 +8,8 @@ Requires:
 
 - r-4.1.3-1
 
-Conventions:
-~~~~~~~~~~~~
+Conventions and best approaches
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - S0 Signal for unbound state
 
@@ -18,9 +18,6 @@ Conventions:
 - K equilibrium constant (Kd or pKa)
 
 - order data from unbound to bound (e.g. cl: 0–>150 mM; pH 9–>5)
-
-Summary of best options
-~~~~~~~~~~~~~~~~~~~~~~~
 
 - lmfit.Model has very convenient results plot functionalities and the unique possibility to estimate upper lower fitting curves.
 
@@ -60,7 +57,7 @@ Single Cl titration.
 .. code:: python
 
     df = pd.read_table("../../tests/data/copyIP.txt")
-    sb.scatterplot(data=df, x="cl", y="F", hue=df.cl*df.F**2.1, palette="Blues", s=200, alpha=.8)
+    sb.scatterplot(data=df, x="cl", y="F", hue=df.cl*df.F, palette="crest", s=200, alpha=.8, legend=False)
 
 .. image:: ../_static/f01.png
 
@@ -306,9 +303,9 @@ lmfit
 ::
 
         95.00% 68.00% _BEST_ 68.00% 95.00%
-     S0:13197619.5013314927.5313408867.6813503329.8013622726.90
-     S1:300912.63447991.67563536.93677869.64819972.30
-     Kd:  53.13  55.95  58.32  60.79  64.07
+     S0:13197616.3413314946.3513408867.6813503300.3813622729.13
+     S1:300911.47447991.63563536.93677869.66819977.61
+     Kd:  53.13  55.96  58.32  60.79  64.07
     [[Fit Statistics]]
         # fitting method   = leastsq
         # function evals   = 17
@@ -445,6 +442,16 @@ lmfit
     axes[1][1].set_xlabel('S1')
     axes[1][1].set_ylabel('Kd')
 
+.. code:: python
+
+    x, y, grid = lmfit.conf_interval2d(mini, res, 'S0','S1', 30, 30)
+    plt.contourf(x, y, grid, np.linspace(0,1,11))
+    plt.xlabel('S0')
+    plt.colorbar()
+    plt.ylabel('S1')
+
+.. image:: ../_static/lmfit5.png
+
 ::
 
     [[Variables]]
@@ -456,21 +463,11 @@ lmfit
         C(S0, Kd) = -0.656
         C(S0, S1) = 0.275
            95.45%    68.27%    _BEST_    68.27%    95.45%
-     S0:-217181.70418-94515.7170213408867.68157+95044.78785+219828.89196
-     S1:-270192.88583-116251.88156563536.93239+115024.53163+263649.25985
-     Kd:  -5.32759  -2.37806  58.31878  +2.48962  +5.92348
+     S0:-217226.57750-94491.3408813408867.68157+95008.90246+219989.07757
+     S1:-270193.18488-116251.92509563536.93239+115024.55042+263650.95181
+     Kd:  -5.32812  -2.37783  58.31878  +2.48963  +5.92424
 
 .. image:: ../_static/lmfit4.png
-
-.. code:: python
-
-    x, y, grid = lmfit.conf_interval2d(mini, res, 'S0','S1', 30, 30)
-    plt.contourf(x, y, grid, np.linspace(0,1,11))
-    plt.xlabel('S0')
-    plt.colorbar()
-    plt.ylabel('S1')
-
-.. image:: ../_static/lmfit5.png
 
 Notes
 ~~~~~

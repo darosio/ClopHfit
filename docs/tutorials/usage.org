@@ -1,17 +1,20 @@
-#+PROPERTY: header-args:python :kernel cloph-310 :pandoc t
+#+PROPERTY: header-args:python :kernel python3 :pandoc t
 #+PROPERTY: header-args :outputs both :results output :exports both
 #+OPTIONS: toc:nil num:nil
+
+* How to use this file                                                  :noexport:
+=C-c C-e r r= to export to usage.rst file, which will be used by sphinx.
 
 * Fitting
 Requires:
 - r-4.1.3-1
 
-** Conventions:
+** Conventions and best approaches
 - S0 Signal for unbound state
 - S1 Signal for bound state
 - K equilibrium constant (Kd or pKa)
 - order data from unbound to bound (e.g. cl: 0–>150 mM; pH 9–>5)
-** Summary of best options
+
 - lmfit.Model has very convenient results plot functionalities and the unique possibility to estimate upper lower fitting curves.
 - R nls and nlsboot seems very convenient (Q-Q plt) and fast; nls can perform global fit but nlstools can not.
 
@@ -38,9 +41,10 @@ MASS = importr('MASS')
 
 ** Single Cl titration.
 
+
 #+begin_src python :exports both :file ../_static/f01.png
 df = pd.read_table("../../tests/data/copyIP.txt")
-sb.scatterplot(data=df, x="cl", y="F", hue=df.cl*df.F**2.1, palette="Blues", s=200, alpha=.8)
+sb.scatterplot(data=df, x="cl", y="F", hue=df.cl*df.F, palette="crest", s=200, alpha=.8, legend=False)
 #+end_src
 
 *** Using R
@@ -265,7 +269,6 @@ fig.colorbar(ctp, ax=axes[1][1])
 axes[1][1].set_xlabel('S1')
 axes[1][1].set_ylabel('Kd')
 #+end_src
-
 #+begin_src python :file ../_static/lmfit5.png
   x, y, grid = lmfit.conf_interval2d(mini, res, 'S0','S1', 30, 30)
   plt.contourf(x, y, grid, np.linspace(0,1,11))
