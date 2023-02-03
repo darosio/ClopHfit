@@ -38,7 +38,7 @@ classifiers = [
   "Development Status :: 3 - Alpha"
   ]
 requires-python = ">=3.8, <3.12"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
   'click < 8.1.4',
   'corner < 2.2.2',
@@ -228,7 +228,7 @@ strict = true
 
 [tool.commitizen]
 name = "cz_customize"
-version = "0.4.4"
+version = "0.4.5"
 tag_format = "v$version"
 version_files = [
   "pyproject.toml:version",
