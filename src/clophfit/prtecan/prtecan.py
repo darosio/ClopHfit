@@ -22,7 +22,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
-import seaborn as sb  # type: ignore
+import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from numpy.typing import NDArray
 
