@@ -38,6 +38,8 @@ DAT_BG = "dat_bg"
 DAT_BG_NRM = "dat_bg_nrm"
 DAT_BG_DIL = "dat_bg_dil"
 DAT_BG_DIL_NRM = "dat_bg_dil_nrm"
+STD_MD_LINE_LENGTH = 2
+NUM_ROWS_96WELL = 8
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -172,9 +174,9 @@ def extract_metadata(
     md: dict[str, Metadata] = {}
 
     for line in strip_lines(lines):
-        if len(line) > 2:
+        if len(line) > STD_MD_LINE_LENGTH:
             md.update({str(line[0]): Metadata(line[1], line[2:])})
-        elif len(line) == 2:
+        elif len(line) == STD_MD_LINE_LENGTH:
             md.update({str(line[0]): Metadata(line[1])})
         elif len(line) == 1 and isinstance(line[0], str) and ":" in line[0]:
             k, v = line[0].split(":")
@@ -334,7 +336,7 @@ class Labelblock:
         rownames = tuple("ABCDEFGH")
         data = {}
         try:
-            assert len(lines) == 8
+            assert len(lines) == NUM_ROWS_96WELL
             for i, row in enumerate(rownames):
                 assert lines[i][0] == row  # e.g. "A" == "A"
                 for col in range(1, 13):
@@ -988,7 +990,7 @@ class TitrationAnalysis(Titration):
         self._scheme = PlateScheme(schemefile)
         self.buffer_wells = self._scheme.buffer
 
-    def fit(
+    def fit(  # noqa: PLR0913
         self,
         kind: str,
         ini: int = 0,
@@ -1235,6 +1237,7 @@ class TitrationAnalysis(Titration):
             When no fitting results are yet available.
 
         """
+        fourdigits = 1e4
         if not hasattr(self, "fittings"):
             raise FitFirstError()
         plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
@@ -1271,7 +1274,8 @@ class TitrationAnalysis(Titration):
             )
             # Print out.
             line = [
-                f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(df[out].loc[key])
+                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
+                for v in list(df[out].loc[key])
             ]
             for _i in range(4):
                 line.append("")
@@ -1291,7 +1295,10 @@ class TitrationAnalysis(Titration):
         # global
         fit_df = self.fittings[-1]
         lines.append(
-            [f"{v:.3g}" if v < 1e4 else f"{v:.0f}" for v in list(fit_df[out2].loc[key])]
+            [
+                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
+                for v in list(fit_df[out2].loc[key])
+            ]
         )
         ax_data.plot(
             xfit,
@@ -1369,7 +1376,7 @@ class TitrationAnalysis(Titration):
             out.savefig(self.plot_well(str(k)))
         out.close()
 
-    def plot_ebar(
+    def plot_ebar(  # noqa: PLR0913
         self,
         lb: int,
         x: str = "K",

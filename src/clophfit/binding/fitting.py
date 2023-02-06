@@ -63,7 +63,7 @@ def fz_pk_singlesite(
     return (float(p[1]) + float(p[0]) * 10 ** (k - x)) / (1 + 10 ** (k - x))
 
 
-def fit_titration(
+def fit_titration(  # noqa: PLR0913, PLR0915
     kind: str,
     x: Sequence[float],
     y: NDArray[np.float_],
@@ -154,7 +154,7 @@ def fit_titration(
         )
     else:
 
-        def ssq2(
+        def ssq2(  # noqa: PLR0913
             p: NDArray[np.float_],
             x: NDArray[np.float_],
             y1: NDArray[np.float_],
@@ -183,7 +183,7 @@ def fit_titration(
         p, cov, info, msg, success = tmp
     res = pd.DataFrame({"ss": [success]})
     res["msg"] = msg
-    if 1 <= success <= 4:
+    if 1 <= success <= 4:  # noqa: PLR2004
         try:
             tval = (tval_conf + 1) / 2
             chisq = sum(info["fvec"] * info["fvec"])
