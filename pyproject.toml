@@ -347,7 +347,7 @@ select = [
     "N",                        # pep8-naming
     "PD",                       # pandas-vet
     # "PGH",  # pygrep WAIT
-    # "PL",                       # pylint see PLR2004...
+    "PL",                       # pylint see PLR2004...
     "PT",                       # pytest-style
     "PTH",                      # use-pathlib
     "Q",                        # quotes
