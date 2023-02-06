@@ -58,17 +58,18 @@ dependencies = [
 optional-dependencies.tests = [
   "coverage[toml] < 7.1.1",
   "mypy < 0.992",
-  "pandas-stubs == 1.5.3.230203",  # XXX:
+  "pandas-stubs == 1.5.3.230203",
   "Pygments < 2.14.1",
-  "pytest == 7.2.1",  # XXX: pdm show pytest
+  "pytest < 7.2.2",
   "typeguard < 2.13.4",
   "xdoctest < 1.1.2",
 ]
 optional-dependencies.dev = [
     "commitizen < 2.40.1",
-    "ipykernel < 6.21.2",
-    # "ipython < 8.9.1",
-    "jupyter < 1.0.1",
+    "ipykernel",
+    "jupyter",
+    "pylsp-mypy",
+    "python-lsp-ruff",
 ]
 # XXX: docs/requirements-docs for RTD
 optional-dependencies.docs = [
@@ -186,13 +187,6 @@ exclude = '''
   | dist
 )/
 '''
-
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-force_single_line = true
-# lines_after_imports = 2
-known_first_party="clophfit"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -332,7 +326,6 @@ select = [
     "C",
     "C4",                       # comprehensions
     "C90",                      # mccabe
-    # "COM", commas
     "D",                        # pydocstyle
     "DTZ",                      # dates
     "E",                        # pycodestyle
@@ -342,7 +335,7 @@ select = [
     "F",                        # pyflakes
     # "FBT",                      # boolean-trap
     "I",                        # isort
-    # "ICN", import conventions
+    "ICN",                      # import conventions (opinionated)
     "ISC",                      # implicit-str-concat
     "N",                        # pep8-naming
     "PD",                       # pandas-vet
@@ -374,13 +367,6 @@ max-complexity = 33
 [tool.ruff.pydocstyle]
 convention = "numpy"
 
-[tool.ruff.isort]
-# combine-as-imports = true
-force-single-line = true
-# single-line-exclusions = ["os", "json"]
-split-on-trailing-comma = true
-known-first-party = ["src", "clophfit"]
-required-imports = ["from __future__ import annotations"]
 
 [tool.ruff.per-file-ignores]
 "tests/*" = [
@@ -390,3 +376,17 @@ required-imports = ["from __future__ import annotations"]
     "ANN001",                   # params are annotated using click
 ]
 "__init__.py" = ["I002"]        # don't need annotations
+
+[tool.ruff.isort]
+combine-as-imports = true
+force-single-line = true
+split-on-trailing-comma = true
+known-first-party = ["clophfit"]
+required-imports = ["from __future__ import annotations"]
+# single-line-exclusions = ["os", "json"]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+force_single_line = true
+known_first_party="clophfit"
