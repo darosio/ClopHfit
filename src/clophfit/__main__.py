@@ -11,7 +11,7 @@ from clophfit import binding
 from clophfit import prtecan
 
 
-def fit_routine(
+def fit_routine(  # noqa: PLR0913
     titan: prtecan.TitrationAnalysis,
     kind: str,
     weight: bool,
@@ -163,7 +163,7 @@ def eq1(  # type: ignore
     help="Errorbar plot for selection with K_min SA_min.",
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def tecan(  # type: ignore
+def tecan(  # type: ignore  # noqa: PLR0913
     list_file,
     scheme,
     dil,
