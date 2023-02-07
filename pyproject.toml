@@ -57,7 +57,7 @@ dependencies = [
 ]
 optional-dependencies.tests = [
   "coverage[toml] < 7.1.1",
-  "mypy < 0.992",
+  "mypy < 1.1",
   "pandas-stubs == 1.5.3.230203",
   "Pygments < 2.14.1",
   "pytest < 7.2.2",
