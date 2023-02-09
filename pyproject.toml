@@ -65,7 +65,7 @@ optional-dependencies.tests = [
   "xdoctest < 1.1.2",
 ]
 optional-dependencies.dev = [
-    "commitizen < 2.40.1",
+    "commitizen < 2.41.1",
     "ipykernel",
     "jupyter",
     "pylsp-mypy",
