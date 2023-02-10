@@ -9,8 +9,12 @@ repos:
     hooks:
       - id: check-added-large-files # hyper
       - id: check-case-conflict
+      - id: check-docstring-first
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
       - id: check-merge-conflict
       - id: check-symlinks
+      - id: destroyed-symlinks
       - id: check-yaml # hyper
       - id: check-toml # hyper
       - id: debug-statements
@@ -19,7 +23,18 @@ repos:
       - id: name-tests-test
         args: ["--pytest-test-first"]
       - id: requirements-txt-fixer
+      - id: detect-private-key
       - id: trailing-whitespace # hyper
+
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.6.0
+    hooks:
+      - id: pretty-format-ini
+        args: [--autofix]
+      # - id: pretty-format-yaml
+      #   args: [--autofix, --indent, "2"]
+      - id: pretty-format-toml
+        args: [--autofix]
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: "v0.0.241"
@@ -86,6 +101,7 @@ repos:
     rev: v0.9.0.2
     hooks:
       - id: shellcheck
+        args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v2.40.0

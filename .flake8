@@ -1,8 +1,8 @@
 [flake8]
 ignore = E203,E501,W503,S101,
 per-file-ignores =
-				 tests/*:S101
-				 tests/test_oldscripts.py:S404,S603
+    tests/*:S101
+    tests/test_oldscripts.py:S404,S603
 rst-directives = autosummary
 rst-roles = ref,
 max-line-length = 88
