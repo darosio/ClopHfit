@@ -3,27 +3,9 @@ build-backend = "hatchling.build"
 requires = ["hatchling>=1.12.2"]
 
 [project]
-name = "clophfit"
-description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
 authors = [
-  { name = "daniele arosio", email = "daniele.arosio@cnr.it" },
+  {name = "daniele arosio", email = "daniele.arosio@cnr.it"}
 ]
-license = "BSD-3-Clause"
-license-files = { paths = ["LICENSE.txt"] }
-readme = "docs/README.md"
-urls.Homepage = "https://github.com/darosio/ClopHfit"
-urls."Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
-urls.Discussions = "https://github.com/darosio/ClopHfit/discussions"
-urls.Changelog = "https://darosio.github.io/ClopHfit/misc/CHANGELOG.html"
-urls."Github releases" = "https://github.com/darosio/ClopHfit/releases"
-urls.Documentation = "https://clophfit.readthedocs.io"
-keywords = [
-  "svd",
-  "ClopHensor",
-  "data fitting",
-  "pH",
-  "macromolecule binding",
-  ]
 classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
@@ -36,9 +18,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
   "Development Status :: 3 - Alpha"
-  ]
-requires-python = ">=3.8, <3.12"
-version = "0.4.5"
+]
 dependencies = [
   'click < 8.1.4',
   'corner < 2.2.2',
@@ -53,26 +33,33 @@ dependencies = [
   'seaborn < 0.12.3',
   'sympy < 1.11.2',
   'tqdm < 4.64.2',
-  'xlrd < 2.0.2',
+  'xlrd < 2.0.2'
 ]
-optional-dependencies.tests = [
-  "coverage[toml] < 7.1.1",
-  "mypy < 1.1",
-  "pandas-stubs == 1.5.3.230203",
-  "Pygments < 2.14.1",
-  "pytest < 7.2.2",
-  "typeguard < 2.13.4",
-  "xdoctest < 1.1.2",
+description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
+keywords = [
+  "svd",
+  "ClopHensor",
+  "data fitting",
+  "pH",
+  "macromolecule binding"
 ]
-optional-dependencies.dev = [
-    "commitizen < 2.41.1",
-    "ipykernel",
-    "jupyter",
-    "pylsp-mypy",
-    "python-lsp-ruff",
+license = "BSD-3-Clause"
+license-files = {paths = ["LICENSE.txt"]}
+name = "clophfit"
+readme = "docs/README.md"
+requires-python = ">=3.8, <3.12"
+version = "0.4.5"
+
+[project.optional-dependencies]
+dev = [
+  "commitizen < 2.41.1",
+  "ipykernel",
+  "jupyter",
+  "pylsp-mypy",
+  "python-lsp-ruff"
 ]
 # XXX: docs/requirements-docs for RTD
-optional-dependencies.docs = [
+docs = [
   "autodocsumm < 0.2.11",
   "myst-parser < 0.18.2",
   "nbsphinx < 0.8.13",
@@ -80,100 +67,30 @@ optional-dependencies.docs = [
   "Sphinx < 5.3.1",
   "sphinx-click < 4.4.1",
   "sphinx_autodoc_typehints < 1.22.1",
-  "sphinxcontrib-plantuml < 0.24.2",
+  "sphinxcontrib-plantuml < 0.24.2"
+]
+tests = [
+  "coverage[toml] < 7.1.1",
+  "mypy < 1.1",
+  "pandas-stubs == 1.5.3.230203",
+  "Pygments < 2.14.1",
+  "pytest < 7.2.2",
+  "typeguard < 2.13.4",
+  "xdoctest < 1.1.2"
 ]
 
 [project.scripts]
 "clop" = "clophfit.__main__:clop"
 
-[tool.hatch.envs.default]
-# type = "pip-deepfreeze"  # pipx runpip hatch install hatch-pip-deepfreeze
-features = ["dev", "tests", "docs"]
-# extra-dependencies = []
-python = "3.10"
-[tool.hatch.envs.default.scripts]
-# # --cov must not come before an argument in order to use the sources defined by config
-# _cov = "pytest --cov --cov-report={env:COVERAGE_REPORT:term-missing} --cov-config=pyproject.toml"
-# dev = "pytest -p no:randomly --no-cov {args:tests}"
-# cov = "_cov -p no:randomly {args:tests}"
-# full = "_cov -n auto --reruns 5 --reruns-delay 3 -r aR {args:tests}"
-# [tool.hatch.envs.default.overrides]
-# env.GITHUB_ACTIONS.env-vars = "COVERAGE_REPORT="
-ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"  # XXX:
-
-ch = "cz ch --incremental --unreleased-version HEAD"
-clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
-init =  ["pre-commit install",
-        "pre-commit install --hook-type commit-msg --hook-type pre-push"]
-sync = "pip-df sync -x dev,docs,tests"
-bump = [
-     "cz bump --major-version-zero -ch {args}", # e.g. "--increment PATCH", "--files-only", "--no-verify" to bypass pre-commit and commit-msg hooks
-     "hatch build",
-     "hatch publish -r test",
-     ]
-
-[tool.hatch.envs.tests]
-template = "tests"
-features = ["tests"]
-[tool.hatch.envs.tests.scripts]
-sync = "pip-df sync -x tests"  # XXX:
-test = "coverage run --parallel -m pytest"
-type = "mypy src tests docs/conf.py"
-xdoc = "python -m xdoctest clophfit all"
-all = ["test", "type", "xdoc"]
-[[tool.hatch.envs.tests.matrix]]
-python = ["3.11", "3.10", "3.9", "3.8"] #reverse order to ensure the presence in older python of module included in newer versions
-
-[tool.hatch.envs.coverage]
-detached = true
-dependencies = ["coverage[toml]>=7.1.0"]  # XXX:
-[tool.hatch.envs.coverage.scripts]
-combine = "coverage combine {args}"
-report = "coverage report"
-xml = "coverage xml"
-
-[tool.hatch.envs.typeguard]
-template = "typeguard"
-features = ["tests"]
-python = "3.11"
-[tool.hatch.envs.typeguard.scripts]
-# guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}  # XXX:
-run = "pytest --typeguard-packages=clophfit {args}"
-
-[tool.hatch.envs.lint]
-detached = true
-dependencies = ["pre-commit>=3.0.1"]  # XXX:
-[tool.hatch.envs.lint.scripts]
-run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
-
-[tool.hatch.envs.docs]
-template = "docs"
-features = ["docs"]
-[tool.hatch.envs.docs.scripts]
-build = "sphinx-build docs docs/_build"
-serve = "python -m http.server 8000 -d docs/_build"
-
-[tool.coverage.paths]
-source = ["src", "*/site-packages"]
-tests = ["tests", "*/tests"]
-
-[tool.coverage.run]
-branch = true
-source = ["clophfit", "tests"]
-omit = ["*__init__.py"]
-
-[tool.coverage.report]
-show_missing = true
-# fail_under = 100
-exclude_lines = [
-    "pragma: no cover",
-    "pytest.raises",
-    "pytest.warns",
-    ]
+[project.urls]
+"Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
+Changelog = "https://darosio.github.io/ClopHfit/misc/CHANGELOG.html"
+Discussions = "https://github.com/darosio/ClopHfit/discussions"
+Documentation = "https://clophfit.readthedocs.io"
+"Github releases" = "https://github.com/darosio/ClopHfit/releases"
+Homepage = "https://github.com/darosio/ClopHfit"
 
 [tool.black]
-line-length = 88
-skip-string-normalization = false
 exclude = '''
 /(
     \.git
@@ -187,55 +104,32 @@ exclude = '''
   | dist
 )/
 '''
-
-[tool.pytest.ini_options]
-minversion = "6.0"
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-# xfail_strict = true
-# filterwarnings = ["ignore::DeprecationWarning", "ignore:OVER"]
-filterwarnings = ["ignore::DeprecationWarning"]
-log_cli_level = "INFO"
-testpaths = [
-  "tests",
-]
-
-[tool.mypy]
-strict = true
-warn_unreachable = true
-pretty = true
-show_column_numbers = true
-show_error_codes = true
-show_error_context = true
-plugins = "numpy.typing.mypy_plugin"
-exclude = "src/clophfit/old"
-files = ["src", "tests", "docs/conf.py"]
-python_version = "3.10"
-warn_unused_configs = true
-# enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
-enable_error_code = ["redundant-expr", "truthy-bool"]
-
-[tool.pylsp-mypy]
-enabled = true
-live_mode = true
-dmypy = false
-strict = true
+line-length = 88
+skip-string-normalization = false
 
 [tool.commitizen]
 name = "cz_customize"
-version = "0.4.5"
 tag_format = "v$version"
+version = "0.4.5"
 version_files = [
   "pyproject.toml:version",
   "docs/conf.py:release",
-  "docs/README.md:Version",
-  ]
+  "docs/README.md:Version"
+]
 
 [tool.commitizen.customize]
-message_template = "{{change_type}}:{% if show_message %} {{message}}{% endif %}"
+bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
+bump_pattern = "^(BREAKING CHANGE|feat|fix|perf|refactor)"
+change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
+change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
+changelog_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci)?(\\(.*\\))?(!)?"
+commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
 example = """fix(parser): correct minor typos in code\n
 see the issue for details on the typos fixed\n
 closes issue #12
 """
+info_path = "cz_customize_info.txt"
+message_template = "{{change_type}}:{% if show_message %} {{message}}{% endif %}"
 schema = """
 <type>(<scope>): <subject>
 <BLANK LINE>
@@ -244,47 +138,156 @@ schema = """
 (BREAKING CHANGE: )<footer>
 """
 schema_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|bump)(?:\\(([^()\r\n]*)\\)|\\()?(!)?:\\s(.*)?"
-bump_pattern = "^(BREAKING CHANGE|feat|fix|perf|refactor)"
-bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
-change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
-info_path = "cz_customize_info.txt"
-commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
-changelog_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci)?(\\(.*\\))?(!)?"
-change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
 
 [[tool.commitizen.customize.questions]]
-type = "list"
-name = "change_type"
 choices = [
-{value = "feat", name = "feat: A new feature. Correlates with MINOR in SemVer"},
-{value = "fix", name = "fix: A bug fix. Correlates with PATCH in SemVer"},
-{value = "perf", name = "perf: A code change that improves performance. Correlates with PATCH in SemVer"},
-{value = "docs", name = "docs: Documentation only changes"},
-{value = "style", name = "style: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)"},
-{value = "refactor", name = "refactor: A code change that neither fixes a bug nor adds a feature"},
-{value = "test", name = "test: Adding missing or correcting existing tests"},
-{value = "build", name = "build: Changes that update the build system, development tools or external dependencies"},
-{value = "ci", name = "ci: Changes to our CI configuration files and scripts (example scopes: GitLabCI)"},
-{value = "revert", name = "revert: Reverting to previous commit(s)."}
+  {value = "feat", name = "feat: A new feature. Correlates with MINOR in SemVer"},
+  {value = "fix", name = "fix: A bug fix. Correlates with PATCH in SemVer"},
+  {value = "perf", name = "perf: A code change that improves performance. Correlates with PATCH in SemVer"},
+  {value = "docs", name = "docs: Documentation only changes"},
+  {value = "style", name = "style: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)"},
+  {value = "refactor", name = "refactor: A code change that neither fixes a bug nor adds a feature"},
+  {value = "test", name = "test: Adding missing or correcting existing tests"},
+  {value = "build", name = "build: Changes that update the build system, development tools or external dependencies"},
+  {value = "ci", name = "ci: Changes to our CI configuration files and scripts (example scopes: GitLabCI)"},
+  {value = "revert", name = "revert: Reverting to previous commit(s)."}
 ]
 message = "Select the type of change you are committing"
+name = "change_type"
+type = "list"
 
 [[tool.commitizen.customize.questions]]
-type = "input"
-name = "message"
 message = "Body."
+name = "message"
+type = "input"
 
 [[tool.commitizen.customize.questions]]
-type = "confirm"
-name = "show_message"
 message = "Do you want to add body message in commit?"
+name = "show_message"
+type = "confirm"
+
+[tool.coverage.paths]
+source = ["src", "*/site-packages"]
+tests = ["tests", "*/tests"]
+
+[tool.coverage.report]
+# fail_under = 100
+exclude_lines = [
+  "pragma: no cover",
+  "pytest.raises",
+  "pytest.warns"
+]
+show_missing = true
+
+[tool.coverage.run]
+branch = true
+omit = ["*__init__.py"]
+source = ["clophfit", "tests"]
+
+[tool.hatch.envs.coverage]
+dependencies = ["coverage[toml]>=7.1.0"]  # XXX:
+detached = true
+
+[tool.hatch.envs.coverage.scripts]
+combine = "coverage combine {args}"
+report = "coverage report"
+xml = "coverage xml"
+
+[tool.hatch.envs.default]
+# type = "pip-deepfreeze"  # pipx runpip hatch install hatch-pip-deepfreeze
+features = ["dev", "tests", "docs"]
+# extra-dependencies = []
+python = "3.10"
+
+[tool.hatch.envs.default.scripts]
+bump = [
+  "cz bump --major-version-zero -ch {args}",  # e.g. "--increment PATCH", "--files-only", "--no-verify" to bypass pre-commit and commit-msg hooks
+  "hatch build",
+  "hatch publish -r test"
+]
+ch = "cz ch --incremental --unreleased-version HEAD"
+# # --cov must not come before an argument in order to use the sources defined by config
+# _cov = "pytest --cov --cov-report={env:COVERAGE_REPORT:term-missing} --cov-config=pyproject.toml"
+# dev = "pytest -p no:randomly --no-cov {args:tests}"
+# cov = "_cov -p no:randomly {args:tests}"
+# full = "_cov -n auto --reruns 5 --reruns-delay 3 -r aR {args:tests}"
+# [tool.hatch.envs.default.overrides]
+# env.GITHUB_ACTIONS.env-vars = "COVERAGE_REPORT="
+ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"  # XXX:
+clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
+init = [
+  "pre-commit install",
+  "pre-commit install --hook-type commit-msg --hook-type pre-push"
+]
+sync = "pip-df sync -x dev,docs,tests"
+
+[tool.hatch.envs.docs]
+features = ["docs"]
+template = "docs"
+
+[tool.hatch.envs.docs.scripts]
+build = "sphinx-build docs docs/_build"
+serve = "python -m http.server 8000 -d docs/_build"
+
+[tool.hatch.envs.lint]
+dependencies = ["pre-commit>=3.0.1"]  # XXX:
+detached = true
+
+[tool.hatch.envs.lint.scripts]
+run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
+
+[tool.hatch.envs.tests]
+features = ["tests"]
+template = "tests"
+
+[[tool.hatch.envs.tests.matrix]]
+python = ["3.11", "3.10", "3.9", "3.8"]  # reverse order to ensure the presence in older python of module included in newer versions
+
+[tool.hatch.envs.tests.scripts]
+all = ["test", "type", "xdoc"]
+sync = "pip-df sync -x tests"  # XXX:
+test = "coverage run --parallel -m pytest"
+type = "mypy src tests docs/conf.py"
+xdoc = "python -m xdoctest clophfit all"
+
+[tool.hatch.envs.typeguard]
+features = ["tests"]
+python = "3.11"
+template = "typeguard"
+
+[tool.hatch.envs.typeguard.scripts]
+# guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}  # XXX:
+run = "pytest --typeguard-packages=clophfit {args}"
+
+[tool.isort]
+force_single_line = true
+known_first_party = "clophfit"
+multi_line_output = 3
+profile = "black"
+
+[tool.mypy]
+# enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+enable_error_code = ["redundant-expr", "truthy-bool"]
+exclude = "src/clophfit/old"
+files = ["src", "tests", "docs/conf.py"]
+plugins = "numpy.typing.mypy_plugin"
+pretty = true
+python_version = "3.10"
+show_column_numbers = true
+show_error_codes = true
+show_error_context = true
+strict = true
+warn_unreachable = true
+warn_unused_configs = true
 
 [tool.pylint]
-master.py-version = "3.10"
-master.ignore-paths= ["src/clophfit/_version.py", "src/clophfit/old"]
-reports.output-format = "colorized"
-similarities.ignore-imports = "yes"
-messages_control.disable = [
+
+[tool.pylint.master]
+ignore-paths = ["src/clophfit/_version.py", "src/clophfit/old"]
+py-version = "3.10"
+
+[tool.pylint.messages_control]
+disable = [
   "invalid-name",
   "design",
   "line-too-long",
@@ -312,81 +315,95 @@ messages_control.disable = [
   # "comparison-of-constants",
   # "consider-using-with",
   # "use-maxsplit-arg",
-  "unnecessary-dunder-call",
+  "unnecessary-dunder-call"
 ]
-# messages_control.enable = ["raise-missing-from"]
+
+[tool.pylint.reports]
+output-format = "colorized"
+
+[tool.pylint.similarities]
+ignore-imports = "yes"
+
+[tool.pylsp-mypy]
+dmypy = false
+enabled = true
+live_mode = true
+strict = true
+
+[tool.pytest.ini_options]
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+# xfail_strict = true
+# filterwarnings = ["ignore::DeprecationWarning", "ignore:OVER"]
+filterwarnings = ["ignore::DeprecationWarning"]
+log_cli_level = "INFO"
+minversion = "6.0"
+testpaths = [
+  "tests"
+]
 
 [tool.ruff]
-line-length = 88
-select = [
-    "A",                        # builtins
-    "ANN",                      # typing annotation
-    "ARG",                      # unused arguments
-    "B",                        # bugbear
-    "C",
-    "C4",                       # comprehensions
-    "C90",                      # mccabe
-    "D",                        # pydocstyle
-    "DTZ",                      # dates
-    "E",                        # pycodestyle
-    "TRY",                      # exceptions
-    "EM",                       # exceptions
-    "ERA",                      # eradicate
-    "F",                        # pyflakes
-    # "FBT",                      # boolean-trap
-    "I",                        # isort
-    "ICN",                      # import conventions (opinionated)
-    "ISC",                      # implicit-str-concat
-    "N",                        # pep8-naming
-    "PD",                       # pandas-vet
-    # "PGH",  # pygrep WAIT
-    "PL",                       # pylint see PLR2004...
-    "PT",                       # pytest-style
-    "PTH",                      # use-pathlib
-    "Q",                        # quotes
-    "RUF",                      # Ruff
-    # "S",    # bandit WAIT
-    "SIM",                      # simplify
-    "TID",                      # tidy-imports
-    # "UP",   # pyupgrade WAIT
-    "YTT",                      # 2020
-    "W",                        # pycodestyle
-]
 extend-exclude = ["src/clophfit/old/"]
 force-exclude = true
 ignore = [
-    "ANN101",
-    "ANN102",
-    "ANN201",
-    "E501",
+  "ANN101",
+  "ANN102",
+  "ANN201",
+  "E501"
 ]
-
-[tool.ruff.mccabe]
-max-complexity = 33
-
-[tool.ruff.pydocstyle]
-convention = "numpy"
-
-
-[tool.ruff.per-file-ignores]
-"tests/*" = [
-    "PLR2004",
+line-length = 88
+select = [
+  "A",  # builtins
+  "ANN",  # typing annotation
+  "ARG",  # unused arguments
+  "B",  # bugbear
+  "C",
+  "C4",  # comprehensions
+  "C90",  # mccabe
+  "D",  # pydocstyle
+  "DTZ",  # dates
+  "E",  # pycodestyle
+  "TRY",  # exceptions
+  "EM",  # exceptions
+  "ERA",  # eradicate
+  "F",  # pyflakes
+  # "FBT",    # boolean-trap
+  "I",  # isort
+  "ICN",  # import conventions (opinionated)
+  "ISC",  # implicit-str-concat
+  "N",  # pep8-naming
+  "PD",  # pandas-vet
+  # "PGH",  # pygrep WAIT
+  "PL",  # pylint see PLR2004...
+  "PT",  # pytest-style
+  "PTH",  # use-pathlib
+  "Q",  # quotes
+  "RUF",  # Ruff
+  # "S",    # bandit WAIT
+  "SIM",  # simplify
+  "TID",  # tidy-imports
+  # "UP",   # pyupgrade WAIT
+  "YTT",  # 2020
+  "W"  # pycodestyle
 ]
-"src/clophfit/__main__.py" = [
-    "ANN001",                   # params are annotated using click
-]
-"__init__.py" = ["I002"]        # don't need annotations
 
 [tool.ruff.isort]
 combine-as-imports = true
 force-single-line = true
-split-on-trailing-comma = true
 known-first-party = ["clophfit"]
 required-imports = ["from __future__ import annotations"]
-# single-line-exclusions = ["os", "json"]
+split-on-trailing-comma = true
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-force_single_line = true
-known_first_party="clophfit"
+[tool.ruff.mccabe]
+max-complexity = 33
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["I002"]  # don't need annotations
+"src/clophfit/__main__.py" = [
+  "ANN001"  # params are annotated using click
+]
+"tests/*" = [
+  "PLR2004"
+]
+
+[tool.ruff.pydocstyle]
+convention = "numpy"

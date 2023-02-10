@@ -9,7 +9,7 @@ import scipy  # type: ignore
 import scipy.stats  # type: ignore
 from numpy.typing import NDArray
 
-"""Binding equations."""
+# Binding equations."""
 # TODO: use this like fz in prtecan
 
 
