@@ -52,7 +52,7 @@ version = "0.4.5"
 
 [project.optional-dependencies]
 dev = [
-  "commitizen < 2.41.1",
+  "commitizen < 2.42.1",
   "ipykernel",
   "jupyter",
   "pylsp-mypy",
