@@ -61,7 +61,7 @@ dev = [
 # XXX: docs/requirements-docs for RTD
 docs = [
   "autodocsumm < 0.2.11",
-  "myst-parser < 0.18.2",
+  "myst-parser < 0.19.2",
   "nbsphinx < 0.8.13",
   "pydata-sphinx-theme < 0.13.1",
   "Sphinx < 5.3.1",
