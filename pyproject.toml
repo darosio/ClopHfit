@@ -63,7 +63,7 @@ docs = [
   "autodocsumm < 0.2.11",
   "myst-parser < 0.19.2",
   "nbsphinx < 0.8.13",
-  "pydata-sphinx-theme < 0.13.1",
+  "pydata-sphinx-theme < 0.13.2",
   "Sphinx < 5.3.1",
   "sphinx-click < 4.4.1",
   "sphinx_autodoc_typehints < 1.22.1",
