@@ -58,16 +58,16 @@ dev = [
   "pylsp-mypy",
   "python-lsp-ruff"
 ]
-# XXX: docs/requirements-docs for RTD
+# XXX: docs/constraints.txt for RTD
 docs = [
-  "autodocsumm < 0.2.11",
-  "myst-parser < 1.0.1",
-  "nbsphinx < 0.9.2",
-  "pydata-sphinx-theme < 0.13.2",
-  "Sphinx < 5.3.1",
-  "sphinx-click < 4.4.1",
-  "sphinx_autodoc_typehints < 1.22.1",
-  "sphinxcontrib-plantuml < 0.26.0"
+  "autodocsumm == 0.2.10",
+  "myst-parser == 1.0.0",
+  "nbsphinx == 0.9.1",
+  "pydata-sphinx-theme == 0.13.1",
+  "Sphinx == 5.3.0",
+  "sphinx-click == 4.4.0",
+  "sphinx_autodoc_typehints == 1.22",
+  "sphinxcontrib-plantuml == 0.25"
 ]
 tests = [
   "coverage[toml] < 7.2.2",
