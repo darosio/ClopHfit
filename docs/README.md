@@ -208,6 +208,6 @@ bandit -r src/
     <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
 
 - ruff
-  - drop flake8
   - drop bandit
   - drop darglint
+  - drop pyupgrade

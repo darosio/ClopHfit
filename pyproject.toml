@@ -378,10 +378,10 @@ select = [
   "PTH",  # use-pathlib
   "Q",  # quotes
   "RUF",  # Ruff
-  "S",  # bandit WAIT
+  "S",  # bandit XXX
   "SIM",  # simplify
   "TID",  # tidy-imports
-  # "UP",   # pyupgrade WAIT
+  "UP",  # pyupgrade XXX
   "YTT",  # 2020
   "W"  # pycodestyle
 ]

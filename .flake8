@@ -1,5 +1,0 @@
-[flake8]
-ignore = E203,E501,W503,
-rst-directives = autosummary
-rst-roles = ref,
-max-line-length = 88
