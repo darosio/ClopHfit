@@ -183,6 +183,13 @@ Configuration files:
 
 pip-df generates requirements[-dev,docs,tests].txt.
 
+Other manual actions:
+
+```bash
+pylint src/ tests/
+bandit -r src/
+```
+
 ## TODO
 
 - Print sorted output.
@@ -196,5 +203,11 @@ pip-df generates requirements[-dev,docs,tests].txt.
   rescaled; dataframe groupby per meta_pre, ma anche enspire
 
 - development
+
   - readthedocs or ghpages?
     <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
+
+- ruff
+  - drop flake8
+  - drop bandit
+  - drop darglint

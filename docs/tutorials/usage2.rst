@@ -1787,7 +1787,7 @@ It is a unique script for pK and Cl and various methods:
 
 3. single lambda
 
-and bootstraping
+and bootstrapping
 
 
 
