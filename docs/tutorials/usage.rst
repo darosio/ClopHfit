@@ -472,7 +472,7 @@ lmfit
 Notes
 ~~~~~
 
-You could implement global fitting using scipy.leastq but will sometime fail in bootstraping.
+You could implement global fitting using scipy.leastq but will sometime fail in bootstrapping.
 lmfit resulted much more robust
 
 .. code:: python

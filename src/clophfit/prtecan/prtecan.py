@@ -113,7 +113,7 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
 
     """
-    return [[e for e in line if e != ""] for line in lines]
+    return [[e for e in line if e] for line in lines]
 
 
 # TODO with a filter ectract_metadata with a map
@@ -336,9 +336,9 @@ class Labelblock:
         rownames = tuple("ABCDEFGH")
         data = {}
         try:
-            assert len(lines) == NUM_ROWS_96WELL
+            assert len(lines) == NUM_ROWS_96WELL  # noqa: S101 # nosec B101
             for i, row in enumerate(rownames):
-                assert lines[i][0] == row  # e.g. "A" == "A"
+                assert lines[i][0] == row  # nosec B101 # noqa: S101 # e.g. "A" == "A"
                 for col in range(1, 13):
                     try:
                         data[row + f"{col:0>2}"] = float(lines[i][col])
@@ -990,7 +990,7 @@ class TitrationAnalysis(Titration):
         self._scheme = PlateScheme(schemefile)
         self.buffer_wells = self._scheme.buffer
 
-    def fit(  # noqa: PLR0913
+    def fit(  # noqa: PLR0913, PLR0912
         self,
         kind: str,
         ini: int = 0,
@@ -1252,9 +1252,7 @@ class TitrationAnalysis(Titration):
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
         # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-        for i, (datafit, df) in enumerate(
-            zip(self._datafit, self.fittings)  # noqa: B905
-        ):
+        for i, (datafit, df) in enumerate(zip(self._datafit, self.fittings)):
             y = np.array(datafit[key]) if datafit else np.zeros_like(x)
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
@@ -1415,7 +1413,7 @@ class TitrationAnalysis(Titration):
                 fit_df["ctrl"] = 0
             fit_df = fit_df[~np.isnan(fit_df[x])]
             fit_df = fit_df[~np.isnan(fit_df[y])]
-            for idx, xv, yv, l in zip(  # noqa: B905, E741
+            for idx, xv, yv, l in zip(  # noqa: E741
                 fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"]
             ):
                 # x or y do not exist.# try:

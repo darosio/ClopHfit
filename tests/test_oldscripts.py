@@ -1,7 +1,7 @@
 """Test cases for the old scripts."""
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404
 import sys
 import typing
 from pathlib import Path
@@ -49,7 +49,7 @@ class TestTitrationFit:
         """Run the script as class fixture."""
         cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
-        with subprocess.Popen(
+        with subprocess.Popen(  # nosec B603
             [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]
             + request.param[2],
             stdout=subprocess.PIPE,
@@ -72,14 +72,14 @@ class TestTitrationFit:
     def test_stderr_svd(self, run_script: Rscript) -> None:
         """Test stderr for svd."""
         if run_script[0][2][1] == "svd":
-            assert run_script[1][1] == ""
+            assert not run_script[1][1]
         else:
             raise AssertionError
 
     def test_stderr_band(self, run_script: Rscript) -> None:
         """Test stderr for band."""
         if run_script[0][2][1] == "band":
-            assert run_script[1][1] == ""
+            assert not run_script[1][1]
 
     def test_pdf(self, run_script: Rscript) -> None:
         """It saves pdf file."""
@@ -127,7 +127,7 @@ bootstrap:""",
         """Run the script as class fixture."""
         cli = "../../src/clophfit/old/fit_titration_global.py"
         dat_file = request.param[0]
-        with subprocess.Popen(
+        with subprocess.Popen(  # nosec B603
             [cli, dat_file, "_tmpoutput"] + request.param[2],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -145,7 +145,7 @@ bootstrap:""",
     @pytest.mark.xfail(reason="Deprecation from dependency.")
     def test_stderr(self, run_script: Rscript) -> None:
         """Stderr is empty."""
-        assert run_script[1][1] == ""
+        assert not run_script[1][1]
 
     @pytest.mark.xfail(reason="Image sizes do not match.")
     def test_png(self, run_script: Rscript) -> None:
