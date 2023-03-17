@@ -378,10 +378,10 @@ select = [
   "PTH",  # use-pathlib
   "Q",  # quotes
   "RUF",  # Ruff
-  # "S",    # bandit WAIT
+  "S",  # bandit XXX
   "SIM",  # simplify
   "TID",  # tidy-imports
-  # "UP",   # pyupgrade WAIT
+  "UP",  # pyupgrade XXX
   "YTT",  # 2020
   "W"  # pycodestyle
 ]
@@ -402,7 +402,8 @@ max-complexity = 33
   "ANN001"  # params are annotated using click
 ]
 "tests/*" = [
-  "PLR2004"
+  "PLR2004",
+  "S101"
 ]
 
 [tool.ruff.pydocstyle]
