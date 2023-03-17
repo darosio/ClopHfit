@@ -8,7 +8,7 @@ updates:
     directory: "/docs"
     schedule:
       interval: daily
-      time: "10:18"
+      time: "10:26"
       timezone: "Europe/Rome"
   - package-ecosystem: pip
     directory: "/.github/workflows"
@@ -18,6 +18,6 @@ updates:
     directory: "/"
     schedule:
       interval: daily
-      time: "10:18"
+      time: "10:26"
       timezone: "Europe/Rome"
     open-pull-requests-limit: 15
