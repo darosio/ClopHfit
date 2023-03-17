@@ -58,7 +58,6 @@ dev = [
   "pylsp-mypy",
   "python-lsp-ruff"
 ]
-# XXX: docs/constraints.txt for RTD
 docs = [
   "autodocsumm == 0.2.10",
   "myst-parser == 1.0.0",
