@@ -25,7 +25,7 @@ copyright = "2021, Daniele Arosio"  # noqa: A001
 author = "Daniele Arosio"
 
 # The full version, including alpha/beta/rc tags
-release = "0.4.6"
+release = "0.4.7"
 
 # -- General configuration ---------------------------------------------------
 

@@ -9,7 +9,7 @@
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
 
-- Version: "0.4.6"
+- Version: "0.4.7"
 
 ## Features
 

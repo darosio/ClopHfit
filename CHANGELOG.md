@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.7 (2023-03-21)
+
+### Docs
+
+- Update Readme
+
+### Build
+
+- **docs**: fix RTD
+
 ## v0.4.6 (2023-03-21)
 
 ### Style
