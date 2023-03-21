@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.4.6 (2023-03-21)
+
+### Style
+
+- yaml with prettier through apheleia
+
+### Build
+
+- bump actions/deploy-pages from 1 to 2 (#196)
+- update coverage[toml] requirement from <7.2.2 to <7.2.3 (#193)
+- bump nbsphinx from 0.8.12 to 0.9.1 (#191)
+- update openpyxl requirement from <3.1.2 to <3.1.3 (#189)
+- bump myst-parser from 0.19.1 to 1.0.0 (#187)
+- update mypy requirement from <1.1 to <1.2 (#186)
+- bump pydata-sphinx-theme from 0.13.0 to 0.13.1 (#185)
+- bump pandas-stubs from 1.5.3.230227 to 1.5.3.230304 (#184)
+- update rpy2 requirement from <3.5.10 to <3.5.11 (#183)
+- update tqdm requirement from <4.64.2 to <4.65.1 (#182)
+- update pytest requirement from <7.2.2 to <7.2.3 (#181)
+- bump sphinxcontrib-plantuml from 0.24.1 to 0.25 (#180)
+- update matplotlib requirement from <3.7.1 to <3.7.2 (#179)
+- bump myst-parser from 0.18.1 to 0.19.1 (#178)
+- bump pydata-sphinx-theme from 0.12.0 to 0.13.0 (#176)
+- bump pandas-stubs from 1.5.3.230214 to 1.5.3.230227 (#175)
+- update rpy2 requirement from <3.5.9 to <3.5.10 (#174)
+- update coverage[toml] requirement from <7.2.1 to <7.2.2 (#173)
+- update commitizen requirement from <2.42.1 to <2.42.2 (#172)
+- update coverage[toml] requirement from <7.1.1 to <7.2.1 (#171)
+- bump pip from 23.0 to 23.0.1 in /.github/workflows (#170)
+- update scipy requirement from <1.10.1 to <1.10.2 (#169)
+- bump pandas-stubs from 1.5.3.230203 to 1.5.3.230214 (#168)
+- update openpyxl requirement from <3.1.1 to <3.1.2 (#167)
+- update matplotlib requirement from <3.6.4 to <3.7.1 (#166)
+- bump pip-deepfreeze from 1.0.0 to 1.1.0 in /.github/workflows (#165)
+- update commitizen requirement from <2.41.1 to <2.42.1 (#164)
+- **style**: more pre-commit checks and formatting
+- update commitizen requirement from <2.40.1 to <2.41.1
+- update mypy requirement from <0.992 to <1.1 (#162)
+- pylsp-ruff,mypy as dev deps
+- **lint**: updt
+- update rpy2 requirement from <3.5.8 to <3.5.9 (#160)
+- bump pandas-stubs from 1.5.2.230105 to 1.5.3.230203 (#159)
+- update numpy requirement from <1.24.2 to <1.24.3 (#158)
+
+### Refactor
+
+- **build**: pre-commit autoupdate
+- remove unneeded symbols in prtecan.\_\_all\_\_
+- separate fitting from prtecan and define \_\_all\_\_
+
+### chore
+
+- update pre-commit hooks (#197)
+
 ## v0.4.5 (2023-02-03)
 
 ### Fix
