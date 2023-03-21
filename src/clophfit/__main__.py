@@ -220,7 +220,7 @@ def tecan(  # type: ignore  # noqa: PLR0913
     if fit:
         if bg and not scheme:
             # ``as bg requires scheme even though scheme does not imply bg```
-            warnings.warn("Scheme is needed to compute buffer bg!")
+            warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
         if fit_all:
             for n, b, d, out2 in [
                 (0, 0, 0, "dat"),

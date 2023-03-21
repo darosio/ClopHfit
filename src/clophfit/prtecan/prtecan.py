@@ -346,7 +346,8 @@ class Labelblock:
                         data[row + f"{col:0>2}"] = np.nan
                         warnings.warn(
                             f"OVER\n Overvalue in {self.metadata['Label'].value}:"
-                            f"{row}{col:0>2} of tecanfile {self.path}"
+                            f"{row}{col:0>2} of tecanfile {self.path}",
+                            stacklevel=2,
                         )
         except AssertionError as exc:
             msg = "Cannot extract data in Labelblock: not 96 wells?"
@@ -380,7 +381,8 @@ class Labelblock:
                 )
             else:
                 warnings.warn(
-                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time."
+                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
+                    stacklevel=2,
                 )  # pragma: no cover
             self._data_norm = {k: v * norm for k, v in self.data.items()}
         return self._data_norm
@@ -520,7 +522,7 @@ class Tecanfile:
             labelblocks[i] == labelblocks[j]
             for i, j in itertools.combinations(range(n_labelblocks), 2)
         ):
-            warnings.warn("Repeated labelblocks")
+            warnings.warn("Repeated labelblocks", stacklevel=2)
         self.labelblocks = labelblocks
 
 
@@ -698,7 +700,9 @@ class TecanfilesGroup:
             if len(self.labelblocksgroups) == 0:  # == []
                 msg = f"No common labelblock in filenames: {files}."
                 raise ValueError(msg)
-            warnings.warn(f"Different LabelblocksGroup among filenames: {files}.")
+            warnings.warn(
+                f"Different LabelblocksGroup among filenames: {files}.", stacklevel=2
+            )
         self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
 
 
@@ -1043,7 +1047,10 @@ class TitrationAnalysis(Titration):
             elif self.data_dilutioncorrected:
                 self._datafit = self.data_dilutioncorrected
             else:  # back up to dat_nrm
-                warnings.warn("No dilution corrected data found; use normalized data.")
+                warnings.warn(
+                    "No dilution corrected data found; use normalized data.",
+                    stacklevel=2,
+                )
                 self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
         elif bg:
             if nrm:

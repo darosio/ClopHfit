@@ -27,7 +27,7 @@ repos:
       - id: trailing-whitespace # hyper
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.7.0
+    rev: v2.8.0
     hooks:
       - id: pretty-format-ini
         args: [--autofix]
@@ -35,7 +35,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.256
+    rev: v0.0.257
     hooks:
       - id: ruff
 
