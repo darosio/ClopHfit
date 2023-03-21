@@ -148,19 +148,22 @@ When needed (e.g. API updates):
 To bump version and upload build to test.pypi using:
 
     hatch run bump
+    hatch run bump "--increment PATCH" "--files-only" ["--no-verify" to bypass pre-commit and commit-msg hooks]
 
-Usually after:
+while to update only the CHANGELOG.md file:
+
+    hatch run ch
+
+Release will automatically occur after pushing.
+
+(Alternatively)
+
+    pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
+
+To keep clean development history use branches and pr:
 
     gh pr create --fill
     gh pr merge --squash --delete-branch [-t “fix|ci|feat: msg”]
-
-To update only changelog:
-
-    gatch run ch
-
-Alternatively:
-
-    pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
 
 ### Configuration files
 
@@ -189,25 +192,3 @@ Other manual actions:
 pylint src/ tests/
 bandit -r src/
 ```
-
-## TODO
-
-- Print sorted output.
-- Add info to results report:
-  - Brightness;
-  - flatness (SA - SB)/SA - fluorescence is constant? GREAT;
-  - presence of isosbestic (the fitting line cross / SA1 < SB1 and SA2 > SB2
-    sometime they do not cross anyway).
-- Robust fit considering sigma pH.
-- check metadata and report the diff REMEMBER 8.8 (2013-05-29); metadata
-  rescaled; dataframe groupby per meta_pre, ma anche enspire
-
-- development
-
-  - readthedocs or ghpages?
-    <https://www.docslikecode.com/articles/github-pages-python-sphinx/>
-
-- ruff
-  - drop bandit
-  - drop darglint
-  - drop pyupgrade

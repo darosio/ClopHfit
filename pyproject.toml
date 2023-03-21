@@ -201,7 +201,7 @@ python = "3.10"
 
 [tool.hatch.envs.default.scripts]
 bump = [
-  "cz bump --major-version-zero -ch {args}",  # e.g. "--increment PATCH", "--files-only", "--no-verify" to bypass pre-commit and commit-msg hooks
+  "cz bump --major-version-zero -ch {args}",  # e.g. "--increment PATCH"
   "hatch build",
   "hatch publish -r test"
 ]
