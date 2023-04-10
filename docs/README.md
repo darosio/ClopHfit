@@ -1,10 +1,10 @@
+# ClopHfit
+
 [![PyPI](https://img.shields.io/pypi/v/ClopHfit.svg)](https://pypi.org/project/ClopHfit/)
 [![CI](https://github.com/darosio/ClopHfit/actions/workflows/ci.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/darosio/ClopHfit/branch/main/graph/badge.svg?token=OU6F9VFUQ6)](https://codecov.io/gh/darosio/ClopHfit)
 [![RtD](https://readthedocs.org/projects/clophfit/badge/)](https://clophfit.readthedocs.io/)
 [![zenodo](https://zenodo.org/badge/DOI/10.5281/zenodo.6354112.svg)](https://doi.org/10.5281/zenodo.6354112)
-
-# ClopHfit
 
 Cli for fitting macromolecule pH titration or binding assay data, e.g.
 fluorescence spectra.
@@ -32,15 +32,17 @@ fluorescence spectra.
 
   For example:
 
-      clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
+        clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH \
+            --norm --out prova2 --Klim 6.8,8.4 --sel 7.6,20
 
   To reproduce older pr.tecan add `--no-weight` option:
 
-      clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight --out 4old --Klim 6.8,8.4 --sel 7.6,20
+        clop prtecan list.pH -k ph --scheme ../scheme.txt --no-bg --no-weight \
+            --out 4old --Klim 6.8,8.4 --sel 7.6,20
 
 - Predict chloride dissociation constant `K_d` at given pH:
 
-      clop eq1 --help
+        clop eq1 --help
 
 To use clophfit in your python:
 
@@ -64,15 +66,16 @@ You need the following requirements:
   `pipx install hatch`. Dependencies are locked thanks to
   [pip-deepfreeze](https://pypi.org/project/pip-deepfreeze/). You can run
   `hatch env show` to list available environments and scripts.
-  ```bash
-  hatch run init  # init repo with pre-commit hooks
-  hatch run sync  # sync venv with deepfreeze
-  # other examples
-  hatch run lint:run
-  hatch run tests.py3.10:all
-  ```
+
+        hatch run init  # init repo with pre-commit hooks
+        hatch run sync  # sync venv with deepfreeze
+
+        hatch run lint:run
+        hatch run tests.py3.10:all
+
   Hatch handles everything for you, including setting up an temporary virtual
   environment for each run.
+
 - `pre-commit` for all style and consistency checking. While you can run it with
   nox, this is such an important tool that it deserves to be installed on its
   own. If pre-commit fails during pushing upstream then stage changes, Commit
@@ -81,28 +84,22 @@ You need the following requirements:
 `pip`, `pip-deepfreeze` and `hatch` are pinned in
 .github/workflows/constraints.txt for consistency with CI/CD.
 
-```bash
-pipx install pre-commit
-pipx install hatch
-pipx runpip hatch install hatch-pip-deepfreeze
-```
+    pipx install pre-commit
+    pipx install hatch
+    pipx runpip hatch install hatch-pip-deepfreeze
 
 ### Setting up a development with direnv
 
-```bash
-echo "layout hatch" > .envrc
-hatch run init
-```
+    echo "layout hatch" > .envrc
+    hatch run init
 
 ### Setting up a development environment manually
 
 You can set up a development environment by running:
 
-```bash
-python3 -m venv .venv
-source ./.venv/bin/activate
-pip install -v -e .[dev,tests,docs]
-```
+    python3 -m venv .venv
+    source ./.venv/bin/activate
+    pip install -v -e .[dev,tests,docs]
 
 With direnv for using [Jupyter](https://jupyter.org/) during development:
 
@@ -148,7 +145,8 @@ When needed (e.g. API updates):
 To bump version and upload build to test.pypi using:
 
     hatch run bump
-    hatch run bump "--increment PATCH" "--files-only" ["--no-verify" to bypass pre-commit and commit-msg hooks]
+    hatch run bump "--increment PATCH" "--files-only" \
+        ["--no-verify" to bypass pre-commit and commit-msg hooks]
 
 while to update only the CHANGELOG.md file:
 
@@ -156,9 +154,10 @@ while to update only the CHANGELOG.md file:
 
 Release will automatically occur after pushing.
 
-(Alternatively)
+(Otherwise)
 
-    pipx run --spec commitizen cz bump --changelog-to-stdout --files-only (--prerelease alpha) --increment MINOR
+    pipx run --spec commitizen cz bump --changelog-to-stdout --files-only \
+        (--prerelease alpha) --increment MINOR
 
 To keep clean development history use branches and pr:
 
@@ -188,7 +187,5 @@ pip-df generates requirements[-dev,docs,tests].txt.
 
 Other manual actions:
 
-```bash
-pylint src/ tests/
-bandit -r src/
-```
+    pylint src/ tests/
+    bandit -r src/
