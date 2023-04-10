@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
   'click < 8.1.4',
-  'corner < 2.2.2',
+  'corner < 2.2.3',
   'emcee < 3.1.5',
   'lmfit < 1.1.1',
   'matplotlib < 3.7.2',
