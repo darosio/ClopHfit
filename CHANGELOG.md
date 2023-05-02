@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.4.8 (2023-05-02)
+
+### Docs
+
+- Lint README.md with markdownlint-cli
+
+### Build
+
+- update lmfit requirement from <1.1.1 to <1.2.1 (#213)
+- remove pyupgrade as ruff "UP" fully replaces it
+- bump pandas-stubs from 2.0.0.230412 to 2.0.1.230501 (#240)
+- update commitizen requirement from <3.1.1 to <3.2.1 (#239)
+- update coverage[toml] requirement from <7.2.4 to <7.2.6 (#238)
+- bump pip from 23.1.1 to 23.1.2 in /.github/workflows (#235)
+- update commitizen requirement from <2.42.2 to <3.1.1 (#234)
+- bump sphinx from 6.1.3 to 6.2.1 (#233)
+- bump ruff from 0.0.262 to 0.0.263 (#232)
+- update pandas requirement from <2.0.1 to <2.0.2 (#231)
+- bump pip from 23.1 to 23.1.1 in /.github/workflows (#229)
+- update numpy requirement from <1.24.3 to <1.24.4 (#227)
+- bump codecov/codecov-action from 3.1.2 to 3.1.3 (#225)
+- update corner requirement from <2.2.2 to <2.2.3 (#211)
+- update pygments requirement from <2.14.1 to <2.15.2 (#223)
+- bump pip from 23.0.1 to 23.1 in /.github/workflows (#222)
+- update pytest requirement from <7.2.3 to <7.3.2 (#220)
+- bump pandas-stubs from 1.5.3.230321 to 2.0.0.230412 (#218)
+- bump ruff from 0.0.260 to 0.0.262 (#224)
+- update rpy2 requirement from <3.5.11 to <3.5.12 (#221)
+- bump sphinx-autodoc-typehints from 1.22 to 1.23.0 (#219)
+- bump codecov/codecov-action from 3.1.1 to 3.1.2 (#217)
+- bump pip-deepfreeze from 1.1.0 to 1.2.0 in /.github/workflows (#216)
+- update mypy requirement from <1.2 to <1.3 (#210)
+- update coverage[toml] requirement from <7.2.3 to <7.2.4 (#209)
+- bump hatch from 1.6.3 to 1.7.0 in /.github/workflows (#207)
+- update pandas requirement from <1.5.4 to <2.0.1 (#205)
+- bump pydata-sphinx-theme from 0.13.1 to 0.13.3 (#204)
+- bump ruff from 0.0.259 to 0.0.260 (#203)
+- bump ruff from 0.0.258 to 0.0.259 (#201)
+- bump ruff from 0.0.257 to 0.0.258 (#199)
+- bump pandas-stubs from 1.5.3.230304 to 1.5.3.230321 (#198)
+
+### CI/CD
+
+- skip tests when only docs are changed
+
+### chore
+
+- update pre-commit hooks (#230)
+- update pre-commit hooks (#214)
+- update pre-commit hooks (#206)
+
 ## v0.4.7 (2023-03-21)
 
 ### Docs
