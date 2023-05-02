@@ -381,7 +381,7 @@ select = [
   "S",  # bandit XXX
   "SIM",  # simplify
   "TID",  # tidy-imports
-  "UP",  # pyupgrade XXX
+  "UP",  # pyupgrade
   "YTT",  # 2020
   "W"  # pycodestyle
 ]
