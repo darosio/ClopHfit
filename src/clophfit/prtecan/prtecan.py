@@ -354,7 +354,7 @@ class Labelblock:
             raise ValueError(msg) from exc
         return data
 
-    _KEYS = [
+    _KEYS = [  # noqa: RUF008 "False positive for ClassVar"
         "Emission Bandwidth",
         "Emission Wavelength",
         "Excitation Bandwidth",
