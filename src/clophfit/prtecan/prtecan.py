@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import itertools
 import warnings
-from collections import defaultdict
 from contextlib import suppress
 from dataclasses import InitVar
 from dataclasses import dataclass
@@ -252,8 +251,8 @@ def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
         Dilution correction vector.
     """
     volumes = np.cumsum(additions)
-    correction = volumes / volumes[0]
-    return np.array(correction)
+    corrections: NDArray[np.float_] = volumes / volumes[0]
+    return corrections
 
 
 @dataclass
@@ -565,16 +564,14 @@ class LabelblocksGroup:
                 self.labelblocks[0] == lb for lb in self.labelblocks[1:]
             )
         if self.allequal:
-            self._data = defaultdict(list)
+            self._data = {}
             for key in self.labelblocks[0].data:
-                for lb in self.labelblocks:
-                    self._data[key].append(lb.data[key])
+                self._data[key] = [lb.data[key] for lb in self.labelblocks]
         # labelblocks that can be merged only after normalization
         elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
-            self._data_norm = defaultdict(list)
+            self._data_norm = {}
             for key in self.labelblocks[0].data:
-                for lb in self.labelblocks:
-                    self._data_norm[key].append(lb.data_norm[key])
+                self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
         else:
             msg = "Creation of labelblock group failed."
             raise ValueError(msg)
@@ -589,10 +586,9 @@ class LabelblocksGroup:
     def data_norm(self) -> dict[str, list[float]]:
         """Normalize data by number of flashes, integration time and gain."""
         if self._data_norm is None:
-            self._data_norm = defaultdict(list)
+            self._data_norm = {}
             for key in self.labelblocks[0].data:
-                for lb in self.labelblocks:
-                    self._data_norm[key].append(lb.data_norm[key])
+                self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
         return self._data_norm
 
     @property
@@ -781,6 +777,7 @@ class Titration(TecanfilesGroup):
         """List of initial volume followed by additions."""
         return self._additions
 
+    # Here there is not any check on the validity of additions (e.g. length).
     @additions.setter
     def additions(self, additions: list[float]) -> None:
         self._additions = additions
@@ -811,7 +808,10 @@ class Titration(TecanfilesGroup):
         """Buffer subtracted data."""
         if self._data_dilutioncorrected is None and self.additions:
             self._data_dilutioncorrected = [
-                {k: v * self._dil_corr for k, v in lbg.data_buffersubtracted.items()}
+                {
+                    k: (np.array(v) * self._dil_corr).tolist()
+                    for k, v in lbg.data_buffersubtracted.items()
+                }
                 if lbg.data_buffersubtracted
                 else None
                 for lbg in self.labelblocksgroups
@@ -824,7 +824,7 @@ class Titration(TecanfilesGroup):
         if self._data_dilutioncorrected_norm is None and self.additions:
             self._data_dilutioncorrected_norm = [
                 {
-                    k: v * self._dil_corr
+                    k: (np.array(v) * self._dil_corr).tolist()
                     for k, v in lbg.data_buffersubtracted_norm.items()
                 }
                 for lbg in self.labelblocksgroups
