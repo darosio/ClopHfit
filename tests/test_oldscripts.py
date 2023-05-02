@@ -50,7 +50,7 @@ class TestTitrationFit:
         cli = Path("../../src/clophfit/old/fit_titration.py")
         csv_file = request.param[0]
         with subprocess.Popen(  # nosec B603
-            [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]
+            [cli, csv_file, self.note_fp, "-t", "cl", "-d", "_tmpoutput"]  # noqa: S603
             + request.param[2],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -133,7 +133,7 @@ bootstrap:""",
             stderr=subprocess.PIPE,
             universal_newlines=True,
             cwd=_data,
-            shell=False,
+            shell=False,  # noqa: S603
         ) as process:
             yield request.param, process.communicate()
 
