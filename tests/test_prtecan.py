@@ -98,13 +98,11 @@ class TestLabelblock:
         """Simulate csvl with 2 labelblocks."""
         csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
         idxs = prtecan.lookup_listoflines(csvl)
-        lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
-        lb1 = prtecan.Labelblock(csvl[idxs[1] :])
-        lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
-        lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
         # pylint: disable=W0201
-        self.lb0 = lb0
-        self.lb1 = lb1
+        self.lb0 = prtecan.Labelblock(csvl[idxs[0] : idxs[1]])
+        self.lb1 = prtecan.Labelblock(csvl[idxs[1] :])
+        self.lb0.buffer_wells = ["D01", "D12", "E01", "E12"]
+        self.lb1.buffer_wells = ["D01", "D12", "E01", "E12"]
 
     def test_metadata(self) -> None:
         """It parses "Temperature" metadata."""
@@ -286,8 +284,9 @@ class TestLabelblocksGroup:
 
     def test_data(self) -> None:
         """Merge data."""
-        assert self.lbg0.data["A01"] == [18713, 17088]  # type: ignore
-        assert self.lbg0.data["H12"] == [28596, 25771]  # type: ignore
+        assert self.lbg0.data is not None
+        assert self.lbg0.data["A01"] == [18713, 17088]
+        assert self.lbg0.data["H12"] == [28596, 25771]
         assert self.lbg1.data is None
 
     def test_data_normalized(self) -> None:
@@ -301,8 +300,9 @@ class TestLabelblocksGroup:
 
     def test_data_buffersubtracted(self) -> None:
         """Merge data_buffersubtracted."""
+        assert self.lbg0.data_buffersubtracted is not None
         np.testing.assert_almost_equal(
-            self.lbg0.data_buffersubtracted["B07"], [7069, 5716.7], 1  # type: ignore
+            self.lbg0.data_buffersubtracted["B07"], [7069, 5716.7], 1
         )
         assert self.lbg1.data_buffersubtracted is None
 
@@ -348,10 +348,12 @@ class TestTecanfileGroup:
             assert lbg1.metadata["Gain"].value == 98.0
             # data normalized ... enough in lbg
             # data
-            assert lbg0.data["A01"] == [18713, 17088]  # type: ignore
-            assert lbg0.data["H12"] == [28596, 25771]  # type: ignore
-            assert lbg1.data["A01"] == [7878, 8761]  # type: ignore
-            assert lbg1.data["H12"] == [14226, 13602]  # type: ignore
+            assert lbg0.data is not None
+            assert lbg0.data["A01"] == [18713, 17088]
+            assert lbg0.data["H12"] == [28596, 25771]
+            assert lbg1.data is not None
+            assert lbg1.data["A01"] == [7878, 8761]
+            assert lbg1.data["H12"] == [14226, 13602]
 
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
@@ -382,8 +384,9 @@ class TestTecanfileGroup:
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg0.metadata["Gain"].value == 94
             # data
-            assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]  # type: ignore
-            assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]  # type: ignore
+            assert lbg0.data is not None
+            assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
+            assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
 
         def test_mergeable_labelblocksgroups(self) -> None:
             """Generate 1 Lbg only with .data_normalized and only common .metadata."""
@@ -429,8 +432,9 @@ class TestTecanfileGroup:
             assert lbg.metadata["Number of Flashes"].value == 10.0
             assert lbg.metadata["Gain"].value == 93.0
             # data
-            assert lbg.data["A01"] == [6289, 6462, 6465]  # type: ignore
-            assert lbg.data["H12"] == [4477, 4705, 4918]  # type: ignore
+            assert lbg.data is not None
+            assert lbg.data["A01"] == [6289, 6462, 6465]
+            assert lbg.data["H12"] == [4477, 4705, 4918]
 
     class TestFailToMerge:
         """Test TfG without mergeable labelblocks."""
@@ -466,16 +470,19 @@ class TestTitration:
         # pH9.3 is 93 Optimal not Manual
         assert lbg1.metadata["Gain"] == prtecan.Metadata(93.0)
         # data
-        assert lbg0.data["A01"][::2] == [30344, 31010, 33731, 37967]  # type: ignore
-        assert lbg1.data["A01"][1::2] == [9165, 15591, 20788, 22534]  # type: ignore
-        assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]  # type: ignore
-        assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]  # type: ignore
+        assert lbg0.data is not None
+        assert lbg1.data is not None
+        assert lbg0.data["A01"][::2] == [30344, 31010, 33731, 37967]
+        assert lbg1.data["A01"][1::2] == [9165, 15591, 20788, 22534]
+        assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]
+        assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
 
     def test_labelblocksgroups_cl(self) -> None:
         """It reads labelblocksgroups data for Cl too."""
         lbg = self.tit_cl.labelblocksgroups[0]
-        assert lbg.data["A01"] == [6462, 6390, 6465, 6774]  # type: ignore
-        assert lbg.data["H12"] == [4705, 4850, 4918, 5007]  # type: ignore
+        assert lbg.data is not None
+        assert lbg.data["A01"] == [6462, 6390, 6465, 6774]
+        assert lbg.data["H12"] == [4705, 4850, 4918, 5007]
 
     def test_export_data(self, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
@@ -540,35 +547,38 @@ class TestTitrationAnalysis:
             [601.72, 641.505, 674.355, 706.774],
             3,
         )
-        if lbg0.data:
-            assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
-        if lbg0.data_buffersubtracted:
-            np.testing.assert_array_equal(
-                lbg0.data_buffersubtracted["A12"][::3],
-                [8084.5, 16621.75, 13775.0],
-            )
+        assert lbg0.data is not None
+        assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
+        assert lbg0.data_buffersubtracted is not None
         np.testing.assert_array_equal(
-            lbg1.data_buffersubtracted["A12"][::3],  # type: ignore
-            [9758.25, 1334.0, 283.5],
+            lbg0.data_buffersubtracted["A12"][::3], [8084.5, 16621.75, 13775.0]
+        )
+        assert lbg1.data_buffersubtracted is not None
+        np.testing.assert_array_equal(
+            lbg1.data_buffersubtracted["A12"][::3], [9758.25, 1334.0, 283.5]
         )
 
     def test_dilution_correction(self) -> None:
         """It applies dilution correction read from file listing additions."""
-        np.testing.assert_array_equal(self.titan.additions, [100, 2, 2, 2, 2, 2, 2])  # type: ignore
+        assert self.titan.additions is not None
+        np.testing.assert_array_equal(self.titan.additions, [100, 2, 2, 2, 2, 2, 2])
+        assert self.titan.data_dilutioncorrected is not None
+        assert self.titan.data_dilutioncorrected[1] is not None
         np.testing.assert_almost_equal(
-            self.titan.data_dilutioncorrected[1]["A12"],  # type: ignore
+            self.titan.data_dilutioncorrected[1]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
     def test_data_dilutioncorrected_norma(self) -> None:
         """It normalizes data."""
+        assert self.titan.data_dilutioncorrected_norm is not None
         np.testing.assert_almost_equal(
-            self.titan.data_dilutioncorrected_norm[0]["A12"][::2],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[0]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         np.testing.assert_almost_equal(
-            self.titan.data_dilutioncorrected_norm[1]["A12"][::2],  # type: ignore
+            self.titan.data_dilutioncorrected_norm[1]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
