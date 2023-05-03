@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 from typing import Callable
+from typing import ClassVar
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -293,6 +294,16 @@ class Labelblock:
     _buffer_norm: float | None = None
     _sd_buffer: float | None = None
     _sd_buffer_norm: float | None = None
+    _KEYS: ClassVar[list[str]] = [
+        "Emission Bandwidth",
+        "Emission Wavelength",
+        "Excitation Bandwidth",
+        "Excitation Wavelength",
+        "Mode",
+        "Integration Time",
+        "Number of Flashes",
+    ]
+    _NORM_KEYS: ClassVar[list[str]] = ["Integration Time", "Number of Flashes", "Gain"]
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
@@ -353,32 +364,15 @@ class Labelblock:
             raise ValueError(msg) from exc
         return data
 
-    _KEYS = [  # noqa: RUF008 "False positive for ClassVar"
-        "Emission Bandwidth",
-        "Emission Wavelength",
-        "Excitation Bandwidth",
-        "Excitation Wavelength",
-        "Mode",
-        "Integration Time",
-        "Number of Flashes",
-    ]
-
     @property
     def data_norm(self) -> dict[str, float]:
         """Normalize data by number of flashes, integration time and gain."""
         if self._data_norm is None:
-            if (
-                isinstance(self.metadata["Gain"].value, (float, int))
-                and isinstance(self.metadata["Number of Flashes"].value, (float, int))
-                and isinstance(self.metadata["Integration Time"].value, (float, int))
-            ):
-                norm = (
-                    1000.0
-                    / self.metadata["Gain"].value
-                    / self.metadata["Number of Flashes"].value
-                    / self.metadata["Integration Time"].value
-                )
-            else:
+            try:
+                norm = 1000.0
+                for k in Labelblock._NORM_KEYS:
+                    norm /= self.metadata[k].value  # type: ignore
+            except TypeError:
                 warnings.warn(
                     "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
                     stacklevel=2,
