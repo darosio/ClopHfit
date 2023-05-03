@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.9 (2023-05-03)
+
+### Build
+
+- bump sphinx from 6.2.1 to 7.0.0 (#236)
+- bump ruff from 0.0.263 to 0.0.264 (#243)
+- bump autodocsumm from 0.2.10 to 0.2.11 (#242)
+- update lmfit requirement from <1.2.1 to <1.2.2 (#241)
+
+### Refactor
+
+- update typeguard to 4.0.0rc5
+
 ## v0.4.8 (2023-05-02)
 
 ### Docs
