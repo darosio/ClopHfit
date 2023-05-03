@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.10 (2023-05-03)
+
+### Refactor
+
+- Labelblock KEYS
+
 ## v0.4.9 (2023-05-03)
 
 ### Build
