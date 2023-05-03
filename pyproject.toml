@@ -60,7 +60,7 @@ dev = [
   "python-lsp-ruff"
 ]
 docs = [
-  "autodocsumm == 0.2.10",
+  "autodocsumm == 0.2.11",
   "myst-parser == 1.0.0",
   "nbsphinx == 0.9.1",
   "pydata-sphinx-theme == 0.13.3",
