@@ -8,6 +8,7 @@ import os
 import warnings
 from collections import Counter
 from collections import namedtuple
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -346,10 +347,9 @@ class EnspireFile(object):
             for w in self.wells:
                 v[w] = [float(r) for r in df[head.res][df.Well == w] if not r == ""]
 
-    def export_measurements(self, output_dir="Meas"):
+    def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
         """Create table as DataFrame and plot; save into Meas folder."""
-        if not os.path.exists(output_dir):
-            os.mkdir(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements.keys():
             a = DataFrame(
                 np.transpose(
@@ -360,13 +360,11 @@ class EnspireFile(object):
             )
             a.index.names = ["lambda"]
             a.plot(title=m, legend=False)
-            file = os.path.join(
-                output_dir, os.path.splitext(self._filename)[0] + "_" + m
-            )
-            while os.path.exists(file + ".csv"):
-                file = file + "-b"
-            a.to_csv(file + ".csv")
-            plt.savefig(file + ".png")
+            file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
+            while file.exists():
+                file = file.with_stem(file.stem + "-b")
+            a.to_csv(str(file))
+            plt.savefig(str(file.with_suffix(".png")))
 
 
 class ExpNote(object):
