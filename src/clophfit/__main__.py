@@ -9,6 +9,7 @@ import click
 
 from clophfit import binding
 from clophfit import prtecan
+from clophfit.prenspire.prenspire import EnspireFile
 
 
 def fit_routine(  # noqa: PLR0913
@@ -263,3 +264,20 @@ def tecan(  # type: ignore  # noqa: PLR0913
                 sel,
                 pdf,
             )
+
+
+@clop.command("prenspire")
+@click.argument("csv", type=click.Path(path_type=Path))
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    default="Meas",
+    help="Path to output results.",
+    show_default=True,
+)
+@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
+def enspire(csv, out, verbose):  # type: ignore
+    """Save spectra as csv tables from EnSpire xls file."""
+    ef = EnspireFile(csv, verbose=verbose)
+    ef.extract_measurements(verbose=verbose)
+    ef.export_measurements(out)
