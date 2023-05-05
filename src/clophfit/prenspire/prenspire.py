@@ -9,8 +9,9 @@ import warnings
 from collections import Counter
 from collections import namedtuple
 from pathlib import Path
+from typing import Callable
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 from pandas import DataFrame
 from pyparsing import Keyword  # TODO: indentBlock, ParseResults
@@ -25,16 +26,7 @@ from pyparsing import alphanums
 import clophfit.prenspire.prparser as pp
 
 
-def verbose_print(kwargs):
-    """Print when verbose output is True."""
-    return (
-        print
-        if "verbose" in kwargs.keys() and kwargs["verbose"]
-        else lambda *a, **k: None
-    )
-
-
-class EnspireFile(object):
+class EnspireFile:
     """Read an EnSpire-generated csv file.
 
     Read the files and check the formats.
@@ -97,7 +89,7 @@ class EnspireFile(object):
             else:  # count > 1
                 raise Exception("2 lines starting with ['Well', 'Sample',...]")
 
-        def get_list_from_platemap():
+        def get_list_from_platemap() -> tuple[list[str], list[list[str]]]:
             """Get well_list from Platemap contained in metadata_post.
 
             Returns
@@ -139,7 +131,7 @@ class EnspireFile(object):
                         p.append(letter + "{0:0>2}".format(c))
             return p, plate
 
-        def create_metadata():
+        def create_metadata() -> None:
             """Create metadata dictionary."""
             self.metadata = {}
             self.metadata[pre[1][3]] = pre[2][3]
@@ -159,7 +151,7 @@ class EnspireFile(object):
                 if len(line) == 1 and "WARNING:" in line[0]
             ]
 
-        verboseprint = verbose_print(kwargs)
+        verboseprint = print if kwargs["verbose"] else lambda *_, **__: None
         csvl = list(csv.reader(open(file, encoding="iso-8859-1"), dialect="excel-tab"))
         verboseprint("read file csv")
         # TODO: try prparser.line_index()
@@ -200,7 +192,7 @@ class EnspireFile(object):
             When something went wrong.
 
         """
-        verboseprint = verbose_print(kwargs)
+        verboseprint = print if kwargs["verbose"] else lambda *_, **__: None
 
         ParserElement.setDefaultWhitespaceChars(" \t")
         EOL = LineEnd().suppress()
@@ -384,7 +376,7 @@ class ExpNote(object):
 
     def __init__(self, note_file, **kwargs):
         """Initialize an object."""
-        verboseprint = verbose_print(kwargs)
+        verboseprint = print if kwargs["verbose"] else lambda *_, **__: None
         self.note_list = pp.load_csv(note_file, dialect="excel-tab")
         verboseprint("read (experimental) note file")
         self.wells = np.array(self.note_list)[1:, 0].tolist()
@@ -447,7 +439,7 @@ class Titration:
         if "func" in kwargs:
             self.func = kwargs["func"]
 
-    def plot(self):
+    def plot(self) -> None:
         """Plot the titration spectra."""
         for m in self.data.keys():
             self.data[m].plot()
