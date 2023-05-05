@@ -1,29 +1,25 @@
 """Test prenspire module."""
-import functools
-import os
 import unittest
+from pathlib import Path
 
 import pytest
 
 from clophfit.prenspire import prenspire
 
-test_data_files_dir = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "EnSpire"
-)
-data_files_dir = os.path.join(os.path.dirname(__file__), "EnSpire")
-esff = functools.partial(os.path.join, data_files_dir)
+data_files_dir = Path(__file__).parent / "EnSpire"
+esff = data_files_dir.joinpath
 
 
 class TestEnspireFile(unittest.TestCase):
     """Test EnspireFile class."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Read in data files."""
         self.esf1 = prenspire.EnspireFile(esff("h148g-spettroC.csv"))
         self.esf2 = prenspire.EnspireFile(esff("M1-A6-G12.csv"))
         self.esf3 = prenspire.EnspireFile(esff("S202N-E2_pHs.csv"))
 
-    def test_Exceptions(self):
+    def test_exceptions(self) -> None:
         """Test some raised exceptions."""
         # Test get_data_ini Exceptions
         with pytest.raises(Exception, match="No line starting with ."):
@@ -60,20 +56,20 @@ class TestEnspireFile(unittest.TestCase):
                 esff("e2dan-exwavelengthstrange.csv")
             ).extract_measurements()
 
-    def test_get_data_ini(self):
+    def test_get_data_ini(self) -> None:
         """Test get_data_ini."""
         self.assertEqual(self.esf1._ini, 12)
         self.assertEqual(self.esf2._ini, 9)
         self.assertEqual(self.esf3._ini, 9)
 
-    def test_fin(self):
+    def test_fin(self) -> None:
         """Test _fin (line_index())."""
         # Remember that first line has index=0
         self.assertEqual(self.esf1._fin, 14897)
         self.assertEqual(self.esf2._fin, 461)
         self.assertEqual(self.esf3._fin, 7233)
 
-    def test_metadata_post(self):
+    def test_metadata_post(self) -> None:
         """Identify correctly the beginning of metadata after data block."""
         # self.assertEqual(self.esf1.metadata_pre[5],
         #                ['Background information'])
@@ -85,13 +81,13 @@ class TestEnspireFile(unittest.TestCase):
         #                ['No background information available.'])
         self.assertEqual(self.esf3._metadata_post[0], ["Basic assay information "])
 
-    def test_localegen_in_metadata_post(self):
+    def test_localegen_in_metadata_post(self) -> None:
         """Test locales."""
         self.assertEqual(self.esf1._metadata_post[31][4], "300 µl")
         self.assertEqual(self.esf2._metadata_post[31][4], "300 µl")
         self.assertEqual(self.esf3._metadata_post[31][4], "300 µl")
 
-    def test_data_list(self):
+    def test_data_list(self) -> None:
         """Test data_list."""
         self.assertEqual(self.esf1._data_list[0][2], "MeasA:Result")
         self.assertEqual(self.esf2._data_list[0][2], "MeasA:WavelengthExc")
@@ -104,13 +100,13 @@ class TestEnspireFile(unittest.TestCase):
         self.assertEqual(self.esf2._data_list[-1][4], "3993")
         self.assertEqual(self.esf3._data_list[-1][2], "1785")
 
-    def test_get_list_from_platemap(self):
+    def test_get_list_from_platemap(self) -> None:
         """Test list from platemap."""
         self.assertEqual(self.esf1._well_list_platemap[2], "A03")
         self.assertEqual(self.esf2._well_list_platemap[1], "H12")
         self.assertEqual(self.esf3._well_list_platemap[2], "A03")
 
-    def test_metadata(self):
+    def test_metadata(self) -> None:
         """Test metadata dictionary."""
         self.assertEqual(self.esf3.metadata["Measurement date"], "2013-06-14 23:13:51")
         self.assertEqual(self.esf3.metadata["Chamber temperature at start"], "19.55")
@@ -123,7 +119,7 @@ class TestEnspireFile(unittest.TestCase):
             "Well,Sample,MeasA:Result,MeasA:Wavelength",
         )
 
-    def test_measurement_metadata(self):
+    def test_measurement_metadata(self) -> None:
         """Test data object."""
         self.esf3.extract_measurements()
         self.assertEqual(
@@ -138,7 +134,7 @@ class TestEnspireFile(unittest.TestCase):
         self.assertEqual(self.esf3.measurements["A"]["metadata"]["Wavelength"], "278")
         self.assertEqual(self.esf3.measurements["A"]["metadata"]["temp"], "20")
 
-    def test_measurements(self):
+    def test_measurements(self) -> None:
         """Test data object."""
         self.esf1.extract_measurements()
         self.assertEqual(self.esf1.measurements["A"]["lambda"][0], 272)
@@ -158,7 +154,7 @@ class TestEnspireFile(unittest.TestCase):
         self.assertEqual(self.esf2.measurements["A"]["metadata"]["Wavelength"], "515")
 
     # @unittest.skip("demonstrating skipping")
-    def test_check_listsWarning(self):
+    def test_check_lists_warning(self) -> None:
         """It warns when (csv != platemap).
 
         *-incomplete.csv: 5 wells (G1-G5) are missing. (They are present in
@@ -182,10 +178,10 @@ class TestEnspireFile(unittest.TestCase):
     #     self.assertEqual(self.s.get_maxx(self.s.ex, self.s.y), 272)
 
 
-class Test_ExpNote(unittest.TestCase):
+class TestExpNote(unittest.TestCase):
     """Experimental notes."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Initialize test class."""
         self.ef1 = prenspire.EnspireFile(esff("h148g-spettroC.csv"))
         self.ef1.extract_measurements()
@@ -194,25 +190,25 @@ class Test_ExpNote(unittest.TestCase):
         self.en3 = prenspire.ExpNote(esff("S202N-E2_pHs-nota"))
         self.en1err = prenspire.ExpNote(esff("h148g-spettroC-nota-Err"))
 
-    def test_get_list_from_note(self):
+    def test_get_list_from_note(self) -> None:
         """Test well_list from note."""
         self.assertEqual(self.en1.wells[2], "A03")
         self.assertEqual(self.en2.wells[1], "H12")
         self.assertEqual(self.en3.wells[2], "A03")
 
-    def test_note_list(self):
+    def test_note_list(self) -> None:
         """Test well_list from note."""
         self.assertEqual(self.en1.note_list[3][0], "A03")
         self.assertEqual(self.en2.note_list[2][0], "H12")
         self.assertEqual(self.en1.note_list[65][1], "8.2")
         self.assertEqual(self.en2.note_list[2][1], "9.36")
 
-    def test_check_list(self):
+    def test_check_list(self) -> None:
         """Test check list from note vs. Enspirefile."""
         self.assertEqual(self.en1.check_wells(self.ef1), True)
         self.assertEqual(self.en1err.check_wells(self.ef1), False)
 
-    def test_build_titrations(self):
+    def test_build_titrations(self) -> None:
         """Test the method extract_titrations()."""
         self.en1.build_titrations(self.ef1)
         self.assertEqual(len(self.en1.titrations), 6)

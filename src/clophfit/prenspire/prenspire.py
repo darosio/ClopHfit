@@ -1,40 +1,67 @@
 """Parses EnSpire data files."""
-
-# TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
-# TODO: Titration.data ['A' 'B' 'C'] -- global fit
+from __future__ import annotations
 
 import csv
-import os
 import warnings
 from collections import Counter
 from collections import namedtuple
 from pathlib import Path
+from typing import Any
+from typing import Callable
+from typing import Sequence
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
-from pandas import DataFrame
-from pyparsing import Keyword  # TODO: indentBlock, ParseResults
-from pyparsing import LineEnd
-from pyparsing import Optional
-from pyparsing import ParserElement
-from pyparsing import White
-from pyparsing import Word
-from pyparsing import ZeroOrMore
-from pyparsing import alphanums
+import pandas as pd
+import pyparsing  # TODO: indentBlock, ParseResults
 
-import clophfit.prenspire.prparser as pp
+# TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
+# TODO: Titration.data ['A' 'B' 'C'] -- global fit
 
 
-def verbose_print(kwargs):
+def verbose_print(verbose: int) -> None | Callable[..., Any]:
     """Print when verbose output is True."""
-    return (
-        print
-        if "verbose" in kwargs.keys() and kwargs["verbose"]
-        else lambda *a, **k: None
-    )
+    return print if verbose else lambda *_, **__: None
 
 
-class EnspireFile(object):
+class ManyLinesFoundError(Exception):
+    """Raised when there are multiple lines containing a specified search string."""
+
+    pass
+
+
+def line_index(lines: list[list[str]], search: list[str]) -> int:
+    """Index function checking the existence of a unique match.
+
+    It behaves like list.index() but raise an Exception if the search string
+    occurs multiple times. Returns 0 otherwise.
+
+    Parameters
+    ----------
+    lines : list[list[str]]
+        List of lines.
+    search : list[str]
+        The search term.
+
+    Returns
+    -------
+    int
+        The position index of search within lines.
+
+    Raises
+    ------
+    ManyLinesFoundError
+        If search term is present 2 or more times.
+
+    """
+    count: int = lines.count(search)
+    if count <= 1:
+        return lines.index(search)  # [].index ValueError if count == 0
+    else:
+        raise ManyLinesFoundError("Many " + str(search) + " lines.")
+
+
+class EnspireFile:
     """Read an EnSpire-generated csv file.
 
     Read the files and check the formats.
@@ -63,8 +90,8 @@ class EnspireFile(object):
 
     """
 
-    def __init__(self, file, **kwargs):
-        def get_data_ini(lines):
+    def __init__(self, file: Path, verbose: int = 0) -> None:
+        def get_data_ini(lines: list[list[str]]) -> int:
             """Get index of the line ['Well', 'Sample', ...].
 
             Check for the presence of a unique ['well', 'sample', ...] line.
@@ -97,7 +124,7 @@ class EnspireFile(object):
             else:  # count > 1
                 raise Exception("2 lines starting with ['Well', 'Sample',...]")
 
-        def get_list_from_platemap():
+        def get_list_from_platemap() -> tuple[list[str], list[list[str]]]:
             """Get well_list from Platemap contained in metadata_post.
 
             Returns
@@ -111,7 +138,7 @@ class EnspireFile(object):
 
             """
             lines = self._metadata_post
-            idx = pp.line_index(lines, ["Platemap:"])
+            idx = line_index(lines, ["Platemap:"])
             if lines[idx + 3] != [
                 "",
                 "01",
@@ -135,13 +162,13 @@ class EnspireFile(object):
                 letter = r[0]
                 for c in range(1, len(r)):
                     # strip out white spaces;fix "no background info available"
-                    if r[c].strip() != "":
-                        p.append(letter + "{0:0>2}".format(c))
+                    if r[c].strip():
+                        p.append(f"{letter}{c:02}")
             return p, plate
 
-        def create_metadata():
+        def create_metadata() -> None:
             """Create metadata dictionary."""
-            self.metadata = {}
+            self.metadata: dict[str, str | list[str]] = {}
             self.metadata[pre[1][3]] = pre[2][3]
             self.metadata[pre[1][4]] = pre[2][4]
             self.metadata[pre[1][5]] = pre[2][5]
@@ -159,32 +186,32 @@ class EnspireFile(object):
                 if len(line) == 1 and "WARNING:" in line[0]
             ]
 
-        verboseprint = verbose_print(kwargs)
-        csvl = list(csv.reader(open(file, encoding="iso-8859-1"), dialect="excel-tab"))
-        verboseprint("read file csv")
+        verboseprint = verbose_print(verbose)
+        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
+        verboseprint("read file csv")  # type: ignore
         # TODO: try prparser.line_index()
         self._ini = 1 + get_data_ini(csvl)
-        verboseprint("ini =", self._ini)
-        self._fin = -1 + pp.line_index(csvl, ["Basic assay information "])
-        verboseprint("fin =", self._fin)
+        verboseprint("ini =", self._ini)  # type: ignore
+        self._fin = -1 + line_index(csvl, ["Basic assay information "])
+        verboseprint("fin =", self._fin)  # type: ignore
         # check csv format around ini and fin
         if not (csvl[self._ini - 3] == csvl[self._ini - 2] == []):
             raise Exception("Expecting two empty lines before _ini")
         if not (csvl[self._fin] == []):
             raise Exception("Expecting an empty line after _fin")
-        verboseprint("checked csv format around ini and fin")
+        verboseprint("checked csv format around ini and fin")  # type: ignore
         pre = csvl[0 : self._ini - 2]  # -3
-        verboseprint("saved metadata_pre attribute")
+        verboseprint("saved metadata_pre attribute")  # type: ignore
         self._data_list = csvl[self._ini - 1 : self._fin]
-        verboseprint("saved _data_list attribute")
+        verboseprint("saved _data_list attribute")  # type: ignore
         self._metadata_post = csvl[self._fin + 1 :]
-        verboseprint("saved metadata_post attribute")
+        verboseprint("saved metadata_post attribute")  # type: ignore
         self._well_list_platemap, self._platemap = get_list_from_platemap()
-        verboseprint("saved _well_list_platemap attribute")
+        verboseprint("saved _well_list_platemap attribute")  # type: ignore
         create_metadata()
-        self._filename = file
+        self._filename = str(file)
 
-    def extract_measurements(self, **kwargs):
+    def extract_measurements(self, verbose: int = 0) -> None:
         """Extract the measurements dictionary.
 
         Add 3 attributes: wells, samples, measurements (as list, list, dict)
@@ -200,30 +227,29 @@ class EnspireFile(object):
             When something went wrong.
 
         """
-        verboseprint = verbose_print(kwargs)
+        verboseprint = verbose_print(verbose)
+        pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
-        ParserElement.setDefaultWhitespaceChars(" \t")
-        EOL = LineEnd().suppress()
-        w = Word(alphanums + ".\u00B0%")
-
-        def line(keyword):
+        def line(keyword: str) -> Any:
+            EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
+            w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")  # . | deg | %
             return (
-                ZeroOrMore(White(" \t")).suppress()
-                + Keyword(keyword)("name")
-                + ZeroOrMore(White(" \t")).suppress()
+                pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
+                + pyparsing.Keyword(keyword)("name")
+                + pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
                 + w("value")
-                + Optional(w)
+                + pyparsing.Optional(w)
                 + EOL
             )
 
-        meas = {}
+        meas: dict[str, Any] = {}
         temp = [0]
         meas_key = ["zz"]
 
-        def aa(tokens):
+        def aa(tokens: pyparsing.ParseResults) -> None:
             name = tokens[0]
             value = tokens[1]
-            verboseprint(name, "=", value)
+            verboseprint(name, "=", value)  # type: ignore
             if name == "Measurement chamber temperature":
                 temp[0] = value
                 return
@@ -250,30 +276,29 @@ class EnspireFile(object):
             | line("Number of flashes")
             | line("Flash power")
         )
-
         pr = block_lines.setParseAction(aa)
 
         ps1 = ["\t".join(line) for line in self._metadata_post]
-        verboseprint("metadata_post ps1 conversion... done")
+        verboseprint("metadata_post ps1 conversion... done")  # type: ignore
         ps2 = "\n".join(ps1)
-        verboseprint("metadata_post ps2 conversion... done")
+        verboseprint("metadata_post ps2 conversion... done")  # type: ignore
         pr.searchString(ps2)
-        verboseprint("metadata_post pyparsing... done")
+        verboseprint("metadata_post pyparsing... done")  # type: ignore
         self.measurements = meas
 
-        def headerdata_measurementskeys_check():
+        def headerdata_measurementskeys_check() -> bool:
             """Check header and measurements.keys()."""
             meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
             b = {k for k, v in Counter(meas).items() if v == 3}
             a = set(self.measurements.keys())
-            verboseprint("check header and measurements.keys()", a == b, a, b)
+            verboseprint("check header and measurements.keys()", a == b, a, b)  # type: ignore
             return a == b
 
         headerdata = self._data_list[0]
         if not headerdata_measurementskeys_check():
             raise Exception("check header and measurements.keys() FAILED.")
 
-        def check_lists():
+        def check_lists() -> bool:
             """Check that lists derived from .csv data and Platemap metadata are identical.
 
             if not raises an *Exception*.
@@ -295,7 +320,7 @@ class EnspireFile(object):
             return True
 
         columns = [r.replace(":", "") for r in headerdata]
-        df = DataFrame(self._data_list[1:], columns=columns)
+        df = pd.DataFrame(self._data_list[1:], columns=columns)
         w = df.drop_duplicates(["Well", "Sample"])
         self.wells = w.Well.tolist()
         self.samples = w.Sample.tolist()
@@ -350,8 +375,8 @@ class EnspireFile(object):
     def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
         """Create table as DataFrame and plot; save into Meas folder."""
         output_dir.mkdir(parents=True, exist_ok=True)
-        for m in self.measurements.keys():
-            a = DataFrame(
+        for m in self.measurements:
+            a = pd.DataFrame(
                 np.transpose(
                     [list(map(float, self.measurements[m][w])) for w in self.wells]
                 ),
@@ -367,7 +392,7 @@ class EnspireFile(object):
             plt.savefig(str(file.with_suffix(".png")))
 
 
-class ExpNote(object):
+class ExpNote:
     """Read an Experimental Note file.
 
     For describing an EnSpire experiment collecting spectrum. Store info as list
@@ -382,27 +407,29 @@ class ExpNote(object):
 
     """
 
-    def __init__(self, note_file, **kwargs):
+    def __init__(self, note_file: Path, verbose: int = 0) -> None:
         """Initialize an object."""
-        verboseprint = verbose_print(kwargs)
-        self.note_list = pp.load_csv(note_file, dialect="excel-tab")
-        verboseprint("read (experimental) note file")
-        self.wells = np.array(self.note_list)[1:, 0].tolist()
-        verboseprint("wells generated")
+        verboseprint = verbose_print(verbose)
+        with note_file.open(encoding="iso-8859-1") as f:
+            # Differ from pandas because all fields/cells are strings.
+            self.note_list = list(csv.reader(f, dialect="excel-tab"))
+        verboseprint("read (experimental) note file")  # type: ignore
+        self.wells: list[str] = np.array(self.note_list)[1:, 0].tolist()
+        verboseprint("wells generated")  # type: ignore
 
-    def check_wells(self, ef):
+    def check_wells(self, ef: EnspireFile) -> bool:
         """Is (EnspireFile) ef.wells == ExpNote.wells? Return False-or-True."""
         return self.wells == ef.wells
 
-    def build_titrations(self, ef):
+    def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
         # 1 pH titration
         conc_well = [(line[1], line[0]) for line in self.note_list if line[2] == "0"]
         conc = [float(tpl[0]) for tpl in conc_well]
         well = [tpl[1] for tpl in conc_well]
         data = {}
-        for m in ef.measurements.keys():
-            data[m] = DataFrame(
+        for m in ef.measurements:
+            data[m] = pd.DataFrame(
                 np.transpose([list(map(float, ef.measurements[m][w])) for w in well]),
                 columns=[conc, well],
                 index=map(float, ef.measurements[m]["lambda"]),
@@ -421,8 +448,8 @@ class ExpNote(object):
             conc = [float(tpl[0]) for tpl in conc_well]
             well = [tpl[1] for tpl in conc_well]
             data = {}
-            for m in ef.measurements.keys():
-                data[m] = DataFrame(
+            for m in ef.measurements:
+                data[m] = pd.DataFrame(
                     np.transpose(
                         [list(map(float, ef.measurements[m][w])) for w in well]
                     ),
@@ -437,7 +464,9 @@ class ExpNote(object):
 class Titration:
     """Store titration data and fit results."""
 
-    def __init__(self, conc, data, **kwargs):
+    def __init__(
+        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs
+    ) -> None:
         self.conc = conc
         self.data = data
         if "ph" in kwargs:
@@ -447,7 +476,7 @@ class Titration:
         if "func" in kwargs:
             self.func = kwargs["func"]
 
-    def plot(self):
+    def plot(self) -> None:
         """Plot the titration spectra."""
-        for m in self.data.keys():
+        for m in self.data:
             self.data[m].plot()
