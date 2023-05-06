@@ -4,7 +4,6 @@
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
 
 import csv
-import os
 import warnings
 from collections import Counter
 from collections import namedtuple
@@ -15,15 +14,8 @@ from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
-from pandas import DataFrame
-from pyparsing import Keyword  # TODO: indentBlock, ParseResults
-from pyparsing import LineEnd
-from pyparsing import Optional
-from pyparsing import ParserElement
-from pyparsing import White
-from pyparsing import Word
-from pyparsing import ZeroOrMore
-from pyparsing import alphanums
+import pandas as pd
+import pyparsing  # TODO: indentBlock, ParseResults
 
 
 def verbose_print(kwargs: dict[str, str | int | float]) -> None | Callable[..., Any]:
@@ -236,17 +228,17 @@ class EnspireFile:
         """
         verboseprint = verbose_print(kwargs)
 
-        ParserElement.setDefaultWhitespaceChars(" \t")
-        EOL = LineEnd().suppress()
-        w = Word(alphanums + ".\u00B0%")
+        pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
+        EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
+        w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")
 
         def line(keyword):
             return (
-                ZeroOrMore(White(" \t")).suppress()
-                + Keyword(keyword)("name")
-                + ZeroOrMore(White(" \t")).suppress()
+                pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
+                + pyparsing.Keyword(keyword)("name")
+                + pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
                 + w("value")
-                + Optional(w)
+                + pyparsing.Optional(w)
                 + EOL
             )
 
@@ -295,7 +287,7 @@ class EnspireFile:
         verboseprint("metadata_post pyparsing... done")  # type: ignore
         self.measurements = meas
 
-        def headerdata_measurementskeys_check():
+        def headerdata_measurementskeys_check() -> bool:
             """Check header and measurements.keys()."""
             meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
             b = {k for k, v in Counter(meas).items() if v == 3}
@@ -329,7 +321,7 @@ class EnspireFile:
             return True
 
         columns = [r.replace(":", "") for r in headerdata]
-        df = DataFrame(self._data_list[1:], columns=columns)
+        df = pd.DataFrame(self._data_list[1:], columns=columns)
         w = df.drop_duplicates(["Well", "Sample"])
         self.wells = w.Well.tolist()
         self.samples = w.Sample.tolist()
@@ -385,7 +377,7 @@ class EnspireFile:
         """Create table as DataFrame and plot; save into Meas folder."""
         output_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements.keys():
-            a = DataFrame(
+            a = pd.DataFrame(
                 np.transpose(
                     [list(map(float, self.measurements[m][w])) for w in self.wells]
                 ),
@@ -439,7 +431,7 @@ class ExpNote:
         well = [tpl[1] for tpl in conc_well]
         data = {}
         for m in ef.measurements.keys():
-            data[m] = DataFrame(
+            data[m] = pd.DataFrame(
                 np.transpose([list(map(float, ef.measurements[m][w])) for w in well]),
                 columns=[conc, well],
                 index=map(float, ef.measurements[m]["lambda"]),
@@ -459,7 +451,7 @@ class ExpNote:
             well = [tpl[1] for tpl in conc_well]
             data = {}
             for m in ef.measurements.keys():
-                data[m] = DataFrame(
+                data[m] = pd.DataFrame(
                     np.transpose(
                         [list(map(float, ef.measurements[m][w])) for w in well]
                     ),
@@ -475,7 +467,7 @@ class Titration:
     """Store titration data and fit results."""
 
     def __init__(
-        self, conc: Sequence[float], data: dict[str, DataFrame], **kwargs
+        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs
     ) -> None:
         self.conc = conc
         self.data = data
