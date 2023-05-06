@@ -1,7 +1,5 @@
 """Parses EnSpire data files."""
-
-# TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
-# TODO: Titration.data ['A' 'B' 'C'] -- global fit
+from __future__ import annotations
 
 import csv
 import warnings
@@ -16,6 +14,9 @@ import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 import pyparsing  # TODO: indentBlock, ParseResults
+
+# TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
+# TODO: Titration.data ['A' 'B' 'C'] -- global fit
 
 
 def verbose_print(kwargs: dict[str, str | int | float]) -> None | Callable[..., Any]:
@@ -161,8 +162,8 @@ class EnspireFile:
                 letter = r[0]
                 for c in range(1, len(r)):
                     # strip out white spaces;fix "no background info available"
-                    if r[c].strip() != "":
-                        p.append(letter + "{0:0>2}".format(c))
+                    if r[c].strip():
+                        p.append(f"{letter}{c:02}")
             return p, plate
 
         def create_metadata() -> None:
@@ -186,7 +187,7 @@ class EnspireFile:
             ]
 
         verboseprint = verbose_print(kwargs)
-        csvl = list(csv.reader(open(file, encoding="iso-8859-1"), dialect="excel-tab"))
+        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
         verboseprint("read file csv")  # type: ignore
         # TODO: try prparser.line_index()
         self._ini = 1 + get_data_ini(csvl)
@@ -227,12 +228,11 @@ class EnspireFile:
 
         """
         verboseprint = verbose_print(kwargs)
-
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
-        EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
-        w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")
 
-        def line(keyword):
+        def line(keyword: str) -> Any:
+            EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
+            w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")  # . | deg | %
             return (
                 pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
                 + pyparsing.Keyword(keyword)("name")
@@ -276,7 +276,6 @@ class EnspireFile:
             | line("Number of flashes")
             | line("Flash power")
         )
-
         pr = block_lines.setParseAction(aa)
 
         ps1 = ["\t".join(line) for line in self._metadata_post]
@@ -299,7 +298,7 @@ class EnspireFile:
         if not headerdata_measurementskeys_check():
             raise Exception("check header and measurements.keys() FAILED.")
 
-        def check_lists():
+        def check_lists() -> bool:
             """Check that lists derived from .csv data and Platemap metadata are identical.
 
             if not raises an *Exception*.
@@ -376,7 +375,7 @@ class EnspireFile:
     def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
         """Create table as DataFrame and plot; save into Meas folder."""
         output_dir.mkdir(parents=True, exist_ok=True)
-        for m in self.measurements.keys():
+        for m in self.measurements:
             a = pd.DataFrame(
                 np.transpose(
                     [list(map(float, self.measurements[m][w])) for w in self.wells]
@@ -408,29 +407,28 @@ class ExpNote:
 
     """
 
-    def __init__(self, note_file, **kwargs):
+    def __init__(self, note_file: Path, **kwargs: dict[str, str | int | float]) -> None:
         """Initialize an object."""
-        # verboseprint = print if kwargs["verbose"] else lambda *_, **__: None
         verboseprint = verbose_print(kwargs)
-        with Path(note_file).open(encoding="iso-8859-1") as f:
+        with note_file.open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self.note_list = list(csv.reader(f, dialect="excel-tab"))
         verboseprint("read (experimental) note file")  # type: ignore
-        self.wells = np.array(self.note_list)[1:, 0].tolist()
+        self.wells: list[str] = np.array(self.note_list)[1:, 0].tolist()
         verboseprint("wells generated")  # type: ignore
 
-    def check_wells(self, ef):
+    def check_wells(self, ef: EnspireFile) -> bool:
         """Is (EnspireFile) ef.wells == ExpNote.wells? Return False-or-True."""
         return self.wells == ef.wells
 
-    def build_titrations(self, ef):
+    def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
         # 1 pH titration
         conc_well = [(line[1], line[0]) for line in self.note_list if line[2] == "0"]
         conc = [float(tpl[0]) for tpl in conc_well]
         well = [tpl[1] for tpl in conc_well]
         data = {}
-        for m in ef.measurements.keys():
+        for m in ef.measurements:
             data[m] = pd.DataFrame(
                 np.transpose([list(map(float, ef.measurements[m][w])) for w in well]),
                 columns=[conc, well],
@@ -450,7 +448,7 @@ class ExpNote:
             conc = [float(tpl[0]) for tpl in conc_well]
             well = [tpl[1] for tpl in conc_well]
             data = {}
-            for m in ef.measurements.keys():
+            for m in ef.measurements:
                 data[m] = pd.DataFrame(
                     np.transpose(
                         [list(map(float, ef.measurements[m][w])) for w in well]
