@@ -138,7 +138,7 @@ class EnspireFile:
 
             Raises
             ------
-            Exception
+            CsvLineError
                 If the number of plate columns is not equal to 12.
 
             """
@@ -206,7 +206,7 @@ class EnspireFile:
         if not (csvl[self._ini - 3] == csvl[self._ini - 2] == []):
             msg = "Expecting two empty lines before _ini"
             raise CsvLineError(msg)
-        if not (csvl[self._fin] == []):
+        if csvl[self._fin] != []:
             msg = "Expecting an empty line after _fin"
             raise CsvLineError(msg)
         verboseprint("checked csv format around ini and fin")  # type: ignore
@@ -233,7 +233,7 @@ class EnspireFile:
 
         Raises
         ------
-        Exception
+        CsvLineError
             When something went wrong.
         """
         verboseprint = verbose_print(verbose)
@@ -322,7 +322,7 @@ class EnspireFile:
                 Ckeck correctness.
 
             """
-            if not self.wells == self._well_list_platemap:
+            if self.wells != self._well_list_platemap:
                 warnings.warn(
                     "well_list from data_list and platemap differ. \
                     It might be you did not exported data for all acquired wells"
@@ -330,8 +330,8 @@ class EnspireFile:
             return True
 
         columns = [r.replace(":", "") for r in headerdata]
-        df = pd.DataFrame(self._data_list[1:], columns=columns)
-        w = df.drop_duplicates(["Well", "Sample"])
+        dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
+        w = dfdata.drop_duplicates(["Well", "Sample"])
         self.wells = w.Well.tolist()
         self.samples = w.Sample.tolist()
         check_lists()
@@ -344,39 +344,29 @@ class EnspireFile:
             )
             # excitation spectra must have only one emission wavelength
             if v["metadata"]["Monochromator"] == "Excitation":
-                x = [r for r in df[head.em] if not r == ""]
+                x = [r for r in dfdata[head.em] if r]
                 c = Counter(x)
-                if (
-                    not len(c) == 1
-                    or not list(c.keys())[0] == v["metadata"]["Wavelength"]
-                ):
+                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
                     msg = f"Excitation spectra with unexpected emission in {label}"
                     raise CsvLineError(msg)
                 v["lambda"] = [
-                    float(r)
-                    for r in df[head.ex][df.Well == self.wells[0]]
-                    if not r == ""
+                    float(r) for r in dfdata[head.ex][dfdata.Well == self.wells[0]] if r
                 ]
             # emission spectra must have only one excitation wavelength
             elif v["metadata"]["Monochromator"] == "Emission":
-                x = [r for r in df[head.ex] if not r == ""]
+                x = [r for r in dfdata[head.ex] if r]
                 c = Counter(x)
-                if (
-                    not len(c) == 1
-                    or not list(c.keys())[0] == v["metadata"]["Wavelength"]
-                ):
+                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
                     msg = f"Emission spectra with unexpected excitation in {label}"
                     raise CsvLineError(msg)
                 v["lambda"] = [
-                    float(r)
-                    for r in df[head.em][df.Well == self.wells[0]]
-                    if not r == ""
+                    float(r) for r in dfdata[head.em][dfdata.Well == self.wells[0]] if r
                 ]
             else:
                 msg = f'Unknown "Monochromator": {v["metadata"]["Monochromator"]} in {label}'
                 raise CsvLineError(msg)
             for w in self.wells:
-                v[w] = [float(r) for r in df[head.res][df.Well == w] if not r == ""]
+                v[w] = [float(r) for r in dfdata[head.res][dfdata.Well == w] if r]
 
     def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
         """Create table as DataFrame and plot; save into Meas folder."""
