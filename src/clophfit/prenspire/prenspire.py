@@ -160,7 +160,8 @@ class EnspireFile:
                 "12",
                 "",
             ]:
-                raise Exception("stop: Platemap format unexpected")
+                msg = "stop: Platemap format unexpected"
+                raise CsvLineError(msg)
             plate = lines[idx + 4 : idx + 12]
             p = []
             for r in plate:
@@ -203,9 +204,11 @@ class EnspireFile:
         verboseprint("fin =", self._fin)  # type: ignore
         # check csv format around ini and fin
         if not (csvl[self._ini - 3] == csvl[self._ini - 2] == []):
-            raise Exception("Expecting two empty lines before _ini")
+            msg = "Expecting two empty lines before _ini"
+            raise CsvLineError(msg)
         if not (csvl[self._fin] == []):
-            raise Exception("Expecting an empty line after _fin")
+            msg = "Expecting an empty line after _fin"
+            raise CsvLineError(msg)
         verboseprint("checked csv format around ini and fin")  # type: ignore
         pre = csvl[0 : self._ini - 2]  # -3
         verboseprint("saved metadata_pre attribute")  # type: ignore
@@ -302,7 +305,8 @@ class EnspireFile:
 
         headerdata = self._data_list[0]
         if not headerdata_measurementskeys_check():
-            raise Exception("check header and measurements.keys() FAILED.")
+            msg = "check header and measurements.keys() FAILED."
+            raise CsvLineError(msg)
 
         def check_lists() -> bool:
             """Check that lists derived from .csv data and Platemap metadata are identical.
@@ -346,9 +350,8 @@ class EnspireFile:
                     not len(c) == 1
                     or not list(c.keys())[0] == v["metadata"]["Wavelength"]
                 ):
-                    raise Exception(
-                        "Excitation spectra with unexpected emission in " + label
-                    )
+                    msg = f"Excitation spectra with unexpected emission in {label}"
+                    raise CsvLineError(msg)
                 v["lambda"] = [
                     float(r)
                     for r in df[head.ex][df.Well == self.wells[0]]
@@ -362,21 +365,16 @@ class EnspireFile:
                     not len(c) == 1
                     or not list(c.keys())[0] == v["metadata"]["Wavelength"]
                 ):
-                    raise Exception(
-                        "Emission spectra with unexpected excitation in " + label
-                    )
+                    msg = f"Emission spectra with unexpected excitation in {label}"
+                    raise CsvLineError(msg)
                 v["lambda"] = [
                     float(r)
                     for r in df[head.em][df.Well == self.wells[0]]
                     if not r == ""
                 ]
             else:
-                raise Exception(
-                    'Unknown "Monochromator": '
-                    + v["metadata"]["Monochromator"]
-                    + " in "
-                    + label
-                )
+                msg = f'Unknown "Monochromator": {v["metadata"]["Monochromator"]} in {label}'
+                raise CsvLineError(msg)
             for w in self.wells:
                 v[w] = [float(r) for r in df[head.res][df.Well == w] if not r == ""]
 
