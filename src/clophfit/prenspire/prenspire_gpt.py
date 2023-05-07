@@ -1,10 +1,10 @@
-"""ChatGPT"""
+"""ChatGPT suggested."""
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
-from typing import Dict
-from typing import List
 
 import pyparsing
 
@@ -17,12 +17,14 @@ class Metadata:
 
     measurement_chamber_temperature: float = 0.0
     current_measurement: str | None = None  # or: ""
-    data: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    data: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
 class MetadataReader:
-    metadata: Metadata = Metadata()
+    """Dummy line."""
+
+    metadata: Metadata = Metadata()  # noqa: RUF009
 
     @staticmethod
     def _parse_measurement_chamber_temperature(
@@ -51,7 +53,7 @@ class MetadataReader:
             value = tokens.value
             metadata.data[metadata.current_measurement]["metadata"][key] = value
 
-    def _generate_parser(self, keyword_list: List[str]) -> pyparsing.ParserElement:
+    def _generate_parser(self, keyword_list: list[str]) -> pyparsing.ParserElement:
         """
         Generate a pyparsing parser for the specified keyword list.
 
@@ -69,9 +71,7 @@ class MetadataReader:
         parsers = []
 
         for keyword in keyword_list:
-            if keyword == "Measurement chamber temperature":
-                parsers.append(pyparsing.Keyword(keyword) + w("value") + EOL)
-            elif keyword == "Meas":
+            if keyword in ["Measurement chamber temperature", "Meas"]:
                 parsers.append(pyparsing.Keyword(keyword) + w("value") + EOL)
             else:
                 parsers.append(

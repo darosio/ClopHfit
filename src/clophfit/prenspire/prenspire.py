@@ -464,16 +464,18 @@ class Titration:
     """Store titration data and fit results."""
 
     def __init__(
-        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs: Any
+        self,
+        conc: Sequence[float],
+        data: dict[str, pd.DataFrame],
+        cl: float | None = None,
+        ph: str | None = None,
     ) -> None:
         self.conc = conc
         self.data = data
-        if "ph" in kwargs:
-            self.ph = kwargs["ph"]
-        if "cl" in kwargs:
-            self.cl = kwargs["cl"]
-        if "func" in kwargs:
-            self.func = kwargs["func"]
+        if ph:
+            self.ph = ph
+        if cl:
+            self.cl = cl
 
     def plot(self) -> None:
         """Plot the titration spectra."""
