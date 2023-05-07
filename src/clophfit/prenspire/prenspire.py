@@ -19,9 +19,9 @@ import pyparsing  # TODO: indentBlock, ParseResults
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
 
 
-def verbose_print(kwargs: dict[str, str | int | float]) -> None | Callable[..., Any]:
+def verbose_print(verbose: int) -> None | Callable[..., Any]:
     """Print when verbose output is True."""
-    return print if "verbose" in kwargs and kwargs["verbose"] else lambda *_, **__: None
+    return print if verbose else lambda *_, **__: None
 
 
 class ManyLinesFoundError(Exception):
@@ -90,7 +90,7 @@ class EnspireFile:
 
     """
 
-    def __init__(self, file: Path, **kwargs) -> None:
+    def __init__(self, file: Path, verbose: int = 0) -> None:
         def get_data_ini(lines: list[list[str]]) -> int:
             """Get index of the line ['Well', 'Sample', ...].
 
@@ -186,7 +186,7 @@ class EnspireFile:
                 if len(line) == 1 and "WARNING:" in line[0]
             ]
 
-        verboseprint = verbose_print(kwargs)
+        verboseprint = verbose_print(verbose)
         csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
         verboseprint("read file csv")  # type: ignore
         # TODO: try prparser.line_index()
@@ -211,7 +211,7 @@ class EnspireFile:
         create_metadata()
         self._filename = str(file)
 
-    def extract_measurements(self, **kwargs):
+    def extract_measurements(self, verbose: int = 0) -> None:
         """Extract the measurements dictionary.
 
         Add 3 attributes: wells, samples, measurements (as list, list, dict)
@@ -227,7 +227,7 @@ class EnspireFile:
             When something went wrong.
 
         """
-        verboseprint = verbose_print(kwargs)
+        verboseprint = verbose_print(verbose)
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> Any:
@@ -242,11 +242,11 @@ class EnspireFile:
                 + EOL
             )
 
-        meas = {}
+        meas: dict[str, Any] = {}
         temp = [0]
         meas_key = ["zz"]
 
-        def aa(tokens):
+        def aa(tokens: pyparsing.ParseResults) -> None:
             name = tokens[0]
             value = tokens[1]
             verboseprint(name, "=", value)  # type: ignore
@@ -407,9 +407,9 @@ class ExpNote:
 
     """
 
-    def __init__(self, note_file: Path, **kwargs: dict[str, str | int | float]) -> None:
+    def __init__(self, note_file: Path, verbose: int = 0) -> None:
         """Initialize an object."""
-        verboseprint = verbose_print(kwargs)
+        verboseprint = verbose_print(verbose)
         with note_file.open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self.note_list = list(csv.reader(f, dialect="excel-tab"))
