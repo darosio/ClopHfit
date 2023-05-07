@@ -1,6 +1,5 @@
 """ChatGPT"""
 import logging
-import pathlib
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -27,13 +26,15 @@ class MetadataReader:
 
     @staticmethod
     def _parse_measurement_chamber_temperature(
-        tokens: List[pyparsing.ParseResults], metadata: Metadata
+        # tokens: List[pyparsing.ParseResults], metadata: Metadata
+        tokens: pyparsing.ParseResults,
+        metadata: Metadata,
     ) -> None:
         value = tokens[0][1]
         # Single token: metadata.measurement_chamber_temperature = float(tokens.value)
         metadata.measurement_chamber_temperature = float(value)
 
-    def _parse_meas(self, tokens: List[str], metadata: Metadata) -> None:
+    def _parse_meas(self, tokens: pyparsing.ParseResults, metadata: Metadata) -> None:
         key = tokens.value
         metadata.current_measurement = key
         if key not in metadata.data:
@@ -44,7 +45,7 @@ class MetadataReader:
             ] = metadata.measurement_chamber_temperature
 
     @staticmethod
-    def _parse_other(tokens: List[str], metadata: Metadata) -> None:
+    def _parse_other(tokens: pyparsing.ParseResults, metadata: Metadata) -> None:
         if metadata.current_measurement is not None:
             key = tokens.name
             value = tokens.value
@@ -83,7 +84,7 @@ class MetadataReader:
 
         pr = pyparsing.MatchFirst(parsers)
 
-        def parse_action(tokens: List[str]):
+        def parse_action(tokens: pyparsing.ParseResults) -> None:
             if tokens[0] == "Meas":
                 self._parse_meas(tokens, self.metadata)
             elif tokens[0] == "Measurement chamber temperature":
