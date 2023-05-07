@@ -27,8 +27,6 @@ def verbose_print(verbose: int) -> None | Callable[..., Any]:
 class ManyLinesFoundError(Exception):
     """Raised when there are multiple lines containing a specified search string."""
 
-    pass
-
 
 def line_index(lines: list[list[str]], search: list[str]) -> int:
     """Index function checking the existence of a unique match.
@@ -61,6 +59,10 @@ def line_index(lines: list[list[str]], search: list[str]) -> int:
         raise ManyLinesFoundError("Many " + str(search) + " lines.")
 
 
+class CsvLineError(Exception):
+    """Exception raised when the lines list has issues."""
+
+
 class EnspireFile:
     """Read an EnSpire-generated csv file.
 
@@ -82,7 +84,7 @@ class EnspireFile:
 
     Examples
     --------
-    >>> from prenspire.prenspire import EnspireFile
+    >>> from clophfit.prenspire import EnspireFile
     >>> ef = EnspireFile("tests/EnSpire/h148g-spettroC.csv", verbose=0)
     >>> ef.extract_measurements()
     >>> ef.measurements['A']['lambda'][2]
@@ -90,10 +92,11 @@ class EnspireFile:
 
     """
 
-    def __init__(self, file: Path, verbose: int = 0) -> None:
+    def __init__(self, file: Path, verbose: int = 0) -> None:  # noqa: PLR0915
         def get_data_ini(lines: list[list[str]]) -> int:
-            """Get index of the line ['Well', 'Sample', ...].
+            """Find the line index containing Well and Sample headers in a list of lines.
 
+            Get index of the line ['Well', 'Sample', ...].
             Check for the presence of a unique ['well', 'sample', ...] line.
 
             Parameters
@@ -103,7 +106,7 @@ class EnspireFile:
 
             Raises
             ------
-            Exception
+            CsvLineError
                 If not unique or absent.
 
             Returns
@@ -111,18 +114,20 @@ class EnspireFile:
             int
 
             """
+            min_line_length = 2  # for key: value
             count = 0
             for i, line in enumerate(lines):
-                if len(line) >= 2:
-                    if line[0:2] == ["Well", "Sample"]:
-                        count += 1
-                        idx = i
+                if len(line) >= min_line_length and line[:2] == ["Well", "Sample"]:
+                    count += 1
+                    idx = i
             if count == 0:
-                raise Exception("No line starting with ['Well', 'Sample',...]")
+                msg = f"No line starting with ['Well', 'Sample',...] found in {lines}"
+                raise CsvLineError(msg)
             elif count == 1:
                 return idx
             else:  # count > 1
-                raise Exception("2 lines starting with ['Well', 'Sample',...]")
+                msg = f"Multiple lines starting with ['Well', 'Sample',...] in {lines}"
+                raise CsvLineError(msg)
 
         def get_list_from_platemap() -> tuple[list[str], list[list[str]]]:
             """Get well_list from Platemap contained in metadata_post.
@@ -187,7 +192,9 @@ class EnspireFile:
             ]
 
         verboseprint = verbose_print(verbose)
-        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
+        csvl = list(
+            csv.reader(Path(file).open(encoding="iso-8859-1"), dialect="excel-tab")
+        )
         verboseprint("read file csv")  # type: ignore
         # TODO: try prparser.line_index()
         self._ini = 1 + get_data_ini(csvl)
@@ -400,7 +407,7 @@ class ExpNote:
 
     Example
     -------
-    >>> from prenspire.prenspire import ExpNote
+    >>> from clophfit.prenspire import ExpNote
     >>> en = ExpNote("tests/EnSpire/h148g-spettroC-nota")
     >>> en.wells[2]
     'A03'
@@ -410,7 +417,7 @@ class ExpNote:
     def __init__(self, note_file: Path, verbose: int = 0) -> None:
         """Initialize an object."""
         verboseprint = verbose_print(verbose)
-        with note_file.open(encoding="iso-8859-1") as f:
+        with Path(note_file).open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self.note_list = list(csv.reader(f, dialect="excel-tab"))
         verboseprint("read (experimental) note file")  # type: ignore
