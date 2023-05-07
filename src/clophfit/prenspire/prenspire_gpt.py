@@ -1,11 +1,10 @@
-"""ChatGPT"""
+"""ChatGPT suggested."""
+from __future__ import annotations
+
 import logging
-import pathlib
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
-from typing import Dict
-from typing import List
 
 import pyparsing
 
@@ -18,22 +17,26 @@ class Metadata:
 
     measurement_chamber_temperature: float = 0.0
     current_measurement: str | None = None  # or: ""
-    data: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    data: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
 class MetadataReader:
-    metadata: Metadata = Metadata()
+    """Dummy line."""
+
+    metadata: Metadata = Metadata()  # noqa: RUF009
 
     @staticmethod
     def _parse_measurement_chamber_temperature(
-        tokens: List[pyparsing.ParseResults], metadata: Metadata
+        # tokens: List[pyparsing.ParseResults], metadata: Metadata
+        tokens: pyparsing.ParseResults,
+        metadata: Metadata,
     ) -> None:
         value = tokens[0][1]
         # Single token: metadata.measurement_chamber_temperature = float(tokens.value)
         metadata.measurement_chamber_temperature = float(value)
 
-    def _parse_meas(self, tokens: List[str], metadata: Metadata) -> None:
+    def _parse_meas(self, tokens: pyparsing.ParseResults, metadata: Metadata) -> None:
         key = tokens.value
         metadata.current_measurement = key
         if key not in metadata.data:
@@ -44,19 +47,20 @@ class MetadataReader:
             ] = metadata.measurement_chamber_temperature
 
     @staticmethod
-    def _parse_other(tokens: List[str], metadata: Metadata) -> None:
+    def _parse_other(tokens: pyparsing.ParseResults, metadata: Metadata) -> None:
         if metadata.current_measurement is not None:
             key = tokens.name
             value = tokens.value
             metadata.data[metadata.current_measurement]["metadata"][key] = value
 
-    def _generate_parser(self, keyword_list: List[str]) -> pyparsing.ParserElement:
+    def _generate_parser(self, keyword_list: list[str]) -> pyparsing.ParserElement:
         """
         Generate a pyparsing parser for the specified keyword list.
 
         Parameters
         ----------
-            keyword_list: A list of strings specifying the keywords to parse.
+        keyword_list: List[str]
+            A list of strings specifying the keywords to parse.
 
         Returns
         -------
@@ -67,9 +71,7 @@ class MetadataReader:
         parsers = []
 
         for keyword in keyword_list:
-            if keyword == "Measurement chamber temperature":
-                parsers.append(pyparsing.Keyword(keyword) + w("value") + EOL)
-            elif keyword == "Meas":
+            if keyword in ["Measurement chamber temperature", "Meas"]:
                 parsers.append(pyparsing.Keyword(keyword) + w("value") + EOL)
             else:
                 parsers.append(
@@ -82,7 +84,7 @@ class MetadataReader:
 
         pr = pyparsing.MatchFirst(parsers)
 
-        def parse_action(tokens: List[str]):
+        def parse_action(tokens: pyparsing.ParseResults) -> None:
             if tokens[0] == "Meas":
                 self._parse_meas(tokens, self.metadata)
             elif tokens[0] == "Measurement chamber temperature":
