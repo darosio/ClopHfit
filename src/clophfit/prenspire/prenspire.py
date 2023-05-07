@@ -326,9 +326,11 @@ class EnspireFile:
         check_lists()
         # Monochromator is expected to be either Exc or Ems
         for k, v in self.measurements.items():
-            head = namedtuple("head", "ex em res")
-            s = "Meas" + k
-            head = head(s + "WavelengthExc", s + "WavelengthEms", s + "Result")
+            label = f"Meas{k}"
+            heading = namedtuple("heading", "ex em res")
+            head = heading(
+                f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
+            )
             # excitation spectra must have only one emission wavelength
             if v["metadata"]["Monochromator"] == "Excitation":
                 x = [r for r in df[head.em] if not r == ""]
@@ -338,7 +340,7 @@ class EnspireFile:
                     or not list(c.keys())[0] == v["metadata"]["Wavelength"]
                 ):
                     raise Exception(
-                        "Excitation spectra with unexpected emission in " + s
+                        "Excitation spectra with unexpected emission in " + label
                     )
                 v["lambda"] = [
                     float(r)
@@ -354,7 +356,7 @@ class EnspireFile:
                     or not list(c.keys())[0] == v["metadata"]["Wavelength"]
                 ):
                     raise Exception(
-                        "Emission spectra with unexpected excitation in " + s
+                        "Emission spectra with unexpected excitation in " + label
                     )
                 v["lambda"] = [
                     float(r)
@@ -366,7 +368,7 @@ class EnspireFile:
                     'Unknown "Monochromator": '
                     + v["metadata"]["Monochromator"]
                     + " in "
-                    + s
+                    + label
                 )
             for w in self.wells:
                 v[w] = [float(r) for r in df[head.res][df.Well == w] if not r == ""]
@@ -426,11 +428,13 @@ class ExpNote:
         conc = [float(tpl[0]) for tpl in conc_well]
         well = [tpl[1] for tpl in conc_well]
         data = {}
-        for m in ef.measurements:
+        for m, measurement in ef.measurements.items():
             data[m] = pd.DataFrame(
-                np.transpose([list(map(float, ef.measurements[m][w])) for w in well]),
+                data=np.transpose([list(map(float, measurement[w])) for w in well]),
                 columns=[conc, well],
-                index=map(float, ef.measurements[m]["lambda"]),
+                index=pd.Index(
+                    data=list(map(float, measurement["lambda"])), name="lambda"
+                ),
             )
         self.titrations = [Titration(conc, data, cl=0)]
         # n cl titrations
@@ -446,13 +450,14 @@ class ExpNote:
             conc = [float(tpl[0]) for tpl in conc_well]
             well = [tpl[1] for tpl in conc_well]
             data = {}
-            for m in ef.measurements:
+            for m, measurement in ef.measurements.items():
                 data[m] = pd.DataFrame(
-                    np.transpose(
-                        [list(map(float, ef.measurements[m][w])) for w in well]
-                    ),
+                    data=np.transpose([list(map(float, measurement[w])) for w in well]),
                     columns=[conc, well],
-                    index=map(float, ef.measurements[m]["lambda"]),
+                    index=pd.Index(
+                        data=list(map(float, measurement["lambda"])),
+                        name="lambda",
+                    ),
                 )
             self.titrations.append(Titration(conc, data, ph=ph))
 
