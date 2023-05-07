@@ -42,12 +42,7 @@ repos:
     rev: v0.0.263
     hooks:
       - id: ruff
-        args: [
-            # --exclude,
-            # "src/clophfit/prenspire/*",
-            --exclude,
-            "tests/test_prenspire.py",
-          ]
+        # args: [--exclude, "src/clophfit/prenspire/*"]
 
   - repo: https://github.com/psf/black
     rev: 23.3.0
