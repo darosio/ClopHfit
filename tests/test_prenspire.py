@@ -1,4 +1,6 @@
 """Test prenspire module."""
+from __future__ import annotations
+
 import unittest
 from pathlib import Path
 
@@ -24,7 +26,7 @@ class TestEnspireFile(unittest.TestCase):
         # Test get_data_ini Exceptions
         with pytest.raises(Exception, match="No line starting with ."):
             prenspire.EnspireFile(esff("h148g-spettroC-idx0.csv"))
-        with pytest.raises(Exception, match="2 lines starting with ."):
+        with pytest.raises(Exception, match="Multiple lines starting with ."):
             prenspire.EnspireFile(esff("h148g-spettroC-idx2.csv"))
         # Test platemap
         with pytest.raises(Exception, match="stop: Platemap format unexpected"):
@@ -173,9 +175,9 @@ class TestEnspireFile(unittest.TestCase):
             assert issubclass(w[-1].category, Warning)
             assert "platemap" in str(w[-1].message)
 
-    # def test_get_maxx(self):
-    #     "really need to be completed"
-    #     self.assertEqual(self.s.get_maxx(self.s.ex, self.s.y), 272)
+    # placemark def test_get_maxx(self):
+    # placemark    "really need to be completed"
+    # placemark    self.assertEqual(self.s.get_maxx(self.s.ex, self.s.y), 272)
 
 
 class TestExpNote(unittest.TestCase):

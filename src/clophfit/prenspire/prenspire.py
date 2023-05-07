@@ -27,8 +27,6 @@ def verbose_print(verbose: int) -> None | Callable[..., Any]:
 class ManyLinesFoundError(Exception):
     """Raised when there are multiple lines containing a specified search string."""
 
-    pass
-
 
 def line_index(lines: list[list[str]], search: list[str]) -> int:
     """Index function checking the existence of a unique match.
@@ -61,6 +59,10 @@ def line_index(lines: list[list[str]], search: list[str]) -> int:
         raise ManyLinesFoundError("Many " + str(search) + " lines.")
 
 
+class CsvLineError(Exception):
+    """Exception raised when the lines list has issues."""
+
+
 class EnspireFile:
     """Read an EnSpire-generated csv file.
 
@@ -82,7 +84,7 @@ class EnspireFile:
 
     Examples
     --------
-    >>> from prenspire.prenspire import EnspireFile
+    >>> from clophfit.prenspire import EnspireFile
     >>> ef = EnspireFile("tests/EnSpire/h148g-spettroC.csv", verbose=0)
     >>> ef.extract_measurements()
     >>> ef.measurements['A']['lambda'][2]
@@ -90,10 +92,11 @@ class EnspireFile:
 
     """
 
-    def __init__(self, file: Path, verbose: int = 0) -> None:
+    def __init__(self, file: Path, verbose: int = 0) -> None:  # noqa: PLR0915
         def get_data_ini(lines: list[list[str]]) -> int:
-            """Get index of the line ['Well', 'Sample', ...].
+            """Find the line index containing Well and Sample headers in a list of lines.
 
+            Get index of the line ['Well', 'Sample', ...].
             Check for the presence of a unique ['well', 'sample', ...] line.
 
             Parameters
@@ -103,7 +106,7 @@ class EnspireFile:
 
             Raises
             ------
-            Exception
+            CsvLineError
                 If not unique or absent.
 
             Returns
@@ -111,18 +114,20 @@ class EnspireFile:
             int
 
             """
+            min_line_length = 2  # for key: value
             count = 0
             for i, line in enumerate(lines):
-                if len(line) >= 2:
-                    if line[0:2] == ["Well", "Sample"]:
-                        count += 1
-                        idx = i
+                if len(line) >= min_line_length and line[:2] == ["Well", "Sample"]:
+                    count += 1
+                    idx = i
             if count == 0:
-                raise Exception("No line starting with ['Well', 'Sample',...]")
+                msg = f"No line starting with ['Well', 'Sample',...] found in {lines}"
+                raise CsvLineError(msg)
             elif count == 1:
                 return idx
             else:  # count > 1
-                raise Exception("2 lines starting with ['Well', 'Sample',...]")
+                msg = f"Multiple lines starting with ['Well', 'Sample',...] in {lines}"
+                raise CsvLineError(msg)
 
         def get_list_from_platemap() -> tuple[list[str], list[list[str]]]:
             """Get well_list from Platemap contained in metadata_post.
@@ -133,7 +138,7 @@ class EnspireFile:
 
             Raises
             ------
-            Exception
+            CsvLineError
                 If the number of plate columns is not equal to 12.
 
             """
@@ -155,7 +160,8 @@ class EnspireFile:
                 "12",
                 "",
             ]:
-                raise Exception("stop: Platemap format unexpected")
+                msg = "stop: Platemap format unexpected"
+                raise CsvLineError(msg)
             plate = lines[idx + 4 : idx + 12]
             p = []
             for r in plate:
@@ -187,7 +193,9 @@ class EnspireFile:
             ]
 
         verboseprint = verbose_print(verbose)
-        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
+        csvl = list(
+            csv.reader(Path(file).open(encoding="iso-8859-1"), dialect="excel-tab")
+        )
         verboseprint("read file csv")  # type: ignore
         # TODO: try prparser.line_index()
         self._ini = 1 + get_data_ini(csvl)
@@ -196,9 +204,11 @@ class EnspireFile:
         verboseprint("fin =", self._fin)  # type: ignore
         # check csv format around ini and fin
         if not (csvl[self._ini - 3] == csvl[self._ini - 2] == []):
-            raise Exception("Expecting two empty lines before _ini")
-        if not (csvl[self._fin] == []):
-            raise Exception("Expecting an empty line after _fin")
+            msg = "Expecting two empty lines before _ini"
+            raise CsvLineError(msg)
+        if csvl[self._fin] != []:
+            msg = "Expecting an empty line after _fin"
+            raise CsvLineError(msg)
         verboseprint("checked csv format around ini and fin")  # type: ignore
         pre = csvl[0 : self._ini - 2]  # -3
         verboseprint("saved metadata_pre attribute")  # type: ignore
@@ -211,26 +221,25 @@ class EnspireFile:
         create_metadata()
         self._filename = str(file)
 
-    def extract_measurements(self, verbose: int = 0) -> None:
+    def extract_measurements(self, verbose: int = 0) -> None:  # noqa: PLR0915
         """Extract the measurements dictionary.
 
         Add 3 attributes: wells, samples, measurements (as list, list, dict)
 
         Parameters
         ----------
-        **kwargs: dict
+        verbose : int
             It passes extra parameters.
 
         Raises
         ------
-        Exception
+        CsvLineError
             When something went wrong.
-
         """
         verboseprint = verbose_print(verbose)
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
-        def line(keyword: str) -> Any:
+        def line(keyword: str) -> pyparsing.ParserElement:
             EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
             w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")  # . | deg | %
             return (
@@ -288,15 +297,17 @@ class EnspireFile:
 
         def headerdata_measurementskeys_check() -> bool:
             """Check header and measurements.keys()."""
+            counter_constant = 3  # Not sure, maybe for md with units.
             meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
-            b = {k for k, v in Counter(meas).items() if v == 3}
+            b = {k for k, v in Counter(meas).items() if v == counter_constant}
             a = set(self.measurements.keys())
             verboseprint("check header and measurements.keys()", a == b, a, b)  # type: ignore
             return a == b
 
         headerdata = self._data_list[0]
         if not headerdata_measurementskeys_check():
-            raise Exception("check header and measurements.keys() FAILED.")
+            msg = "check header and measurements.keys() FAILED."
+            raise CsvLineError(msg)
 
         def check_lists() -> bool:
             """Check that lists derived from .csv data and Platemap metadata are identical.
@@ -312,83 +323,69 @@ class EnspireFile:
                 Ckeck correctness.
 
             """
-            if not self.wells == self._well_list_platemap:
+            if self.wells != self._well_list_platemap:
                 warnings.warn(
-                    "well_list from data_list and platemap differ. \
-                    It might be you did not exported data for all acquired wells"
+                    "well_list from data_list and platemap differ. It might be you did not exported data for all acquired wells",
+                    stacklevel=2,
                 )
             return True
 
         columns = [r.replace(":", "") for r in headerdata]
-        df = pd.DataFrame(self._data_list[1:], columns=columns)
-        w = df.drop_duplicates(["Well", "Sample"])
+        dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
+        w = dfdata.drop_duplicates(["Well", "Sample"])
         self.wells = w.Well.tolist()
         self.samples = w.Sample.tolist()
         check_lists()
         # Monochromator is expected to be either Exc or Ems
         for k, v in self.measurements.items():
-            head = namedtuple("head", "ex em res")
-            s = "Meas" + k
-            head = head(s + "WavelengthExc", s + "WavelengthEms", s + "Result")
+            label = f"Meas{k}"
+            heading = namedtuple("heading", "ex em res")
+            head = heading(
+                f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
+            )
             # excitation spectra must have only one emission wavelength
             if v["metadata"]["Monochromator"] == "Excitation":
-                x = [r for r in df[head.em] if not r == ""]
+                x = [r for r in dfdata[head.em] if r]
                 c = Counter(x)
-                if (
-                    not len(c) == 1
-                    or not list(c.keys())[0] == v["metadata"]["Wavelength"]
-                ):
-                    raise Exception(
-                        "Excitation spectra with unexpected emission in " + s
-                    )
+                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
+                    msg = f"Excitation spectra with unexpected emission in {label}"
+                    raise CsvLineError(msg)
                 v["lambda"] = [
-                    float(r)
-                    for r in df[head.ex][df.Well == self.wells[0]]
-                    if not r == ""
+                    float(r) for r in dfdata[head.ex][dfdata.Well == self.wells[0]] if r
                 ]
             # emission spectra must have only one excitation wavelength
             elif v["metadata"]["Monochromator"] == "Emission":
-                x = [r for r in df[head.ex] if not r == ""]
+                x = [r for r in dfdata[head.ex] if r]
                 c = Counter(x)
-                if (
-                    not len(c) == 1
-                    or not list(c.keys())[0] == v["metadata"]["Wavelength"]
-                ):
-                    raise Exception(
-                        "Emission spectra with unexpected excitation in " + s
-                    )
+                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
+                    msg = f"Emission spectra with unexpected excitation in {label}"
+                    raise CsvLineError(msg)
                 v["lambda"] = [
-                    float(r)
-                    for r in df[head.em][df.Well == self.wells[0]]
-                    if not r == ""
+                    float(r) for r in dfdata[head.em][dfdata.Well == self.wells[0]] if r
                 ]
             else:
-                raise Exception(
-                    'Unknown "Monochromator": '
-                    + v["metadata"]["Monochromator"]
-                    + " in "
-                    + s
-                )
+                msg = f'Unknown "Monochromator": {v["metadata"]["Monochromator"]} in {label}'
+                raise CsvLineError(msg)
             for w in self.wells:
-                v[w] = [float(r) for r in df[head.res][df.Well == w] if not r == ""]
+                v[w] = [float(r) for r in dfdata[head.res][dfdata.Well == w] if r]
 
     def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
         """Create table as DataFrame and plot; save into Meas folder."""
         output_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements:
-            a = pd.DataFrame(
-                np.transpose(
-                    [list(map(float, self.measurements[m][w])) for w in self.wells]
-                ),
-                columns=self.wells,
-                index=map(float, self.measurements[m]["lambda"]),
+            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
+            data_dict.update(
+                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
             )
-            a.index.names = ["lambda"]
-            a.plot(title=m, legend=False)
+            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
+            # Create plot
+            dfdata.plot(title=m, legend=False)
+            # Save files
             file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
             while file.exists():
-                file = file.with_stem(file.stem + "-b")
-            a.to_csv(str(file))
+                # because with_stem was introduced in py3.9
+                file = file.with_name(file.stem + "-b" + file.suffix)
+            dfdata.to_csv(str(file))
             plt.savefig(str(file.with_suffix(".png")))
 
 
@@ -400,7 +397,7 @@ class ExpNote:
 
     Example
     -------
-    >>> from prenspire.prenspire import ExpNote
+    >>> from clophfit.prenspire import ExpNote
     >>> en = ExpNote("tests/EnSpire/h148g-spettroC-nota")
     >>> en.wells[2]
     'A03'
@@ -410,7 +407,7 @@ class ExpNote:
     def __init__(self, note_file: Path, verbose: int = 0) -> None:
         """Initialize an object."""
         verboseprint = verbose_print(verbose)
-        with note_file.open(encoding="iso-8859-1") as f:
+        with Path(note_file).open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self.note_list = list(csv.reader(f, dialect="excel-tab"))
         verboseprint("read (experimental) note file")  # type: ignore
@@ -428,17 +425,19 @@ class ExpNote:
         conc = [float(tpl[0]) for tpl in conc_well]
         well = [tpl[1] for tpl in conc_well]
         data = {}
-        for m in ef.measurements:
+        for m, measurement in ef.measurements.items():
             data[m] = pd.DataFrame(
-                np.transpose([list(map(float, ef.measurements[m][w])) for w in well]),
+                data=np.transpose([list(map(float, measurement[w])) for w in well]),
                 columns=[conc, well],
-                index=map(float, ef.measurements[m]["lambda"]),
+                index=pd.Index(
+                    data=list(map(float, measurement["lambda"])), name="lambda"
+                ),
             )
         self.titrations = [Titration(conc, data, cl=0)]
         # n cl titrations
-        self.pH_values = np.unique(
-            [line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()]
-        ).tolist()
+        self.pH_values = sorted(
+            {line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()}
+        )
         for ph in self.pH_values:
             conc_well = [
                 (line[2], line[0])
@@ -448,13 +447,14 @@ class ExpNote:
             conc = [float(tpl[0]) for tpl in conc_well]
             well = [tpl[1] for tpl in conc_well]
             data = {}
-            for m in ef.measurements:
+            for m, measurement in ef.measurements.items():
                 data[m] = pd.DataFrame(
-                    np.transpose(
-                        [list(map(float, ef.measurements[m][w])) for w in well]
-                    ),
+                    data=np.transpose([list(map(float, measurement[w])) for w in well]),
                     columns=[conc, well],
-                    index=map(float, ef.measurements[m]["lambda"]),
+                    index=pd.Index(
+                        data=list(map(float, measurement["lambda"])),
+                        name="lambda",
+                    ),
                 )
             self.titrations.append(Titration(conc, data, ph=ph))
 
@@ -465,16 +465,18 @@ class Titration:
     """Store titration data and fit results."""
 
     def __init__(
-        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs
+        self,
+        conc: Sequence[float],
+        data: dict[str, pd.DataFrame],
+        cl: float | None = None,
+        ph: str | None = None,
     ) -> None:
         self.conc = conc
         self.data = data
-        if "ph" in kwargs:
-            self.ph = kwargs["ph"]
-        if "cl" in kwargs:
-            self.cl = kwargs["cl"]
-        if "func" in kwargs:
-            self.func = kwargs["func"]
+        if ph:
+            self.ph = ph
+        if cl:
+            self.cl = cl
 
     def plot(self) -> None:
         """Plot the titration spectra."""
