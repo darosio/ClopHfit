@@ -383,7 +383,8 @@ class EnspireFile:
             # Save files
             file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
             while file.exists():
-                file = file.with_stem(file.stem + "-b")
+                # because with_stem was introduced in py3.9
+                file = file.with_name(file.stem + "-b" + file.suffix)
             dfdata.to_csv(str(file))
             plt.savefig(str(file.with_suffix(".png")))
 
