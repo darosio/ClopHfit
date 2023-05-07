@@ -221,7 +221,7 @@ class EnspireFile:
         create_metadata()
         self._filename = str(file)
 
-    def extract_measurements(self, verbose: int = 0) -> None:
+    def extract_measurements(self, verbose: int = 0) -> None:  # noqa: PLR0915
         """Extract the measurements dictionary.
 
         Add 3 attributes: wells, samples, measurements (as list, list, dict)
@@ -239,7 +239,7 @@ class EnspireFile:
         verboseprint = verbose_print(verbose)
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
-        def line(keyword: str) -> Any:
+        def line(keyword: str) -> pyparsing.ParserElement:
             EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
             w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")  # . | deg | %
             return (
@@ -297,8 +297,9 @@ class EnspireFile:
 
         def headerdata_measurementskeys_check() -> bool:
             """Check header and measurements.keys()."""
+            counter_constant = 3  # Not sure, maybe for md with units.
             meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
-            b = {k for k, v in Counter(meas).items() if v == 3}
+            b = {k for k, v in Counter(meas).items() if v == counter_constant}
             a = set(self.measurements.keys())
             verboseprint("check header and measurements.keys()", a == b, a, b)  # type: ignore
             return a == b
@@ -324,8 +325,8 @@ class EnspireFile:
             """
             if self.wells != self._well_list_platemap:
                 warnings.warn(
-                    "well_list from data_list and platemap differ. \
-                    It might be you did not exported data for all acquired wells"
+                    "well_list from data_list and platemap differ. It might be you did not exported data for all acquired wells",
+                    stacklevel=2,
                 )
             return True
 
