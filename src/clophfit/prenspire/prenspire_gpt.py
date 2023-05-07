@@ -56,7 +56,8 @@ class MetadataReader:
 
         Parameters
         ----------
-            keyword_list: A list of strings specifying the keywords to parse.
+        keyword_list: List[str]
+            A list of strings specifying the keywords to parse.
 
         Returns
         -------

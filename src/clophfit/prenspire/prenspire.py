@@ -218,14 +218,13 @@ class EnspireFile:
 
         Parameters
         ----------
-        **kwargs: dict
+        verbose : int
             It passes extra parameters.
 
         Raises
         ------
         Exception
             When something went wrong.
-
         """
         verboseprint = verbose_print(verbose)
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
@@ -376,19 +375,18 @@ class EnspireFile:
         """Create table as DataFrame and plot; save into Meas folder."""
         output_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements:
-            a = pd.DataFrame(
-                np.transpose(
-                    [list(map(float, self.measurements[m][w])) for w in self.wells]
-                ),
-                columns=self.wells,
-                index=map(float, self.measurements[m]["lambda"]),
+            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
+            data_dict.update(
+                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
             )
-            a.index.names = ["lambda"]
-            a.plot(title=m, legend=False)
+            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
+            # Create plot
+            dfdata.plot(title=m, legend=False)
+            # Save files
             file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
             while file.exists():
                 file = file.with_stem(file.stem + "-b")
-            a.to_csv(str(file))
+            dfdata.to_csv(str(file))
             plt.savefig(str(file.with_suffix(".png")))
 
 
@@ -436,9 +434,9 @@ class ExpNote:
             )
         self.titrations = [Titration(conc, data, cl=0)]
         # n cl titrations
-        self.pH_values = np.unique(
-            [line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()]
-        ).tolist()
+        self.pH_values = sorted(
+            {line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()}
+        )
         for ph in self.pH_values:
             conc_well = [
                 (line[2], line[0])
@@ -465,7 +463,7 @@ class Titration:
     """Store titration data and fit results."""
 
     def __init__(
-        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs
+        self, conc: Sequence[float], data: dict[str, pd.DataFrame], **kwargs: Any
     ) -> None:
         self.conc = conc
         self.data = data
