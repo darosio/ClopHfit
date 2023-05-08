@@ -55,7 +55,7 @@ dev = [
   "commitizen < 3.2.2",
   "ipykernel",
   "jupyter",
-  "ruff == 0.0.264",
+  "ruff == 0.0.265",
   "pylsp-mypy",
   "python-lsp-ruff"
 ]
