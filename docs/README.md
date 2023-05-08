@@ -44,9 +44,18 @@ fluorescence spectra.
 
         clop eq1 --help
 
+- Parser for EnSpire (PerkinElmer) file:
+
+        clop prenspire file.csv -out folder
+
+  Destination folder (default: "./Meas") will contain for each _Measurement_:
+
+  - a table <lambda, A01, ..., H12> (wide tabular form);
+  - corresponding graphical (png) representation of spectra from all wells.
+
 To use clophfit in your python:
 
-    from clophfit import prtecan, binding
+    from clophfit import prenspire, prtecan, binding
 
 ## Installation
 
