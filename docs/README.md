@@ -50,7 +50,7 @@ fluorescence spectra.
 
   Destination folder (default: "./Meas") will contain for each _Measurement_:
 
-  - a table <lambda, A01, ..., H12> (wide tabular form);
+  - a table (csv) in wide tabular form e.g. <lambda, A01, ..., H12>;
   - corresponding graphical (png) representation of spectra from all wells.
 
 To use clophfit in your python:

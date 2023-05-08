@@ -6,7 +6,7 @@ This part of the documentation lists the full API reference of all public
 classes and functions.
 
 clophfit.binding module
-++++++++++++++++++++++++
++++++++++++++++++++++++
 
 .. automodule:: clophfit.binding
    :undoc-members:
@@ -27,3 +27,9 @@ clophfit.prtecan
 ..
    .. autoclass:: Tecanfile
 	  :exclude-members: path
+
+clophfit.prenspire module
++++++++++++++++++++++++++
+
+.. automodule:: clophfit.prenspire
+   :show-inheritance:
