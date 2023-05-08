@@ -117,6 +117,7 @@ class EnspireFile:
             min_line_length = 2  # for key: value
             count = 0
             for i, line in enumerate(lines):
+                # XXX: Sometime "Sample" is absent. if line[0:1] == ["Well"]:
                 if len(line) >= min_line_length and line[:2] == ["Well", "Sample"]:
                     count += 1
                     idx = i
@@ -144,6 +145,7 @@ class EnspireFile:
             """
             lines = self._metadata_post
             idx = line_index(lines, ["Platemap:"])
+            # XXX: 24
             if lines[idx + 3] != [
                 "",
                 "01",
@@ -162,6 +164,7 @@ class EnspireFile:
             ]:
                 msg = "stop: Platemap format unexpected"
                 raise CsvLineError(msg)
+            # XXX:
             plate = lines[idx + 4 : idx + 12]
             p = []
             for r in plate:
@@ -216,6 +219,7 @@ class EnspireFile:
         verboseprint("saved _data_list attribute")  # type: ignore
         self._metadata_post = csvl[self._fin + 1 :]
         verboseprint("saved metadata_post attribute")  # type: ignore
+        # XXX: 24
         self._well_list_platemap, self._platemap = get_list_from_platemap()
         verboseprint("saved _well_list_platemap attribute")  # type: ignore
         create_metadata()
@@ -332,9 +336,12 @@ class EnspireFile:
 
         columns = [r.replace(":", "") for r in headerdata]
         dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
+        # XXX: Sometime "Sample" is absent. w = df.drop_duplicates(["Well"])
         w = dfdata.drop_duplicates(["Well", "Sample"])
         self.wells = w.Well.tolist()
+        # XXX: Sometime "Sample" is absent.
         self.samples = w.Sample.tolist()
+        # XXX: 24
         check_lists()
         # Monochromator is expected to be either Exc or Ems
         for k, v in self.measurements.items():
