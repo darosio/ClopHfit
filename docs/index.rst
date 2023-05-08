@@ -9,6 +9,7 @@
 
    tutorials/tutorials
    api/api
+   references/cli
    references/references
    misc/misc
 
