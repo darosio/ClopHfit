@@ -21,3 +21,4 @@ And documentation development in .org files requires:
    usage
    usage2
    prtecan
+   prenspire

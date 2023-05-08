@@ -433,7 +433,7 @@ class ExpNote:
                     data=list(map(float, measurement["lambda"])), name="lambda"
                 ),
             )
-        self.titrations = [Titration(conc, data, cl=0)]
+        self.titrations = [Titration(conc, data, cl="0")]
         # n cl titrations
         self.pH_values = sorted(
             {line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()}
@@ -468,7 +468,7 @@ class Titration:
         self,
         conc: Sequence[float],
         data: dict[str, pd.DataFrame],
-        cl: float | None = None,
+        cl: str | None = None,
         ph: str | None = None,
     ) -> None:
         self.conc = conc
