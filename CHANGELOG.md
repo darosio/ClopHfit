@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.5.2 (2023-05-09)
+
+### Fix
+
+- **CI/CD**: release to PyPI
+
+## v0.5.1 (2023-05-09)
+
+### Fix
+
+- **CI/CD**: release to PyPI
+
 ## v0.5.0 (2023-05-09)
 
 ### Feat
