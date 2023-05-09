@@ -184,8 +184,9 @@ Manually updated pinned dependencies for CI/CD:
 Configuration files:
 
 - pre-commit configured in .pre-commit-config.yaml;
-- flake8 (for rst-docstrings and bandit) configured in .flake8 (pinned in
-  pre-commit);
+- bandit (sys) configured in bandit.yml;
+- pylint (sys) configured in pyproject.toml;
+- isort (sys) configured in pyproject.toml;
 - black configured in pyproject.toml (pinned in pre-commit);
 - ruff configured in pyproject.toml (pinned in pre-commit);
 - darglint configured in .darglint (pinned in pre-commit);
