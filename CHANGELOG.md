@@ -1,3 +1,6 @@
+<!-- markdownlint-disable MD024 -->
+<!-- vale write-good.TooWordy = NO -->
+
 # Changelog
 
 ## v0.5.2 (2023-05-09)
@@ -410,7 +413,7 @@
 
 ### Refactor
 
-- Path and str are mixing yet it is fixed.
+- Path and str are mixing.
 - tests do not use os.chdir() anymore.
 
 ## 0.3.6 (2022-09-21)
@@ -456,7 +459,7 @@
   - liaisan-data
   - new-bootstrap
   - lmfit global
-  - emcee (very slow)
+  - emcee (extremely slow)
 - command `clop`.
 - <https://pypi.org/project/readme-renderer/> in lint.
 
@@ -491,14 +494,15 @@
   [Poetry](https://python-poetry.org) and
   [Pyenv](https://github.com/pyenv/pyenv):
 
-      LDFLAGS=-L/usr/lib/openssl-1.0/ CFLAGS=-I/usr/include/openssl-1.0/ pyenv install 3.4.10
+      LDFLAGS=-L/usr/lib/openssl-1.0/ CFLAGS=-I/usr/include/openssl-1.0/ \
+        pyenv install 3.4.10
       ++CONFIGURE_OPTS="--without-ensurepip" pyenv install 3.5.8++
       CC=clang pyenv install 3.5.10
       poetry env use 3.5
       poetry install
-      ../../src/clophfit/fit_titration.py Meas/A04\ Cl_A.csv NTT-A04-Cl_note -t cl -d output-enspire
-      ../../src/clophfit/fit_titration_global.py D05.dat output-D05 --boot 99
-      ../../src/clophfit/fit_titration_global.py -t cl --boot 999 B05-20130628-cor.dat output-B05
+      .. fit_titration.py Meas/A04\ Cl_A.csv NTT-A04-Cl_note -t cl -d output-enspire
+      .. fit_titration_global.py D05.dat output-D05 --boot 99
+      .. fit_titration_global.py -t cl --boot 999 B05-20130628-cor.dat output-B05
 
 - Note that `fit_rpy.py` did never work (indeed did not use #!/usr/bin/env
   python).
@@ -508,8 +512,8 @@
       cycler          0.10.0 Composable style cycles
       lmfit           0.8.3  Least-Squares Minimization with Bounds and Constraints
       matplotlib      1.5.3  Python plotting package
-      numpy           1.10.4 NumPy: array processing for numbers, strings, records, and objects.
-      pandas          0.18.1 Powerful data structures for data analysis, time series,and statistics
+      numpy           1.10.4 NumPy: array processing for numbers, strings, …
+      pandas          0.18.1 Powerful data structures for data analysis, …
       pyparsing       2.4.7  Python parsing module
       python-dateutil 2.8.1  Extensions to the standard Python datetime module
       pytz            2021.3 World timezone definitions, modern and historical
