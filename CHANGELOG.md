@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.5.0 (2023-05-09)
+
+### Feat
+
+- Add prenspire to parse PerkinElmer files
+
+### Build
+
+- bump ruff from 0.0.264 to 0.0.265 (#246)
+- bump typeguard from 4.0.0rc5 to 4.0.0rc6 (#245)
+- update commitizen requirement from <3.2.1 to <3.2.2 (#244)
+
+### chore
+
+- update pre-commit hooks (#247)
+- default to python 3.11
+
 ## v0.4.10 (2023-05-03)
 
 ### Refactor
