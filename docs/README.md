@@ -80,7 +80,7 @@ You need the following requirements:
         hatch run sync  # sync venv with deepfreeze
 
         hatch run lint:run
-        hatch run tests.py3.10:all
+        hatch run tests.py3.11:all
 
   Hatch handles everything for you, including setting up an temporary virtual
   environment for each run.
@@ -94,8 +94,9 @@ You need the following requirements:
 .github/workflows/constraints.txt for consistency with CI/CD.
 
     pipx install pre-commit
-    pipx install hatch
-    pipx runpip hatch install hatch-pip-deepfreeze
+    pipx install pip-deepfreeze
+
+    pacman -S python-hatch python-hyperlink python-httpx
 
 ### Setting up a development with direnv
 
@@ -156,6 +157,7 @@ To bump version and upload build to test.pypi using:
     hatch run bump
     hatch run bump "--increment PATCH" "--files-only" \
         ["--no-verify" to bypass pre-commit and commit-msg hooks]
+    git push
 
 while to update only the CHANGELOG.md file:
 
