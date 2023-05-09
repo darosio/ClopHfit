@@ -3,6 +3,12 @@
 
 # Changelog
 
+## v0.5.3 (2023-05-09)
+
+### Docs
+
+- updated docs/README.md
+
 ## v0.5.2 (2023-05-09)
 
 ### CI/CD

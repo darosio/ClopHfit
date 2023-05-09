@@ -48,7 +48,7 @@ license-files = {paths = ["LICENSE.txt"]}
 name = "clophfit"
 readme = "docs/README.md"
 requires-python = ">=3.8, <3.12"
-version = "0.5.2"
+version = "0.5.3"
 
 [project.optional-dependencies]
 dev = [
@@ -110,7 +110,7 @@ skip-string-normalization = false
 [tool.commitizen]
 name = "cz_customize"
 tag_format = "v$version"
-version = "0.5.2"
+version = "0.5.3"
 version_files = [
   "pyproject.toml:version",
   "docs/conf.py:release",
