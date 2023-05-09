@@ -2,9 +2,9 @@
 
 ## v0.5.2 (2023-05-09)
 
-### Fix
+### CI/CD
 
-- **CI/CD**: release to PyPI
+- Unify CI/CD into a single workflow
 
 ## v0.5.1 (2023-05-09)
 
