@@ -8,6 +8,7 @@ repos:
     rev: v4.4.0
     hooks:
       - id: check-added-large-files # hyper
+        exclude: "^tests/EnSpire/"
       - id: check-case-conflict
       - id: check-docstring-first
       - id: check-executables-have-shebangs
@@ -19,12 +20,15 @@ repos:
       - id: check-toml # hyper
       - id: debug-statements
       - id: end-of-file-fixer # hyper
+        exclude: "^tests/EnSpire/"
       - id: mixed-line-ending
+        exclude: "^tests/EnSpire/"
       - id: name-tests-test
         args: [--pytest-test-first]
       - id: requirements-txt-fixer
       - id: detect-private-key
       - id: trailing-whitespace # hyper
+        exclude: "^tests/EnSpire/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
     rev: v2.8.0
@@ -38,6 +42,7 @@ repos:
     rev: v0.0.265
     hooks:
       - id: ruff
+        # args: [--exclude, "src/clophfit/prenspire/*"]
 
   - repo: https://github.com/psf/black
     rev: 23.3.0
