@@ -35,7 +35,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.263
+    rev: v0.0.265
     hooks:
       - id: ruff
 
@@ -96,7 +96,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: 3.2.0
+    rev: 3.2.1
     hooks:
       - id: commitizen
       - id: commitizen-branch
