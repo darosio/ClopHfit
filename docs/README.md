@@ -201,3 +201,64 @@ Other manual actions:
 
     pylint src/ tests/
     bandit -r src/
+
+## GPT
+
+Installation
+
+You can get the library directly from PyPI:
+
+pip install clophfit
+
+or with pipx: pipx install clophfit
+
+Usage CLI
+
+ClopHfit provides several command line interface tools for fitting and
+processing data. prtecan
+
+Extract and fit titrations from a list of Tecan files collected at various pH or
+chloride concentrations:
+
+css
+
+clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm
+--out prova2 --Klim 6.8,8.4 --sel 7.6,20
+
+Use the --no-weight option to reproduce an older pr.tecan version. eq1
+
+Predict chloride dissociation constant K_d at a given pH:
+
+bash
+
+clop eq1 --help
+
+prenspire
+
+Parser for EnSpire (PerkinElmer) file:
+
+csharp
+
+clop prenspire file.csv -out folder
+
+Destination folder (default: "./Meas") will contain for each Measurement:
+
+    a table (csv) in wide tabular form e.g. <lambda, A01, ..., H12>;
+    corresponding graphical (png) representation of spectra from all wells.
+
+Python
+
+ClopHfit can be imported and used as a Python package. The following modules are
+available:
+
+    clophfit.prenspire - parser for EnSpire (PerkinElmer) files
+    clophfit.prtecan - perform fitting of macromolecule pH titration or binding assay data
+    clophfit.binding - perform fitting of macromolecule binding assay data
+
+To use clophfit in your python:
+
+javascript
+
+from clophfit import prenspire, prtecan, binding
+
+Features

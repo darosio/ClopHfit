@@ -21,11 +21,10 @@ sys.path.insert(0, str(Path("../..").resolve()))
 # -- Project information -----------------------------------------------------
 
 project = "ClopHfit"
-copyright = "2021, Daniele Arosio"  # noqa: A001
+copyright = "2023, Daniele Arosio"  # noqa: A001
 author = "Daniele Arosio"
-
-# The full version, including alpha/beta/rc tags
 release = "0.5.3"
+html_title = "ClopHfit"
 
 # -- General configuration ---------------------------------------------------
 

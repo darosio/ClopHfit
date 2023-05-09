@@ -1,10 +1,14 @@
-===================
-Miscellaneous Pages
-===================
+======
+More
+======
+
+.. toctree::
+   :titlesonly:
+
+   license
+   CONTRIBUTING.md
 
 .. toctree::
    :maxdepth: 2
 
-   license
    CHANGELOG.md
-   CONTRIBUTING.md
