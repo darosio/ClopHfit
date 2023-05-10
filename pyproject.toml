@@ -46,7 +46,7 @@ keywords = [
 license = "BSD-3-Clause"
 license-files = {paths = ["LICENSE.txt"]}
 name = "clophfit"
-readme = "docs/README.md"
+readme = "README.md"
 requires-python = ">=3.8, <3.12"
 version = "0.5.3"
 
@@ -61,10 +61,10 @@ dev = [
 ]
 docs = [
   "autodocsumm == 0.2.11",
-  "myst-parser == 1.0.0",
+  # "myst-parser == 1.0.0",
   "nbsphinx == 0.9.1",
   "pydata-sphinx-theme == 0.13.3",
-  "Sphinx == 6.2.1",
+  "Sphinx == 7.0.0",
   "sphinx-click == 4.4.0",
   "sphinx_autodoc_typehints == 1.23.0",
   "sphinxcontrib-plantuml == 0.25"
@@ -114,7 +114,7 @@ version = "0.5.3"
 version_files = [
   "pyproject.toml:version",
   "docs/conf.py:release",
-  "docs/README.md:Version"
+  "README.md:Version"
 ]
 
 [tool.commitizen.customize]

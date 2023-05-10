@@ -1,5 +1,5 @@
 Description of prtecan parser
-=============================
+-----------------------------
 
 **Tecan** file has the following structure.
 
@@ -27,7 +27,7 @@ A format that can be formalized using the following Backus-Naur form:
 XXX to be completed...
 
 OOA
-...
+~~~
 
 The program need to be able to:
 
@@ -46,7 +46,7 @@ Titration could be **fitted globally**.
 
 
 OOD
-...
+~~~
 
 **Labelblock** contains:
 

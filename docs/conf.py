@@ -39,7 +39,7 @@ extensions = [
     "sphinxcontrib.plantuml",
     "nbsphinx",
     "sphinx_click",
-    "myst_parser",
+    # "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',
 ]
 
@@ -58,7 +58,7 @@ autodoc_typehints = "description"
 # The suffix of source filenames.
 source_suffix = {
     ".rst": "restructuredtext",
-    ".md": "markdown",
+    # ".md": "markdown",
 }
 
 
