@@ -90,12 +90,12 @@ To use clophfit in your python:
 We use a shared copyright model that enables all contributors to maintain the
 copyright on their contributions.
 
-All code is licensed under the terms of the revised BSD license.
+All code is licensed under the terms of the [revised BSD license](LICENSE.txt).
 
 ## Contributing
 
 If you are interested in contributing to the project, please read our
-[Contributing](https://darosio.github.io/ClopHfit/references/contributing.html)
+[contributing](https://darosio.github.io/ClopHfit/references/contributing.html)
 and
 [development environment](https://darosio.github.io/ClopHfit/references/contributing.html#development)
 guides, which outline the guidelines and conventions that we follow for
