@@ -117,8 +117,7 @@ class EnspireFile:
             min_line_length = 2  # for key: value
             count = 0
             for i, line in enumerate(lines):
-                # XXX: Sometime "Sample" is absent. if line[0:1] == ["Well"]:
-                if len(line) >= min_line_length and line[:2] == ["Well", "Sample"]:
+                if len(line) >= min_line_length and line[:1] == ["Well"]:
                     count += 1
                     idx = i
             if count == 0:
@@ -336,11 +335,8 @@ class EnspireFile:
 
         columns = [r.replace(":", "") for r in headerdata]
         dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
-        # XXX: Sometime "Sample" is absent. w = df.drop_duplicates(["Well"])
-        w = dfdata.drop_duplicates(["Well", "Sample"])
+        w = dfdata.drop_duplicates(["Well"])
         self.wells = w.Well.tolist()
-        # XXX: Sometime "Sample" is absent.
-        self.samples = w.Sample.tolist()
         # XXX: 24
         check_lists()
         # Monochromator is expected to be either Exc or Ems
