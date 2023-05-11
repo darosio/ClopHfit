@@ -24,6 +24,7 @@ class TestEnspireFile:
 
     def test_exceptions(self) -> None:
         """Test some raised exceptions."""
+        esff = (data_files_dir / "exceptions").joinpath
         # Test get_data_ini Exceptions
         with pytest.raises(Exception, match="No line starting with ."):
             EnspireFile(esff("h148g-spettroC-idx0.csv"))

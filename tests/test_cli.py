@@ -22,13 +22,13 @@ def test_eq1() -> None:
 
 def test_prenspire(tmp_path: Path) -> None:
     """Run cli with actual data."""
-    expected = Path(__file__).parent / "EnSpire" / "data" / "output"
+    expected = Path(__file__).parent / "EnSpire" / "cli" / "output"
     out = tmp_path / "E"
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prenspire", "tests/EnSpire/data/NTT_37C_pKa.csv", "--out", str(out)],
+        ["prenspire", "tests/EnSpire/cli/NTT_37C_pKa.csv", "--out", str(out)],
     )
     assert result.exit_code == 0
     # validate output files
@@ -42,7 +42,7 @@ def test_prenspire(tmp_path: Path) -> None:
     # validate graph
     for f in ["NTT_37C_pKa_A.png", "NTT_37C_pKa_B.png"]:
         msg = compare_images(out / f, expected / f, 0.0001)
-        if msg:
+        if msg:  # pragma: no cover
             raise ImageComparisonFailure(msg)
 
 
