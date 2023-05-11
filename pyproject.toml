@@ -31,7 +31,7 @@ dependencies = [
   'rpy2 < 3.5.12',
   'scipy < 1.10.2',
   'seaborn < 0.12.3',
-  'sympy < 1.11.2',
+  'sympy < 1.13.0',
   'tqdm < 4.65.1',
   'xlrd < 2.0.2'
 ]
