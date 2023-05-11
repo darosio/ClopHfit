@@ -3,6 +3,17 @@
 
 # Changelog
 
+## v0.5.4 (2023-05-11)
+
+### Docs
+
+- Reorganize readme sphinx etc.
+
+### Build
+
+- update mypy requirement from <1.3 to <1.4 (#253)
+- update sympy requirement from <1.11.2 to <1.13.0 (#251)
+
 ## v0.5.3 (2023-05-09)
 
 ### Docs
