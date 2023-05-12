@@ -3,6 +3,16 @@
 
 # Changelog
 
+## v0.6.0 (2023-05-12)
+
+### Feat
+
+- **prenspire**: Read platemap othen than 96-well
+
+### Build
+
+- update commitizen requirement from <3.2.2 to <3.2.3 (#256)
+
 ## v0.5.4 (2023-05-11)
 
 ### Docs
