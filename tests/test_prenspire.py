@@ -1,6 +1,7 @@
 """Test prenspire module."""
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -33,37 +34,37 @@ class TestEnspireFile:
 
     def test_exceptions(self) -> None:
         """Test some raised exceptions."""
-        esff = (data_files_dir / "exceptions").joinpath
+        esf = (data_files_dir / "exceptions").joinpath
         # Test get_data_ini Exceptions
         with pytest.raises(Exception, match="No line starting with ."):
-            EnspireFile(esff("h148g-spettroC-idx0.csv"))
+            EnspireFile(esf("h148g-spettroC-idx0.csv"))
         with pytest.raises(Exception, match="Multiple lines starting with ."):
-            EnspireFile(esff("h148g-spettroC-idx2.csv"))
+            EnspireFile(esf("h148g-spettroC-idx2.csv"))
         # Test platemap
         with pytest.raises(Exception, match="stop: Platemap format unexpected"):
-            EnspireFile(esff("M1-A6-G12_11columns.csv"))
+            EnspireFile(esf("M1-A6-G12_11columns.csv"))
         # Test the presence of some empty lines
         with pytest.raises(Exception, match="Expecting two empty lines before _ini"):
-            EnspireFile(esff("M1-A6-G12_missing_emptyline_ini.csv"))
+            EnspireFile(esf("M1-A6-G12_missing_emptyline_ini.csv"))
         with pytest.raises(Exception, match="Expecting an empty line after _fin"):
-            EnspireFile(esff("M1-A6-G12_missing_emptyline_fin.csv"))
+            EnspireFile(esf("M1-A6-G12_missing_emptyline_fin.csv"))
         # Test multiple emission wavelengths in excitation spectra
         with pytest.raises(
             Exception, match="Excitation spectra with unexpected emission in MeasA"
         ):
-            EnspireFile(esff("e2dan-exwavelength.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelength.csv")).extract_measurements()
         with pytest.raises(
             Exception, match="Excitation spectra with unexpected emission in MeasA"
         ):
-            EnspireFile(esff("e2dan-exwavelength2.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelength2.csv")).extract_measurements()
         with pytest.raises(
             Exception, match="Emission spectra with unexpected excitation in MeasC"
         ):
-            EnspireFile(esff("e2dan-emwavelength.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-emwavelength.csv")).extract_measurements()
         with pytest.raises(
             Exception, match='Unknown "Monochromator": Strange in MeasB'
         ):
-            EnspireFile(esff("e2dan-exwavelengthstrange.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelengthstrange.csv")).extract_measurements()
 
     def test_get_data_ini(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test get_data_ini."""
@@ -147,14 +148,12 @@ class TestEnspireFile:
         exported).
 
         """
-        import warnings
-
-        esff = (data_files_dir / "warnings").joinpath
+        esf = (data_files_dir / "warnings").joinpath
 
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            ef = EnspireFile(esff("h148g-spettroC-incomplete.csv"))
+            ef = EnspireFile(esf("h148g-spettroC-incomplete.csv"))
             ef.extract_measurements()
             assert len(w) == 2
             assert issubclass(w[-1].category, Warning)
