@@ -117,63 +117,50 @@ class EnspireFile:
             min_line_length = 2  # for key: value
             count = 0
             for i, line in enumerate(lines):
-                # XXX: Sometime "Sample" is absent. if line[0:1] == ["Well"]:
-                if len(line) >= min_line_length and line[:2] == ["Well", "Sample"]:
+                if len(line) >= min_line_length and line[:1] == ["Well"]:
                     count += 1
                     idx = i
             if count == 0:
-                msg = f"No line starting with ['Well', 'Sample',...] found in {lines}"
+                msg = (
+                    f"No line starting with ['Well', 'Sample',...] found in {lines[:9]}"
+                )
                 raise CsvLineError(msg)
             elif count == 1:
                 return idx
             else:  # count > 1
-                msg = f"Multiple lines starting with ['Well', 'Sample',...] in {lines}"
+                msg = f"Multiple lines starting with ['Well', 'Sample',...] in {lines[:9]}"
                 raise CsvLineError(msg)
 
         def get_list_from_platemap() -> tuple[list[str], list[list[str]]]:
-            """Get well_list from Platemap contained in metadata_post.
+            """Extract well list and Platemap from _metadata_post.
 
             Returns
             -------
-                also Platemap, at this time.
+            tuple[list[str], list[list[str]]]
+                A tuple containing:
+                - A list of well IDs in the format "A01", "A02", etc.
+                - A list of lists representing the Platemap.
 
             Raises
             ------
             CsvLineError
-                If the number of plate columns is not equal to 12.
+                If the column '01' is not present 3 lines below ['Platemap:'].
 
             """
-            lines = self._metadata_post
-            idx = line_index(lines, ["Platemap:"])
-            # XXX: 24
-            if lines[idx + 3] != [
-                "",
-                "01",
-                "02",
-                "03",
-                "04",
-                "05",
-                "06",
-                "07",
-                "08",
-                "09",
-                "10",
-                "11",
-                "12",
-                "",
-            ]:
+            lines: list[list[str]] = self._metadata_post
+            idx: int = line_index(lines, ["Platemap:"])
+            if "01" not in lines[idx + 3]:
                 msg = "stop: Platemap format unexpected"
                 raise CsvLineError(msg)
-            # XXX:
-            plate = lines[idx + 4 : idx + 12]
-            p = []
-            for r in plate:
-                letter = r[0]
-                for c in range(1, len(r)):
-                    # strip out white spaces;fix "no background info available"
-                    if r[c].strip():
-                        p.append(f"{letter}{c:02}")
-            return p, plate
+            plate: list[list[str]] = []
+            for i in range(idx + 4, len(lines)):
+                if not lines[i]:
+                    break
+                plate.append(lines[i])
+            well_list: list[str] = [
+                f"{r[0]}{c:02}" for r in plate for c in range(1, len(r)) if r[c].strip()
+            ]
+            return well_list, plate
 
         def create_metadata() -> None:
             """Create metadata dictionary."""
@@ -219,7 +206,6 @@ class EnspireFile:
         verboseprint("saved _data_list attribute")  # type: ignore
         self._metadata_post = csvl[self._fin + 1 :]
         verboseprint("saved metadata_post attribute")  # type: ignore
-        # XXX: 24
         self._well_list_platemap, self._platemap = get_list_from_platemap()
         verboseprint("saved _well_list_platemap attribute")  # type: ignore
         create_metadata()
@@ -336,12 +322,8 @@ class EnspireFile:
 
         columns = [r.replace(":", "") for r in headerdata]
         dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
-        # XXX: Sometime "Sample" is absent. w = df.drop_duplicates(["Well"])
-        w = dfdata.drop_duplicates(["Well", "Sample"])
+        w = dfdata.drop_duplicates(["Well"])
         self.wells = w.Well.tolist()
-        # XXX: Sometime "Sample" is absent.
-        self.samples = w.Sample.tolist()
-        # XXX: 24
         check_lists()
         # Monochromator is expected to be either Exc or Ems
         for k, v in self.measurements.items():

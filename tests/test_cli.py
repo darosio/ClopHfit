@@ -11,6 +11,9 @@ from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
 from clophfit.__main__ import clop
 
+# tests path
+tpath = Path(__file__).parent
+
 
 def test_eq1() -> None:
     """It runs XXX pr.tecan and generates correct results and graphs."""
@@ -21,14 +24,15 @@ def test_eq1() -> None:
 
 
 def test_prenspire(tmp_path: Path) -> None:
-    """Run cli with actual data."""
-    expected = Path(__file__).parent / "EnSpire" / "data" / "output"
+    """Test prenspire command with actual data and validate output."""
+    expected = tpath / "EnSpire" / "cli" / "output"
+    input_csv = tpath / "EnSpire" / "cli" / "NTT_37C_pKa.csv"
     out = tmp_path / "E"
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prenspire", "tests/EnSpire/data/NTT_37C_pKa.csv", "--out", str(out)],
+        ["prenspire", str(input_csv), "--out", str(out)],
     )
     assert result.exit_code == 0
     # validate output files
@@ -42,27 +46,20 @@ def test_prenspire(tmp_path: Path) -> None:
     # validate graph
     for f in ["NTT_37C_pKa_A.png", "NTT_37C_pKa_B.png"]:
         msg = compare_images(out / f, expected / f, 0.0001)
-        if msg:
+        if msg:  # pragma: no cover
             raise ImageComparisonFailure(msg)
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
 def test_prtecan(tmp_path: Path) -> None:
-    """It runs XXX pr.tecan and generates correct results and graphs."""
+    """Test prtecan command with actual data."""
+    lfile = str(tpath / "Tecan" / "140220" / "list.pH")
+    sfile = str(tpath / "Tecan" / "140220" / "scheme.txt")
     out = tmp_path / "out3"
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        [
-            "prtecan",
-            "tests/Tecan/140220/list.pH",
-            "--out",
-            str(out),
-            "--fit",
-            "--scheme",
-            "tests/Tecan/140220/scheme.txt",
-            "--bg",
-        ],
+        ["prtecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
     )
     assert result.exit_code == 0

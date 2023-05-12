@@ -12,18 +12,28 @@ data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath
 
 
+@pytest.fixture(scope="module")
+def ef1() -> EnspireFile:
+    """Read in file."""
+    ef = EnspireFile(esff("h148g-spettroC.csv"))
+    ef.extract_measurements()
+    return ef
+
+
+@pytest.fixture(scope="module")
+def ef2() -> EnspireFile:
+    """Read in file without 'Samples' column."""
+    ef = EnspireFile(esff("e2-T-without_sample_column.csv"))
+    ef.extract_measurements()
+    return ef
+
+
 class TestEnspireFile:
     """Test EnspireFile class."""
 
-    @pytest.fixture(autouse=True)
-    def _init(self) -> None:
-        """Read in data files."""
-        self.esf1 = EnspireFile(esff("h148g-spettroC.csv"))
-        self.esf2 = EnspireFile(esff("M1-A6-G12.csv"))
-        self.esf3 = EnspireFile(esff("S202N-E2_pHs.csv"))
-
     def test_exceptions(self) -> None:
         """Test some raised exceptions."""
+        esff = (data_files_dir / "exceptions").joinpath
         # Test get_data_ini Exceptions
         with pytest.raises(Exception, match="No line starting with ."):
             EnspireFile(esff("h148g-spettroC-idx0.csv"))
@@ -37,7 +47,7 @@ class TestEnspireFile:
             EnspireFile(esff("M1-A6-G12_missing_emptyline_ini.csv"))
         with pytest.raises(Exception, match="Expecting an empty line after _fin"):
             EnspireFile(esff("M1-A6-G12_missing_emptyline_fin.csv"))
-        # Test multiple emission wavelebgths in excitation spectra
+        # Test multiple emission wavelengths in excitation spectra
         with pytest.raises(
             Exception, match="Excitation spectra with unexpected emission in MeasA"
         ):
@@ -55,92 +65,80 @@ class TestEnspireFile:
         ):
             EnspireFile(esff("e2dan-exwavelengthstrange.csv")).extract_measurements()
 
-    def test_get_data_ini(self) -> None:
+    def test_get_data_ini(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test get_data_ini."""
-        assert self.esf1._ini == 12
-        assert self.esf2._ini == 9
-        assert self.esf3._ini == 9
+        assert ef1._ini == 12
+        assert ef2._ini == 9
 
-    def test_fin(self) -> None:
+    def test_fin(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test _fin (line_index())."""
-        # Remember that first line has index=0
-        assert self.esf1._fin == 14897
-        assert self.esf2._fin == 461
-        assert self.esf3._fin == 7233
+        assert ef1._fin == 14897
+        assert ef2._fin == 856
 
-    def test_metadata_post(self) -> None:
+    def test_metadata_post(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Identify correctly the beginning of metadata after data block."""
-        assert self.esf1._metadata_post[0] == ["Basic assay information "]
-        assert self.esf2._metadata_post[0] == ["Basic assay information "]
-        assert self.esf3._metadata_post[0] == ["Basic assay information "]
+        assert ef1._metadata_post[0] == ["Basic assay information "]
+        assert ef2._metadata_post[0] == ["Basic assay information "]
 
-    def test_localegen_in_metadata_post(self) -> None:
+    def test_localegen_in_metadata_post(
+        self, ef1: EnspireFile, ef2: EnspireFile
+    ) -> None:
         """Test locales."""
-        assert self.esf1._metadata_post[31][4] == "300 µl"
-        assert self.esf2._metadata_post[31][4] == "300 µl"
-        assert self.esf3._metadata_post[31][4] == "300 µl"
+        assert ef1._metadata_post[31][4] == "300 µl"
+        assert ef2._metadata_post[31][4] == "300 µl"
 
-    def test_data_list(self) -> None:
+    def test_data_list(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test data_list."""
-        assert self.esf1._data_list[0][2] == "MeasA:Result"
-        assert self.esf2._data_list[0][2] == "MeasA:WavelengthExc"
-        assert self.esf3._data_list[0][2] == "MeasA:Result"
-        assert self.esf1._data_list[1][2] == "3151"
-        assert self.esf2._data_list[1][4] == "66953"
-        assert self.esf3._data_list[1][2] == "7504"
+        assert ef1._data_list[0][2] == "MeasA:Result"
+        assert ef2._data_list[0][2] == "MeasB:WavelengthEms"
+        assert ef1._data_list[1][2] == "3151"
+        assert ef2._data_list[1][3] == "3739"
         # Important to check for last line
-        assert self.esf1._data_list[-1][2] == "97612"
-        assert self.esf2._data_list[-1][4] == "3993"
-        assert self.esf3._data_list[-1][2] == "1785"
+        assert ef1._data_list[-1][2] == "97612"
+        assert ef2._data_list[-1][3] == "512"
 
-    def test_get_list_from_platemap(self) -> None:
+    def test_get_list_from_platemap(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test list from platemap."""
-        assert self.esf1._well_list_platemap[2] == "A03"
-        assert self.esf2._well_list_platemap[1] == "H12"
-        assert self.esf3._well_list_platemap[2] == "A03"
+        assert ef1._well_list_platemap[2] == "A03"
+        assert ef2._well_list_platemap[1] == "F02"
 
-    def test_metadata(self) -> None:
+    def test_metadata(self, ef1: EnspireFile) -> None:
         """Test metadata dictionary."""
-        assert self.esf3.metadata["Measurement date"] == "2013-06-14 23:13:51"
-        assert self.esf3.metadata["Chamber temperature at start"] == "19.55"
-        assert self.esf3.metadata["Chamber temperature at end"] == "36.5"
-        assert self.esf3.metadata["Ambient temperature at start"] == "4.7"
-        assert self.esf3.metadata["Ambient temperature at end"] == "8.4"
-        assert self.esf1.metadata["Protocol name"] == "Eccitazione C"
+        assert ef1.metadata["Measurement date"] == "2011-10-03 17:12:33"
+        assert ef1.metadata["Chamber temperature at start"] == "20"
+        assert ef1.metadata["Chamber temperature at end"] == "20"
+        assert ef1.metadata["Ambient temperature at start"] == "6"
+        assert ef1.metadata["Ambient temperature at end"] == "9.3"
+        assert ef1.metadata["Protocol name"] == "Eccitazione C"
         assert (
-            self.esf1.metadata["Exported data"]
-            == "Well,Sample,MeasA:Result,MeasA:Wavelength"
+            ef1.metadata["Exported data"] == "Well,Sample,MeasA:Result,MeasA:Wavelength"
         )
 
-    def test_measurement_metadata(self) -> None:
+    def test_measurement_metadata(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test data object."""
-        self.esf3.extract_measurements()
-        assert self.esf3.measurements["G"]["metadata"]["Monochromator"] == "Excitation"
-        assert self.esf3.measurements["G"]["metadata"]["Wavelength"] == "535"
-        assert self.esf3.measurements["G"]["metadata"]["temp"] == "37"
-        assert self.esf3.measurements["A"]["metadata"]["Monochromator"] == "Emission"
-        assert self.esf3.measurements["A"]["metadata"]["Wavelength"] == "278"
-        assert self.esf3.measurements["A"]["metadata"]["temp"] == "20"
+        assert ef1.measurements["A"]["metadata"]["Monochromator"] == "Excitation"
+        assert ef1.measurements["A"]["metadata"]["Wavelength"] == "520"
+        assert ef1.measurements["A"]["metadata"]["temp"] == "20"
+        assert ef2.measurements["C"]["metadata"]["Monochromator"] == "Emission"
+        assert ef2.measurements["C"]["metadata"]["Wavelength"] == "480"
+        assert ef2.measurements["F"]["metadata"]["temp"] == "35"
 
-    def test_measurements(self) -> None:
+    def test_measurements(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test data object."""
-        self.esf1.extract_measurements()
-        assert self.esf1.measurements["A"]["lambda"][0] == 272
-        assert self.esf1.measurements["A"]["lambda"][228] == 500
-        assert self.esf1.measurements["A"]["A01"][0] == 3151
-        assert self.esf1.measurements["A"]["A01"][228] == 573
+        assert ef1.measurements["A"]["lambda"][0] == 272
+        assert ef1.measurements["A"]["lambda"][228] == 500
+        assert ef1.measurements["A"]["A01"][0] == 3151
+        assert ef1.measurements["A"]["A01"][228] == 573
         # Important to check for last line of csvl
-        assert self.esf1.measurements["A"]["G05"][228] == 97612
-        assert self.esf1.measurements["A"]["A01"][10] == 2496
-        assert self.esf1.measurements["A"]["A02"][10] == 1765
-        assert self.esf1.measurements["A"]["lambda"][10] == 282
-        assert self.esf1.measurements["A"]["metadata"]["Wavelength"] == "520"
-        self.esf2.extract_measurements()
-        assert self.esf2.measurements["A"]["lambda"][2] == 272
-        assert self.esf2.measurements["A"]["G12"][0] == 66953
-        assert self.esf2.measurements["A"]["metadata"]["Wavelength"] == "515"
+        assert ef1.measurements["A"]["G05"][228] == 97612
+        assert ef1.measurements["A"]["A01"][10] == 2496
+        assert ef1.measurements["A"]["A02"][10] == 1765
+        assert ef1.measurements["A"]["lambda"][10] == 282
+        assert ef1.measurements["A"]["metadata"]["Wavelength"] == "520"
+        assert ef2.measurements["A"]["lambda"][2] == 402
+        assert ef2.measurements["B"]["F07"][1] == 1898
+        assert ef2.measurements["A"]["metadata"]["Wavelength"] == "530"
 
-    # @unittest.skip("demonstrating skipping")
     def test_check_lists_warning(self) -> None:
         """It warns when (csv != platemap).
 
@@ -150,6 +148,8 @@ class TestEnspireFile:
 
         """
         import warnings
+
+        esff = (data_files_dir / "warnings").joinpath
 
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
@@ -165,43 +165,41 @@ class TestEnspireFile:
     # placemark    self.assertEqual(self.s.get_maxx(self.s.ex, self.s.y), 272)
 
 
+@pytest.fixture(scope="module")
+def en1() -> ExpNote:
+    """Read note file."""
+    return ExpNote(esff("h148g-spettroC-nota"))
+
+
+@pytest.fixture(scope="module")
+def en1err() -> ExpNote:
+    """Read note file with missing wells."""
+    return ExpNote(esff("h148g-spettroC-nota-Err"))
+
+
 class TestExpNote:
     """Experimental notes."""
 
-    @pytest.fixture(autouse=True)
-    def _init(self) -> None:
-        """Initialize test class."""
-        self.ef1 = EnspireFile(esff("h148g-spettroC.csv"))
-        self.ef1.extract_measurements()
-        self.en1 = ExpNote(esff("h148g-spettroC-nota"))
-        self.en2 = ExpNote(esff("M1-A6-G12-nota"))
-        self.en3 = ExpNote(esff("S202N-E2_pHs-nota"))
-        self.en1err = ExpNote(esff("h148g-spettroC-nota-Err"))
-
-    def test_get_list_from_note(self) -> None:
+    def test_get_list_from_note(self, en1: ExpNote) -> None:
         """Test get_well_list_from_note method."""
-        assert self.en1.wells[2] == "A03"
-        assert self.en2.wells[1] == "H12"
-        assert self.en3.wells[2] == "A03"
+        assert en1.wells[2] == "A03"
 
-    def test_note_list(self) -> None:
+    def test_note_list(self, en1: ExpNote) -> None:
         """Test well_list from note."""
-        assert self.en1.note_list[3][0] == "A03"
-        assert self.en2.note_list[2][0] == "H12"
-        assert self.en1.note_list[65][1] == "8.2"
-        assert self.en2.note_list[2][1] == "9.36"
+        assert en1.note_list[3][0] == "A03"
+        assert en1.note_list[65][1] == "8.2"
 
-    def test_check_list(self) -> None:
+    def test_check_list(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
         """Test check list from note vs. Enspirefile."""
-        assert self.en1.check_wells(self.ef1) is True
-        assert self.en1err.check_wells(self.ef1) is False
+        assert en1.check_wells(ef1) is True
+        assert en1err.check_wells(ef1) is False
 
-    def test_build_titrations(self) -> None:
+    def test_build_titrations(self, en1: ExpNote, ef1: EnspireFile) -> None:
         """Test the method extract_titrations()."""
-        self.en1.build_titrations(self.ef1)
-        assert len(self.en1.titrations) == 6
-        tit = self.en1.titrations[0]
-        assert tit.conc == [5.2, 6.3, 7.4, 8.1, 8.2]
-        assert tit.data["A"][(5.2, "A01")][272] == 3151
-        tit = self.en1.titrations[5]
-        assert tit.data["A"][(667.0, "E11")][500] == 8734
+        en1.build_titrations(ef1)
+        assert len(en1.titrations) == 6
+        tit0 = en1.titrations[0]
+        assert tit0.conc == [5.2, 6.3, 7.4, 8.1, 8.2]
+        assert tit0.data["A"][(5.2, "A01")][272] == 3151
+        tit5 = en1.titrations[5]
+        assert tit5.data["A"][(667.0, "E11")][500] == 8734

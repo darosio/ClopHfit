@@ -173,9 +173,7 @@ tests = ["tests", "*/tests"]
 [tool.coverage.report]
 # fail_under = 100
 exclude_lines = [
-  "pragma: no cover",
-  "pytest.raises",
-  "pytest.warns"
+  "pragma: no cover"
 ]
 show_missing = true
 
