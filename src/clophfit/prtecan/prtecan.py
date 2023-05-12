@@ -371,7 +371,7 @@ class Labelblock:
             try:
                 norm = 1000.0
                 for k in Labelblock._NORM_KEYS:
-                    norm /= self.metadata[k].value  # type: ignore
+                    norm /= self.metadata[k].value  # type: ignore # XXX: D
             except TypeError:
                 warnings.warn(
                     "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
@@ -1082,8 +1082,8 @@ class TitrationAnalysis(Titration):
         fitting = pd.DataFrame()
         for k in keys_fit:
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y = self._datafit[0][k]  # type: ignore
-            y2 = self._datafit[1][k]  # type: ignore
+            y = self._datafit[0][k]  # type: ignore # XXX: D
+            y2 = self._datafit[1][k]  # type: ignore # XXX: D
             residue = y - self.fz(
                 fittings[0]["K"].loc[k],
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
@@ -1317,7 +1317,7 @@ class TitrationAnalysis(Titration):
         ax1.grid(0, axis="y")  # switch off horizontal
         ax2.grid(1, axis="both")
         # ## only residues
-        y = self.labelblocksgroups[0].data[key]  # type: ignore
+        y = self.labelblocksgroups[0].data[key]  # type: ignore # XXX: D
         ax1.plot(
             x,
             (
@@ -1330,7 +1330,7 @@ class TitrationAnalysis(Titration):
             lw=1.5,
             color=colors[0],
         )
-        y = self.labelblocksgroups[1].data[key]  # type: ignore
+        y = self.labelblocksgroups[1].data[key]  # type: ignore # XXX: D
         ax2.plot(
             x,
             (
@@ -1489,7 +1489,7 @@ class TitrationAnalysis(Titration):
                     ]
                 ]
             ]
-            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore
+            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore # XXX: D
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
