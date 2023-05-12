@@ -52,7 +52,7 @@ version = "0.5.4"
 
 [project.optional-dependencies]
 dev = [
-  "commitizen < 3.2.2",
+  "commitizen < 3.2.3",
   "ipykernel",
   "jupyter",
   "ruff == 0.0.265",
