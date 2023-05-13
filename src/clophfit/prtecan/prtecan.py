@@ -1,10 +1,4 @@
-"""Parse Tecan files, group lists and fit titrations.
-
-- Titration is described in list.pH or list.cl file.
-- Builds 96 titrations and export them in txt files.
-- In the case of 2 labelblocks performs a global fit saving a png and printing the fitting results.
-
-"""
+"""prtecan/prtecan.py."""
 from __future__ import annotations
 
 import hashlib
@@ -121,11 +115,17 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 
 @dataclass(frozen=False)
 class Metadata:
-    """Value type of a metadata dictionary."""
+    """Represents the value of a metadata dictionary.
 
-    #: Value for the dictionary key.
+    Parameters
+    ----------
+    value : int | str | float | None
+        The value for the dictionary key.
+    unit : Sequence[str | float | int] | None, optional
+        The first element represents the unit, while the following elements are only listed.
+    """
+
     value: int | str | float | None
-    #: First element is the unit, the following are somewhat unexpected.
     unit: Sequence[str | float | int] | None = None
 
 
@@ -258,14 +258,14 @@ def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
 
 @dataclass
 class Labelblock:
-    """Parse a label block within a Tecan file.
+    """Parse a label block.
 
     Parameters
     ----------
-    lines : list[list[str | int | float]]
+    _lines : list[list[str | int | float]]
         Lines to create this Labelblock.
     path : Path, optional
-        File path to the tecanfile that contains this labelblock.
+        Path to the containing file, if it exists.
 
     Raises
     ------
@@ -276,24 +276,14 @@ class Labelblock:
     -----
     Warning
         When it replaces "OVER" with ``np.nan`` for saturated values.
-
     """
 
-    lines: InitVar[list[list[str | int | float]]]
+    _lines: InitVar[list[list[str | int | float]]]
     path: Path | None = None
-
     #: Metadata specific for this Labelblock.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
-    _data_norm: dict[str, float] | None = None
-    _data_buffersubtracted: dict[str, float] | None = None
-    _data_buffersubtracted_norm: dict[str, float] | None = None
-    _buffer_wells: list[str] | None = None
-    _buffer: float | None = None
-    _buffer_norm: float | None = None
-    _sd_buffer: float | None = None
-    _sd_buffer_norm: float | None = None
     _KEYS: ClassVar[list[str]] = [
         "Emission Bandwidth",
         "Emission Wavelength",
@@ -307,17 +297,25 @@ class Labelblock:
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Generate metadata and data for this labelblock."""
+        self._buffer_wells: list[str] | None = None
+        self._buffer: float | None = None
+        self._buffer_norm: float | None = None
+        self._buffer_sd: float | None = None
+        self._buffer_norm_sd: float | None = None
+        self._data_norm: dict[str, float] | None = None
+        self._data_buffersubtracted: dict[str, float] | None = None
+        self._data_buffersubtracted_norm: dict[str, float] | None = None
         if lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13:
             stripped = strip_lines(lines)
             stripped[14:23] = []
-            self.metadata = extract_metadata(stripped)
-            self.data = self._extract_data(lines[15:23])
+            self.metadata: dict[str, Metadata] = extract_metadata(stripped)
+            self.data: dict[str, float] = self._extract_data(lines[15:23])
         else:
             msg = "Cannot build Labelblock: not 96 wells?"
             raise ValueError(msg)
 
     def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
-        """Convert data into a dictionary.
+        """Extract data into a dictionary.
 
         {'A01' : value}
         :
@@ -365,22 +363,6 @@ class Labelblock:
         return data
 
     @property
-    def data_norm(self) -> dict[str, float]:
-        """Normalize data by number of flashes, integration time and gain."""
-        if self._data_norm is None:
-            try:
-                norm = 1000.0
-                for k in Labelblock._NORM_KEYS:
-                    norm /= self.metadata[k].value  # type: ignore # XXX: D
-            except TypeError:
-                warnings.warn(
-                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
-                    stacklevel=2,
-                )  # pragma: no cover
-            self._data_norm = {k: v * norm for k, v in self.data.items()}
-        return self._data_norm
-
-    @property
     def buffer_wells(self) -> list[str] | None:
         """List of buffer wells."""
         return self._buffer_wells
@@ -389,35 +371,11 @@ class Labelblock:
     def buffer_wells(self, buffer_wells: list[str]) -> None:
         self._buffer_wells = buffer_wells
         self._buffer = float(np.average([self.data[k] for k in buffer_wells]))
-        self._sd_buffer = float(np.std([self.data[k] for k in buffer_wells]))
+        self._buffer_sd = float(np.std([self.data[k] for k in buffer_wells]))
         self._buffer_norm = float(np.average([self.data_norm[k] for k in buffer_wells]))
-        self._sd_buffer_norm = float(np.std([self.data_norm[k] for k in buffer_wells]))
+        self._buffer_norm_sd = float(np.std([self.data_norm[k] for k in buffer_wells]))
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
-
-    @property
-    def data_buffersubtracted(self) -> dict[str, float]:
-        """Buffer subtracted data."""
-        if self._data_buffersubtracted is None:
-            if self.buffer:
-                self._data_buffersubtracted = {
-                    k: v - self.buffer for k, v in self.data.items()
-                }
-            else:
-                self._data_buffersubtracted = {}
-        return self._data_buffersubtracted
-
-    @property
-    def data_buffersubtracted_norm(self) -> dict[str, float]:
-        """Normalize buffer-subtracted data."""
-        if self._data_buffersubtracted_norm is None:
-            if self.buffer_norm:
-                self._data_buffersubtracted_norm = {
-                    k: v - self.buffer_norm for k, v in self.data_norm.items()
-                }
-            else:
-                self._data_buffersubtracted_norm = {}
-        return self._data_buffersubtracted_norm
 
     @property
     def buffer(self) -> float | None:
@@ -444,14 +402,54 @@ class Labelblock:
         self._buffer_norm = value
 
     @property
-    def sd_buffer(self) -> float | None:
+    def buffer_sd(self) -> float | None:
         """Get standard deviation of buffer_wells values."""
-        return self._sd_buffer
+        return self._buffer_sd
 
     @property
-    def sd_buffer_norm(self) -> float | None:
+    def buffer_norm_sd(self) -> float | None:
         """Get standard deviation of normalized buffer_wells values."""
-        return self._sd_buffer_norm
+        return self._buffer_norm_sd
+
+    @property
+    def data_norm(self) -> dict[str, float]:
+        """Normalize data by number of flashes, integration time and gain."""
+        if self._data_norm is None:
+            try:
+                norm = 1000.0
+                for k in Labelblock._NORM_KEYS:
+                    norm /= self.metadata[k].value  # type: ignore # XXX: D
+            except TypeError:
+                warnings.warn(
+                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
+                    stacklevel=2,
+                )  # pragma: no cover
+            self._data_norm = {k: v * norm for k, v in self.data.items()}
+        return self._data_norm
+
+    @property
+    def data_buffersubtracted(self) -> dict[str, float]:
+        """Buffer subtracted data."""
+        if self._data_buffersubtracted is None:
+            if self.buffer:
+                self._data_buffersubtracted = {
+                    k: v - self.buffer for k, v in self.data.items()
+                }
+            else:
+                self._data_buffersubtracted = {}
+        return self._data_buffersubtracted
+
+    @property
+    def data_buffersubtracted_norm(self) -> dict[str, float]:
+        """Normalize buffer-subtracted data."""
+        if self._data_buffersubtracted_norm is None:
+            if self.buffer_norm:
+                self._data_buffersubtracted_norm = {
+                    k: v - self.buffer_norm for k, v in self.data_norm.items()
+                }
+            else:
+                self._data_buffersubtracted_norm = {}
+        return self._data_buffersubtracted_norm
 
     def __eq__(self, other: object) -> bool:
         """Two labelblocks are equal when metadata KEYS are identical."""
@@ -488,11 +486,9 @@ class Tecanfile:
         When path does not exist.
     Exception
         When no Labelblock is found.
-
     """
 
     path: Path
-
     #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: All labelblocks contained in this file.
@@ -536,40 +532,38 @@ class LabelblocksGroup:
     ------
     Exception
         When labelblocks are neither equal nor almost equal.
-
     """
 
     labelblocks: list[Labelblock]
     allequal: bool = False
-
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    #: List of data in the same order of labelblocks.
-    _data: dict[str, list[float]] | None = None
-    _data_norm: dict[str, list[float]] | None = None
-    _data_buffersubtracted: dict[str, list[float]] | None = None
-    _data_buffersubtracted_norm: dict[str, list[float]] | None = None
-    _buffer_wells: list[str] | None = None
 
     def __post_init__(self) -> None:
         """Create common metadata and data."""
-        if not self.allequal:
-            self.allequal = all(
-                self.labelblocks[0] == lb for lb in self.labelblocks[1:]
-            )
-        if self.allequal:
+        labelblocks = self.labelblocks
+        allequal = self.allequal
+        self._buffer_wells: list[str] | None = None
+        self._data: dict[str, list[float]] | None = None
+        self._data_norm: dict[str, list[float]] | None = None
+        self._data_buffersubtracted: dict[str, list[float]] | None = None
+        self._data_buffersubtracted_norm: dict[str, list[float]] | None = None
+        if not allequal:
+            allequal = all(labelblocks[0] == lb for lb in labelblocks[1:])
+        if allequal:
             self._data = {}
-            for key in self.labelblocks[0].data:
-                self._data[key] = [lb.data[key] for lb in self.labelblocks]
+            for key in labelblocks[0].data:
+                self._data[key] = [lb.data[key] for lb in labelblocks]
         # labelblocks that can be merged only after normalization
-        elif all(self.labelblocks[0].__almost_eq__(lb) for lb in self.labelblocks[1:]):
+        elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
             self._data_norm = {}
-            for key in self.labelblocks[0].data:
-                self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
+            for key in labelblocks[0].data:
+                self._data_norm[key] = [lb.data_norm[key] for lb in labelblocks]
         else:
             msg = "Creation of labelblock group failed."
             raise ValueError(msg)
-        self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
+        self.labelblocks = labelblocks
+        self.metadata = merge_md([lb.metadata for lb in labelblocks])
 
     @property
     def data(self) -> dict[str, list[float]] | None:
@@ -646,12 +640,12 @@ class TecanfilesGroup:
     Warns
     -----
     Warning
-        The Tecanfiles listed in *filenames* are supposed to contain the
-        "same" list (of length N) of Labelblocks. So, N labelblocksgroups
-        will be normally created. A warn will raise if not all Tecanfiles
-        contains the same number of Labelblocks ('equal' mergeable) in the
-        same order, but a number M < N of groups can be built.
-
+        The Tecanfiles listed in `tecanfiles` are expected to contain the
+        "same" list (of length N) of Labelblocks. Normally, N labelblocksgroups
+        will be created. However, if not all Tecanfiles contain the same number
+        of Labelblocks that can be merged ('equal' mergeable) in the same order,
+        then a warning will be raised. In this case, a number M < N of groups
+        can be built.
     """
 
     tecanfiles: list[Tecanfile]
@@ -711,11 +705,14 @@ class Titration(TecanfilesGroup):
     tecanfiles: list[Tecanfile]
     conc: Sequence[float]
 
-    _additions: list[float] | None = None
-    _data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
-    _data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
-    _buffer_wells: list[str] | None = None
-    _dil_corr: NDArray[np.float_] = field(init=False, repr=False)
+    def __post_init__(self) -> None:
+        """Set up the initial values for the properties."""
+        super().__post_init__()
+        self._additions: list[float] | None = None
+        self._data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
+        self._data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
+        self._buffer_wells: list[str] | None = None
+        self._dil_corr: NDArray[np.float_] = field(init=False, repr=False)
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> Titration:
@@ -899,11 +896,20 @@ class Titration(TecanfilesGroup):
 
 @dataclass
 class PlateScheme:
-    """Define buffer, ctrl and unk wells, and ctrl names."""
+    """Define buffer, ctrl and unk wells, and ctrl names.
+
+    Parameters
+    ----------
+    file: Path
+        File path to the scheme file [<well Id, sample name>].
+    """
 
     file: Path | None = None
+    #: List of buffer wells.
     buffer: list[str] = field(init=False, default_factory=list)
+    #: List of CTR wells.
     ctrl: list[str] = field(init=False, default_factory=list)
+    #: A dictionary mapping sample names to their associated list of wells.
     names: dict[str, set[str]] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -923,7 +929,6 @@ class PlateScheme:
                 - set(self.buffer)
             )
             self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
-        # else: default_factory
 
 
 class FitFirstError(Exception):
@@ -937,30 +942,27 @@ class FitFirstError(Exception):
 class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
 
-    Parameters
-    ----------
-    titration : Titration
-        Titration object.
-    schemefile : str | None
-        File path to the schemefile (e.g. {"C01: 'V224Q'"}).
-
     Raises
     ------
     ValueError
         For unexpected file format, e.g. header `names`.
-
     """
 
-    _scheme: PlateScheme = field(default_factory=PlateScheme)
-    _datafit: Sequence[dict[str, list[float]] | None] = field(
-        init=False, default_factory=list
-    )  # [], empty list
-    keys_unk: list[str] = field(init=False, default_factory=list)
+    #: List of result dataframes.
+    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
+    #: Function used in the fitting.
     fz: Callable[
         [float, NDArray[np.float_] | Sequence[float], NDArray[np.float_]],
         NDArray[np.float_],
-    ] = fz_pk_singlesite
-    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
+    ] = field(init=False)
+    #: A list of wells containing samples that are neither buffer nor CTR samples.
+    keys_unk: list[str] = field(init=False, default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Set up the initial values for the properties."""
+        super().__post_init__()
+        self._scheme: PlateScheme = PlateScheme()
+        self._datafit: Sequence[dict[str, list[float]] | None] = []
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -980,7 +982,7 @@ class TitrationAnalysis(Titration):
 
     @property
     def scheme(self) -> PlateScheme:
-        """Scheme for known samples e.g. {'buffer', ['H12', 'H01']}."""
+        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
         return self._scheme
 
     def load_scheme(self, schemefile: Path) -> None:
@@ -1479,7 +1481,7 @@ class TitrationAnalysis(Titration):
                 bg_sd = []
                 for lb in lbg.labelblocks:
                     bg.append(lb.buffer)
-                    bg_sd.append(lb.sd_buffer)
+                    bg_sd.append(lb.buffer_sd)
             rowlabel = ["Temp"]
             lines = [
                 [

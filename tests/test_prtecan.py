@@ -140,8 +140,8 @@ class TestLabelblock:
         lb0, lb1 = labelblocks
         assert lb0.buffer == 11889.25
         assert lb1.buffer == 56.75
-        assert lb0.sd_buffer == pytest.approx(450.2490)
-        assert lb1.sd_buffer == pytest.approx(4.43706)
+        assert lb0.buffer_sd == pytest.approx(450.2490)
+        assert lb1.buffer_sd == pytest.approx(4.43706)
         assert lb0.data_buffersubtracted["F06"] == pytest.approx(7661.75)
         assert lb1.data_buffersubtracted["H12"] == pytest.approx(486.25)
         # Can also assign a buffer value.
@@ -157,8 +157,8 @@ class TestLabelblock:
         lb0, lb1 = labelblocks
         assert lb0.buffer_norm == pytest.approx(639.20699)
         assert lb1.buffer_norm == pytest.approx(5.06696)
-        assert lb0.sd_buffer_norm == pytest.approx(24.20694)
-        assert lb1.sd_buffer_norm == pytest.approx(0.396166)
+        assert lb0.buffer_norm_sd == pytest.approx(24.20694)
+        assert lb1.buffer_norm_sd == pytest.approx(0.396166)
         assert lb0.data_buffersubtracted_norm["F06"] == pytest.approx(411.922)
         assert lb1.data_buffersubtracted_norm["H12"] == pytest.approx(43.4152)
         # Can also assign a buffer_norm value.
