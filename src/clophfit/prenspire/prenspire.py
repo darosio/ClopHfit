@@ -5,6 +5,7 @@ import csv
 import warnings
 from collections import Counter
 from collections import namedtuple
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from typing import Callable
@@ -89,7 +90,6 @@ class EnspireFile:
     >>> ef.extract_measurements()
     >>> ef.measurements['A']['lambda'][2]
     274.0
-
     """
 
     def __init__(self, file: Path, verbose: int = 0) -> None:  # noqa: PLR0915
@@ -378,6 +378,7 @@ class EnspireFile:
             plt.savefig(str(file.with_suffix(".png")))
 
 
+@dataclass
 class ExpNote:
     """Read an Experimental Note file.
 
@@ -390,13 +391,15 @@ class ExpNote:
     >>> en = ExpNote("tests/EnSpire/h148g-spettroC-nota")
     >>> en.wells[2]
     'A03'
-
     """
 
-    def __init__(self, note_file: Path, verbose: int = 0) -> None:
-        """Initialize an object."""
-        verboseprint = verbose_print(verbose)
-        with Path(note_file).open(encoding="iso-8859-1") as f:
+    note_file: Path
+    verbose: int = 0
+
+    def __post_init__(self) -> None:
+        """Complete the initialization."""
+        verboseprint = verbose_print(self.verbose)
+        with self.note_file.open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self.note_list = list(csv.reader(f, dialect="excel-tab"))
         verboseprint("read (experimental) note file")  # type: ignore
