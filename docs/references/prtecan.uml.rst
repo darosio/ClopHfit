@@ -1,5 +1,13 @@
 .. uml::
 
+   class BufferWellsMixin {
+     +@buffer_wells: list[str]
+   }
+
+   Labelblock .up.|> BufferWellsMixin : Uses >
+   LabelblocksGroup .up.|> BufferWellsMixin : Uses >
+   Titration .up.|> BufferWellsMixin : Uses >
+
    class Labelblock{
      #_lines: list_of_lines
 	 #path: Path|None

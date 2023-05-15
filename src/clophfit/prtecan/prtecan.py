@@ -256,8 +256,33 @@ def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
     return corrections
 
 
+class BufferWellsMixin:
+    """Mixin class for handling buffer wells.
+
+    This mixin adds a property for buffer wells. It's intended to be used in
+    classes that deal with collections of wells, where some of the wells are
+    designated as buffer wells.
+    """
+
+    _buffer_wells: list[str] | None = None
+
+    @property
+    def buffer_wells(self) -> list[str] | None:
+        """List of buffer wells."""
+        return self._buffer_wells
+
+    @buffer_wells.setter
+    def buffer_wells(self, value: list[str]) -> None:
+        self._buffer_wells = value
+        self.on_buffer_wells_set(value)
+
+    def on_buffer_wells_set(self, value: list[str]) -> None:
+        """Provide a hook for subclasses to add behavior when buffer_wells is set."""
+        pass
+
+
 @dataclass
-class Labelblock:
+class Labelblock(BufferWellsMixin):
     """Parse a label block.
 
     Parameters
@@ -362,18 +387,18 @@ class Labelblock:
             raise ValueError(msg) from exc
         return data
 
-    @property
-    def buffer_wells(self) -> list[str] | None:
-        """List of buffer wells."""
-        return self._buffer_wells
+    def on_buffer_wells_set(self, value: list[str]) -> None:
+        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
-    @buffer_wells.setter
-    def buffer_wells(self, buffer_wells: list[str]) -> None:
-        self._buffer_wells = buffer_wells
-        self._buffer = float(np.average([self.data[k] for k in buffer_wells]))
-        self._buffer_sd = float(np.std([self.data[k] for k in buffer_wells]))
-        self._buffer_norm = float(np.average([self.data_norm[k] for k in buffer_wells]))
-        self._buffer_norm_sd = float(np.std([self.data_norm[k] for k in buffer_wells]))
+        Parameters
+        ----------
+        value: list[str]
+            The new value of 'buffer_wells'
+        """
+        self._buffer = float(np.average([self.data[k] for k in value]))
+        self._buffer_sd = float(np.std([self.data[k] for k in value]))
+        self._buffer_norm = float(np.average([self.data_norm[k] for k in value]))
+        self._buffer_norm_sd = float(np.std([self.data_norm[k] for k in value]))
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
 
@@ -516,7 +541,7 @@ class Tecanfile:
 
 
 @dataclass
-class LabelblocksGroup:
+class LabelblocksGroup(BufferWellsMixin):
     """Group labelblocks with compatible metadata.
 
     `data_norm` always exist.
@@ -579,16 +604,17 @@ class LabelblocksGroup:
                 self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
         return self._data_norm
 
-    @property
-    def buffer_wells(self) -> list[str] | None:
-        """List of buffer wells."""
-        return self._buffer_wells
+    def on_buffer_wells_set(self, value: list[str]) -> None:
+        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
-    @buffer_wells.setter
-    def buffer_wells(self, buffer_wells: list[str]) -> None:
-        self._buffer_wells = buffer_wells
+        Parameters
+        ----------
+        value: list[str]
+            The new value of 'buffer_wells'
+
+        """
         for lb in self.labelblocks:
-            lb.buffer_wells = self.buffer_wells
+            lb.buffer_wells = value
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
 
@@ -691,7 +717,7 @@ class TecanfilesGroup:
 
 
 @dataclass
-class Titration(TecanfilesGroup):
+class Titration(TecanfilesGroup, BufferWellsMixin):
     """TecanfileGroup + concentrations.
 
     Parameters
@@ -781,16 +807,17 @@ class Titration(TecanfilesGroup):
         additions = pd.read_csv(additions_file, names=["add"])
         self.additions = additions["add"].tolist()
 
-    @property
-    def buffer_wells(self) -> list[str] | None:
-        """List of buffer wells."""
-        return self._buffer_wells
+    def on_buffer_wells_set(self, value: list[str]) -> None:
+        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
-    @buffer_wells.setter
-    def buffer_wells(self, buffer_wells: list[str]) -> None:
-        self._buffer_wells = buffer_wells
+        Parameters
+        ----------
+        value: list[str]
+            The new value of 'buffer_wells'
+
+        """
         for lbg in self.labelblocksgroups:
-            lbg.buffer_wells = buffer_wells
+            lbg.buffer_wells = value
         self._data_dilutioncorrected = None
         self._data_dilutioncorrected_norm = None
 
