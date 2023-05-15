@@ -10,7 +10,7 @@ This package provides a command line interface for fitting pH titration or
 binding assay data for macromolecules, such as fluorescence spectra. With this
 tool, users can easily analyze their data and obtain accurate fitting results.
 
-- Version: "0.6.0"
+- Version: "0.7.0"
 
 ## Installation
 

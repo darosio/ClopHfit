@@ -3,6 +3,22 @@
 
 # Changelog
 
+## v0.7.0 (2023-05-15)
+
+### Feat
+
+- **prtecan**: Typecheck PlateScheme and improve docs
+
+### Test
+
+- Refactor fixtures for prtecan
+
+### Build
+
+- bump ruff from 0.0.265 to 0.0.267 (#259)
+- bump sphinx from 7.0.0 to 7.0.1 (#258)
+- bump typeguard from 4.0.0rc6 to 4.0.0 (#257)
+
 ## v0.6.0 (2023-05-12)
 
 ### Feat
