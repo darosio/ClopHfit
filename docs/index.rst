@@ -28,4 +28,4 @@ to the `Semantic Versioning <https://semver.org/>`_ scheme.
    click
    tutorials/tutorials
    api/api
-   references/development
+   references/references

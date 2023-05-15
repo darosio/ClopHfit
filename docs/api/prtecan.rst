@@ -2,12 +2,12 @@ clophfit.prtecan
 ----------------
 
 .. automodule:: clophfit.prtecan
-   :show-inheritance: Titration
    :special-members: __almost_eq__
+
 
 ..
    .. autoclass:: Titration
-      :show-inheritance: True
+      :show-inheritance:
 
 ..
    .. autoclass:: Tecanfile
