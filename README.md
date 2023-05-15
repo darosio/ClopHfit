@@ -97,6 +97,6 @@ All code is licensed under the terms of the [revised BSD license](LICENSE.txt).
 If you are interested in contributing to the project, please read our
 [contributing](https://darosio.github.io/ClopHfit/references/contributing.html)
 and
-[development environment](https://darosio.github.io/ClopHfit/references/contributing.html#development)
+[development environment](https://darosio.github.io/ClopHfit/references/development.html)
 guides, which outline the guidelines and conventions that we follow for
 contributing code, documentation, and other resources.
