@@ -442,13 +442,13 @@
 - Prototyped NormalizedLabelblock class.
 - Removed of os.path in favor of pathlib.Path
 
-## 0.3.8 (2022-09-24)
+## v0.3.8 (2022-09-24)
 
 ### Fix
 
 - missing xlrd issue.
 
-## 0.3.7 (2022-09-23)
+## v0.3.7 (2022-09-23)
 
 ### Fix
 
@@ -459,7 +459,7 @@
 - Path and str are mixing.
 - tests do not use os.chdir() anymore.
 
-## 0.3.6 (2022-09-21)
+## v0.3.6 (2022-09-21)
 
 ### Feat
 
@@ -478,7 +478,13 @@
 - [ci] safety.
 - [docs] README.md and CHANGELOG.md.
 
-## 0.3.5 (2022-09-07)
+## v0.3.5 (2022-09-11)
+
+### Changed
+
+- Update poetry 1.2.0 and notebook.
+
+## v0.3.4 (2022-09-07)
 
 ### Fixed
 
@@ -488,23 +494,40 @@
 
 - Update poetry 1.2.0 and notebook.
 
-## 0.3.4 (2022-03-14)
+## v0.3.3 (2022-05-27)
+
+- Update deps for notebooks.
+
+## v0.3.2 (2022-03-15)
+
+- Add zenodo.
+
+## v0.3.1 (2022-03-14)
 
 ### Fixed
 
-- Read the docs.
-- Removed :math: directive from README.rst.
+- Removed :math: directive from README.rst and plantuml.
+
+## v0.3.0 (2022-03-14)
+
+### Fixed
+
+- warning for keys_unk set used as index in pd.
 
 ### Added
 
 - Tecan file parser.
+- Import fit_titrations scripts with many test data.
 - usage.org (exported to .rst) serves as tutorial in docs and includes:
   - liaisan-data
   - new-bootstrap
   - lmfit global
   - emcee (extremely slow)
 - command `clop`.
+- (docs) usage.org.
+- Adopt pre-commit, poetry and nox.
 - <https://pypi.org/project/readme-renderer/> in lint.
+- (build) Github actions.
 
 ### Changed
 
@@ -518,11 +541,7 @@
 - nox-poetry.
 - pandas.rpy (\<=0.19) now lives in rpy2.
 
-### Fixed
-
-- warning for keys_unk set used as index in pd.
-
-## 0.2.1 (2021-11-18)
+## v0.2.1 (2021-11-18)
 
 - Update to python 3.6.
 - Py.test for:
@@ -531,7 +550,7 @@
 - lmfit==0.8.3 to prevent `fit-titration_global.py` to fail.
 - [\_tmpoutput]{.title-ref} is not deleted; watch out for false positive.
 
-## 0.2.0 (2021-11-14)
+## v0.2.0 (2021-11-14)
 
 - Reference for running older scripts; reproducibility thanks to
   [Poetry](https://python-poetry.org) and
