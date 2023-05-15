@@ -6,6 +6,7 @@ import warnings
 from collections import Counter
 from collections import namedtuple
 from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 from typing import Any
 from typing import Callable
@@ -64,6 +65,7 @@ class CsvLineError(Exception):
     """Exception raised when the lines list has issues."""
 
 
+@dataclass
 class EnspireFile:
     """Read an EnSpire-generated csv file.
 
@@ -73,10 +75,10 @@ class EnspireFile:
 
     Parameters
     ----------
-    file : str
-        filename
-    **kwargs : dict
-        keywords
+    file : Path
+        Path to the EnSpire csv file
+    verbose : int
+        Level of verbosity; 0 is silent, higher values are more verbose (default=0).
 
     Raises
     ------
@@ -92,7 +94,14 @@ class EnspireFile:
     274.0
     """
 
-    def __init__(self, file: Path, verbose: int = 0) -> None:  # noqa: PLR0915
+    file: Path
+    verbose: int = 0
+
+    def __post_init__(self) -> None:  # noqa: PLR0915
+        """Complete initialization."""
+        file = self.file
+        verbose = self.verbose
+
         def get_data_ini(lines: list[list[str]]) -> int:
             """Find the line index containing Well and Sample headers in a list of lines.
 
@@ -378,10 +387,18 @@ class EnspireFile:
 
 @dataclass
 class ExpNote:
-    """Read an Experimental Note file.
+    """Read and processes an Experimental Note file.
 
-    For describing an EnSpire experiment collecting spectrum. Store info as list
-    of lines: note_list and well_list.
+    This class is responsible for handling Experimental Note files
+    that describe an EnSpire experiment collecting spectrum. It reads the files and
+    stores the extracted information as a list of lines: note_list and list of wells.
+
+    Parameters
+    ----------
+    note_file : Path
+        The path to the Experimental Note file to be processed.
+    verbose : int
+        Level of verbosity; 0 is silent, higher values are more verbose (default=0).
 
     Example
     -------
@@ -393,25 +410,40 @@ class ExpNote:
 
     note_file: Path
     verbose: int = 0
+    #: A list of wells generated from the note file.
+    wells: list[str] = field(init=False, default_factory=list)
+    # A list of lines extracted from the note file.
+    _note_list: list[list[str]] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
-        """Complete the initialization."""
+        """Completes the initialization by reading the note file and generating wells."""
         verboseprint = verbose_print(self.verbose)
         with Path(self.note_file).open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
-            self.note_list = list(csv.reader(f, dialect="excel-tab"))
-        verboseprint("read (experimental) note file")  # type: ignore
-        self.wells: list[str] = np.array(self.note_list)[1:, 0].tolist()
-        verboseprint("wells generated")  # type: ignore
+            self._note_list = list(csv.reader(f, dialect="excel-tab"))
+        verboseprint("Read (experimental) note file")  # type: ignore
+        self.wells: list[str] = np.array(self._note_list)[1:, 0].tolist()
+        verboseprint("Wells generated")  # type: ignore
 
     def check_wells(self, ef: EnspireFile) -> bool:
-        """Is (EnspireFile) ef.wells == ExpNote.wells? Return False-or-True."""
+        """Check if wells in 'ef' match those in the current instance.
+
+        Parameters
+        ----------
+        ef : EnspireFile
+            Instance to compare with.
+
+        Returns
+        -------
+        bool
+            True if wells match, False otherwise.
+        """
         return self.wells == ef.wells
 
     def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
         # 1 pH titration
-        conc_well = [(line[1], line[0]) for line in self.note_list if line[2] == "0"]
+        conc_well = [(line[1], line[0]) for line in self._note_list if line[2] == "0"]
         conc = [float(tpl[0]) for tpl in conc_well]
         well = [tpl[1] for tpl in conc_well]
         data = {}
@@ -426,12 +458,16 @@ class ExpNote:
         self.titrations = [Titration(conc, data, cl="0")]
         # n cl titrations
         self.pH_values = sorted(
-            {line[1] for line in self.note_list if line[2].replace(".", "").isnumeric()}
+            {
+                line[1]
+                for line in self._note_list
+                if line[2].replace(".", "").isnumeric()
+            }
         )
         for ph in self.pH_values:
             conc_well = [
                 (line[2], line[0])
-                for line in self.note_list
+                for line in self._note_list
                 if line[1] == ph and line[2].replace(".", "").isnumeric()
             ]
             conc = [float(tpl[0]) for tpl in conc_well]
@@ -448,7 +484,13 @@ class ExpNote:
                 )
             self.titrations.append(Titration(conc, data, ph=ph))
 
-    # TODO: BUFFER
+        # TODO: BUFFER
+
+
+# TODO: +titrations attribute even though created by build_titrations()
+# TODO: PlateScheme?
+# TODO: Metadata
+# TODO: _get_init
 
 
 class Titration:

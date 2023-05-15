@@ -1,5 +1,5 @@
-prtecan parser
-~~~~~~~~~~~~~~
+prtecan
+~~~~~~~
 
 **Tecan** file has the following structure.
 

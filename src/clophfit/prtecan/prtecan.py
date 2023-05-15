@@ -321,7 +321,7 @@ class Labelblock(BufferWellsMixin):
     _NORM_KEYS: ClassVar[list[str]] = ["Integration Time", "Number of Flashes", "Gain"]
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
-        """Generate metadata and data for this labelblock."""
+        """Create metadata and data; initialize labelblock's properties."""
         self._buffer_wells: list[str] | None = None
         self._buffer: float | None = None
         self._buffer_norm: float | None = None

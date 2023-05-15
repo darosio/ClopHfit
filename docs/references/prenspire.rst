@@ -1,5 +1,5 @@
-prenspire parser
-~~~~~~~~~~~~~~~~
+prenspire
+~~~~~~~~~
 
 Here is the UML for the old implementation with EnSpireFiles class.
 
@@ -19,6 +19,15 @@ Usage: enspireconvert  foo.csv  foo-note (--out Table)
    + SpectraA  280 : 300 - 650
    + SpectraC  260 - (Max_A-20) : Max_A
    + SpectraB  Max_C : (Max_C+20) - 650
+
+
+UML
+^^^
+
+.. include:: ./prenspire.uml.rst
+
+UML devel
+^^^^^^^^^
 
 .. uml::
 
@@ -68,65 +77,3 @@ Usage: enspireconvert  foo.csv  foo-note (--out Table)
 
    EnSpireFiles "1" <-- "1" SpectrumList
    EnSpireFiles "1" o-- "*" Spectrum : "> read from"
-
-
-.. uml::
-
-   class EnspireFile {
-    +metadata: {}
-    +measurements: {}
-    +wells: []
-    +samples: []
-    -ini
-    -fin
-    -data_list
-    -metadata_post
-    -well_list_platemap: []
-    -platemap: [][]
-    __init__(csv_f)
-    extract_measurements()
-    export_measurements()
-   }
-
-   class ExpNote {
-       + note_list: [][]
-       + wells: []
-       + titrations: []
-       __init__(note_file)
-       + check_wells(EnspireFile)
-       + build_titrations()
-   }
-
-   class Titration {
-    +conc: []
-    +data: {}
-    +fitting_func
-    +results: ?
-    __init__(conc, data, **kwargs)
-    +fit()
-   }
-
-   Titration "*" --* "1" ExpNote  : < extract_titrations()
-   EnspireFile "1" *-- "1" measurements : > extract_measurements()
-   measurement "*" -* "1" measurements
-   Titration "*" --o "1" globTitration
-   data "1" --* "1" Titration
-
-   class data << (D,orchid) >> {
-       "A": DataFrame(index=lambda, columns=[conc, well])
-       ..
-   }
-
-   class measurements << (D,orchid) >> {
-       "A": measurement
-       .
-       .
-   }
-
-   class measurement << (D,orchid) >> {
-       "metadata": {}
-       "lambda": []
-       "A01": [y]
-       .
-       "H12": [y]
-   }

@@ -183,10 +183,10 @@ class TestExpNote:
         """Test get_well_list_from_note method."""
         assert en1.wells[2] == "A03"
 
-    def test_note_list(self, en1: ExpNote) -> None:
+    def test__note_list(self, en1: ExpNote) -> None:
         """Test well_list from note."""
-        assert en1.note_list[3][0] == "A03"
-        assert en1.note_list[65][1] == "8.2"
+        assert en1._note_list[3][0] == "A03"
+        assert en1._note_list[65][1] == "8.2"
 
     def test_check_list(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
         """Test check list from note vs. Enspirefile."""
