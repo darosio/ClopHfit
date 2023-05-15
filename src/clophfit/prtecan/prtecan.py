@@ -932,12 +932,52 @@ class PlateScheme:
     """
 
     file: Path | None = None
-    #: List of buffer wells.
-    buffer: list[str] = field(init=False, default_factory=list)
-    #: List of CTR wells.
-    ctrl: list[str] = field(init=False, default_factory=list)
-    #: A dictionary mapping sample names to their associated list of wells.
-    names: dict[str, set[str]] = field(init=False, default_factory=dict)
+    _buffer: list[str] = field(default_factory=list, init=False)
+    _ctrl: list[str] = field(default_factory=list, init=False)
+    _names: dict[str, set[str]] = field(default_factory=dict, init=False)
+
+    @property
+    def buffer(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer
+
+    @buffer.setter
+    def buffer(self, value: list[str]) -> None:
+        if not all(isinstance(item, str) for item in value):
+            msg = "Buffer wells must be a list of strings"
+            raise TypeError(msg)
+        self._buffer = value
+
+    @property
+    def ctrl(self) -> list[str]:
+        """List of CTR wells."""
+        return self._ctrl
+
+    @ctrl.setter
+    def ctrl(self, value: list[str]) -> None:
+        if not all(isinstance(item, str) for item in value):
+            msg = "Ctrl wells must be a list of strings"
+            raise TypeError(msg)
+        self._ctrl = value
+
+    @property
+    def names(self) -> dict[str, set[str]]:
+        """A dictionary mapping sample names to their associated list of wells."""
+        return self._names
+
+    @names.setter
+    def names(self, value: dict[str, set[str]]) -> None:
+        msg = "Names must be a dictionary mapping strings to sets of strings"
+        if not isinstance(value, dict):
+            raise TypeError(msg)
+        if not all(
+            isinstance(k, str)  # type: ignore
+            and isinstance(v, set)  # type: ignore
+            and all(isinstance(item, str) for item in v)
+            for k, v in value.items()
+        ):
+            raise TypeError(msg)
+        self._names = value
 
     def __post_init__(self) -> None:
         """Complete initialization."""

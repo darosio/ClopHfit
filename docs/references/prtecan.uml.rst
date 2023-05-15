@@ -80,9 +80,9 @@
 
    class PlateScheme{
      #file: Path|None
-	 +buffer: list[str]|[]
-	 +crtl: list[str]|[]
-	 +names: dict[str, set[str]]|{}
+	 +@buffer: list[str]|[]
+	 +@crtl: list[str]|[]
+	 +@names: dict[str, set[str]]|{}
    }
 
    class TitrationAnalysis{
