@@ -110,7 +110,7 @@ class EnspireFile:
         self._ini, self._fin = self._find_data_indices(csvl)
         verboseprint("ini =", self._ini)  # type: ignore
         verboseprint("fin =", self._fin)  # type: ignore
-        self._check_csvl_ini_fin(csvl, self._ini, self._fin)
+        self._check_csvl_format(csvl, self._ini, self._fin)
         verboseprint("checked csv format around ini and fin")  # type: ignore
         pre = csvl[0 : self._ini - 2]  # -3
         verboseprint("saved metadata_pre attribute")  # type: ignore
@@ -172,7 +172,7 @@ class EnspireFile:
         fin = -1 + line_index(csvl, ["Basic assay information "])
         return ini, fin
 
-    def _check_csvl_ini_fin(self, csvl: list[list[str]], ini: int, fin: int) -> None:
+    def _check_csvl_format(self, csvl: list[list[str]], ini: int, fin: int) -> None:
         """Check csv format around ini and fin."""
         if not (csvl[ini - 3] == csvl[ini - 2] == []):
             msg = "Expecting two empty lines before _ini"
@@ -208,26 +208,25 @@ class EnspireFile:
         if "01" not in post[idx + 3]:
             msg = "stop: Platemap format unexpected"
             raise CsvLineError(msg)
-        plate: list[list[str]] = []
+        platemap: list[list[str]] = []
         for i in range(idx + 4, len(post)):
             if not post[i]:
                 break
-            plate.append(post[i])
-        well_list: list[str] = [
-            f"{r[0]}{c:02}" for r in plate for c in range(1, len(r)) if r[c].strip()
+            platemap.append(post[i])
+        wells: list[str] = [
+            f"{r[0]}{c:02}" for r in platemap for c in range(1, len(r)) if r[c].strip()
         ]
-        return well_list, plate
+        return wells, platemap
 
     def _create_metadata(
         self, pre: list[list[str]], post: list[list[str]]
     ) -> dict[str, str | list[str]]:
         """Create metadata dictionary."""
+        pre_md_start_line = 3
+        pre_md_end_line = 8
         metadata: dict[str, str | list[str]] = {}
-        metadata[pre[1][3]] = pre[2][3]
-        metadata[pre[1][4]] = pre[2][4]
-        metadata[pre[1][5]] = pre[2][5]
-        metadata[pre[1][6]] = pre[2][6]
-        metadata[pre[1][7]] = pre[2][7]
+        for i in range(pre_md_start_line, pre_md_end_line):
+            metadata[pre[1][i]] = pre[2][i]
         metadata["Protocol name"] = post[7][4]
         metadata["Exported data"] = [
             ll[4]
