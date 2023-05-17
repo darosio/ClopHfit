@@ -12,7 +12,6 @@
     _metadata_post: list[list[str]]
     _well_list_platemap: list
     _platemap:
-    _filename: str
     extract_measurements()
     export_measurements()
    }

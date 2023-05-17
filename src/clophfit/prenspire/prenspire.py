@@ -216,7 +216,6 @@ class EnspireFile:
         self._well_list_platemap, self._platemap = get_list_from_platemap()
         verboseprint("saved _well_list_platemap attribute")  # type: ignore
         create_metadata()
-        self._filename = str(file)
 
     def extract_measurements(self, verbose: int = 0) -> None:  # noqa: PLR0915
         """Extract the measurements dictionary.
@@ -377,7 +376,7 @@ class EnspireFile:
             # Create plot
             dfdata.plot(title=m, legend=False)
             # Save files
-            file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
+            file = output_dir / (self.file.stem + "_" + m + ".csv")
             while file.exists():
                 # because with_stem was introduced in py3.9
                 file = file.with_name(file.stem + "-b" + file.suffix)

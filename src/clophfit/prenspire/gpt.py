@@ -212,21 +212,7 @@ class EnspireFile:
     def _extract_platemap(
         self, post: list[list[str]]
     ) -> tuple[list[str], list[list[str]]]:
-        """Extract well list and Platemap from _metadata_post.
-
-        Returns
-        -------
-        tuple[list[str], list[list[str]]]
-            A tuple containing:
-            - A list of well IDs in the format "A01", "A02", etc.
-            - A list of lists representing the Platemap.
-
-        Raises
-        ------
-        CsvLineError
-            If the column '01' is not present 3 lines below ['Platemap:'].
-
-        """
+        """Extract well list and Platemap from _metadata_post."""
         idx: int = line_index(post, ["Platemap:"])
         if "01" not in post[idx + 3]:
             msg = "stop: Platemap format unexpected"
@@ -243,7 +229,6 @@ class EnspireFile:
 
     def __post_init__(self) -> None:
         """Complete initialization."""
-        self._filename = str(self.file)
         csvl = self._read_csv_file(self.file, self.verbose)
         self._ini, self._fin = self._find_data_indices(csvl)
         self._check_csv_format(csvl)
@@ -411,7 +396,7 @@ class EnspireFile:
             # Create plot
             dfdata.plot(title=m, legend=False)
             # Save files
-            file = output_dir / (Path(self._filename).stem + "_" + m + ".csv")
+            file = output_dir / (self.file.stem + "_" + m + ".csv")
             while file.exists():
                 # because with_stem was introduced in py3.9
                 file = file.with_name(file.stem + "-b" + file.suffix)
