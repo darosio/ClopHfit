@@ -96,26 +96,21 @@ class EnspireFile:
 
     file: Path
     verbose: int = 0
+    #: General metadata.
+    metadata: dict[str, str | list[str]] = field(default_factory=dict, init=False)
+    #: Spectra and metadata for each Meas.
+    measurements: dict[str, Any] = field(default_factory=dict, init=False)
+    # #: List of wells.
+    #: wells: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         """Complete initialization."""
         verboseprint = verbose_print(self.verbose)
-        csvl = list(
-            csv.reader(Path(self.file).open(encoding="iso-8859-1"), dialect="excel-tab")
-        )
-        verboseprint("read file csv")  # type: ignore
-        # TODO: try prparser.line_index()
-        self._ini = 1 + self.get_data_ini(csvl)
+        csvl = self._read_csv_file(Path(self.file), self.verbose)
+        self._ini, self._fin = self._find_data_indices(csvl)
         verboseprint("ini =", self._ini)  # type: ignore
-        self._fin = -1 + line_index(csvl, ["Basic assay information "])
         verboseprint("fin =", self._fin)  # type: ignore
-        # check csv format around ini and fin
-        if not (csvl[self._ini - 3] == csvl[self._ini - 2] == []):
-            msg = "Expecting two empty lines before _ini"
-            raise CsvLineError(msg)
-        if csvl[self._fin] != []:
-            msg = "Expecting an empty line after _fin"
-            raise CsvLineError(msg)
+        self._check_csvl_ini_fin(csvl, self._ini, self._fin)
         verboseprint("checked csv format around ini and fin")  # type: ignore
         pre = csvl[0 : self._ini - 2]  # -3
         verboseprint("saved metadata_pre attribute")  # type: ignore
@@ -123,49 +118,107 @@ class EnspireFile:
         verboseprint("saved _data_list attribute")  # type: ignore
         self._metadata_post = csvl[self._fin + 1 :]
         verboseprint("saved metadata_post attribute")  # type: ignore
-        self._well_list_platemap, self._platemap = self.get_list_from_platemap(
+        self._well_list_platemap, self._platemap = self._extract_platemap(
             self._metadata_post
         )
         verboseprint("saved _well_list_platemap attribute")  # type: ignore
-        self.metadata = self.create_metadata(pre, self._metadata_post)
+        self.metadata = self._create_metadata(pre, self._metadata_post)
 
-    def get_data_ini(self, lines: list[list[str]]) -> int:
-        """Find the line index containing Well and Sample headers in a list of lines.
+    def _read_csv_file(self, file: Path, verbose: int) -> list[list[str]]:
+        verboseprint = verbose_print(verbose)
+        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
+        verboseprint("read file csv")  # type: ignore
+        return csvl
 
-        Get index of the line ['Well', 'Sample', ...].
-        Check for the presence of a unique ['well', 'sample', ...] line.
+    def _find_data_indices(self, csvl: list[list[str]]) -> tuple[int, int]:
+        def get_data_ini(lines: list[list[str]]) -> int:
+            """Find the line index containing Well and Sample headers in a list of lines.
+
+            Get index of the line ['Well', 'Sample', ...].
+            Check for the presence of a unique ['well', 'sample', ...] line.
+
+            Parameters
+            ----------
+            lines : list
+                List of lines.
+
+            Raises
+            ------
+            CsvLineError
+                If not unique or absent.
+
+            Returns
+            -------
+            int
+
+            """
+            min_line_length = 2  # for key: value
+            count = 0
+            for i, line in enumerate(lines):
+                if len(line) >= min_line_length and line[:1] == ["Well"]:
+                    count += 1
+                    idx = i
+            if count == 0:
+                msg = f"No line starting with ['Well', ...] found in {lines[:9]}"
+                raise CsvLineError(msg)
+            elif count == 1:
+                return idx
+            else:  # count > 1
+                msg = f"Multiple lines starting with ['Well', ...] in {lines[:9]}"
+                raise CsvLineError(msg)
+
+        # TODO: try prparser.line_index()
+        ini = 1 + get_data_ini(csvl)
+        fin = -1 + line_index(csvl, ["Basic assay information "])
+        return ini, fin
+
+    def _check_csvl_ini_fin(self, csvl: list[list[str]], ini: int, fin: int) -> None:
+        """Check csv format around ini and fin."""
+        if not (csvl[ini - 3] == csvl[ini - 2] == []):
+            msg = "Expecting two empty lines before _ini"
+            raise CsvLineError(msg)
+        if csvl[fin] != []:
+            msg = "Expecting an empty line after _fin"
+            raise CsvLineError(msg)
+
+    def _extract_platemap(
+        self, post: list[list[str]]
+    ) -> tuple[list[str], list[list[str]]]:
+        """Extract well list and Platemap from _metadata_post.
 
         Parameters
         ----------
-        lines : list
-            List of lines.
+        lines: list[list[str]]
+            List of lines of metadata post containing plate map.
+
+        Returns
+        -------
+        tuple[list[str], list[list[str]]]
+            A tuple containing:
+            - A list of well IDs in the format "A01", "A02", etc.
+            - A list of lists representing the Platemap.
 
         Raises
         ------
         CsvLineError
-            If not unique or absent.
-
-        Returns
-        -------
-        int
+            If the column '01' is not present 3 lines below ['Platemap:'].
 
         """
-        min_line_length = 2  # for key: value
-        count = 0
-        for i, line in enumerate(lines):
-            if len(line) >= min_line_length and line[:1] == ["Well"]:
-                count += 1
-                idx = i
-        if count == 0:
-            msg = f"No line starting with ['Well', ...] found in {lines[:9]}"
+        idx: int = line_index(post, ["Platemap:"])
+        if "01" not in post[idx + 3]:
+            msg = "stop: Platemap format unexpected"
             raise CsvLineError(msg)
-        elif count == 1:
-            return idx
-        else:  # count > 1
-            msg = f"Multiple lines starting with ['Well', ...] in {lines[:9]}"
-            raise CsvLineError(msg)
+        plate: list[list[str]] = []
+        for i in range(idx + 4, len(post)):
+            if not post[i]:
+                break
+            plate.append(post[i])
+        well_list: list[str] = [
+            f"{r[0]}{c:02}" for r in plate for c in range(1, len(r)) if r[c].strip()
+        ]
+        return well_list, plate
 
-    def create_metadata(
+    def _create_metadata(
         self, pre: list[list[str]], post: list[list[str]]
     ) -> dict[str, str | list[str]]:
         """Create metadata dictionary."""
@@ -185,39 +238,6 @@ class EnspireFile:
             line[0] for line in post if len(line) == 1 and "WARNING:" in line[0]
         ]
         return metadata
-
-    def get_list_from_platemap(
-        self,
-        lines: list[list[str]],
-    ) -> tuple[list[str], list[list[str]]]:
-        """Extract well list and Platemap from _metadata_post.
-
-        Returns
-        -------
-        tuple[list[str], list[list[str]]]
-            A tuple containing:
-            - A list of well IDs in the format "A01", "A02", etc.
-            - A list of lists representing the Platemap.
-
-        Raises
-        ------
-        CsvLineError
-            If the column '01' is not present 3 lines below ['Platemap:'].
-
-        """
-        idx: int = line_index(lines, ["Platemap:"])
-        if "01" not in lines[idx + 3]:
-            msg = "stop: Platemap format unexpected"
-            raise CsvLineError(msg)
-        plate: list[list[str]] = []
-        for i in range(idx + 4, len(lines)):
-            if not lines[i]:
-                break
-            plate.append(lines[i])
-        well_list: list[str] = [
-            f"{r[0]}{c:02}" for r in plate for c in range(1, len(r)) if r[c].strip()
-        ]
-        return well_list, plate
 
     def extract_measurements(self, verbose: int = 0) -> None:  # noqa: PLR0915
         """Extract the measurements dictionary.
