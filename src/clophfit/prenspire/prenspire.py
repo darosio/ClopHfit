@@ -15,7 +15,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
-import pyparsing  # TODO: indentBlock, ParseResults
+import pyparsing
 
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
@@ -414,9 +414,11 @@ class ExpNote:
     wells: list[str] = field(init=False, default_factory=list)
     # A list of lines extracted from the note file.
     _note_list: list[list[str]] = field(init=False, default_factory=list)
+    #: A list of titrations extracted from the note file.
+    titrations: list[Titration] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
-        """Completes the initialization by reading the note file and generating wells."""
+        """Complete the initialization generating wells and _note_list."""
         verboseprint = verbose_print(self.verbose)
         with Path(self.note_file).open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
@@ -424,21 +426,6 @@ class ExpNote:
         verboseprint("Read (experimental) note file")  # type: ignore
         self.wells: list[str] = np.array(self._note_list)[1:, 0].tolist()
         verboseprint("Wells generated")  # type: ignore
-
-    def check_wells(self, ef: EnspireFile) -> bool:
-        """Check if wells in 'ef' match those in the current instance.
-
-        Parameters
-        ----------
-        ef : EnspireFile
-            Instance to compare with.
-
-        Returns
-        -------
-        bool
-            True if wells match, False otherwise.
-        """
-        return self.wells == ef.wells
 
     def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""

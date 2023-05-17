@@ -188,10 +188,10 @@ class TestExpNote:
         assert en1._note_list[3][0] == "A03"
         assert en1._note_list[65][1] == "8.2"
 
-    def test_check_list(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
-        """Test check list from note vs. Enspirefile."""
-        assert en1.check_wells(ef1) is True
-        assert en1err.check_wells(ef1) is False
+    def test_wells(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
+        """Check wells from ExpNote vs. EnspireFile."""
+        assert en1.wells == ef1.wells
+        assert (en1err.wells == ef1.wells) is False
 
     def test_build_titrations(self, en1: ExpNote, ef1: EnspireFile) -> None:
         """Test the method extract_titrations()."""

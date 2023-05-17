@@ -23,7 +23,6 @@
        #verbose: int = 0
        +wells: list
        +titrations: list[Titration]
-       +check_wells()
        +build_titrations()
    }
 
