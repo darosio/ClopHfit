@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import csv
+import typing
 import warnings
 from collections import Counter
 from collections import namedtuple
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Any
-from typing import Callable
-from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
@@ -22,9 +20,12 @@ import pyparsing
 from clophfit.prtecan import lookup_listoflines
 
 
-def verbose_print(verbose: int) -> None | Callable[..., Any]:
-    """Print when verbose output is True."""
-    return print if verbose else lambda *_, **__: None
+def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
+    """Return print function when verbose output is True."""
+    if verbose:
+        return print
+    else:
+        return lambda *_, **__: None
 
 
 class ManyLinesFoundError(Exception):
@@ -69,38 +70,33 @@ class EnspireFile:
     #: General metadata.
     metadata: dict[str, str | list[str]] = field(default_factory=dict, init=False)
     #: Spectra and metadata for each Meas.
-    measurements: dict[str, Any] = field(default_factory=dict, init=False)
+    measurements: dict[str, typing.Any] = field(default_factory=dict, init=False)
     # #: List of wells.
     #: wells: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         """Complete initialization."""
         verboseprint = verbose_print(self.verbose)
-        csvl = self._read_csv_file(Path(self.file), self.verbose)
-        self._ini, self._fin = self._find_data_indices(csvl)
-        verboseprint("ini =", self._ini)  # type: ignore
-        verboseprint("fin =", self._fin)  # type: ignore
-        self._check_csvl_format(csvl, self._ini, self._fin)
-        verboseprint("checked csv format around ini and fin")  # type: ignore
-        pre = csvl[0 : self._ini - 2]  # -3
-        verboseprint("saved metadata_pre attribute")  # type: ignore
-        self._data_list = csvl[self._ini - 1 : self._fin]
-        verboseprint("saved _data_list attribute")  # type: ignore
-        self._metadata_post = csvl[self._fin + 1 :]
-        verboseprint("saved metadata_post attribute")  # type: ignore
-        self._well_list_platemap, self._platemap = self._extract_platemap(
-            self._metadata_post
+        csvl = self._read_csv_file(Path(self.file), verboseprint)
+        ini, fin = self._find_data_indices(csvl, verboseprint)
+        self._ini, self._fin = ini, fin
+        self._check_csvl_format(csvl, ini, fin, verboseprint)
+        self._wells_platemap, self._platemap = self._extract_platemap(
+            csvl[fin + 1 :], verboseprint
         )
-        verboseprint("saved _well_list_platemap attribute")  # type: ignore
-        self.metadata = self._create_metadata(pre, self._metadata_post)
+        self.metadata = self._create_metadata(csvl[0 : ini - 2], csvl[fin + 1 :])
+        self.extract_measurements(csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint)
 
-    def _read_csv_file(self, file: Path, verbose: int) -> list[list[str]]:
-        verboseprint = verbose_print(verbose)
+    def _read_csv_file(
+        self, file: Path, verboseprint: typing.Callable[..., typing.Any]
+    ) -> list[list[str]]:
         csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
-        verboseprint("read file csv")  # type: ignore
+        verboseprint("read file csv")
         return csvl
 
-    def _find_data_indices(self, csvl: list[list[str]]) -> tuple[int, int]:
+    def _find_data_indices(
+        self, csvl: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
+    ) -> tuple[int, int]:
         """Find the indices of the data blocks in the input file."""
         inil = lookup_listoflines(csvl, pattern="Well", col=0)
         if len(inil) == 0:
@@ -111,11 +107,19 @@ class EnspireFile:
         else:
             msg = f"Multiple lines starting with ['Well', ...] in {csvl[:9]}"
             raise CsvLineError(msg)
+        verboseprint("ini =", ini)
         fin = -1
         fin += lookup_listoflines(csvl, pattern="Basic assay information ", col=0)[0]
+        verboseprint("fin =", fin)
         return ini, fin
 
-    def _check_csvl_format(self, csvl: list[list[str]], ini: int, fin: int) -> None:
+    def _check_csvl_format(
+        self,
+        csvl: list[list[str]],
+        ini: int,
+        fin: int,
+        verboseprint: typing.Callable[..., typing.Any],
+    ) -> None:
         """Check csv format around ini and fin."""
         if not (csvl[ini - 3] == csvl[ini - 2] == []):
             msg = "Expecting two empty lines before _ini"
@@ -123,9 +127,10 @@ class EnspireFile:
         if csvl[fin] != []:
             msg = "Expecting an empty line after _fin"
             raise CsvLineError(msg)
+        verboseprint("checked csv format around ini and fin")
 
     def _extract_platemap(
-        self, post: list[list[str]]
+        self, post: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
     ) -> tuple[list[str], list[list[str]]]:
         """Extract well list and Platemap from _metadata_post.
 
@@ -159,6 +164,7 @@ class EnspireFile:
         wells: list[str] = [
             f"{r[0]}{c:02}" for r in platemap for c in range(1, len(r)) if r[c].strip()
         ]
+        verboseprint("Created attributes _wells_platemap and _platemap.")
         return wells, platemap
 
     def _create_metadata(
@@ -181,7 +187,12 @@ class EnspireFile:
         ]
         return metadata
 
-    def extract_measurements(self, verbose: int = 0) -> None:  # noqa: PLR0915
+    def extract_measurements(  # noqa: PLR0915
+        self,
+        csvl_data: list[list[str]],
+        csvl_post: list[list[str]],
+        verboseprint: typing.Callable[..., typing.Any],
+    ) -> None:
         """Extract the measurements dictionary.
 
         Add 3 attributes: wells, samples, measurements (as list, list, dict)
@@ -196,7 +207,6 @@ class EnspireFile:
         CsvLineError
             When something went wrong.
         """
-        verboseprint = verbose_print(verbose)
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> pyparsing.ParserElement:
@@ -211,14 +221,14 @@ class EnspireFile:
                 + EOL
             )
 
-        meas: dict[str, Any] = {}
+        meas: dict[str, typing.Any] = {}
         temp = [0]
         meas_key = ["zz"]
 
         def aa(tokens: pyparsing.ParseResults) -> None:
             name = tokens[0]
             value = tokens[1]
-            verboseprint(name, "=", value)  # type: ignore
+            verboseprint(name, "=", value)
             if name == "Measurement chamber temperature":
                 temp[0] = value
                 return
@@ -247,12 +257,15 @@ class EnspireFile:
         )
         pr = block_lines.setParseAction(aa)
 
-        ps1 = ["\t".join(line) for line in self._metadata_post]
-        verboseprint("metadata_post ps1 conversion... done")  # type: ignore
+        ps1 = ["\t".join(line) for line in csvl_post]
+        if callable(verboseprint):
+            verboseprint("metadata_post ps1 conversion... done")
         ps2 = "\n".join(ps1)
-        verboseprint("metadata_post ps2 conversion... done")  # type: ignore
+        if callable(verboseprint):
+            verboseprint("metadata_post ps2 conversion... done")
         pr.searchString(ps2)
-        verboseprint("metadata_post pyparsing... done")  # type: ignore
+        if callable(verboseprint):
+            verboseprint("metadata_post pyparsing... done")
         self.measurements = meas
 
         def headerdata_measurementskeys_check() -> bool:
@@ -261,10 +274,11 @@ class EnspireFile:
             meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
             b = {k for k, v in Counter(meas).items() if v == counter_constant}
             a = set(self.measurements.keys())
-            verboseprint("check header and measurements.keys()", a == b, a, b)  # type: ignore
+            if callable(verboseprint):
+                verboseprint("check header and measurements.keys()", a == b, a, b)
             return a == b
 
-        headerdata = self._data_list[0]
+        headerdata = csvl_data[0]
         if not headerdata_measurementskeys_check():
             msg = "check header and measurements.keys() FAILED."
             raise CsvLineError(msg)
@@ -283,7 +297,7 @@ class EnspireFile:
                 Ckeck correctness.
 
             """
-            if self.wells != self._well_list_platemap:
+            if self.wells != self._wells_platemap:
                 warnings.warn(
                     "well_list from data_list and platemap differ. It might be you did not exported data for all acquired wells",
                     stacklevel=2,
@@ -291,7 +305,7 @@ class EnspireFile:
             return True
 
         columns = [r.replace(":", "") for r in headerdata]
-        dfdata = pd.DataFrame(self._data_list[1:], columns=columns)
+        dfdata = pd.DataFrame(csvl_data[1:], columns=columns)
         w = dfdata.drop_duplicates(["Well"])
         self.wells = w.Well.tolist()
         check_lists()
@@ -386,9 +400,11 @@ class ExpNote:
         with Path(self.note_file).open(encoding="iso-8859-1") as f:
             # Differ from pandas because all fields/cells are strings.
             self._note_list = list(csv.reader(f, dialect="excel-tab"))
-        verboseprint("Read (experimental) note file")  # type: ignore
+        if callable(verboseprint):
+            verboseprint("Read (experimental) note file")
         self.wells: list[str] = np.array(self._note_list)[1:, 0].tolist()
-        verboseprint("Wells generated")  # type: ignore
+        if callable(verboseprint):
+            verboseprint("Wells generated")
 
     def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
@@ -448,7 +464,7 @@ class Titration:
 
     def __init__(
         self,
-        conc: Sequence[float],
+        conc: typing.Sequence[float],
         data: dict[str, pd.DataFrame],
         cl: str | None = None,
         ph: str | None = None,

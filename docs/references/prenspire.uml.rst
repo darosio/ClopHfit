@@ -8,9 +8,7 @@
     +wells: []
     _ini
     _fin
-    _data_list: list[list[str]]
-    _metadata_post: list[list[str]]
-    _well_list_platemap: list
+    _wells_platemap: list
     _platemap:
     extract_measurements()
     export_measurements()
