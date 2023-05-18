@@ -68,10 +68,10 @@ class EnspireFile:
     verbose: int = 0
     #: General metadata.
     metadata: dict[str, str | list[str]] = field(default_factory=dict, init=False)
-    #: Spectra and metadata for each Meas.
+    #: Spectra and metadata for each label, such as "MeasB".
     measurements: dict[str, typing.Any] = field(default_factory=dict, init=False)
-    # #: List of wells.
-    #: wells: list[str] = field(default_factory=list, init=False)
+    #: List of exported wells.
+    wells: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
         """Complete initialization."""
@@ -84,11 +84,34 @@ class EnspireFile:
             csvl[fin + 1 :], verboseprint
         )
         self.metadata = self._create_metadata(csvl[0 : ini - 2], csvl[fin + 1 :])
-        self.extract_measurements(csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint)
+        self.wells, self.measurements = self._extract_measurements(
+            csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
+        )
 
+    def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
+        """Create table as DataFrame and plot; save into Meas folder."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for m in self.measurements:
+            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
+            data_dict.update(
+                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
+            )
+            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
+            # Create plot
+            dfdata.plot(title=m, legend=False)
+            # Save files
+            file = output_dir / (self.file.stem + "_" + m + ".csv")
+            while file.exists():
+                # because with_stem was introduced in py3.9
+                file = file.with_name(file.stem + "-b" + file.suffix)
+            dfdata.to_csv(str(file))
+            plt.savefig(str(file.with_suffix(".png")))
+
+    # Helpers
     def _read_csv_file(
         self, file: Path, verboseprint: typing.Callable[..., typing.Any]
     ) -> list[list[str]]:
+        """Read EnSpire exported file into csvl."""
         csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
         verboseprint("read file csv")
         return csvl
@@ -188,15 +211,15 @@ class EnspireFile:
         ]
         return metadata
 
-    def extract_measurements(  # noqa: PLR0915
+    def _extract_measurements(
         self,
         csvl_data: list[list[str]],
         csvl_post: list[list[str]],
         verboseprint: typing.Callable[..., typing.Any],
-    ) -> None:
+    ) -> tuple[list[str], dict[str, typing.Any]]:
         """Extract the measurements dictionary.
 
-        Add 3 attributes: wells, samples, measurements (as list, list, dict)
+        For each measurement label extracts metadata, lambda and for each well the spectrum.
 
         Parameters
         ----------
@@ -207,11 +230,75 @@ class EnspireFile:
         verboseprint : typing.Callable[..., typing.Any]
             Function to print verbose information.
 
+        Returns
+        -------
+        tuple[list[str], dict[str, typing.Any]]
+            A tuple containing a list of wells and the measurements dictionary.
+
         Raises
         ------
         CsvLineError
-            When something went wrong.
+            When an error occurs during the extraction process.
         """
+        measurements = self._parse_measurements_metadata(csvl_post, verboseprint)
+        header = csvl_data[0]
+        if not self._check_header_measurements_keys(header, measurements, verboseprint):
+            msg = "check header and measurements.keys() FAILED."
+            raise CsvLineError(msg)
+        columns = [r.replace(":", "") for r in header]
+        dfdata = pd.DataFrame(csvl_data[1:], columns=columns)
+        w = dfdata.drop_duplicates(["Well"])
+        wells = w.Well.tolist()
+        if wells != self._wells_platemap:
+            msg = "well_list from data_list and platemap differ. It might be that you did not export data for all acquired wells"
+            warnings.warn(msg, stacklevel=2)
+
+        # Monochromator is expected to be either Exc or Ems
+        for k, measurement in measurements.items():
+            label = f"Meas{k}"
+            heading = namedtuple("heading", "ex em res")
+            head = heading(
+                f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
+            )
+            # excitation spectra must have only one emission wavelength
+            if measurement["metadata"]["Monochromator"] == "Excitation":
+                x = [r for r in dfdata[head.em] if r]
+                c = Counter(x)
+                if (
+                    len(c) != 1
+                    or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
+                ):
+                    msg = f"Excitation spectra with unexpected emission in {label}"
+                    raise CsvLineError(msg)
+                measurement["lambda"] = [
+                    float(r) for r in dfdata[head.ex][dfdata.Well == wells[0]] if r
+                ]
+            # emission spectra must have only one excitation wavelength
+            elif measurement["metadata"]["Monochromator"] == "Emission":
+                x = [r for r in dfdata[head.ex] if r]
+                c = Counter(x)
+                if (
+                    len(c) != 1
+                    or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
+                ):
+                    msg = f"Emission spectra with unexpected excitation in {label}"
+                    raise CsvLineError(msg)
+                measurement["lambda"] = [
+                    float(r) for r in dfdata[head.em][dfdata.Well == wells[0]] if r
+                ]
+            else:
+                msg = f'Unknown "Monochromator": {measurement["metadata"]["Monochromator"]} in {label}'
+                raise CsvLineError(msg)
+            for w in wells:
+                measurement[w] = [
+                    float(r) for r in dfdata[head.res][dfdata.Well == w] if r
+                ]
+        return wells, measurements
+
+    def _parse_measurements_metadata(
+        self, csvl_post: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
+    ) -> dict[str, typing.Any]:
+        """Initialize measurements with metadata for each label."""
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> pyparsing.ParserElement:
@@ -226,9 +313,9 @@ class EnspireFile:
                 + EOL
             )
 
-        meas: dict[str, typing.Any] = {}
-        temp = [0]
-        meas_key = ["zz"]
+        measurements: dict[str, typing.Any] = {}
+        temp = [0.0]
+        meas_key = [""]
 
         def aa(tokens: pyparsing.ParseResults) -> None:
             name = tokens[0]
@@ -239,13 +326,12 @@ class EnspireFile:
                 return
             if name == "Meas":
                 meas_key[0] = value
-                if value not in meas.keys():
-                    # Initialize new "Measurement"
-                    meas[meas_key[0]] = {}
-                    meas[value]["metadata"] = {}
-                    meas[value]["metadata"]["temp"] = temp[0]
+                if value not in measurements.keys():
+                    measurements[meas_key[0]] = {}
+                    measurements[value]["metadata"] = {}
+                    measurements[value]["metadata"]["temp"] = temp[0]
                 return
-            meas[meas_key[0]]["metadata"][name] = value
+            measurements[meas_key[0]]["metadata"][name] = value
 
         block_lines = (
             line("Measurement chamber temperature")
@@ -261,110 +347,24 @@ class EnspireFile:
             | line("Flash power")
         )
         pr = block_lines.setParseAction(aa)
-
         ps1 = ["\t".join(line) for line in csvl_post]
-        if callable(verboseprint):
-            verboseprint("metadata_post ps1 conversion... done")
         ps2 = "\n".join(ps1)
-        if callable(verboseprint):
-            verboseprint("metadata_post ps2 conversion... done")
         pr.searchString(ps2)
-        if callable(verboseprint):
-            verboseprint("metadata_post pyparsing... done")
-        self.measurements = meas
+        return measurements
 
-        def headerdata_measurementskeys_check() -> bool:
-            """Check header and measurements.keys()."""
-            counter_constant = 3  # Not sure, maybe for md with units.
-            meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
-            b = {k for k, v in Counter(meas).items() if v == counter_constant}
-            a = set(self.measurements.keys())
-            if callable(verboseprint):
-                verboseprint("check header and measurements.keys()", a == b, a, b)
-            return a == b
-
-        headerdata = csvl_data[0]
-        if not headerdata_measurementskeys_check():
-            msg = "check header and measurements.keys() FAILED."
-            raise CsvLineError(msg)
-
-        def check_lists() -> bool:
-            """Check that lists derived from .csv data and Platemap metadata are identical.
-
-            if not raises an *Exception*.
-            Will Raise *Exception* if well_list from csv (data_list) and note
-            disagree. Raise *Warning* if well_list from csv (data_list) and
-            platemap disagree.
-
-            Returns
-            -------
-            bool
-                Ckeck correctness.
-
-            """
-            if self.wells != self._wells_platemap:
-                warnings.warn(
-                    "well_list from data_list and platemap differ. It might be you did not exported data for all acquired wells",
-                    stacklevel=2,
-                )
-            return True
-
-        columns = [r.replace(":", "") for r in headerdata]
-        dfdata = pd.DataFrame(csvl_data[1:], columns=columns)
-        w = dfdata.drop_duplicates(["Well"])
-        self.wells = w.Well.tolist()
-        check_lists()
-        # Monochromator is expected to be either Exc or Ems
-        for k, v in self.measurements.items():
-            label = f"Meas{k}"
-            heading = namedtuple("heading", "ex em res")
-            head = heading(
-                f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
-            )
-            # excitation spectra must have only one emission wavelength
-            if v["metadata"]["Monochromator"] == "Excitation":
-                x = [r for r in dfdata[head.em] if r]
-                c = Counter(x)
-                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
-                    msg = f"Excitation spectra with unexpected emission in {label}"
-                    raise CsvLineError(msg)
-                v["lambda"] = [
-                    float(r) for r in dfdata[head.ex][dfdata.Well == self.wells[0]] if r
-                ]
-            # emission spectra must have only one excitation wavelength
-            elif v["metadata"]["Monochromator"] == "Emission":
-                x = [r for r in dfdata[head.ex] if r]
-                c = Counter(x)
-                if len(c) != 1 or list(c.keys())[0] != v["metadata"]["Wavelength"]:
-                    msg = f"Emission spectra with unexpected excitation in {label}"
-                    raise CsvLineError(msg)
-                v["lambda"] = [
-                    float(r) for r in dfdata[head.em][dfdata.Well == self.wells[0]] if r
-                ]
-            else:
-                msg = f'Unknown "Monochromator": {v["metadata"]["Monochromator"]} in {label}'
-                raise CsvLineError(msg)
-            for w in self.wells:
-                v[w] = [float(r) for r in dfdata[head.res][dfdata.Well == w] if r]
-
-    def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
-        """Create table as DataFrame and plot; save into Meas folder."""
-        output_dir.mkdir(parents=True, exist_ok=True)
-        for m in self.measurements:
-            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
-            data_dict.update(
-                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
-            )
-            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
-            # Create plot
-            dfdata.plot(title=m, legend=False)
-            # Save files
-            file = output_dir / (self.file.stem + "_" + m + ".csv")
-            while file.exists():
-                # because with_stem was introduced in py3.9
-                file = file.with_name(file.stem + "-b" + file.suffix)
-            dfdata.to_csv(str(file))
-            plt.savefig(str(file.with_suffix(".png")))
+    def _check_header_measurements_keys(
+        self,
+        headerdata: list[str],
+        measurements: dict[str, typing.Any],
+        verboseprint: typing.Callable[..., typing.Any],
+    ) -> bool:
+        """Check header and measurements.keys()."""
+        counter_constant = 3  # Not sure, maybe for md with units. <Exc, Ems, F>
+        meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
+        b = {k for k, v in Counter(meas).items() if v == counter_constant}
+        a = set(measurements.keys())
+        verboseprint("check header and measurements.keys()", a == b, a, b)
+        return a == b
 
 
 @dataclass
@@ -456,12 +456,6 @@ class ExpNote:
             self.titrations.append(Titration(conc, data, ph=ph))
 
         # TODO: BUFFER
-
-
-# TODO: +titrations attribute even though created by build_titrations()
-# TODO: PlateScheme?
-# TODO: Metadata
-# TODO: _get_init
 
 
 class Titration:

@@ -10,7 +10,6 @@
     _fin
     _wells_platemap: list
     _platemap:
-    extract_measurements()
     export_measurements()
    }
 
