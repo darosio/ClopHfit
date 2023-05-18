@@ -3,6 +3,28 @@
 
 # Changelog
 
+## v0.7.1 (2023-05-18)
+
+### Fix
+
+- **docs**: README links to pages
+
+### Docs
+
+- Enhance the alignment between the changelog and tags
+
+### Build
+
+- bump codecov/codecov-action from 3.1.3 to 3.1.4 (#262)
+
+### Refactor
+
+- **enspire**: Adopt dataclass with helper functions
+
+### chore
+
+- update pre-commit hooks (#261)
+
 ## v0.7.0 (2023-05-15)
 
 ### Feat
