@@ -60,7 +60,6 @@ class EnspireFile:
     --------
     >>> from clophfit.prenspire import EnspireFile
     >>> ef = EnspireFile("tests/EnSpire/h148g-spettroC.csv", verbose=0)
-    >>> ef.extract_measurements()
     >>> ef.measurements['A']['lambda'][2]
     274.0
     """
@@ -138,6 +137,8 @@ class EnspireFile:
         ----------
         post: list[list[str]]
             List of lines of metadata post containing plate map.
+        verboseprint : typing.Callable[..., typing.Any]
+            Function to print verbose information.
 
         Returns
         -------
@@ -199,8 +200,12 @@ class EnspireFile:
 
         Parameters
         ----------
-        verbose : int
-            It passes extra parameters.
+        csvl_data : list[list[str]]
+            Lines of csvl containing data.
+        csvl_post : list[list[str]]
+            Lines of csvl containing metadata after data.
+        verboseprint : typing.Callable[..., typing.Any]
+            Function to print verbose information.
 
         Raises
         ------
