@@ -19,6 +19,7 @@ import pyparsing
 
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
+from clophfit.prtecan import lookup_listoflines
 
 
 def verbose_print(verbose: int) -> None | Callable[..., Any]:
@@ -28,37 +29,6 @@ def verbose_print(verbose: int) -> None | Callable[..., Any]:
 
 class ManyLinesFoundError(Exception):
     """Raised when there are multiple lines containing a specified search string."""
-
-
-def line_index(lines: list[list[str]], search: list[str]) -> int:
-    """Index function checking the existence of a unique match.
-
-    It behaves like list.index() but raise an Exception if the search string
-    occurs multiple times. Returns 0 otherwise.
-
-    Parameters
-    ----------
-    lines : list[list[str]]
-        List of lines.
-    search : list[str]
-        The search term.
-
-    Returns
-    -------
-    int
-        The position index of search within lines.
-
-    Raises
-    ------
-    ManyLinesFoundError
-        If search term is present 2 or more times.
-
-    """
-    count: int = lines.count(search)
-    if count <= 1:
-        return lines.index(search)  # [].index ValueError if count == 0
-    else:
-        raise ManyLinesFoundError("Many " + str(search) + " lines.")
 
 
 class CsvLineError(Exception):
@@ -131,45 +101,18 @@ class EnspireFile:
         return csvl
 
     def _find_data_indices(self, csvl: list[list[str]]) -> tuple[int, int]:
-        def get_data_ini(lines: list[list[str]]) -> int:
-            """Find the line index containing Well and Sample headers in a list of lines.
-
-            Get index of the line ['Well', 'Sample', ...].
-            Check for the presence of a unique ['well', 'sample', ...] line.
-
-            Parameters
-            ----------
-            lines : list
-                List of lines.
-
-            Raises
-            ------
-            CsvLineError
-                If not unique or absent.
-
-            Returns
-            -------
-            int
-
-            """
-            min_line_length = 2  # for key: value
-            count = 0
-            for i, line in enumerate(lines):
-                if len(line) >= min_line_length and line[:1] == ["Well"]:
-                    count += 1
-                    idx = i
-            if count == 0:
-                msg = f"No line starting with ['Well', ...] found in {lines[:9]}"
-                raise CsvLineError(msg)
-            elif count == 1:
-                return idx
-            else:  # count > 1
-                msg = f"Multiple lines starting with ['Well', ...] in {lines[:9]}"
-                raise CsvLineError(msg)
-
-        # TODO: try prparser.line_index()
-        ini = 1 + get_data_ini(csvl)
-        fin = -1 + line_index(csvl, ["Basic assay information "])
+        """Find the indices of the data blocks in the input file."""
+        inil = lookup_listoflines(csvl, pattern="Well", col=0)
+        if len(inil) == 0:
+            msg = f"No line starting with ['Well', ...] found in {csvl[:9]}"
+            raise CsvLineError(msg)
+        elif len(inil) == 1:
+            ini = 1 + inil[0]
+        else:
+            msg = f"Multiple lines starting with ['Well', ...] in {csvl[:9]}"
+            raise CsvLineError(msg)
+        fin = -1
+        fin += lookup_listoflines(csvl, pattern="Basic assay information ", col=0)[0]
         return ini, fin
 
     def _check_csvl_format(self, csvl: list[list[str]], ini: int, fin: int) -> None:
@@ -204,7 +147,7 @@ class EnspireFile:
             If the column '01' is not present 3 lines below ['Platemap:'].
 
         """
-        idx: int = line_index(post, ["Platemap:"])
+        idx = lookup_listoflines(post, pattern="Platemap:", col=0)[0]
         if "01" not in post[idx + 3]:
             msg = "stop: Platemap format unexpected"
             raise CsvLineError(msg)

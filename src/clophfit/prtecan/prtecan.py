@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import typing
 import warnings
 from contextlib import suppress
 from dataclasses import InitVar
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-from typing import Callable
-from typing import ClassVar
 from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -57,8 +56,22 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
     return list(sheet.to_numpy().tolist())
 
 
+@typing.overload
+def lookup_listoflines(csvl: list[list[str]], pattern: str, col: int) -> list[int]:
+    ...
+
+
+@typing.overload
 def lookup_listoflines(
-    csvl: list[list[str | int | float]], pattern: str = "Label: Label", col: int = 0
+    csvl: list[list[str | int | float]], pattern: str, col: int
+) -> list[int]:
+    ...
+
+
+def lookup_listoflines(
+    csvl: list[list[str | int | float]] | list[list[str]],
+    pattern: str = "Label: Label",
+    col: int = 0,
 ) -> list[int]:
     """Lookup line numbers (row index) where given pattern occurs.
 
@@ -79,11 +92,10 @@ def lookup_listoflines(
     """
     indexes = []
     for i, line in enumerate(csvl):
-        try:
-            if isinstance(line[col], str) and pattern in str(line[col]):
+        if isinstance(line, list) and col < len(line):
+            element = line[col]
+            if isinstance(element, (str, int, float)) and pattern in str(element):
                 indexes.append(i)
-        except IndexError:
-            continue
     return indexes
 
 
@@ -309,7 +321,7 @@ class Labelblock(BufferWellsMixin):
     metadata: dict[str, Metadata] = field(init=False, repr=True)
     #: The 96 data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
-    _KEYS: ClassVar[list[str]] = [
+    _KEYS: typing.ClassVar[list[str]] = [
         "Emission Bandwidth",
         "Emission Wavelength",
         "Excitation Bandwidth",
@@ -318,7 +330,11 @@ class Labelblock(BufferWellsMixin):
         "Integration Time",
         "Number of Flashes",
     ]
-    _NORM_KEYS: ClassVar[list[str]] = ["Integration Time", "Number of Flashes", "Gain"]
+    _NORM_KEYS: typing.ClassVar[list[str]] = [
+        "Integration Time",
+        "Number of Flashes",
+        "Gain",
+    ]
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
         """Create metadata and data; initialize labelblock's properties."""
@@ -1018,7 +1034,7 @@ class TitrationAnalysis(Titration):
     #: List of result dataframes.
     fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
     #: Function used in the fitting.
-    fz: Callable[
+    fz: typing.Callable[
         [float, NDArray[np.float_] | Sequence[float], NDArray[np.float_]],
         NDArray[np.float_],
     ] = field(init=False)
