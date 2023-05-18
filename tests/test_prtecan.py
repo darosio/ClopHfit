@@ -167,23 +167,26 @@ class TestLabelblock:
         assert lb0.data_buffersubtracted_norm["F06"] == pytest.approx(1050.13)
         assert lb1.data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
 
-    def test___eq__(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """It is equal to itself. TODO and different from other."""
+    def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """Check if a Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        tmp = lb0
-        assert lb0 == tmp
-        assert lb0 != lb1
-        assert lb0.__eq__(1) == NotImplemented
+        assert lb0 == lb0, "Labelblock is not equal to itself"
+        assert lb0 != lb1, "Different Labelblocks are incorrectly reported as equal"
+        assert (
+            lb0.__eq__(1) == NotImplemented
+        ), "Equality check against non-Labelblock object did not return NotImplemented"
 
-    def test___almost_eq__(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """It is equal to itself. TODO and different from other."""
+    def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """Test the __almost_eq__ method of the Labelblock class."""
         lb0, _ = labelblocks
-        csvl = prtecan.read_xls(data_tests / "290513_7.2.xls")  # Gain=98
-        idxs = prtecan.lookup_listoflines(csvl)
-        lb11 = Labelblock(csvl[idxs[1] :])
-        csvl = prtecan.read_xls(data_tests / "290513_8.8.xls")  # Gain=99
-        idxs = prtecan.lookup_listoflines(csvl)
-        lb12 = Labelblock(csvl[idxs[1] :])
+        file_path1 = Path(data_tests) / "290513_7.2.xls"
+        csvl1 = prtecan.read_xls(file_path1)  # Gain=98
+        idxs1 = prtecan.lookup_listoflines(csvl1)
+        lb11 = Labelblock(csvl1[idxs1[1] :])
+        file_path2 = Path(data_tests) / "290513_8.8.xls"
+        csvl2 = prtecan.read_xls(file_path2)  # Gain=99
+        idxs2 = prtecan.lookup_listoflines(csvl2)
+        lb12 = Labelblock(csvl2[idxs2[1] :])
         assert lb11 != lb12
         assert lb11.__almost_eq__(lb12)
         assert not lb11.__almost_eq__(lb0)
@@ -250,11 +253,12 @@ class TestTecanfile:
         assert self.tf.labelblocks[0].data["A01"] == 17260
         assert self.tf.labelblocks[1].data["H12"] == 4196
 
-    def test___eq__(self) -> None:
-        """It is equal to itself. TODO and different from other."""
-        assert self.tf == prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+    def test_eq(self) -> None:
+        """Check if a Tecanfile is equal to itself and not equal to a different Tecanfile."""
+        tf1 = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+        assert self.tf == tf1, "Tecanfile is not equal to itself"
         tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
-        assert tf2 != self.tf
+        assert self.tf != tf2, "Different Tecanfiles are incorrectly reported as equal"
 
     def test_warn(self) -> None:
         """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""

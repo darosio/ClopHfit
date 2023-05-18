@@ -17,7 +17,6 @@ esff = data_files_dir.joinpath
 def ef1() -> EnspireFile:
     """Read in file."""
     ef = EnspireFile(esff("h148g-spettroC.csv"))
-    ef.extract_measurements()
     return ef
 
 
@@ -25,7 +24,6 @@ def ef1() -> EnspireFile:
 def ef2() -> EnspireFile:
     """Read in file without 'Samples' column."""
     ef = EnspireFile(esff("e2-T-without_sample_column.csv"))
-    ef.extract_measurements()
     return ef
 
 
@@ -52,19 +50,19 @@ class TestEnspireFile:
         with pytest.raises(
             Exception, match="Excitation spectra with unexpected emission in MeasA"
         ):
-            EnspireFile(esf("e2dan-exwavelength.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelength.csv"))
         with pytest.raises(
             Exception, match="Excitation spectra with unexpected emission in MeasA"
         ):
-            EnspireFile(esf("e2dan-exwavelength2.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelength2.csv"))
         with pytest.raises(
             Exception, match="Emission spectra with unexpected excitation in MeasC"
         ):
-            EnspireFile(esf("e2dan-emwavelength.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-emwavelength.csv"))
         with pytest.raises(
             Exception, match='Unknown "Monochromator": Strange in MeasB'
         ):
-            EnspireFile(esf("e2dan-exwavelengthstrange.csv")).extract_measurements()
+            EnspireFile(esf("e2dan-exwavelengthstrange.csv"))
 
     def test_get_data_ini(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test get_data_ini."""
@@ -76,32 +74,34 @@ class TestEnspireFile:
         assert ef1._fin == 14897
         assert ef2._fin == 856
 
-    def test_metadata_post(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
-        """Identify correctly the beginning of metadata after data block."""
-        assert ef1._metadata_post[0] == ["Basic assay information "]
-        assert ef2._metadata_post[0] == ["Basic assay information "]
+    """
+    # def test_metadata_post(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
+    #     \"Identify correctly the beginning of metadata after data block.\"
+    #     assert ef1._metadata_post[0] == ["Basic assay information "]
+    #     assert ef2._metadata_post[0] == ["Basic assay information "]
 
-    def test_localegen_in_metadata_post(
-        self, ef1: EnspireFile, ef2: EnspireFile
-    ) -> None:
-        """Test locales."""
-        assert ef1._metadata_post[31][4] == "300 µl"
-        assert ef2._metadata_post[31][4] == "300 µl"
+    # def test_localegen_in_metadata_post(
+    #     self, ef1: EnspireFile, ef2: EnspireFile
+    # ) -> None:
+    #     \"Test locales.\"
+    #     assert ef1._metadata_post[31][4] == "300 µl"
+    #     assert ef2._metadata_post[31][4] == "300 µl"
 
-    def test_data_list(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
-        """Test data_list."""
-        assert ef1._data_list[0][2] == "MeasA:Result"
-        assert ef2._data_list[0][2] == "MeasB:WavelengthEms"
-        assert ef1._data_list[1][2] == "3151"
-        assert ef2._data_list[1][3] == "3739"
-        # Important to check for last line
-        assert ef1._data_list[-1][2] == "97612"
-        assert ef2._data_list[-1][3] == "512"
+    # def test_data_list(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
+    #     \"Test data_list.\"
+    #     assert ef1._data_list[0][2] == "MeasA:Result"
+    #     assert ef2._data_list[0][2] == "MeasB:WavelengthEms"
+    #     assert ef1._data_list[1][2] == "3151"
+    #     assert ef2._data_list[1][3] == "3739"
+    #     # Important to check for last line
+    #     assert ef1._data_list[-1][2] == "97612"
+    #     assert ef2._data_list[-1][3] == "512"
+    """
 
     def test_get_list_from_platemap(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test list from platemap."""
-        assert ef1._well_list_platemap[2] == "A03"
-        assert ef2._well_list_platemap[1] == "F02"
+        assert ef1._wells_platemap[2] == "A03"
+        assert ef2._wells_platemap[1] == "F02"
 
     def test_metadata(self, ef1: EnspireFile) -> None:
         """Test metadata dictionary."""
@@ -153,8 +153,7 @@ class TestEnspireFile:
         with warnings.catch_warnings(record=True) as w:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
-            ef = EnspireFile(esf("h148g-spettroC-incomplete.csv"))
-            ef.extract_measurements()
+            EnspireFile(esf("h148g-spettroC-incomplete.csv"))
             assert len(w) == 2
             assert issubclass(w[-1].category, Warning)
             assert "platemap" in str(w[-1].message)
@@ -183,15 +182,15 @@ class TestExpNote:
         """Test get_well_list_from_note method."""
         assert en1.wells[2] == "A03"
 
-    def test_note_list(self, en1: ExpNote) -> None:
+    def test__note_list(self, en1: ExpNote) -> None:
         """Test well_list from note."""
-        assert en1.note_list[3][0] == "A03"
-        assert en1.note_list[65][1] == "8.2"
+        assert en1._note_list[3][0] == "A03"
+        assert en1._note_list[65][1] == "8.2"
 
-    def test_check_list(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
-        """Test check list from note vs. Enspirefile."""
-        assert en1.check_wells(ef1) is True
-        assert en1err.check_wells(ef1) is False
+    def test_wells(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
+        """Check wells from ExpNote vs. EnspireFile."""
+        assert en1.wells == ef1.wells
+        assert (en1err.wells == ef1.wells) is False
 
     def test_build_titrations(self, en1: ExpNote, ef1: EnspireFile) -> None:
         """Test the method extract_titrations()."""

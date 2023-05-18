@@ -279,5 +279,4 @@ def tecan(  # type: ignore  # noqa: PLR0913
 def enspire(csv, out, verbose):  # type: ignore
     """Save spectra as csv tables from EnSpire xls file."""
     ef = EnspireFile(csv, verbose=verbose)
-    ef.extract_measurements(verbose=verbose)
     ef.export_measurements(out)
