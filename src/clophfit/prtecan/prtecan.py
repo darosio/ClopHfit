@@ -63,7 +63,7 @@ def lookup_listoflines(csvl: list[list[str]], pattern: str, col: int) -> list[in
 
 @typing.overload
 def lookup_listoflines(
-    csvl: list[list[str | int | float]], pattern: str, col: int
+    csvl: list[list[str | int | float]], pattern: str = "Label: Label", col: int = 0
 ) -> list[int]:
     ...
 

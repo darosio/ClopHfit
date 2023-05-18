@@ -131,7 +131,7 @@ class EnspireFile:
 
         Parameters
         ----------
-        lines: list[list[str]]
+        post: list[list[str]]
             List of lines of metadata post containing plate map.
 
         Returns
