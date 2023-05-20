@@ -14,14 +14,25 @@ tool, users can easily analyze their data and obtain accurate fitting results.
 
 ## Installation
 
-You can get the library directly from
-[PyPI](https://pypi.org/project/ClopHfit/):
+You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/)
+using `pip`:
 
     pip install clophfit
 
-or with [pipx](https://pypa.github.io/pipx/):
+Alternatively, you can use [pipx](https://pypa.github.io/pipx/) to install it in
+an isolated environment:
 
     pipx install clophfit
+
+To enable auto completion for the `clop` command, follow these steps:
+
+1.  Generate the completion script by running the following command:
+
+        _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
+
+2.  Source the generated completion script to enable auto completion:
+
+        source ~/.local/bin/clop-complete.bash
 
 ## Usage
 
