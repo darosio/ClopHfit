@@ -458,6 +458,71 @@ class ExpNote:
         # TODO: BUFFER
 
 
+@dataclass
+class Note:
+    """Read and processes an Experimental Note file."""
+
+    fpath: Path
+    verbose: int = 0
+    #: A list of wells generated from the note file.
+    wells: list[str] = field(init=False, default_factory=list)
+    # A list of lines extracted from the note file.
+    _note: pd.DataFrame = field(init=False, default_factory=pd.DataFrame)
+    #: A list of titrations extracted from the note file.
+    titrations: dict[typing.Any, typing.Any] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Complete the initialization generating wells and _note_list."""
+        verboseprint = verbose_print(self.verbose)
+        with self.fpath.open("r", newline="") as file:
+            sample_data = file.read(1024)  # Read a sample of the CSV data
+        dialect = typing.cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
+        self._note = pd.read_csv(self.fpath, dialect=dialect)
+        self.wells: list[str] = np.array(self._note)[1:, 0].tolist()
+        verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
+
+    def build_titrations(self, ef: EnspireFile) -> None:
+        """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
+        df_no_buffer = self._note.query('Name != "buffer"')
+        threshold = 3
+        grouped0 = df_no_buffer.groupby("Name")
+        titrations: dict[typing.Any, typing.Any] = {}
+        for name0, group0 in grouped0:
+            grouped1 = group0.groupby("Temp")
+            titrations[name0] = {}
+            for name1, group1 in grouped1:
+                titrations[name0][name1] = {}
+                # Group by 'pH' and 'Cl' and keep only groups with more than 'threshold' rows.
+                for grouping in ["pH", "Cl"]:
+                    grouped2 = group1.groupby(grouping)
+                    for name2, group2 in grouped2:
+                        if len(group2) > threshold:
+                            grouped3 = group2.groupby("Labels")
+                            for name3, group3 in grouped3:
+                                wells = group3["Well"].to_list()
+                                meas_dict = {}
+                                for label in str(name3).split():
+                                    d = {w: ef.measurements[label][w] for w in wells}
+                                    value_df = pd.DataFrame(
+                                        d,
+                                        index=ef.measurements[label]["lambda"],
+                                        columns=wells,
+                                    )
+                                    if group3["pH"].nunique() > group3["Cl"].nunique():
+                                        value_df.columns = pd.Index(
+                                            group3["pH"].to_list()
+                                        )
+                                    else:
+                                        value_df.columns = pd.Index(
+                                            group3["Cl"].to_list()
+                                        )
+                                    meas_dict[label] = value_df
+                                titrations[name0][name1][
+                                    f"{grouping}_{name2}"
+                                ] = meas_dict
+        self.titrations = titrations
+
+
 class Titration:
     """Store titration data and fit results."""
 

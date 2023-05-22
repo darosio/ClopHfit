@@ -1,6 +1,8 @@
 """Fit Cl binding and pH titration."""
 from __future__ import annotations
 
+import typing
+from collections import namedtuple
 from typing import Sequence
 
 import numpy as np
@@ -8,6 +10,7 @@ import pandas as pd
 import scipy  # type: ignore
 import scipy.stats  # type: ignore
 from numpy.typing import NDArray
+from scipy import optimize
 
 # Binding equations."""
 # TODO: use this like fz in prtecan
@@ -207,3 +210,82 @@ def fit_titration(  # noqa: PLR0913, PLR0915
         except TypeError:
             pass  # if some params are not successfully determined.
     return res
+
+
+# Define the namedtuple outside the function
+FitResult = namedtuple(
+    "FitResult", ["success", "msg", "df", "chisqr", "K", "sK", "SA", "sSA", "SB", "sSB"]
+)
+
+
+def fit_titration_spectra(
+    binding_model_func: typing.Callable[
+        [float, list[float], NDArray[np.float_]], NDArray[np.float_]
+    ],
+    x: NDArray[np.float_],
+    y: NDArray[np.float_],
+    initial_parameters: list[float] | None = None,
+) -> FitResult:
+    """Fit a dataset (x, y) using a single-site binding model.
+
+    The model is provided by the binding_model_func that defines a constant K and two plateaus SA and SB.
+
+    Parameters
+    ----------
+    binding_model_func : typing.Callable[[float, list[float], NDArray], NDArray]
+        The binding model function.
+    x : NDArray[np.float]
+        The x values of the dataset.
+    y : NDArray[np.float]
+        The y values of the dataset.
+    initial_parameters : list[float], optional
+        The initial parameters for the model, by default [7.1, None, None]
+
+    Raises
+    ------
+    ValueError
+        If the optimization fails.
+
+    Returns
+    -------
+    FitResult
+        A named tuple containing the least square results.
+    """
+    if initial_parameters is None:
+        initial_parameters = [7.1, np.NaN, np.NaN]
+
+    def ssq(
+        p: list[float], x: NDArray[np.float_], y1: NDArray[np.float_]
+    ) -> NDArray[np.float_]:
+        return np.asarray(y1 - binding_model_func(p[0], p[1:3], x), dtype=np.float_)
+
+    # Plateau calculation
+    df = pd.DataFrame({"x": x, "y": y})  # noqa: PD901
+    if np.isnan(initial_parameters[1]):
+        initial_parameters[1] = df.y[df.x == min(df.x)].values[0]  # noqa: PD011
+    if np.isnan(initial_parameters[2]):
+        initial_parameters[2] = df.y[df.x == max(df.x)].values[0]  # noqa: PD011
+
+    p, cov, info, msg, success = optimize.leastsq(
+        ssq, initial_parameters, args=(x, y), full_output=True, xtol=1e-11
+    )
+
+    if not 1 <= success <= 4:  # noqa: PLR2004
+        message = f"Optimization failed with message: {msg}"
+        raise ValueError(message)
+
+    degree_freedom = len(y) - len(p)
+    chisqr = sum(info["fvec"] * info["fvec"]) / degree_freedom
+    fit_result = FitResult(
+        msg=msg,
+        success=success,
+        df=degree_freedom,
+        chisqr=chisqr,
+        K=p[0],
+        sK=np.sqrt(cov[0][0]) * chisqr,
+        SA=p[1],
+        sSA=np.sqrt(cov[1][1]) * chisqr,
+        SB=p[2],
+        sSB=np.sqrt(cov[2][2]) * chisqr,
+    )
+    return fit_result

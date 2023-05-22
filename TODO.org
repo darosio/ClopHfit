@@ -1,0 +1,12 @@
+- Tit works for a plate organized with a pH-value for each row and a Cl conc
+  value for each column.
+- Old fit works with a list of well and corresponding cl conc orpH value; the
+  kind ["pH", "Cl"] decides
+
+** TODO consider Temp
+Some measurements e.g. "A", "C" and "D" are at T = 20 others ("B", "E" and "F")
+are taken at T = 37.
+This temp is present in each metadata. (e.g. measurements["A"]["metadata"]["Temp"]).
+
+A future note file format:
+- well, pH, Cl, T, mut, meas labels
