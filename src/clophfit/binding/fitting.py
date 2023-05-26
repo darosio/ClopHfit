@@ -5,15 +5,20 @@ import typing
 from collections import namedtuple
 from typing import Sequence
 
+import matplotlib as mpl  # type: ignore
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 import scipy  # type: ignore
 import scipy.stats  # type: ignore
+import seaborn as sb  # type: ignore # noqa: ICN001
 from numpy.typing import NDArray
 from scipy import optimize
 
 # Binding equations."""
 # TODO: use this like fz in prtecan
+
+COLOR_MAP = plt.cm.Set2
 
 
 def kd(
@@ -289,3 +294,262 @@ def fit_titration_spectra(
         sSB=np.sqrt(cov[2][2]) * chisqr,
     )
     return fit_result
+
+
+def apply_common_plot_style(
+    ax: mpl.axes.Axes, title: str, xlabel: str, ylabel: str
+) -> None:
+    """Apply common plot style to a given Axes object.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The Axes object to which the style should be applied.
+    title : str
+        The title to set for the plot.
+    xlabel : str
+        The label for the x-axis of the plot.
+    ylabel : str
+        The label for the y-axis of the plot.
+    """
+    ax.grid(True)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+
+
+def plot_spectra(
+    f: pd.DataFrame,
+    ax: mpl.axes.Axes,
+    hue_norm: tuple[float, float],
+    palette: str,
+    kind: str,
+) -> None:
+    """
+    Plot the spectral data.
+
+    Parameters
+    ----------
+    f : pd.DataFrame
+        The DataFrame containing spectral data.
+    ax : mpl.axes.Axes
+        The Axes object to which the plot should be added.
+    hue_norm : Tuple[float, float]
+        The normalization for the hue mapping, as a tuple of the form (min, max).
+    palette : str
+        The name of the palette to use for the hue mapping.
+    kind : str
+        The variable in `data` to map plot aspects to.
+
+    """
+    dat = f.copy()
+    dat["lambda"] = dat.index
+    sb.lineplot(
+        data=dat.melt(id_vars="lambda", var_name=kind),
+        x="lambda",
+        y="value",
+        hue=kind,
+        hue_norm=hue_norm,
+        palette=palette,
+        ax=ax,
+    )
+    apply_common_plot_style(ax, "Spectra", "Wavelength", "Fluorescence")
+
+
+def plot_autovectors(f: pd.DataFrame, u: NDArray[np.float_], ax: mpl.axes.Axes) -> None:
+    """Plot autovectors.
+
+    Parameters
+    ----------
+    f : pd.DataFrame
+        The DataFrame containing spectral data.
+    u : np.ndarray
+        The left singular vectors obtained from SVD.
+    ax : mpl.axes.Axes
+        The Axes object to which the plot should be added.
+
+    """
+    apply_common_plot_style(ax, "Autovectors", "Wavelength", "Magnitude")
+    for i in range(4):
+        ax.plot(
+            f.index,
+            u[:, i],
+            color=COLOR_MAP(i),
+            lw=3 / (i + 1),
+            alpha=max(0.3, 1 - 0.2 * i),
+        )
+
+
+def plot_fit(  # noqa: PLR0913
+    conc: NDArray[np.float_],
+    y: NDArray[np.float_],
+    ax: mpl.axes.Axes,
+    result: FitResult,
+    fz: typing.Callable[[float, list[float], NDArray[np.float_]], NDArray[np.float_]],
+    hue_norm: tuple[float, float],
+    palette: str,
+    kind: str,
+) -> None:
+    """Plot fit of first principal component against concentration variable.
+
+    Parameters
+    ----------
+    conc : NDArray[np.float_]
+        The concentrations used for the titration.
+    y : NDArray[np.float_]
+        The first principal component.
+    ax : mpl.axes.Axes
+        The Axes object to which the plot should be added.
+    result : Any
+        The fit results.
+    fz : Callable[[float, List[float], np.ndarray], np.ndarray]
+        The function used to fit the data.
+    hue_norm : Tuple[float, float]
+        The normalization for the hue mapping.
+    palette : str
+        The colormap to be used.
+    kind : str
+        The type of the titration.
+
+    """
+    # Create scatter plot
+    ax.scatter(
+        conc,
+        y,
+        c=conc,
+        cmap=palette,
+        vmin=hue_norm[0],
+        vmax=hue_norm[1],
+        s=200,
+        edgecolors="k",
+    )
+    apply_common_plot_style(ax, "LM fit", "", "")
+    ax.set_ylabel("First Principal Component", color=COLOR_MAP(0), fontsize=14)
+    ax.set_xlabel(kind, fontsize=14)
+    # Adjust x-axis limits
+    xmin = conc.min()
+    xmax = conc.max()
+    xmax += (xmax - xmin) / 7
+    xlin = np.linspace(xmin, xmax, 100)
+    # Plot fit line
+    ax.plot(xlin, fz(result.K, [result.SA, result.SB], xlin), "k--")
+    # Add fit result to plot
+    title = str(round(result.K, 2)) + " \u00B1 " + str(round(result.sK, 2))
+    sb.mpl.pyplot.figtext(0.26, 0.54, title, size=20)
+
+
+def plot_pca(
+    v: NDArray[np.float_],
+    ax: mpl.axes.Axes,
+    conc: NDArray[np.float_],
+    hue_norm: tuple[float, float],
+    palette: str,
+) -> None:
+    """Plot the first two principal components.
+
+    Parameters
+    ----------
+    v : NDArray[np.float_]
+        The matrix containing the principal components.
+    ax : mpl.axes.Axes
+        The Axes object to which the plot should be added.
+    conc : NDArray[np.float_]
+        The concentrations used for the titration.
+    hue_norm : Tuple[float, float]
+        The normalization for the hue mapping.
+    palette : str
+        The colormap to be used.
+
+    """
+    ax.scatter(
+        v[1],
+        v[0],
+        c=conc,
+        cmap=palette,
+        vmin=hue_norm[0],
+        vmax=hue_norm[1],
+        s=200,
+        edgecolors="k",
+    )
+    apply_common_plot_style(ax, "PCA plot", "", "")
+    ax.set_ylabel("First Principal Component", color=COLOR_MAP(0))
+    ax.set_xlabel("Second Principal Component", color=COLOR_MAP(1))
+    # Add labels.
+    for x, y, w in zip(v[1], v[0], conc):
+        ax.text(x, y, w)
+
+
+def plot_autovalues(s: NDArray[np.float_], ax: mpl.axes.Axes) -> None:
+    """Plot the singular values from SVD.
+
+    Parameters
+    ----------
+    S : numpy.ndarray
+        The singular values from the SVD.
+    ax : mpl.axes.Axes
+        The axes on which to plot the singular values.
+
+    Returns
+    -------
+    None
+    """
+    data = pd.DataFrame({"index": range(1, len(s) + 1), "singular_values": s})
+    sb.scatterplot(
+        x="index",
+        y="singular_values",
+        data=data,
+        ax=ax,
+        hue="index",
+        s=160,
+        legend=False,
+        palette="Set2",
+    )
+    apply_common_plot_style(ax, "Singular Values from SVD", "Index", "Singular Value")
+    ax.set(yscale="log")
+    ax.set_xticks(np.arange(1, len(s) + 1))
+
+
+def f_svd(f: pd.DataFrame, kind: str) -> plt.Figure:
+    """Perform singular value decomposition (SVD) and visualize results.
+
+    Creates a figure with five subplots to visualize the results.
+
+    Parameters
+    ----------
+    f : pd.DataFrame
+        The input data for SVD.
+    kind : str
+        Specifies the type of data, which determines the colormap, hue normalization, and callable function used in the plots.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The created figure containing the subplots.
+    """
+    if kind == "Cl":
+        hue_norm = (0.0, 500.0)
+        palette = sb.cm.icefire
+        fz = fz_kd_singlesite
+    else:
+        hue_norm = (5.7, 8.7)
+        palette = sb.cm.vlag_r
+        fz = fz_pk_singlesite
+    u, s, v = np.linalg.svd(f)
+    conc = np.array(f.columns.to_list())
+    y = v[0, :]
+    result = fit_titration_spectra(fz, conc, y)
+    sb.set_style("ticks")
+    fig = sb.mpl.pyplot.figure(figsize=(12, 8))
+    ax1 = fig.add_axes([0.05, 0.65, 0.32, 0.31])
+    plot_spectra(f, ax1, hue_norm, palette, kind)
+
+    ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
+    plot_autovectors(f, u, ax2)
+    ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
+    plot_autovalues(s, ax3)
+
+    ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
+    plot_fit(conc, y, ax4, result, fz, hue_norm, palette, kind)
+    ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
+    plot_pca(v, ax5, conc, hue_norm, palette)
+    return fig
