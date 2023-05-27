@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pprint
+import typing
 import warnings
 from collections import namedtuple
 from pathlib import Path
@@ -12,10 +13,12 @@ import numpy as np
 import pandas as pd
 import seaborn  # type: ignore # noqa: ICN001
 from numpy.typing import NDArray
+from scipy import optimize  # type: ignore
 
 from clophfit import binding
+from clophfit import prenspire
 from clophfit import prtecan
-from clophfit.binding import fit_titration_spectra
+from clophfit.binding.fitting import analyze_spectra
 from clophfit.prenspire import EnspireFile
 
 
@@ -88,7 +91,7 @@ def clop() -> None:  # pragma: no cover
     """Group command."""
 
 
-@clop.command()
+@clop.command("eq1")
 @click.argument("kd1", type=float)
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
@@ -101,7 +104,7 @@ def eq1(  # type: ignore
     print(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
-@clop.command("prtecan")
+@clop.command("pr.tecan")
 @click.argument("list_file", type=click.Path(path_type=Path))
 @click.option(
     "--dil",
@@ -273,23 +276,82 @@ def tecan(  # type: ignore  # noqa: PLR0913
             )
 
 
-@clop.command("prenspire")
-@click.argument("csv", type=click.Path(path_type=Path))
+@clop.command("pr.enspire")
+@click.argument("csv", type=click.Path(exists=True, path_type=Path))
+@click.argument("note_fp", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option(
+    "-m",
+    "--method-of-analysis",
+    "analysis_method",
+    default="svd",
+    type=click.Choice(["svd", "band"], case_sensitive=False),
+    help="analysis method (default: svd)",
+)
+@click.option(
+    "-b",
+    "--band-interval",
+    "band",
+    nargs=2,
+    type=int,
+    help="Integration interval from <1> to <2>",
+)
 @click.option(
     "--out",
+    "-d",
     type=click.Path(path_type=Path),
     default="Meas",
     help="Path to output results.",
     show_default=True,
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def enspire(csv, out, verbose):  # type: ignore
+def enspire(csv, note_fp, out, analysis_method, band, verbose):  # type: ignore # noqa: PLR0913
     """Save spectra as csv tables from EnSpire xls file."""
     ef = EnspireFile(csv, verbose=verbose)
     ef.export_measurements(out)
+    if note_fp is not None:
+        fit_enspire(ef, note_fp, out, analysis_method, band, verbose)
 
 
-@clop.command()
+def fit_enspire(  # noqa: PLR0913
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    analysis_method: str,
+    band: tuple[int, int],
+    verbose: int,
+) -> None:
+    """Fit prenspire titration (all labels, temp, mutant, titrations)."""
+    note = prenspire.prenspire.Note(note_fp, verbose=verbose)
+    note.build_titrations(ef)
+    for name, d_name in note.titrations.items():
+        for temp, d_temp in d_name.items():
+            for tit, d_tit in d_temp.items():
+                for label, data in d_tit.items():
+                    if tit.split("_")[0] == "pH":
+                        ttype = "Cl"
+                    elif tit.split("_")[0] == "Cl":
+                        ttype = "pH"
+                    else:
+                        msg = "Unknown titration type."
+                        raise ValueError(msg)
+                    fig1, result = binding.fitting.f_svd(data, ttype)
+                    # output
+                    f_out = "_".join([name, str(temp), label, tit, analysis_method])
+                    print("f-out: ", f_out)
+                    ff_out = out_dir / Path(f_out).with_suffix(".pdf")
+                    fig1.savefig(ff_out)
+                    print("best-fitting using: ", analysis_method)
+                    print("K = ", round(result.K, 3))
+                    print("sK = ", round(result.sK, 3))
+                    print("SA = ", round(result.SA, 3))
+                    print("sSA = ", round(result.sSA, 3))
+                    print("SB = ", round(result.SB, 3))
+                    print("sSB = ", round(result.sSB, 3))
+    if band:
+        print(band)
+
+
+@clop.command("fit_titration")
 @click.argument("csvtable")
 @click.argument("note_fp")
 @click.option(
@@ -320,28 +382,22 @@ def enspire(csv, out, verbose):  # type: ignore
     help="Integration interval from <1> to <2>",
 )
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit(csvtable, note_fp, out_dir, analysis_method, titration_type, band, verbose):  # type: ignore # noqa: PLR0913,PLR0915
-    """Old fit titration."""
+def fit_titration(csvtable, note_fp, out_dir, analysis_method, titration_type, band, verbose):  # type: ignore # noqa: PLR0913,PLR0915
+    """Old svd or band fit of titration spectra."""
     # input of spectra (csv) and titration (note) data
     csv = pd.read_csv(csvtable)
     note_file = pd.read_table(note_fp)  # noqa: PD012
+    click.echo(note_file)
     note_file = note_file[note_file["mutant"] != "buffer"]
-    # TODO aggregation logic for some pH or cloride
+    # TODO aggregation logic for some pH or chloride
     nnote = namedtuple("nnote", "wells conc")
-
-    # pH or Cl titration
-    def fz_kd(kd: float, p: list[float], x: NDArray[np.float_]) -> NDArray[np.float_]:
-        return (p[0] + p[1] * x / kd) / (1 + x / kd)
-
-    def fz_pk(pk: float, p: list[float], x: NDArray[np.float_]) -> NDArray[np.float_]:
-        return (p[1] + p[0] * 10 ** (pk - x)) / (1 + 10 ** (pk - x))
 
     if titration_type == "cl":
         note = nnote(list(note_file.well), list(note_file.Cl))
-        fz = fz_kd
+        fz = binding.fz_kd_singlesite
     elif titration_type == "pH":
         note = nnote(list(note_file.well), list(note_file.pH))
-        fz = fz_pk  # type: ignore
+        fz = binding.fz_pk_singlesite
 
     df = csv[note.wells]  # noqa: PD901
     df.index = csv["lambda"]
@@ -399,6 +455,7 @@ def fit(csvtable, note_fp, out_dir, analysis_method, titration_type, band, verbo
         ax5.plot(v[:, 1], v[:, 2], lw=0.8)
         for x, y, w in zip(v[:, 1], v[:, 2], note.wells):
             ax5.text(x, y, w)
+        # bootstrap
         kd = []
         sa = []
         sb = []
@@ -470,3 +527,146 @@ def fit(csvtable, note_fp, out_dir, analysis_method, titration_type, band, verbo
     print("sSA = ", round(result.sSA, 3))
     print("SB = ", round(result.SB, 3))
     print("sSB = ", round(result.sSB, 3))
+
+
+def fit_titration_spectra(
+    binding_model_func: typing.Callable[
+        [float, list[float], NDArray[np.float_]], NDArray[np.float_]
+    ],
+    x: NDArray[np.float_],
+    y: NDArray[np.float_],
+    initial_parameters: list[float] | None = None,
+) -> FitResult:
+    """Fit a dataset (x, y) using a single-site binding model.
+
+    The model is provided by the binding_model_func that defines a constant K and two plateaus SA and SB.
+
+    Parameters
+    ----------
+    binding_model_func : typing.Callable[[float, list[float], NDArray], NDArray]
+        The binding model function.
+    x : NDArray[np.float]
+        The x values of the dataset.
+    y : NDArray[np.float]
+        The y values of the dataset.
+    initial_parameters : list[float], optional
+        The initial parameters for the model, by default [7.1, None, None]
+
+    Raises
+    ------
+    ValueError
+        If the optimization fails.
+
+    Returns
+    -------
+    FitResult
+        A named tuple containing the least square results.
+    """
+    if initial_parameters is None:
+        initial_parameters = [7.1, np.NaN, np.NaN]
+
+    def ssq(
+        p: list[float], x: NDArray[np.float_], y1: NDArray[np.float_]
+    ) -> NDArray[np.float_]:
+        return np.asarray(y1 - binding_model_func(p[0], p[1:3], x), dtype=np.float_)
+
+    # Plateau calculation
+    df = pd.DataFrame({"x": x, "y": y})  # noqa: PD901
+    if np.isnan(initial_parameters[1]):
+        initial_parameters[1] = df.y[df.x == min(df.x)].values[0]  # noqa: PD011
+    if np.isnan(initial_parameters[2]):
+        initial_parameters[2] = df.y[df.x == max(df.x)].values[0]  # noqa: PD011
+
+    p, cov, info, msg, success = optimize.leastsq(
+        ssq, initial_parameters, args=(x, y), full_output=True, xtol=1e-11
+    )
+
+    if not 1 <= success <= 4:  # noqa: PLR2004
+        message = f"Optimization failed with message: {msg}"
+        raise ValueError(message)
+
+    degree_freedom = len(y) - len(p)
+    chisqr = sum(info["fvec"] * info["fvec"]) / degree_freedom
+    fit_result = FitResult(
+        msg=msg,
+        success=success,
+        df=degree_freedom,
+        chisqr=chisqr,
+        K=p[0],
+        sK=np.sqrt(cov[0][0]) * chisqr,
+        SA=p[1],
+        sSA=np.sqrt(cov[1][1]) * chisqr,
+        SB=p[2],
+        sSB=np.sqrt(cov[2][2]) * chisqr,
+    )
+    return fit_result
+
+
+# Define the namedtuple outside the function
+FitResult = namedtuple(
+    "FitResult", ["success", "msg", "df", "chisqr", "K", "sK", "SA", "sSA", "SB", "sSB"]
+)
+
+
+@clop.command("fit_titration2")
+@click.argument("csvtable")
+@click.argument("note_fp")
+@click.option(
+    "-d", "--out", "out_dir", default=Path("."), type=Path, help="destination directory"
+)
+@click.option(
+    "-m",
+    "--method-of-analysis",
+    "analysis_method",
+    default="svd",
+    type=click.Choice(["svd", "band"], case_sensitive=False),
+    help="analysis method (default: svd)",
+)
+@click.option(
+    "-t",
+    "--titration-of",
+    "titration_type",
+    default="pH",
+    type=click.Choice(["pH", "Cl"], case_sensitive=False),
+    help="titration type (default: pH)",
+)
+@click.option(
+    "-b",
+    "--band-interval",
+    "band",
+    nargs=2,
+    type=int,
+    help="Integration interval from <1> to <2>",
+)
+@click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
+def fit_titration2(csvtable, note_fp, out_dir, analysis_method, titration_type, band, verbose):  # type: ignore # noqa: PLR0913
+    """Update old svd or band fit of titration spectra."""
+    csv = pd.read_csv(csvtable)
+    note_file = pd.read_csv(note_fp, sep="\t")
+    # Ignore buffer wells! SVD will use differences between spectra.
+    note_file = note_file[note_file["mutant"] != "buffer"]
+    Notes = namedtuple("Notes", ["wells", "conc"])
+    note = Notes(list(note_file["well"]), list(note_file[titration_type]))
+    spectra = csv[note.wells]
+    spectra.index = csv["lambda"]
+    spectra.columns = np.array(note.conc)
+    if verbose:
+        print(csv)
+        click.echo(note_file)
+        print(note)
+        print("DataFrame\n", spectra)
+    if analysis_method == "svd":
+        figure, result = analyze_spectra(spectra, titration_type)
+    elif analysis_method == "band":
+        figure, result = analyze_spectra(spectra, titration_type, band)
+    # output
+    f_csv_shortname = Path(csvtable).stem
+    f_note_shortname = Path(note_fp).stem
+    f_out = "__".join([f_csv_shortname, analysis_method, f_note_shortname])
+    if not out_dir.is_dir():
+        out_dir.mkdir(parents=True)
+    f_out = out_dir / Path(f_out).with_suffix(".pdf")
+    figure.savefig(f_out)
+    print(f"Best fit using '{analysis_method}' method:\n")
+    print(result.ci_report(ndigits=2, with_offset=False))
+    print(f"\n Plot saved in '{f_out}'.\n")

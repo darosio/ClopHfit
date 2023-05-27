@@ -32,7 +32,7 @@ def test_prenspire(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prenspire", str(input_csv), "--out", str(out)],
+        ["pr.enspire", str(input_csv), "--out", str(out)],
     )
     assert result.exit_code == 0
     # validate output files
@@ -60,6 +60,6 @@ def test_prtecan(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prtecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
+        ["pr.tecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
     )
     assert result.exit_code == 0

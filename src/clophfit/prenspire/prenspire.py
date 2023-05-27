@@ -59,7 +59,8 @@ class EnspireFile:
     Examples
     --------
     >>> from clophfit.prenspire import EnspireFile
-    >>> ef = EnspireFile("tests/EnSpire/h148g-spettroC.csv", verbose=0)
+    >>> from pathlib import Path
+    >>> ef = EnspireFile(Path("tests/EnSpire/h148g-spettroC.csv"), verbose=0)
     >>> ef.measurements['A']['lambda'][2]
     274.0
     """
@@ -76,7 +77,7 @@ class EnspireFile:
     def __post_init__(self) -> None:
         """Complete initialization."""
         verboseprint = verbose_print(self.verbose)
-        csvl = self._read_csv_file(Path(self.file), verboseprint)
+        csvl = self._read_csv_file(self.file, verboseprint)
         ini, fin = self._find_data_indices(csvl, verboseprint)
         self._ini, self._fin = ini, fin
         self._check_csvl_format(csvl, ini, fin, verboseprint)
