@@ -19,11 +19,39 @@ from uncertainties import ufloat  # type: ignore
 COLOR_MAP = plt.cm.Set1
 
 
+@typing.overload
 def _binding_pk(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
+    ...
+
+
+@typing.overload
+def _binding_pk(
+    x: NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
+) -> NDArray[np.float_]:
+    ...
+
+
+def _binding_pk(
+    x: float | NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
+) -> float | NDArray[np.float_]:
     return S1 + (S0 - S1) * 10 ** (K - x) / (1 + 10 ** (K - x))
 
 
+@typing.overload
 def _binding_kd(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
+    ...
+
+
+@typing.overload
+def _binding_kd(
+    x: NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
+) -> NDArray[np.float_]:
+    ...
+
+
+def _binding_kd(
+    x: float | NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
+) -> float | NDArray[np.float_]:
     return S1 + (S0 - S1) * x / K / (1 + x / K)
 
 
@@ -443,6 +471,51 @@ def plot_pca(
         ax.text(x, y, w)
 
 
+def analyze_spectra_glob(
+    mspectra: dict[str, pd.DataFrame],
+    kind: str,
+    dbands: dict[str, tuple[int, int]] | None = None,
+    x_combined: list[NDArray[np.float_]] | None = None,
+    y_combined: list[NDArray[np.float_]] | None = None,
+) -> (
+    tuple[plt.Figure, lmfit.model.ModelResult]
+    | tuple[plt.Figure, lmfit.model.MinimizerResult]
+):
+    """Analyze multi-label spectra visualize the results."""
+    _gap_ = 1
+    dbands = dbands or {}
+    x_combined = x_combined or []
+    y_combined = y_combined or []
+    prev_max = 0
+    adjusted_list = []
+    for spectra in mspectra.values():
+        spectra_adjusted = spectra.copy()  # Avoid modifying original data
+        spectra_adjusted.index += prev_max - spectra_adjusted.index.min() + _gap_
+        prev_max = spectra_adjusted.index.max()
+        adjusted_list.append(spectra_adjusted)
+    spectra_merged = pd.concat(adjusted_list)
+    if dbands.keys() == mspectra.keys():
+        ndata = len(x_combined)
+        params = lmfit.Parameters()
+        params.add("K", value=7, min=0)
+        for i in range(ndata):
+            params.add(f"S0_{i+1}", value=1.0 * np.random.rand() - 0.5)
+            params.add(f"S1_{i+1}", value=0.02 * np.random.rand() - 0.5)
+        fz = _binding_kd if kind == "Cl" else _binding_pk
+        result = lmfit.minimize(
+            _binding_residuals, params, args=(fz, x_combined, y_combined)
+        )
+        figure, ax = plt.subplots()
+        xfit = [np.linspace(x.min(), x.max(), 100) for x in x_combined]
+        yfit = _binding_residuals(result.params, fz, xfit)
+        for i in range(ndata):
+            ax.plot(x_combined[i], y_combined[i], "o", xfit[i], yfit[i], "-")
+        ax.grid(True)
+        return figure, result
+    else:  # SVD
+        return analyze_spectra(spectra_merged, kind)
+
+
 def analyze_spectra(
     spectra: pd.DataFrame, kind: str, band: tuple[int, int] | None = None
 ) -> tuple[plt.Figure, lmfit.model.ModelResult]:
@@ -536,9 +609,6 @@ def analyze_spectra(
     _apply_common_plot_style(ax4, "LM fit", kind, "")
     ax4.set_ylabel(ylabel, color=ylabel_color)
     return fig, result
-
-
-################################################################################
 
 
 def _binding_residuals(

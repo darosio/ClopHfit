@@ -32,7 +32,7 @@ def mcmc_sampling(result):
     )
 #+begin_src sh :results output :exports both
 echo "Well,pH,Cl,Name,Temp,Labels" > v224H_note.csv
-awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",H148G,20.0," substr($1,1,1)}' $input_file >> $output_file
+awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",V224H,37.0,A B"}' v224H_note >> v224H_note.csv
 #+end_src
 
 * TODO New fit paying attention to:
