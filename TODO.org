@@ -30,6 +30,10 @@ def mcmc_sampling(result):
         marginals=True,
         textsize=10
     )
+#+begin_src sh :results output :exports both
+echo "Well,pH,Cl,Name,Temp,Labels" > v224H_note.csv
+awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",H148G,20.0," substr($1,1,1)}' $input_file >> $output_file
+#+end_src
 
 * TODO New fit paying attention to:
 ** DONE fit 2 datasets with different weight (pca1 and pca2 test ddf)

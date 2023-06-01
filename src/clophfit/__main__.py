@@ -8,6 +8,7 @@ from collections import namedtuple
 from pathlib import Path
 
 import click
+import lmfit  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
@@ -15,10 +16,10 @@ import seaborn  # type: ignore # noqa: ICN001
 from numpy.typing import NDArray
 from scipy import optimize  # type: ignore
 
+from clophfit import __default_enspire_out_dir__
 from clophfit import binding
 from clophfit import prenspire
 from clophfit import prtecan
-from clophfit.binding.fitting import analyze_spectra
 from clophfit.prenspire import EnspireFile
 
 
@@ -299,7 +300,7 @@ def tecan(  # type: ignore  # noqa: PLR0913
     "--out",
     "-d",
     type=click.Path(path_type=Path),
-    default="Meas",
+    default=__default_enspire_out_dir__,
     help="Path to output results.",
     show_default=True,
 )
@@ -316,7 +317,7 @@ def fit_enspire(  # noqa: PLR0913
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
-    analysis_method: str,
+    method: str,
     band: tuple[int, int],
     verbose: int,
 ) -> None:
@@ -326,29 +327,46 @@ def fit_enspire(  # noqa: PLR0913
     for name, d_name in note.titrations.items():
         for temp, d_temp in d_name.items():
             for tit, d_tit in d_temp.items():
+                if tit.split("_")[0] == "pH":
+                    ttype = "Cl"
+                elif tit.split("_")[0] == "Cl":
+                    ttype = "pH"
+                else:
+                    msg = "Unknown titration type."
+                    raise ValueError(msg)
                 for label, data in d_tit.items():
-                    if tit.split("_")[0] == "pH":
-                        ttype = "Cl"
-                    elif tit.split("_")[0] == "Cl":
-                        ttype = "pH"
-                    else:
-                        msg = "Unknown titration type."
-                        raise ValueError(msg)
-                    fig1, result = binding.fitting.f_svd(data, ttype)
-                    # output
-                    f_out = "_".join([name, str(temp), label, tit, analysis_method])
-                    print("f-out: ", f_out)
-                    ff_out = out_dir / Path(f_out).with_suffix(".pdf")
-                    fig1.savefig(ff_out)
-                    print("best-fitting using: ", analysis_method)
-                    print("K = ", round(result.K, 3))
-                    print("sK = ", round(result.sK, 3))
-                    print("SA = ", round(result.SA, 3))
-                    print("sSA = ", round(result.sSA, 3))
-                    print("SB = ", round(result.SB, 3))
-                    print("sSB = ", round(result.sSB, 3))
+                    figure, result = binding.fitting.analyze_spectra(data, ttype)
+                    pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{method}.pdf"
+                    figure.savefig(pdf_file)
+                    _print_result(result, pdf_file, method)
+                if len(d_tit.keys()) > 1:
+                    # global fit
+                    prev_max = 0
+                    data_list = []  # List to hold adjusted DataFrames
+                    for data in d_tit.values():
+                        data_adjusted = data.copy()  # Avoid modifying original data
+                        data_adjusted.index += prev_max - data_adjusted.index.min() + 10
+                        prev_max = data_adjusted.index.max()
+                        data_list.append(data_adjusted)
+                    spectra = pd.concat(data_list)  # Concatenate DataFrames in the list
+                    figure, result = binding.fitting.analyze_spectra(spectra, ttype)
+                    pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{method}.pdf"
+                    figure.savefig(pdf_file)
+                    _print_result(result, pdf_file, method)
     if band:
         print(band)
+
+
+def _print_result(
+    result: lmfit.model.ModelResult, pdf_file: Path, analysis_method: str
+) -> None:
+    print(str(pdf_file))
+    print(f"Best fit using '{analysis_method}' method:\n")
+    try:
+        print(result.ci_report(ndigits=2, with_offset=False))
+    except ValueError:
+        print(result.params)
+    print(f"\n Plot saved in '{pdf_file}'.\n")
 
 
 @clop.command("fit_titration")
@@ -656,9 +674,9 @@ def fit_titration2(csvtable, note_fp, out_dir, analysis_method, titration_type, 
         print(note)
         print("DataFrame\n", spectra)
     if analysis_method == "svd":
-        figure, result = analyze_spectra(spectra, titration_type)
+        figure, result = binding.fitting.analyze_spectra(spectra, titration_type)
     elif analysis_method == "band":
-        figure, result = analyze_spectra(spectra, titration_type, band)
+        figure, result = binding.fitting.analyze_spectra(spectra, titration_type, band)
     # output
     f_csv_shortname = Path(csvtable).stem
     f_note_shortname = Path(note_fp).stem

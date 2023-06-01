@@ -1,11 +1,11 @@
 """Parses EnSpire data files."""
 from __future__ import annotations
 
+import collections
 import csv
+import datetime
 import typing
 import warnings
-from collections import Counter
-from collections import namedtuple
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -15,9 +15,11 @@ import numpy as np
 import pandas as pd
 import pyparsing
 
+from clophfit import __default_enspire_out_dir__
+from clophfit.prtecan import lookup_listoflines
+
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
-from clophfit.prtecan import lookup_listoflines
 
 
 def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
@@ -89,24 +91,30 @@ class EnspireFile:
             csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
         )
 
-    def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
-        """Create table as DataFrame and plot; save into Meas folder."""
-        output_dir.mkdir(parents=True, exist_ok=True)
+    def export_measurements(self, out_dir: Path = __default_enspire_out_dir__) -> None:
+        """Save measurements, metadata and plots into out_dir."""
+        out_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements:
-            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
-            data_dict.update(
-                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
-            )
+            # Prepare data dictionary and construct DataFrame
+            data_dict = {"lambda": self.measurements[m]["lambda"]}
+            data_dict.update({w: self.measurements[m][w] for w in self.wells})
             dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
-            # Create plot
-            dfdata.plot(title=m, legend=False)
-            # Save files
-            file = output_dir / (self.file.stem + "_" + m + ".csv")
-            while file.exists():
-                # because with_stem was introduced in py3.9
-                file = file.with_name(file.stem + "-b" + file.suffix)
-            dfdata.to_csv(str(file))
-            plt.savefig(str(file.with_suffix(".png")))
+            basename = f"{self.file.stem}_{m}"
+            if (out_dir / f"{basename}.csv").exists():
+                timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y%m%d%H%M%S"
+                )  # e.g. '20230518093055'
+                basename = f"{self.file.stem}_{m}_{timestamp}"
+            csv_file = out_dir / f"{basename}.csv"
+            md_file = out_dir / f"{basename}.json"
+            png_file = out_dir / f"{basename}.png"
+            dfdata.to_csv(csv_file)
+            pd.DataFrame([self.measurements[m]["metadata"]]).to_json(md_file, indent=4)
+            # Create and save plot
+            fig, ax = plt.subplots()
+            dfdata.plot(title=m, legend=False, ax=ax)
+            plt.savefig(png_file)
+            plt.close(fig)
 
     # Helpers
     def _read_csv_file(
@@ -257,14 +265,14 @@ class EnspireFile:
         # Monochromator is expected to be either Exc or Ems
         for k, measurement in measurements.items():
             label = f"Meas{k}"
-            heading = namedtuple("heading", "ex em res")
+            heading = collections.namedtuple("heading", "ex em res")
             head = heading(
                 f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
             )
             # excitation spectra must have only one emission wavelength
             if measurement["metadata"]["Monochromator"] == "Excitation":
                 x = [r for r in dfdata[head.em] if r]
-                c = Counter(x)
+                c = collections.Counter(x)
                 if (
                     len(c) != 1
                     or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
@@ -277,7 +285,7 @@ class EnspireFile:
             # emission spectra must have only one excitation wavelength
             elif measurement["metadata"]["Monochromator"] == "Emission":
                 x = [r for r in dfdata[head.ex] if r]
-                c = Counter(x)
+                c = collections.Counter(x)
                 if (
                     len(c) != 1
                     or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
@@ -362,7 +370,7 @@ class EnspireFile:
         """Check header and measurements.keys()."""
         counter_constant = 3  # Not sure, maybe for md with units. <Exc, Ems, F>
         meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
-        b = {k for k, v in Counter(meas).items() if v == counter_constant}
+        b = {k for k, v in collections.Counter(meas).items() if v == counter_constant}
         a = set(measurements.keys())
         verboseprint("check header and measurements.keys()", a == b, a, b)
         return a == b

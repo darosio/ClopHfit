@@ -443,56 +443,6 @@ def plot_pca(
         ax.text(x, y, w)
 
 
-def f_svd(f: pd.DataFrame, kind: str) -> tuple[plt.Figure, lmfit.model.ModelResult]:
-    """Perform singular value decomposition (SVD) and visualize results.
-
-    Creates a figure with five subplots to visualize the results.
-
-    Parameters
-    ----------
-    f : pd.DataFrame
-        The input data for SVD.
-    kind : str
-        Specifies the type of data, which determines the colormap, hue normalization, and callable function used in the plots.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        The created figure containing the subplots.
-    """
-    if kind == "Cl":
-        hue_norm = (0.0, 200.0)
-        palette = sb.cm.crest
-        fz = _binding_kd
-    else:
-        hue_norm = (5.7, 8.7)
-        palette = sb.cm.vlag_r
-        fz = _binding_pk
-    ddf = f.sub(f.iloc[:, 0], axis=0)
-    u, s, v = np.linalg.svd(ddf)
-    x = np.array(f.columns)
-    y = v[0, :] + 1
-    result = fit_binding(x, y, fz)
-    sb.set_style("ticks")
-    fig = sb.mpl.pyplot.figure(figsize=(12, 8))
-    ax1 = fig.add_axes([0.05, 0.65, 0.32, 0.31])
-    plot_spectra(f, ax1, hue_norm, palette, kind)
-
-    ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
-    _plot_autovectors(f.index, u, ax2)
-    ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
-    plot_autovalues(s[:], ax3)  # do not plat last 2 autovalues
-
-    ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
-    plot_lmfit(ax4, result, hue_norm, palette)
-    _apply_common_plot_style(ax4, "LM fit", kind, "")
-    ax4.set_ylabel("First Principal Component", color=COLOR_MAP(0))
-
-    ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
-    plot_pca(v, ax5, x, hue_norm, palette)
-    return fig, result
-
-
 def analyze_spectra(
     spectra: pd.DataFrame, kind: str, band: tuple[int, int] | None = None
 ) -> tuple[plt.Figure, lmfit.model.ModelResult]:
