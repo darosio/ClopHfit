@@ -181,7 +181,7 @@ show_missing = true
 
 [tool.coverage.run]
 branch = true
-omit = ["*__init__.py"]
+omit = ["*__init__.py", "*/old/*"]
 source = ["clophfit", "tests"]
 
 [tool.hatch.envs.coverage]

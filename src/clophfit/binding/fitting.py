@@ -34,7 +34,7 @@ def _binding_pk(
 def _binding_pk(
     x: float | NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
 ) -> float | NDArray[np.float_]:
-    return S1 + (S0 - S1) * 10 ** (K - x) / (1 + 10 ** (K - x))
+    return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
 
 
 @typing.overload
@@ -251,6 +251,7 @@ def fit_titration(  # noqa: PLR0913, PLR0915
     return res
 
 
+###############
 def fit_binding(
     x: NDArray[np.float_],
     y: NDArray[np.float_],
@@ -273,8 +274,8 @@ def fit_binding(
 
     Returns
     -------
-    result : Minimizer
-        lmfit's MinimizerResult object containing the fitting results.
+    result : ModelResult
+        lmfit's object containing the fitting results.
 
     Raises
     ------
@@ -285,9 +286,8 @@ def fit_binding(
     params = lmfit.Parameters()
     # Data-driven initialization
     xydata = pd.DataFrame({"x": x, "y": y})
-    s1_initial = xydata.y[xydata.x == min(xydata.x)].to_numpy()[0]
-    s0_initial = xydata.y[xydata.x == max(xydata.x)].to_numpy()[0]
-    # Find the x value where y is closest to (S1_initial + S0_initial) / 2
+    s0_initial = y[0]
+    s1_initial = y[-1]
     target_y = (s1_initial + s0_initial) / 2
     k_initial = xydata.loc[(xydata.y - target_y).abs().idxmin(), "x"]
     # Parameters initialization
@@ -514,23 +514,18 @@ def analyze_spectra_glob(
     if len(dbands.keys()) > 1:
         params = lmfit.Parameters()
         params.add("K", value=7, min=0)
-        i = 0
-        xc = []
-        yc = []
         for label in dbands:
-            params.add(f"S0_{i+1}", value=y_combined[label][0])
-            params.add(f"S1_{i+1}", value=y_combined[label][-1])
-            i += 1
-            xc.append(x_combined[label])
-            yc.append(y_combined[label])
-        ndata = len(xc)
+            params.add(f"S0_{label}", value=y_combined[label][0])
+            params.add(f"S1_{label}", value=y_combined[label][-1])
+        xc = {label: x_combined[label] for label in dbands}
+        yc = {label: y_combined[label] for label in dbands}
         fz = _binding_kd if kind == "Cl" else _binding_pk
         result_bands = lmfit.minimize(_binding_residuals, params, args=(fz, xc, yc))
         figure_bands, ax = plt.subplots()
-        xfit = [np.linspace(x.min(), x.max(), 100) for x in xc]
+        xfit = {label: np.linspace(x.min(), x.max(), 100) for label, x in xc.items()}
         yfit = _binding_residuals(result_bands.params, fz, xfit)
-        for i in range(ndata):
-            ax.plot(xc[i], yc[i], "o", xfit[i], yfit[i], "-")
+        for label in yc:
+            ax.plot(xc[label], yc[label], "o", xfit[label], yfit[label], "-")
         ax.grid(True)
     else:
         figure_bands, result_bands = (None, None)
@@ -588,11 +583,11 @@ def analyze_spectra(
     """
     if kind == "Cl":
         hue_norm = (0.0, 200.0)
-        palette = sb.cm.crest
+        palette = sb.cm.crest.name
         fz = _binding_kd
     else:
         hue_norm = (5.7, 8.7)
-        palette = sb.cm.vlag_r
+        palette = sb.cm.vlag_r.name
         fz = _binding_pk
     x = spectra.columns.to_numpy()
     fig = sb.mpl.pyplot.figure(figsize=(12, 8))
@@ -606,7 +601,7 @@ def analyze_spectra(
         ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
         _plot_autovectors(spectra.index, u, ax2)
         ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
-        plot_autovalues(s[:], ax3)  # do not plat last 2 autovalues
+        plot_autovalues(s[:], ax3)  # don't plot last auto-values?
         ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
         plot_pca(v, ax5, x, hue_norm, palette)
         ylabel = "First Principal Component"
@@ -632,14 +627,37 @@ def analyze_spectra(
     return fig, result
 
 
+@typing.overload
 def _binding_residuals(
     params: lmfit.Parameter,
     model_func: typing.Callable[
         [NDArray[np.float_], float, float, float], NDArray[np.float_]
     ],
-    x: list[NDArray[np.float_]],
-    datasets: list[NDArray[np.float_]] | None = None,
+    x: dict[str, NDArray[np.float_]],
+    datasets: dict[str, NDArray[np.float_]],
 ) -> list[NDArray[np.float_]]:
+    ...
+
+
+@typing.overload
+def _binding_residuals(
+    params: lmfit.Parameter,
+    model_func: typing.Callable[
+        [NDArray[np.float_], float, float, float], NDArray[np.float_]
+    ],
+    x: dict[str, NDArray[np.float_]],
+) -> dict[str, NDArray[np.float_]]:
+    ...
+
+
+def _binding_residuals(
+    params: lmfit.Parameter,
+    model_func: typing.Callable[
+        [NDArray[np.float_], float, float, float], NDArray[np.float_]
+    ],
+    x: dict[str, NDArray[np.float_]],
+    datasets: dict[str, NDArray[np.float_]] | None = None,
+) -> dict[str, NDArray[np.float_]] | list[NDArray[np.float_]]:
     """Compute residuals for multiple datasets given a shared binding model function.
 
     Parameters
@@ -658,14 +676,13 @@ def _binding_residuals(
     list of np.ndarray
         The residuals for each dataset or the model predictions if datasets is None.
     """
-    # Number of datasets
-    ndata = len(x)
-    models = [
-        model_func(x[i], params["K"], params[f"S0_{i+1}"], params[f"S1_{i+1}"])
-        for i in range(ndata)
-    ]
+    models = {}
+    for label in x:
+        models[label] = model_func(
+            x[label], params["K"], params[f"S0_{label}"], params[f"S1_{label}"]
+        )
     # If no datasets are provided, return the model predictions
     if datasets is None:
         return models
-    residuals = [datasets[i] - models[i] for i in range(ndata)]
+    residuals = [datasets[label] - models[label] for label in x]
     return residuals

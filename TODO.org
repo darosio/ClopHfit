@@ -10,7 +10,8 @@ This temp is present in each metadata. (e.g. measurements["A"]["metadata"]["Temp
 A future note file format:
 - well, pH, Cl, T, mut, meas labels
 
-  import corner
+#+begin_src jupyter-python
+import corner
 import arviz as az
 
 def mcmc_sampling(result):
@@ -30,6 +31,8 @@ def mcmc_sampling(result):
         marginals=True,
         textsize=10
     )
+#+end_src
+
 #+begin_src sh :results output :exports both
 echo "Well,pH,Cl,Name,Temp,Labels" > v224H_note.csv
 awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",V224H,37.0,A B"}' v224H_note >> v224H_note.csv
@@ -45,6 +48,9 @@ CLOSED: [2023-05-28 Sun 13:06]
 buf_A = tit["B"].iloc[:, -8:].mean(axis=1)
 ref = tit["B"].iloc[:, 10]
 f = tit["B"].iloc[:, :-8].subtract(buf_A, axis=0).subtract(ref, axis=0)
-* TODO complete band fit after svd
-* TODO add to =test_cli= =fit_titration= and pr.enspire fit...
+* DONE complete band fit after svd
+* TODO add to =test_cli=
+** DONE =fit_titration=
+CLOSED: [2023-06-05 lun 15:36]
+** TODO pr.enspire fit...
 * WAIT Finally adapt the script

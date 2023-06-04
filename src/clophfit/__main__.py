@@ -365,11 +365,9 @@ def _print_result(
 
 
 @clop.command("fit_titration")
-@click.argument("csvtable", type=click.Path(exists=True, path_type=Path))
+@click.argument("csv_fp", type=click.Path(exists=True, path_type=Path))
 @click.argument("note_fp", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "-d", "--out", "out_dir", default=Path("."), type=Path, help="destination directory"
-)
+@click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
 @click.option(
     "-t",
     "titration_type",
@@ -378,33 +376,29 @@ def _print_result(
     help="titration type (default: pH)",
 )
 @click.option(
-    "-b",
-    "--band-interval",
-    "band",
-    nargs=2,
-    type=int,
-    help="Integration interval from <1> to <2>",
+    "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
 )
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit_titration(csvtable, note_fp, out_dir, titration_type, band, verbose):  # type: ignore # noqa: PLR0913
+def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type: ignore # noqa: PLR0913
     """Update old svd or band fit of titration spectra."""
-    csv = pd.read_csv(csvtable)
-    note_file = pd.read_csv(note_fp, sep="\t")
+    note_df = pd.read_csv(note_fp, sep="\t")
+    csv = pd.read_csv(csv_fp)
+    out_fp = Path(out)
     # Ignore buffer wells! SVD will use differences between spectra.
-    note_file = note_file[note_file["mutant"] != "buffer"]
+    note_df = note_df[note_df["mutant"] != "buffer"]
     Notes = namedtuple("Notes", ["wells", "conc"])
-    note = Notes(list(note_file["well"]), list(note_file[titration_type.lower()]))
+    note = Notes(list(note_df["well"]), list(note_df[titration_type]))
     spectra = csv[note.wells]
     spectra.index = csv["lambda"]
     spectra.columns = np.array(note.conc)
     if verbose:
         print(csv)
-        click.echo(note_file)
+        click.echo(note_fp)
         print(note)
         print("DataFrame\n", spectra)
     figure, result = binding.fitting.analyze_spectra(spectra, titration_type, band)
     # output
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_file = out_dir / f"{csvtable.stem}_{band}_{note_fp.stem}.pdf"
+    out_fp.mkdir(parents=True, exist_ok=True)
+    pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
     figure.savefig(pdf_file)
     _print_result(result, pdf_file, str(band))
