@@ -312,8 +312,8 @@ def fit_enspire(
     note = prenspire.prenspire.Note(note_fp, verbose=verbose)
     note.build_titrations(ef)
     dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
-    x_combined = []
-    y_combined = []
+    x_combined = {}
+    y_combined = {}
     for name, d_name in note.titrations.items():
         for temp, d_temp in d_name.items():
             for tit, d_tit in d_temp.items():
@@ -328,23 +328,26 @@ def fit_enspire(
                     band: tuple[int, int] | None = dbands.get(label)
                     figure, result = binding.fitting.analyze_spectra(data, ttype, band)
                     if band:
-                        x_combined.append(result.userkws["x"])
-                        y_combined.append(result.data)
+                        x_combined[label] = result.userkws["x"]
+                        y_combined[label] = result.data
                     pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
                     figure.savefig(pdf_file)
                     _print_result(result, pdf_file, str(band))
-                if len(d_tit.keys()) > 1:
-                    figure, result = binding.fitting.analyze_spectra_glob(
+                if len(d_tit.keys() - dbands.keys()) > 1 or len(dbands.keys()) > 1:
+                    figs_res = binding.fitting.analyze_spectra_glob(
                         d_tit, ttype, dbands, x_combined, y_combined
                     )
-                    dbs = (
-                        "".join([f"{k}({v[0]},{v[1]})" for k, v in dbands.items()])
-                        if dbands
-                        else "svd"
-                    )
-                    pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{dbs}.pdf"
-                    figure.savefig(pdf_file)
-                    _print_result(result, pdf_file, str(band))
+                    figure_svd, result_svd, figure_bands, result_bands = figs_res
+                    if figure_svd:
+                        pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
+                        figure_svd.savefig(pdf_file)
+                        _print_result(result_svd, pdf_file, "")
+                    if figure_bands:
+                        bands_slist = [f"{k}({v[0]},{v[1]})" for k, v in dbands.items()]
+                        bands_str = "".join(bands_slist)
+                        pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
+                        figure_bands.savefig(pdf_file)
+                        _print_result(result_bands, pdf_file, bands_str)
 
 
 def _print_result(

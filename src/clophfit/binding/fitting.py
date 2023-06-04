@@ -472,48 +472,69 @@ def plot_pca(
 
 
 def analyze_spectra_glob(
-    mspectra: dict[str, pd.DataFrame],
+    titration: dict[str, pd.DataFrame],
     kind: str,
     dbands: dict[str, tuple[int, int]] | None = None,
-    x_combined: list[NDArray[np.float_]] | None = None,
-    y_combined: list[NDArray[np.float_]] | None = None,
+    x_combined: dict[str, NDArray[np.float_]] | None = None,
+    y_combined: dict[str, NDArray[np.float_]] | None = None,
 ) -> (
-    tuple[plt.Figure, lmfit.model.ModelResult]
-    | tuple[plt.Figure, lmfit.model.MinimizerResult]
+    tuple[
+        plt.Figure | None,
+        lmfit.model.ModelResult | None,
+        plt.Figure,
+        lmfit.model.MinimizerResult,
+    ]
+    | tuple[
+        plt.Figure,
+        lmfit.model.ModelResult,
+        plt.Figure | None,
+        lmfit.model.MinimizerResult | None,
+    ]
 ):
     """Analyze multi-label spectra visualize the results."""
     _gap_ = 1
     dbands = dbands or {}
-    x_combined = x_combined or []
-    y_combined = y_combined or []
-    prev_max = 0
-    adjusted_list = []
-    for spectra in mspectra.values():
-        spectra_adjusted = spectra.copy()  # Avoid modifying original data
-        spectra_adjusted.index += prev_max - spectra_adjusted.index.min() + _gap_
-        prev_max = spectra_adjusted.index.max()
-        adjusted_list.append(spectra_adjusted)
-    spectra_merged = pd.concat(adjusted_list)
-    if dbands.keys() == mspectra.keys():
-        ndata = len(x_combined)
+    x_combined = x_combined or {}
+    y_combined = y_combined or {}
+    labels_svd = titration.keys() - dbands.keys()
+    if len(labels_svd) > 1:
+        # Concatenate spectra.
+        prev_max = 0
+        adjusted_list = []
+        for label in labels_svd:
+            spectra_adjusted = titration[label].copy()  # Avoid modifying original data
+            spectra_adjusted.index += prev_max - spectra_adjusted.index.min() + _gap_
+            prev_max = spectra_adjusted.index.max()
+            adjusted_list.append(spectra_adjusted)
+        spectra_merged = pd.concat(adjusted_list)
+        # Analyze concatenated spectra.
+        figure_svd, result_svd = analyze_spectra(spectra_merged, kind)
+    else:
+        figure_svd, result_svd = (None, None)
+    if len(dbands.keys()) > 1:
         params = lmfit.Parameters()
         params.add("K", value=7, min=0)
-        for i in range(ndata):
-            params.add(f"S0_{i+1}", value=1.0 * np.random.rand() - 0.5)
-            params.add(f"S1_{i+1}", value=0.02 * np.random.rand() - 0.5)
+        i = 0
+        xc = []
+        yc = []
+        for label in dbands:
+            params.add(f"S0_{i+1}", value=y_combined[label][0])
+            params.add(f"S1_{i+1}", value=y_combined[label][-1])
+            i += 1
+            xc.append(x_combined[label])
+            yc.append(y_combined[label])
+        ndata = len(xc)
         fz = _binding_kd if kind == "Cl" else _binding_pk
-        result = lmfit.minimize(
-            _binding_residuals, params, args=(fz, x_combined, y_combined)
-        )
-        figure, ax = plt.subplots()
-        xfit = [np.linspace(x.min(), x.max(), 100) for x in x_combined]
-        yfit = _binding_residuals(result.params, fz, xfit)
+        result_bands = lmfit.minimize(_binding_residuals, params, args=(fz, xc, yc))
+        figure_bands, ax = plt.subplots()
+        xfit = [np.linspace(x.min(), x.max(), 100) for x in xc]
+        yfit = _binding_residuals(result_bands.params, fz, xfit)
         for i in range(ndata):
-            ax.plot(x_combined[i], y_combined[i], "o", xfit[i], yfit[i], "-")
+            ax.plot(xc[i], yc[i], "o", xfit[i], yfit[i], "-")
         ax.grid(True)
-        return figure, result
-    else:  # SVD
-        return analyze_spectra(spectra_merged, kind)
+    else:
+        figure_bands, result_bands = (None, None)
+    return figure_svd, result_svd, figure_bands, result_bands
 
 
 def analyze_spectra(
