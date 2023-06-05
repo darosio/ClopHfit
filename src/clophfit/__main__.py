@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import pprint
 import warnings
+from collections import namedtuple
 from pathlib import Path
 
 import click
+import lmfit  # type: ignore
+import numpy as np
+import pandas as pd
 
+from clophfit import __default_enspire_out_dir__
 from clophfit import binding
+from clophfit import prenspire
 from clophfit import prtecan
-from clophfit.prenspire.prenspire import EnspireFile
+from clophfit.prenspire import EnspireFile
 
 
 def fit_routine(  # noqa: PLR0913
@@ -81,7 +87,7 @@ def clop() -> None:  # pragma: no cover
     """Group command."""
 
 
-@clop.command()
+@clop.command("eq1")
 @click.argument("kd1", type=float)
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
@@ -94,7 +100,7 @@ def eq1(  # type: ignore
     print(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
-@clop.command("prtecan")
+@clop.command("pr.tecan")
 @click.argument("list_file", type=click.Path(path_type=Path))
 @click.option(
     "--dil",
@@ -266,17 +272,133 @@ def tecan(  # type: ignore  # noqa: PLR0913
             )
 
 
-@clop.command("prenspire")
-@click.argument("csv", type=click.Path(path_type=Path))
+@clop.command("pr.enspire")
+@click.argument("csv", type=click.Path(exists=True, path_type=Path))
+@click.argument("note_fp", type=click.Path(exists=True, path_type=Path), required=False)
+@click.option(
+    "-b",
+    "--band-intervals",
+    "bands",
+    multiple=True,
+    nargs=3,
+    type=(str, int, int),
+    help="Label and band interval (format: LABEL LOWER UPPER)",
+)
 @click.option(
     "--out",
+    "-d",
     type=click.Path(path_type=Path),
-    default="Meas",
+    default=__default_enspire_out_dir__,
     help="Path to output results.",
     show_default=True,
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def enspire(csv, out, verbose):  # type: ignore
+def enspire(csv, note_fp, out, bands, verbose):  # type: ignore
     """Save spectra as csv tables from EnSpire xls file."""
     ef = EnspireFile(csv, verbose=verbose)
     ef.export_measurements(out)
+    if note_fp is not None:
+        fit_enspire(ef, note_fp, out, bands, verbose)
+
+
+def fit_enspire(
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    bands: list[tuple[str, int, int]] | None,
+    verbose: int,
+) -> None:
+    """Fit prenspire titration (all labels, temp, mutant, titrations)."""
+    note = prenspire.prenspire.Note(note_fp, verbose=verbose)
+    note.build_titrations(ef)
+    dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
+    x_combined = {}
+    y_combined = {}
+    for name, d_name in note.titrations.items():
+        for temp, d_temp in d_name.items():
+            for tit, d_tit in d_temp.items():
+                if tit.split("_")[0] == "pH":
+                    ttype = "Cl"
+                elif tit.split("_")[0] == "Cl":
+                    ttype = "pH"
+                else:
+                    msg = "Unknown titration type."
+                    raise ValueError(msg)
+                for label, data in d_tit.items():
+                    band: tuple[int, int] | None = dbands.get(label)
+                    figure, result = binding.fitting.analyze_spectra(data, ttype, band)
+                    if band:
+                        x_combined[label] = result.userkws["x"]
+                        y_combined[label] = result.data
+                    pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
+                    figure.savefig(pdf_file)
+                    _print_result(result, pdf_file, str(band))
+                if len(d_tit.keys() - dbands.keys()) > 1 or len(dbands.keys()) > 1:
+                    figs_res = binding.fitting.analyze_spectra_glob(
+                        d_tit, ttype, dbands, x_combined, y_combined
+                    )
+                    figure_svd, result_svd, figure_bands, result_bands = figs_res
+                    if figure_svd:
+                        pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
+                        figure_svd.savefig(pdf_file)
+                        _print_result(result_svd, pdf_file, "")
+                    if figure_bands:
+                        bands_slist = [f"{k}({v[0]},{v[1]})" for k, v in dbands.items()]
+                        bands_str = "".join(bands_slist)
+                        pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
+                        figure_bands.savefig(pdf_file)
+                        _print_result(result_bands, pdf_file, bands_str)
+
+
+def _print_result(
+    result: lmfit.model.ModelResult | lmfit.model.MinimizerResult,
+    pdf_file: Path,
+    band_str: str,
+) -> None:
+    print(str(pdf_file))
+    print(f"Best fit using '{band_str}' band:\n")
+    try:
+        print(result.ci_report(ndigits=2, with_offset=False))
+    except (ValueError, AttributeError):
+        print(result.params)
+    print(f"\n Plot saved in '{pdf_file}'.\n")
+
+
+@clop.command("fit_titration")
+@click.argument("csv_fp", type=click.Path(exists=True, path_type=Path))
+@click.argument("note_fp", type=click.Path(exists=True, path_type=Path))
+@click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
+@click.option(
+    "-t",
+    "titration_type",
+    default="pH",
+    type=click.Choice(["pH", "Cl"], case_sensitive=False),
+    help="titration type (default: pH)",
+)
+@click.option(
+    "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
+)
+@click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
+def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type: ignore # noqa: PLR0913
+    """Update old svd or band fit of titration spectra."""
+    note_df = pd.read_csv(note_fp, sep="\t")
+    csv = pd.read_csv(csv_fp)
+    out_fp = Path(out)
+    # Ignore buffer wells! SVD will use differences between spectra.
+    note_df = note_df[note_df["mutant"] != "buffer"]
+    Notes = namedtuple("Notes", ["wells", "conc"])
+    note = Notes(list(note_df["well"]), list(note_df[titration_type]))
+    spectra = csv[note.wells]
+    spectra.index = csv["lambda"]
+    spectra.columns = np.array(note.conc)
+    if verbose:
+        print(csv)
+        click.echo(note_fp)
+        print(note)
+        print("DataFrame\n", spectra)
+    figure, result = binding.fitting.analyze_spectra(spectra, titration_type, band)
+    # output
+    out_fp.mkdir(parents=True, exist_ok=True)
+    pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
+    figure.savefig(pdf_file)
+    _print_result(result, pdf_file, str(band))

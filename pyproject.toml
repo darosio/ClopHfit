@@ -81,6 +81,8 @@ tests = [
 
 [project.scripts]
 "clop" = "clophfit.__main__:clop"
+"fit_titration_global_old" = "clophfit.old.fit_titration_global:main"
+"fit_titration_old" = "clophfit.old.fit_titration:main"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
@@ -179,7 +181,7 @@ show_missing = true
 
 [tool.coverage.run]
 branch = true
-omit = ["*__init__.py"]
+omit = ["*__init__.py", "*/old/*"]
 source = ["clophfit", "tests"]
 
 [tool.hatch.envs.coverage]

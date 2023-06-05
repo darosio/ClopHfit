@@ -32,7 +32,7 @@ def test_prenspire(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prenspire", str(input_csv), "--out", str(out)],
+        ["pr.enspire", str(input_csv), "--out", str(out)],
     )
     assert result.exit_code == 0
     # validate output files
@@ -60,6 +60,41 @@ def test_prtecan(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["prtecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
+        ["pr.tecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
     )
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize(
+    ("csv_file", "expected_output", "additional_params"),
+    [
+        ("A04 Cl_A.csv", " K :  13.64  14.28  14.86  15.44  16.04  16.71  17.51", None),
+        ("A04 Cl_A.csv", " K :  13.52  14.11  14.66  15.20", ["-b", "480", "530"]),
+        ("A04 Cl_B.csv", " K :  12.73  13.46  14.14  14.82  15.54  16.35  17.32", None),
+        ("A04 Cl_B.csv", " K :  12.93  13.66  14.34  15.02", ["-b", "480", "530"]),
+    ],
+)
+def test_fit_titration(
+    csv_file: str, expected_output: str, additional_params: list[str], tmp_path: Path
+) -> None:
+    """Test the old ``fit_titration.py`` script with actual data and validate output."""
+    note_fp = tpath / "data" / "NTT-A04-Cl_note"
+    csv_fp = tpath / "data" / "Meas" / csv_file
+    out = tmp_path / "tit_fit"
+    out.mkdir()
+    runner = CliRunner()
+    base_args = ["fit_titration", str(csv_fp), str(note_fp)]
+    base_args.extend(["-t", "cl", "-d", str(out)])
+    if additional_params:
+        base_args.extend(additional_params)
+        sbands = f"({additional_params[1]}, {additional_params[2]})"
+    else:
+        sbands = "None"
+    result = runner.invoke(clop, base_args)
+    print(result.exc_info)
+    print(result.output)
+    assert result.exit_code == 0
+    assert expected_output in result.output
+    # Asserting that PDF is created
+    expected_pdf_filename = out / f"{csv_fp.stem}_{sbands}_{note_fp.stem}.pdf"
+    assert expected_pdf_filename.exists()

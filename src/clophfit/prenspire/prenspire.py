@@ -1,11 +1,11 @@
 """Parses EnSpire data files."""
 from __future__ import annotations
 
+import collections
 import csv
+import datetime
 import typing
 import warnings
-from collections import Counter
-from collections import namedtuple
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -15,9 +15,11 @@ import numpy as np
 import pandas as pd
 import pyparsing
 
+from clophfit import __default_enspire_out_dir__
+from clophfit.prtecan import lookup_listoflines
+
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 # TODO: Titration.data ['A' 'B' 'C'] -- global fit
-from clophfit.prtecan import lookup_listoflines
 
 
 def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
@@ -59,7 +61,8 @@ class EnspireFile:
     Examples
     --------
     >>> from clophfit.prenspire import EnspireFile
-    >>> ef = EnspireFile("tests/EnSpire/h148g-spettroC.csv", verbose=0)
+    >>> from pathlib import Path
+    >>> ef = EnspireFile(Path("tests/EnSpire/h148g-spettroC.csv"), verbose=0)
     >>> ef.measurements['A']['lambda'][2]
     274.0
     """
@@ -76,7 +79,7 @@ class EnspireFile:
     def __post_init__(self) -> None:
         """Complete initialization."""
         verboseprint = verbose_print(self.verbose)
-        csvl = self._read_csv_file(Path(self.file), verboseprint)
+        csvl = self._read_csv_file(self.file, verboseprint)
         ini, fin = self._find_data_indices(csvl, verboseprint)
         self._ini, self._fin = ini, fin
         self._check_csvl_format(csvl, ini, fin, verboseprint)
@@ -88,24 +91,30 @@ class EnspireFile:
             csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
         )
 
-    def export_measurements(self, output_dir: Path = Path("Meas")) -> None:
-        """Create table as DataFrame and plot; save into Meas folder."""
-        output_dir.mkdir(parents=True, exist_ok=True)
+    def export_measurements(self, out_dir: Path = __default_enspire_out_dir__) -> None:
+        """Save measurements, metadata and plots into out_dir."""
+        out_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements:
-            data_dict = {"lambda": list(map(float, self.measurements[m]["lambda"]))}
-            data_dict.update(
-                {w: list(map(float, self.measurements[m][w])) for w in self.wells}
-            )
+            # Prepare data dictionary and construct DataFrame
+            data_dict = {"lambda": self.measurements[m]["lambda"]}
+            data_dict.update({w: self.measurements[m][w] for w in self.wells})
             dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
-            # Create plot
-            dfdata.plot(title=m, legend=False)
-            # Save files
-            file = output_dir / (self.file.stem + "_" + m + ".csv")
-            while file.exists():
-                # because with_stem was introduced in py3.9
-                file = file.with_name(file.stem + "-b" + file.suffix)
-            dfdata.to_csv(str(file))
-            plt.savefig(str(file.with_suffix(".png")))
+            basename = f"{self.file.stem}_{m}"
+            if (out_dir / f"{basename}.csv").exists():
+                timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+                    "%Y%m%d%H%M%S"
+                )  # e.g. '20230518093055'
+                basename = f"{self.file.stem}_{m}_{timestamp}"
+            csv_file = out_dir / f"{basename}.csv"
+            md_file = out_dir / f"{basename}.json"
+            png_file = out_dir / f"{basename}.png"
+            dfdata.to_csv(csv_file)
+            pd.DataFrame([self.measurements[m]["metadata"]]).to_json(md_file, indent=4)
+            # Create and save plot
+            fig, ax = plt.subplots()
+            dfdata.plot(title=m, legend=False, ax=ax)
+            plt.savefig(png_file)
+            plt.close(fig)
 
     # Helpers
     def _read_csv_file(
@@ -256,14 +265,14 @@ class EnspireFile:
         # Monochromator is expected to be either Exc or Ems
         for k, measurement in measurements.items():
             label = f"Meas{k}"
-            heading = namedtuple("heading", "ex em res")
+            heading = collections.namedtuple("heading", "ex em res")
             head = heading(
                 f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
             )
             # excitation spectra must have only one emission wavelength
             if measurement["metadata"]["Monochromator"] == "Excitation":
                 x = [r for r in dfdata[head.em] if r]
-                c = Counter(x)
+                c = collections.Counter(x)
                 if (
                     len(c) != 1
                     or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
@@ -276,7 +285,7 @@ class EnspireFile:
             # emission spectra must have only one excitation wavelength
             elif measurement["metadata"]["Monochromator"] == "Emission":
                 x = [r for r in dfdata[head.ex] if r]
-                c = Counter(x)
+                c = collections.Counter(x)
                 if (
                     len(c) != 1
                     or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
@@ -361,7 +370,7 @@ class EnspireFile:
         """Check header and measurements.keys()."""
         counter_constant = 3  # Not sure, maybe for md with units. <Exc, Ems, F>
         meas = [line.split(":")[0].replace("Meas", "") for line in headerdata]
-        b = {k for k, v in Counter(meas).items() if v == counter_constant}
+        b = {k for k, v in collections.Counter(meas).items() if v == counter_constant}
         a = set(measurements.keys())
         verboseprint("check header and measurements.keys()", a == b, a, b)
         return a == b
@@ -456,6 +465,71 @@ class ExpNote:
             self.titrations.append(Titration(conc, data, ph=ph))
 
         # TODO: BUFFER
+
+
+@dataclass
+class Note:
+    """Read and processes an Experimental Note file."""
+
+    fpath: Path
+    verbose: int = 0
+    #: A list of wells generated from the note file.
+    wells: list[str] = field(init=False, default_factory=list)
+    # A list of lines extracted from the note file.
+    _note: pd.DataFrame = field(init=False, default_factory=pd.DataFrame)
+    #: A list of titrations extracted from the note file.
+    titrations: dict[typing.Any, typing.Any] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Complete the initialization generating wells and _note_list."""
+        verboseprint = verbose_print(self.verbose)
+        with self.fpath.open("r", newline="") as file:
+            sample_data = file.read(1024)  # Read a sample of the CSV data
+        dialect = typing.cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
+        self._note = pd.read_csv(self.fpath, dialect=dialect)
+        self.wells: list[str] = np.array(self._note)[1:, 0].tolist()
+        verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
+
+    def build_titrations(self, ef: EnspireFile) -> None:
+        """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
+        df_no_buffer = self._note.query('Name != "buffer"')
+        threshold = 3
+        grouped0 = df_no_buffer.groupby("Name")
+        titrations: dict[typing.Any, typing.Any] = {}
+        for name0, group0 in grouped0:
+            grouped1 = group0.groupby("Temp")
+            titrations[name0] = {}
+            for name1, group1 in grouped1:
+                titrations[name0][name1] = {}
+                # Group by 'pH' and 'Cl' and keep only groups with more than 'threshold' rows.
+                for grouping in ["pH", "Cl"]:
+                    grouped2 = group1.groupby(grouping)
+                    for name2, group2 in grouped2:
+                        if len(group2) > threshold:
+                            grouped3 = group2.groupby("Labels")
+                            for name3, group3 in grouped3:
+                                wells = group3["Well"].to_list()
+                                meas_dict = {}
+                                for label in str(name3).split():
+                                    d = {w: ef.measurements[label][w] for w in wells}
+                                    value_df = pd.DataFrame(
+                                        d,
+                                        index=ef.measurements[label]["lambda"],
+                                        columns=wells,
+                                    )
+                                    if group3["pH"].nunique() > group3["Cl"].nunique():
+                                        value_df.columns = pd.Index(
+                                            group3["pH"].to_list()
+                                        )
+                                    else:
+                                        value_df.columns = pd.Index(
+                                            group3["Cl"].to_list()
+                                        )
+                                    meas_dict[label] = value_df
+                                titrations[name0][name1][
+                                    f"{grouping}_{name2}"
+                                ] = meas_dict
+        self.titrations = titrations
 
 
 class Titration:

@@ -1,0 +1,56 @@
+- Tit works for a plate organized with a pH-value for each row and a Cl conc
+  value for each column.
+- Old fit works with a list of well and corresponding cl conc orpH value; the
+  kind ["pH", "Cl"] decides
+
+Some measurements e.g. "A", "C" and "D" are at T = 20 others ("B", "E" and "F")
+are taken at T = 37.
+This temp is present in each metadata. (e.g. measurements["A"]["metadata"]["Temp"]).
+
+A future note file format:
+- well, pH, Cl, T, mut, meas labels
+
+#+begin_src jupyter-python
+import corner
+import arviz as az
+
+def mcmc_sampling(result):
+    # result = result.emcee(steps=500, burn=100, params=result.params, is_weighted=True)
+    result = result.emcee(steps=2000, burn=50, workers=2000, is_w)
+    samples = result.flatchain
+    #return corner.corner(
+    #    samples,
+    #    labels=result.var_names,
+    #    truths=list(result.params.valuesdict().values()),)
+    samples_dict = {col: result.flatchain[col].values for col in result.flatchain.columns}
+    idata = az.from_dict(samples_dict)
+    return az.plot_pair(
+        idata,
+        var_names=result.var_names,
+        kind='kde',
+        marginals=True,
+        textsize=10
+    )
+#+end_src
+
+#+begin_src sh :results output :exports both
+echo "Well,pH,Cl,Name,Temp,Labels" > v224H_note.csv
+awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",V224H,37.0,A B"}' v224H_note >> v224H_note.csv
+#+end_src
+
+* TODO New fit paying attention to:
+** DONE fit 2 datasets with different weight (pca1 and pca2 test ddf)
+with ddf pca1 is usually sufficiently good.
+** TODO discard outliers
+* DONE extend to more labels like A C D
+CLOSED: [2023-05-28 Sun 13:06]
+* TODO subtract buffer if present
+buf_A = tit["B"].iloc[:, -8:].mean(axis=1)
+ref = tit["B"].iloc[:, 10]
+f = tit["B"].iloc[:, :-8].subtract(buf_A, axis=0).subtract(ref, axis=0)
+* DONE complete band fit after svd
+* TODO add to =test_cli=
+** DONE =fit_titration=
+CLOSED: [2023-06-05 lun 15:36]
+** TODO pr.enspire fit...
+* WAIT Finally adapt the script

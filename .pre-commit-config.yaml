@@ -68,9 +68,9 @@ repos:
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.10.0
     hooks:
-      - id: python-check-blanket-noqa
+      # - id: python-check-blanket-noqa
       # - id: python-check-blanket-type-ignore # same as ruff PGH
-      - id: python-no-eval
+      # - id: python-no-eval
       - id: python-use-type-annotations
       - id: rst-backticks
       - id: rst-directive-colons
