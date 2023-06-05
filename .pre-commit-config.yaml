@@ -28,7 +28,7 @@ repos:
       - id: requirements-txt-fixer
       - id: detect-private-key
       - id: trailing-whitespace # hyper
-        exclude: "^tests/EnSpire/"
+        exclude: "^tests/EnSpire/|^tests/data/tmp/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
     rev: v2.9.0

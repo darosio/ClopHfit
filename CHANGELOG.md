@@ -3,6 +3,47 @@
 
 # Changelog
 
+## v0.8.0 (2023-06-05)
+
+### Feat
+
+- **prenspire**: build and fit single-and-global SVD-or-band titrations
+- **clop**: fit_titration for old note
+- **clop**: `fit titration global old` and `fit titration old` as cli command
+- add \_\_version\_\_ for output into "Meas-{version}"
+
+### Test
+
+- **clop**: add test for new fit_titration cli
+
+### Docs
+
+- Add instruction to install auto completion
+
+### Build
+
+- remove pygrep-hook: python-check-blanket-noqa and python-no-eval
+- update coverage[toml] requirement from <7.2.7 to <7.2.8 (#272)
+- update pandas requirement from <2.0.2 to <2.0.3 (#271)
+- bump nbsphinx from 0.9.1 to 0.9.2 (#269)
+- bump ruff from 0.0.269 to 0.0.270 (#268)
+- update coverage[toml] requirement from <7.2.6 to <7.2.7 (#267)
+- update rpy2 requirement from <3.5.12 to <3.5.13 (#265)
+- bump ruff from 0.0.267 to 0.0.269 (#264)
+
+### Refactor
+
+- **prenspire**: new Note (titration build) and fit_titration cmd; keep the old
+  ExpNote for compatibility with old note files.
+- **prenspire**: analyze_spectra_glob for SVD or multiple bands
+- **prenspire**: SVD spectra expand (with helpers functions) on old
+  `fit_titration` script
+
+### chore
+
+- update pre-commit hooks (#270)
+- update pre-commit hooks (#266)
+
 ## v0.7.1 (2023-05-18)
 
 ### Fix

@@ -54,3 +54,12 @@ f = tit["B"].iloc[:, :-8].subtract(buf_A, axis=0).subtract(ref, axis=0)
 CLOSED: [2023-06-05 lun 15:36]
 ** TODO pr.enspire fit...
 * WAIT Finally adapt the script
+* changelog
+- Remove pygrep-hook:  python-check-blanket-noqa and python-no-eval.
+- Add `fit titration global old` and `fit titration old` as cli command.
+- Add __version__ for output into "Meas-{__version__}".
+- pr.enspire now build and fit single-and-global SVD-or-band titrations. New
+  Note class contains this new logic. I need to keep the old for compatibility
+  with the old note files.
+- SVD spectra expand (with helpers functions) on old `fit_titration` script.
+- Add test for the fit_titration cli.
