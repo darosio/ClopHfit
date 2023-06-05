@@ -86,7 +86,7 @@ tests = [
 
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
-Changelog = "https://darosio.github.io/ClopHfit/misc/CHANGELOG.html"
+Changelog = "https://github.com/darosio/ClopHfit/blob/main/CHANGELOG.md"
 Discussions = "https://github.com/darosio/ClopHfit/discussions"
 Documentation = "https://clophfit.readthedocs.io"
 "Github releases" = "https://github.com/darosio/ClopHfit/releases"
