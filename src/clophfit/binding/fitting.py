@@ -581,6 +581,7 @@ def analyze_spectra(
     the fitting results. For the band method, it plots the original spectra and
     the fitting results.
     """
+    y_offset = 1.0
     if kind == "Cl":
         hue_norm = (0.0, 200.0)
         palette = sb.cm.crest.name
@@ -596,7 +597,7 @@ def analyze_spectra(
     if band is None:  # SVD
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
-        y = v[0, :] + 1
+        y = v[0, :] + y_offset
         result = fit_binding(x, y, fz)
         ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
         _plot_autovectors(spectra.index, u, ax2)
