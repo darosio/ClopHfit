@@ -20,6 +20,108 @@ COLOR_MAP = plt.cm.Set1
 
 
 @typing.overload
+def binding_1site(
+    x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
+) -> float:
+    ...
+
+
+@typing.overload
+def binding_1site(
+    x: NDArray[np.float_],
+    K: float,  # noqa: N803
+    S0: float,  # noqa: N803
+    S1: float,  # noqa: N803
+    is_ph: bool = False,
+) -> NDArray[np.float_]:
+    ...
+
+
+def binding_1site(
+    x: float | NDArray[np.float_],
+    K: float,  # noqa: N803
+    S0: float,  # noqa: N803
+    S1: float,  # noqa: N803
+    is_ph: bool = False,
+) -> float | NDArray[np.float_]:
+    """
+    Single site binding model function.
+
+    Parameters
+    ----------
+    x : float | np.ndarray
+        Concentration values.
+    K : float
+        Dissociation constant.
+    S0 : float
+        Plateau value for the unbound state.
+    S1 : float
+        Plateau value for the bound state.
+    is_ph : bool
+        If True, use the pH model for binding. Default is False.
+
+    Returns
+    -------
+    float | np.ndarray
+        Modeled binding values.
+
+    Note:
+        The parameters K, S0 and S1 are in uppercase by convention as used in lmfit library.
+    """
+    if is_ph:
+        return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
+    return S0 + (S1 - S0) * x / K / (1 + x / K)
+
+
+@typing.overload
+def _binding_1site_residuals(
+    params: lmfit.Parameters,
+    x: dict[str, NDArray[np.float_]],
+    is_ph: bool,
+    datasets: dict[str, NDArray[np.float_]],
+) -> NDArray[np.float_]:
+    ...
+
+
+@typing.overload
+def _binding_1site_residuals(
+    params: lmfit.Parameters, x: dict[str, NDArray[np.float_]], is_ph: bool
+) -> dict[str, NDArray[np.float_]]:
+    ...
+
+
+def _binding_1site_residuals(
+    params: lmfit.Parameters,
+    x: dict[str, NDArray[np.float_]],
+    is_ph: bool,
+    datasets: dict[str, NDArray[np.float_]] | None = None,
+    weights: dict[str, NDArray[np.float_]] | None = None,
+) -> dict[str, NDArray[np.float_]] | NDArray[np.float_]:
+    """Compute concatenated residuals (array) for multiple datasets; or model predictions (dict)."""
+    models = {}
+    for label, x_data in x.items():
+        models[label] = binding_1site(
+            x_data,
+            params["K"].value,
+            params[f"S0_{label}"].value,
+            params[f"S1_{label}"].value,
+            is_ph,
+        )
+    # If no datasets are provided, return the model predictions
+    if datasets is None:
+        return models
+    if weights is None:
+        residuals: NDArray[np.float_] = np.concatenate(
+            [datasets[label] - models[label] for label in x]
+        )
+    else:
+        residuals = np.concatenate(
+            [weights[label] * (datasets[label] - models[label]) for label in x]
+        )
+    return residuals
+
+
+@typing.overload
 def _binding_pk(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
     ...
 
@@ -35,6 +137,12 @@ def _binding_pk(
     x: float | NDArray[np.float_], K: float, S0: float, S1: float  # noqa: N803
 ) -> float | NDArray[np.float_]:
     return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
+
+
+def _binding_pkr(
+    x: float | NDArray[np.float_], K: float, R: float, S1: float  # noqa: N803
+) -> float | NDArray[np.float_]:
+    return S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
 
 
 @typing.overload
@@ -252,53 +360,22 @@ def fit_titration(  # noqa: PLR0913, PLR0915
 
 
 ###############
-def fit_binding(
-    x: NDArray[np.float_],
-    y: NDArray[np.float_],
-    model_func: typing.Callable[[float, float, float, float], float],
-) -> lmfit.model.ModelResult:
-    """Fit a dataset (x, y) using a single-site binding model with lmfit.
 
-    The model is provided by the `model_func` argument, a function defining the
-    model for fitting, which takes four arguments - x, K, S0 and S1, and returns
-    a float.
 
-    Parameters
-    ----------
-    x : NDArray[np.float]
-        The x values of the dataset.
-    y : NDArray[np.float]
-        The y values of the dataset.
-    model_func : Callable
-        The function defining the model for fitting.
-
-    Returns
-    -------
-    result : ModelResult
-        lmfit's object containing the fitting results.
-
-    Raises
-    ------
-    ValueError
-        If the optimization fails.
-    """
-    model = lmfit.Model(model_func)
+def _build_params_1site(
+    xc: dict[str, NDArray[np.float_]], yc: dict[str, NDArray[np.float_]]
+) -> lmfit.minimizer.Parameters:
+    """Build fitting parameters."""
     params = lmfit.Parameters()
     # Data-driven initialization
-    xydata = pd.DataFrame({"x": x, "y": y})
-    s0_initial = y[0]
-    s1_initial = y[-1]
-    target_y = (s1_initial + s0_initial) / 2
-    k_initial = xydata.loc[(xydata.y - target_y).abs().idxmin(), "x"]
-    # Parameters initialization
-    params.add("K", value=k_initial, min=2)
-    params.add("S1", value=s1_initial)
-    params.add("S0", value=s0_initial)
-    result = model.fit(y, params, x=x)
-    if result.success is not True:
-        message = f"Optimization failed with message: {result.message}"
-        raise ValueError(message)
-    return result
+    k_initial = []
+    for label in xc:
+        params.add(f"S0_{label}", value=yc[label][0])
+        params.add(f"S1_{label}", value=yc[label][-1])
+        target_y = (yc[label][0] + yc[label][-1]) / 2
+        k_initial.append(xc[label][np.argmin(np.abs(yc[label] - target_y))])
+    params.add("K", value=np.mean(k_initial), min=0)
+    return params
 
 
 def plot_lmfit(
@@ -471,26 +548,59 @@ def plot_pca(
         ax.text(x, y, w)
 
 
+def plot_fit(
+    xc: dict[str, NDArray[np.float_]],
+    yc: dict[str, NDArray[np.float_]],
+    is_ph: bool,
+    result: lmfit.model.MinimizerResult,
+) -> plt.Figure:
+    """Plot residuals for each dataset."""
+    figure, ax = plt.subplots()
+    xfit = {label: np.linspace(x.min(), x.max(), 100) for label, x in xc.items()}
+    yfit = _binding_1site_residuals(result.params, xfit, is_ph)
+    for label in yc:
+        ax.plot(xc[label], yc[label], "o", xfit[label], yfit[label], "-")
+    ax.grid(True)
+    return figure
+
+
+def fit_binding_glob(
+    kind: str, xc: dict[str, NDArray[np.float_]], yc: dict[str, NDArray[np.float_]]
+) -> tuple[plt.Figure, lmfit.model.MinimizerResult, lmfit.minimizer.Minimizer]:
+    """Analyze multi-label binding datasets and visualize the results."""
+    is_ph = kind == "pH"
+    keys = yc.keys()
+    wc = {}  # weights
+    # Calculate standard deviations of residuals
+    for label in keys:
+        x = {label: xc[label]}
+        y = {label: yc[label]}
+        params = _build_params_1site(x, y)
+        res = lmfit.minimize(_binding_1site_residuals, params, args=(x, is_ph, y))
+        wc[label] = 1 / np.std(res.residual)
+    params = _build_params_1site(xc, yc)
+
+    mini = lmfit.Minimizer(
+        _binding_1site_residuals, params, fcn_args=(xc, is_ph, yc, wc)
+    )
+    # XXX: result = lmfit.minimize(_binding_residuals, params, args=(fz, xc, yc, wc))
+    result = mini.minimize()
+    figure = plot_fit(xc, yc, is_ph, result)
+    return figure, result, mini
+
+
 def analyze_spectra_glob(
     titration: dict[str, pd.DataFrame],
     kind: str,
     dbands: dict[str, tuple[int, int]] | None = None,
     x_combined: dict[str, NDArray[np.float_]] | None = None,
     y_combined: dict[str, NDArray[np.float_]] | None = None,
-) -> (
-    tuple[
-        plt.Figure | None,
-        lmfit.model.ModelResult | None,
-        plt.Figure,
-        lmfit.model.MinimizerResult,
-    ]
-    | tuple[
-        plt.Figure,
-        lmfit.model.ModelResult,
-        plt.Figure | None,
-        lmfit.model.MinimizerResult | None,
-    ]
-):
+) -> tuple[
+    None | plt.Figure,
+    None | lmfit.model.ModelResult,
+    None | plt.Figure,
+    None | lmfit.model.MinimizerResult,
+]:
     """Analyze multi-label spectra visualize the results."""
     _gap_ = 1
     dbands = dbands or {}
@@ -512,21 +622,19 @@ def analyze_spectra_glob(
     else:
         figure_svd, result_svd = (None, None)
     if len(dbands.keys()) > 1:
+        is_ph = kind == "pH"
         params = lmfit.Parameters()
         params.add("K", value=7, min=0)
+        params.add("ph", value=(kind == "pH"), vary=False)
         for label in dbands:
             params.add(f"S0_{label}", value=y_combined[label][0])
             params.add(f"S1_{label}", value=y_combined[label][-1])
         xc = {label: x_combined[label] for label in dbands}
         yc = {label: y_combined[label] for label in dbands}
-        fz = _binding_kd if kind == "Cl" else _binding_pk
-        result_bands = lmfit.minimize(_binding_residuals, params, args=(fz, xc, yc))
-        figure_bands, ax = plt.subplots()
-        xfit = {label: np.linspace(x.min(), x.max(), 100) for label, x in xc.items()}
-        yfit = _binding_residuals(result_bands.params, fz, xfit)
-        for label in yc:
-            ax.plot(xc[label], yc[label], "o", xfit[label], yfit[label], "-")
-        ax.grid(True)
+        result_bands = lmfit.minimize(
+            _binding_1site_residuals, params, args=(xc, is_ph, yc)
+        )
+        figure_bands = plot_fit(xc, yc, is_ph, result_bands)
     else:
         figure_bands, result_bands = (None, None)
     return figure_svd, result_svd, figure_bands, result_bands
@@ -581,15 +689,14 @@ def analyze_spectra(
     the fitting results. For the band method, it plots the original spectra and
     the fitting results.
     """
+    is_ph = kind == "pH"
     y_offset = 1.0
     if kind == "Cl":
         hue_norm = (0.0, 200.0)
         palette = sb.cm.crest.name
-        fz = _binding_kd
     else:
         hue_norm = (5.7, 8.7)
         palette = sb.cm.vlag_r.name
-        fz = _binding_pk
     x = spectra.columns.to_numpy()
     fig = sb.mpl.pyplot.figure(figsize=(12, 8))
     ax1 = fig.add_axes([0.05, 0.65, 0.32, 0.31])
@@ -598,7 +705,8 @@ def analyze_spectra(
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
         y = v[0, :] + y_offset
-        result = fit_binding(x, y, fz)
+        result = fit_binding(x, is_ph, y)
+        # XXX: fff, result, mini = analyze_binding_glob(kind, {"": x}, {"": y})
         ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
         _plot_autovectors(spectra.index, u, ax2)
         ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
@@ -618,7 +726,7 @@ def analyze_spectra(
         )
         # rescale y
         y /= np.abs(y).max() / 10
-        result = fit_binding(x, y, fz)
+        result = fit_binding(x, is_ph, y)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = "k"
     ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
@@ -628,62 +736,36 @@ def analyze_spectra(
     return fig, result
 
 
-@typing.overload
-def _binding_residuals(
-    params: lmfit.Parameter,
-    model_func: typing.Callable[
-        [NDArray[np.float_], float, float, float], NDArray[np.float_]
-    ],
-    x: dict[str, NDArray[np.float_]],
-    datasets: dict[str, NDArray[np.float_]],
-) -> list[NDArray[np.float_]]:
-    ...
+def fit_binding(
+    x: NDArray[np.float_], is_ph: bool, y: NDArray[np.float_]
+) -> lmfit.model.ModelResult:
+    """Fit a dataset (x, y) using a single-site binding model with lmfit.
 
-
-@typing.overload
-def _binding_residuals(
-    params: lmfit.Parameter,
-    model_func: typing.Callable[
-        [NDArray[np.float_], float, float, float], NDArray[np.float_]
-    ],
-    x: dict[str, NDArray[np.float_]],
-) -> dict[str, NDArray[np.float_]]:
-    ...
-
-
-def _binding_residuals(
-    params: lmfit.Parameter,
-    model_func: typing.Callable[
-        [NDArray[np.float_], float, float, float], NDArray[np.float_]
-    ],
-    x: dict[str, NDArray[np.float_]],
-    datasets: dict[str, NDArray[np.float_]] | None = None,
-) -> dict[str, NDArray[np.float_]] | list[NDArray[np.float_]]:
-    """Compute residuals for multiple datasets given a shared binding model function.
+    The model is provided by the `model_func` argument, a function defining the
+    model for fitting, which takes four arguments - x, K, S0 and S1, and returns
+    a float.
 
     Parameters
     ----------
-    params : lmfit.Parameter
-        Parameters for the model function.
-    model_func : callable
-        The model function used for fitting the data.
-    x : list of np.ndarray
-        Independent variables for each dataset.
-    datasets : list of np.ndarray, optional
-        The datasets to fit. If None, returns only the model predictions.
+    x : NDArray[np.float]
+        The x values of the dataset.
+    is_ph : bool
+        If True, uses a pH titration model for fitting.
+    y : NDArray[np.float]
+        The y values of the dataset.
 
     Returns
     -------
-    list of np.ndarray
-        The residuals for each dataset or the model predictions if datasets is None.
+    result : ModelResult
+        lmfit's object containing the fitting results.
     """
-    models = {}
-    for label in x:
-        models[label] = model_func(
-            x[label], params["K"], params[f"S0_{label}"], params[f"S1_{label}"]
-        )
-    # If no datasets are provided, return the model predictions
-    if datasets is None:
-        return models
-    residuals = [datasets[label] - models[label] for label in x]
-    return residuals
+    model = lmfit.Model(binding_1site)
+    params = _build_params_1site({"1": x}, {"1": y})
+    p = params.pop("S0_1")
+    params.add("S0", value=p.value)
+    p = params.pop("S1_1")
+    params.add("S1", value=p.value)
+    print(params)
+    params.add("is_ph", value=is_ph, vary=False)
+    result = model.fit(y, params, x=x)
+    return result

@@ -7,9 +7,11 @@ from collections import namedtuple
 from pathlib import Path
 
 import click
+import corner  # type: ignore
 import lmfit  # type: ignore
 import numpy as np
 import pandas as pd
+from scipy import stats  # type: ignore
 
 from clophfit import __default_enspire_out_dir__
 from clophfit import binding
@@ -418,8 +420,35 @@ def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type:
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
 def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ignore
     """Update old svd or band fit of titration spectra."""
-    print(file)
-    print(out)
-    print(titration_type)
-    print(boot)
-    print(verbose)
+    file_df = pd.read_csv(file)
+    if verbose:
+        click.echo(file_df)
+        print(out)
+        print(titration_type)
+        print(boot)
+    xc = {}
+    yc = {}
+    for label in file_df.columns[1:]:
+        xc[label] = file_df["x"].to_numpy()
+        yc[label] = file_df[label].to_numpy()
+    figure, result, mini = binding.fitting.fit_binding_glob(titration_type, xc, yc)
+    lmfit.printfuncs.report_fit(result, min_correl=0.75)
+    figure.savefig(Path(file).with_suffix(".png"))
+
+    threshold = 7.8  # The threshold value to compare against
+
+    # Calculate z-scores and probabilities
+    z_score = (result.params["K"].value - threshold) / result.params["K"].stderr / 4
+    probability = stats.norm.cdf(z_score)
+
+    emcee_plot = corner.corner(
+        result.flatchain,
+        labels=result.var_names,
+        truths=list(result.params.valuesdict().values()),
+    )
+    emcee_plot.savefig("e.png")
+    print(probability)
+    y1_ratio = result.params["S1_y1"].value / result.params["S0_y1"].value
+    y2_ratio = result.params["S0_y2"].value / result.params["S1_y2"].value
+    print(f"y1: {y1_ratio}")
+    print(f"y2: {y2_ratio}")
