@@ -52,7 +52,7 @@ repos:
         require_serial: true
 
   - repo: https://github.com/asottile/blacken-docs
-    rev: 1.13.0
+    rev: 1.14.0
     hooks:
       - id: blacken-docs
         additional_dependencies: [black]
@@ -90,7 +90,7 @@ repos:
         stages: [manual]
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.2.4
+    rev: v2.2.5
     hooks:
       - id: codespell
 
@@ -101,7 +101,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: 3.2.2
+    rev: 3.3.0
     hooks:
       - id: commitizen
       - id: commitizen-branch
