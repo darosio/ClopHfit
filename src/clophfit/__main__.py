@@ -402,3 +402,24 @@ def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type:
     pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
     figure.savefig(pdf_file)
     _print_result(result, pdf_file, str(band))
+
+
+@clop.command("fit_titration_global")
+@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
+@click.option(
+    "-t",
+    "titration_type",
+    default="pH",
+    type=click.Choice(["pH", "Cl"], case_sensitive=False),
+    help="titration type (default: pH)",
+)
+@click.option("-b", "--boot", type=int, help="Number of booting iterations")
+@click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
+def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ignore
+    """Update old svd or band fit of titration spectra."""
+    print(file)
+    print(out)
+    print(titration_type)
+    print(boot)
+    print(verbose)
