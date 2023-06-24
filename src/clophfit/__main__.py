@@ -6,12 +6,12 @@ import warnings
 from collections import namedtuple
 from pathlib import Path
 
+import arviz as az
 import click
 import corner  # type: ignore
 import lmfit  # type: ignore
 import numpy as np
 import pandas as pd
-from scipy import stats  # type: ignore
 
 from clophfit import __default_enspire_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
@@ -317,25 +317,29 @@ def fit_enspire(
         for temp, d_temp in d_name.items():
             for tit, d_tit in d_temp.items():
                 if tit.split("_")[0] == "pH":
-                    ttype = "Cl"
+                    is_ph = False
                 elif tit.split("_")[0] == "Cl":
-                    ttype = "pH"
+                    is_ph = True
                 else:
                     msg = "Unknown titration type."
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band: tuple[int, int] | None = dbands.get(label)
-                    figure, result = binding.fitting.analyze_spectra(data, ttype, band)
+                    figure, result = binding.fitting.analyze_spectra(data, is_ph, band)
                     if band:
                         x_combined[label] = result.userkws["x"]
                         y_combined[label] = result.data
                     pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
                     figure.savefig(pdf_file)
                     _print_result(result, pdf_file, str(band))
-                if len(d_tit.keys() - dbands.keys()) > 1 or len(dbands.keys()) > 1:
-                    figs_res = binding.fitting.analyze_spectra_glob(
-                        d_tit, ttype, dbands, x_combined, y_combined
-                    )
+                # Global spectra analysis when more than 1 (svd or band) label
+                if (
+                    len(d_tit.keys() - dbands.keys()) > 1
+                    or len(dbands.keys() & d_tit.keys()) > 1
+                ):
+                    dsub = {k: v for k, v in dbands.items() if k in d_tit}
+                    ds = binding.fitting.Dataset(x_combined, y_combined, is_ph)
+                    figs_res = binding.fitting.analyze_spectra_glob(d_tit, ds, dsub)
                     figure_svd, result_svd, figure_bands, result_bands = figs_res
                     if figure_svd:
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
@@ -428,24 +432,19 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
     for label in file_df.columns[1:]:
         xc[label] = file_df["x"].to_numpy()
         yc[label] = file_df[label].to_numpy()
-    figure, result, mini = binding.fitting.fit_binding_glob(titration_type, xc, yc)
-    lmfit.printfuncs.report_fit(result, min_correl=0.75)
+    ds = binding.fitting.Dataset(xc, yc, titration_type == "pH")
+    figure, result, mini = binding.fitting.fit_binding_glob(ds, True)
+    lmfit.printfuncs.report_fit(result, min_correl=0.65)
     figure.savefig(Path(file).with_suffix(".png"))
-
-    threshold = 7.8  # The threshold value to compare against
-
-    # Calculate z-scores and probabilities
-    z_score = (result.params["K"].value - threshold) / result.params["K"].stderr / 4
-    probability = stats.norm.cdf(z_score)
-
-    emcee_plot = corner.corner(
-        result.flatchain,
-        labels=result.var_names,
-        truths=list(result.params.valuesdict().values()),
-    )
+    result_emcee = mini.emcee(burn=150, steps=1800)
+    samples = result_emcee.flatchain
+    # Convert the dictionary of flatchains to an ArviZ InferenceData object
+    samples_dict = {key: np.array(val) for key, val in samples.items()}
+    idata = az.from_dict(posterior=samples_dict)
+    quantiles = np.percentile(idata.posterior["K"], [2.275, 15.865, 50, 84.135, 97.275])
+    emcee_plot = corner.corner(samples)
     emcee_plot.savefig("e.png")
-    print(probability)
-    y1_ratio = result.params["S1_y1"].value / result.params["S0_y1"].value
-    y2_ratio = result.params["S0_y2"].value / result.params["S1_y2"].value
-    print(f"y1: {y1_ratio}")
-    print(f"y2: {y2_ratio}")
+    print(quantiles)
+    for lbl in ds:
+        ratio = result.params[f"S0_{lbl}"].value / result.params[f"S1_{lbl}"].value
+        print(f"Ratio of {lbl}: {ratio}")

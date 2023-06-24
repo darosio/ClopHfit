@@ -8,10 +8,10 @@ It defines the following types:
 """
 from __future__ import annotations
 
-from typing import Dict
+import typing
 
 import numpy as np
 from numpy import typing as npt
 
 ArrayF = npt.NDArray[np.float_]
-ArrayDict = Dict[str, ArrayF]
+ArrayDict = typing.Dict[str, ArrayF]

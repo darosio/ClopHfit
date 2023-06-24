@@ -1,11 +1,13 @@
 """Test cases for the binding functions module."""
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 
 from clophfit import binding
-from clophfit.binding.fitting import fit_binding
+from clophfit.binding.fitting import Dataset, fit_binding
 
 
 def test_kd() -> None:
@@ -51,3 +53,50 @@ class TestFitBinding:
         assert np.isclose(result.params["K"].value, 7, 1e-4)
         assert np.isclose(result.params["S0"].value, 2, 1e-4)
         assert np.isclose(result.params["S1"].value, 1, 1e-5)
+
+
+def test_dataset_class() -> None:
+    """Test Dataset and DataPair classes.
+
+    This includes tests for:
+    - Correct initialization with various input types (arrays and dictionaries).
+    - Correct storage and retrieval of data pairs in the Dataset.
+    - Appropriate error handling for mismatched keys and unequal data lengths.
+    """
+    # Define some test data
+    x1 = np.array([5.5, 7.0, 8.5])
+    x2 = np.array([6.8, 7.0, 7.2])
+    y1 = np.array([2.1, 1.6, 1.1])
+    y2 = np.array([1.8, 1.6, 1.4])
+    # Test the case where x and y are both single ArrayF.
+    # The key should default to "default".
+    ds = Dataset(x1, y1)
+    assert np.array_equal(ds["default"].x, x1)
+    assert np.array_equal(ds["default"].y, y1)
+    # Test the case where x is a single ArrayF and y is an ArrayDict.
+    # The keys should come from y.
+    ds = Dataset(x1, {"y1": y1, "y2": y2})
+    assert np.array_equal(ds["y1"].x, x1)
+    assert np.array_equal(ds["y2"].x, x1)
+    assert np.array_equal(ds["y1"].y, y1)
+    assert np.array_equal(ds["y2"].y, y2)
+    # Test the case where x and y are both ArrayDict and keys match.
+    # The keys should match between x and y.
+    ds = Dataset({"x1": x1, "x2": x2}, {"x1": y1, "x2": y2})
+    assert np.array_equal(ds["x1"].x, x1)
+    assert np.array_equal(ds["x2"].x, x2)
+    assert np.array_equal(ds["x1"].y, y1)
+    assert np.array_equal(ds["x2"].y, y2)
+    # Test the case where x and y are both ArrayDict and keys don't match.
+    # This should raise a ValueError.
+    with pytest.raises(
+        ValueError,
+        match=re.escape("Keys of 'x', 'y', and 'w' (if w is a dict) must match."),
+    ):
+        ds = Dataset({"x1": x1, "x2": x2}, {"y1": y1, "y2": y2})
+    xx = np.array([6.8, 7.0, 7.2, 7.9])
+    with pytest.raises(ValueError, match="Length of 'x' and 'y' must be equal."):
+        ds = Dataset(xx, y1)
+    ww = np.array([6.8, 7.0, 7.2, 7.9])
+    with pytest.raises(ValueError, match="Length of 'x' and 'w' must be equal."):
+        ds = Dataset(x1, y1, w=ww)
