@@ -5,11 +5,7 @@ import subprocess  # nosec B404
 import sys
 import typing
 from pathlib import Path
-from typing import Any
-from typing import ClassVar
-from typing import Iterator
-from typing import List
-from typing import Tuple
+from typing import Any, ClassVar, Iterator, List, Tuple
 
 import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest

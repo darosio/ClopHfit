@@ -6,8 +6,7 @@ import csv
 import datetime
 import typing
 import warnings
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.pyplot as plt  # type: ignore

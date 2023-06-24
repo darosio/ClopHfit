@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from clophfit.prenspire import EnspireFile
-from clophfit.prenspire import ExpNote
+from clophfit.prenspire import EnspireFile, ExpNote
 
 data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath

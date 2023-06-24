@@ -20,6 +20,7 @@ classifiers = [
   "Development Status :: 3 - Alpha"
 ]
 dependencies = [
+  'arviz < 0.15.2',
   'click < 8.1.4',
   'corner < 2.2.3',
   'emcee < 3.1.5',
@@ -257,8 +258,10 @@ template = "typeguard"
 run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.isort]
-force_single_line = true
+force_single_line = false
+include_trailing_comma = true
 known_first_party = "clophfit"
+line_length = 88  # to match black's default line length
 multi_line_output = 3
 profile = "black"
 
@@ -384,9 +387,9 @@ select = [
 
 [tool.ruff.isort]
 combine-as-imports = true
-force-single-line = true
+force-single-line = false
 known-first-party = ["clophfit"]
-required-imports = ["from __future__ import annotations"]
+required-imports = ["from __future__ import annotations"]  # until py3.8 is supported
 split-on-trailing-comma = true
 
 [tool.ruff.mccabe]

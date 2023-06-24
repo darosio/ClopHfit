@@ -6,9 +6,7 @@ import itertools
 import typing
 import warnings
 from contextlib import suppress
-from dataclasses import InitVar
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from typing import Sequence
 
@@ -17,11 +15,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
-from numpy.typing import NDArray
 
-from clophfit.binding import fit_titration
-from clophfit.binding import fz_kd_singlesite
-from clophfit.binding import fz_pk_singlesite
+from clophfit.binding import fit_titration, fz_kd_singlesite, fz_pk_singlesite
+from clophfit.types import ArrayF
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -220,7 +216,7 @@ def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
 
 def calculate_conc(
     additions: Sequence[float], conc_stock: float, conc_ini: float = 0.0
-) -> NDArray[np.float_]:
+) -> ArrayF:
     """Calculate concentration values.
 
     additions[0]=vol_ini; Stock concentration is a parameter.
@@ -236,7 +232,7 @@ def calculate_conc(
 
     Returns
     -------
-    np.ndarray
+    ArrayF
         Concentrations as vector.
 
     """
@@ -250,7 +246,7 @@ def calculate_conc(
     return concs  # , vol_tot
 
 
-def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
+def dilution_correction(additions: list[float]) -> ArrayF:
     """Apply dilution correction.
 
     Parameters
@@ -260,11 +256,11 @@ def dilution_correction(additions: list[float]) -> NDArray[np.float_]:
 
     Returns
     -------
-    NDArray[float]
+    ArrayF
         Dilution correction vector.
     """
     volumes = np.cumsum(additions)
-    corrections: NDArray[np.float_] = volumes / volumes[0]
+    corrections: ArrayF = volumes / volumes[0]
     return corrections
 
 
@@ -754,7 +750,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         self._data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
         self._data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
         self._buffer_wells: list[str] | None = None
-        self._dil_corr: NDArray[np.float_] = field(init=False, repr=False)
+        self._dil_corr: ArrayF = field(init=False, repr=False)
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> Titration:
@@ -1034,10 +1030,9 @@ class TitrationAnalysis(Titration):
     #: List of result dataframes.
     fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
     #: Function used in the fitting.
-    fz: typing.Callable[
-        [float, NDArray[np.float_] | Sequence[float], NDArray[np.float_]],
-        NDArray[np.float_],
-    ] = field(init=False)
+    fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
+        init=False
+    )
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
 

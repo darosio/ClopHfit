@@ -13,10 +13,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats  # type: ignore
 
-from clophfit import __default_enspire_out_dir__
-from clophfit import binding
-from clophfit import prenspire
-from clophfit import prtecan
+from clophfit import __default_enspire_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
 
 
