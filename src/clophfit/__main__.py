@@ -382,7 +382,14 @@ def _print_result(
     "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
 )
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type: ignore # noqa: PLR0913
+def fit_titration(  # noqa: PLR0913
+    csv_fp: Path,
+    note_fp: Path,
+    out: Path,
+    titration_type: str,
+    band: tuple[int, int] | None,
+    verbose: bool,
+) -> None:
     """Update old svd or band fit of titration spectra."""
     note_df = pd.read_csv(note_fp, sep="\t")
     csv = pd.read_csv(csv_fp)
@@ -399,7 +406,8 @@ def fit_titration(csv_fp, note_fp, out, titration_type, band, verbose):  # type:
         click.echo(note_fp)
         print(note)
         print("DataFrame\n", spectra)
-    figure, result = binding.fitting.analyze_spectra(spectra, titration_type, band)
+    is_ph = titration_type == "pH"
+    figure, result = binding.fitting.analyze_spectra(spectra, is_ph, band)
     # output
     out_fp.mkdir(parents=True, exist_ok=True)
     pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"

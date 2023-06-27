@@ -91,8 +91,6 @@ def test_fit_titration(
     else:
         sbands = "None"
     result = runner.invoke(clop, base_args)
-    print(result.exc_info)
-    print(result.output)
     assert result.exit_code == 0
     assert expected_output in result.output
     # Asserting that PDF is created
