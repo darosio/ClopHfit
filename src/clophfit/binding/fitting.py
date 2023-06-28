@@ -16,7 +16,6 @@ import scipy.stats  # type: ignore
 import seaborn as sb  # type: ignore # noqa: ICN001
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore
-from lmfit.model import Model, ModelResult  # type: ignore
 from uncertainties import ufloat  # type: ignore
 
 from clophfit.types import ArrayDict, ArrayF
@@ -94,6 +93,35 @@ class Dataset(typing.Dict[str, DataArrays]):
                 super().__init__({k: DataArrays(x[k], y[k], w.get(k)) for k in x})
             else:
                 super().__init__({k: DataArrays(x[k], y[k], w) for k in x})
+
+    def add_weights(self, w: ArrayF | ArrayDict | typing.Any) -> None:
+        """Add weights to the dataset.
+
+        Parameters
+        ----------
+        w : ArrayF | ArrayDict
+            The weights to be added to the dataset.
+
+        Raises
+        ------
+        ValueError
+            If a key in the weights dictionary does not match any key in the current Dataset object.
+        TypeError
+            If the type of weights is not np.ndarray or dict.
+        """
+        if isinstance(w, np.ndarray):
+            for da in self.values():
+                da.w = w
+        elif isinstance(w, dict):
+            for k, weights in w.items():
+                if k in self:
+                    self[k].w = weights
+                else:
+                    msg = f"No matching dataset found for key '{k}' in the current Dataset object."
+                    raise ValueError(msg)
+        else:
+            msg = "Invalid type for w. Expected np.ndarray or dict."
+            raise TypeError(msg)
 
 
 @typing.overload
@@ -402,7 +430,10 @@ def _build_params_1site(ds: Dataset) -> Parameters:
         params.add(f"S1_{lbl}", value=da.y[-1])
         target_y = (da.y[0] + da.y[-1]) / 2
         k_initial.append(da.x[np.argmin(np.abs(da.y - target_y))])
-    params.add("K", value=np.mean(k_initial), min=0)
+    if ds.is_ph:
+        params.add("K", value=np.mean(k_initial), min=3, max=11)
+    else:
+        params.add("K", value=np.mean(k_initial), min=0)
     return params
 
 
@@ -504,36 +535,49 @@ def plot_autovalues(s: ArrayF, ax: mpl.axes.Axes) -> None:
     ax.set_xticks(np.arange(1, len(s) + 1))
 
 
-def plot_lmfit(ax: mpl.axes.Axes, result: ModelResult, pp: PlotParameters) -> None:
-    """Plot the results of the lmfit model on a given axes.
-
-    Uncertainty band is derived from the ModelResult. The data points are
-    colored according to their x-value, and a text element is added to the plot
-    to display the fitted parameter K with its uncertainty.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        The axes on which to plot the lmfit results.
-    result : ModelResult
-        The lmfit ModelResult object containing the fit results.
-    pp : PlotParameters
-        The PlotParameters object containing plot parameters.
-    """
-    x = result.userkws["x"]
-    y = result.data
-    kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
-    ax.scatter(x, y, c=x, s=99, edgecolors="k", **kws)
-    # Adjust x-axis limits
-    xmin = x.min()
-    xmax = x.max()
-    xmax += (xmax - xmin) / 7
-    xfit = np.linspace(xmin, xmax, 100)
-    # Plot fit line
-    best_fit = result.eval(x=xfit)
-    ax.plot(xfit, best_fit, "k--")
-    dy = result.eval_uncertainty(x=xfit)
-    ax.fill_between(xfit, best_fit - dy, best_fit + dy, color="#FEDCBA", alpha=0.5)
+def plot_fit(
+    ax: mpl.axes.Axes,
+    ds: Dataset,
+    result: MinimizerResult,
+    n_samples: int = 0,
+    pp: PlotParameters | None = None,
+) -> None:
+    # def plot_fit(ds: Dataset, result: MinimizerResult, n_samples: int = 0) -> plt.Figure:
+    """Plot residuals for each dataset with uncertainty."""
+    _fraction = 0.05
+    xfit = {
+        k: np.linspace(
+            da.x.min() - _fraction * (da.x.max() - da.x.min()),
+            da.x.max() + _fraction * (da.x.max() - da.x.min()),
+            100,
+        )
+        for k, da in ds.items()
+    }
+    yfit = _binding_1site_models(result.params, xfit, ds.is_ph)
+    # Create a color cycle
+    colors = sb.color_palette("Set2", len(ds))
+    for (lbl, da), clr in zip(ds.items(), colors):
+        # Plot data and fitting
+        if pp:
+            kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
+            ax.scatter(da.x, da.y, c=da.x, s=99, edgecolors="k", label=lbl, **kws)
+        else:
+            ax.plot(ds[lbl].x, ds[lbl].y, "o", label=lbl, color=clr)
+        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
+        if n_samples:
+            # Calculate uncertainty using Monte Carlo method
+            y_samples = np.empty((n_samples, len(xfit[lbl])))
+            for i in range(n_samples):
+                p_sample = result.params.copy()
+                for param in p_sample.values():
+                    param.value = np.random.normal(param.value, param.stderr)
+                y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
+            dy = y_samples.std(axis=0)
+            # Plot uncertainty
+            kws = {"alpha": 0.4, "color": clr}
+            ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws)
+    ax.grid(True)
+    ax.legend()
     # Add fit result to plot
     k = ufloat(result.params["K"].value, result.params["K"].stderr)
     title = "=".join(["K", str(k).replace("+/-", "±")])
@@ -564,41 +608,9 @@ def plot_pca(v: ArrayF, ax: mpl.axes.Axes, conc: ArrayF, pp: PlotParameters) -> 
         ax.text(x, y, w)
 
 
-def fit_binding(x: ArrayF, is_ph: bool, y: ArrayF) -> ModelResult:
-    """Fit a dataset (x, y) using a single-site binding model with lmfit.
-
-    The model is provided by the `model_func` argument, a function defining the
-    model for fitting, which takes four arguments - x, K, S0 and S1, and returns
-    a float.
-
-    Parameters
-    ----------
-    x : ArrayF
-        The x values of the dataset.
-    is_ph : bool
-        If True, uses a pH titration model for fitting.
-    y : ArrayF
-        The y values of the dataset.
-
-    Returns
-    -------
-    ModelResult
-        lmfit's objectd containing the fitting results.
-    """
-    model = Model(binding_1site)
-    params = _build_params_1site(Dataset({"1": x}, {"1": y}))
-    p = params.pop("S0_1")
-    params.add("S0", value=p.value)
-    p = params.pop("S1_1")
-    params.add("S1", value=p.value)
-    params.add("is_ph", value=is_ph, vary=False)
-    result = model.fit(y, params, x=x)
-    return result
-
-
 def analyze_spectra(
     spectra: pd.DataFrame, is_ph: bool, band: tuple[int, int] | None = None
-) -> tuple[plt.Figure, ModelResult]:
+) -> tuple[plt.Figure, MinimizerResult, Minimizer]:
     """Analyze spectral data and visualize the results.
 
     This function performs either Singular Value Decomposition (SVD) or integrates
@@ -639,9 +651,8 @@ def analyze_spectra(
         # SVD
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
-        y = v[0, :] + y_offset
-        result = fit_binding(x, is_ph, y)
-        # XXX: fff, result, mini = analyze_binding_glob(kind, {"": x}, {"": y})
+        ds = Dataset(x, v[0, :] + y_offset, is_ph)
+        result, mini = fit_binding_glob(ds, True)
         ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
         _plot_autovectors(spectra.index, u, ax2)
         ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
@@ -662,51 +673,22 @@ def analyze_spectra(
         )
         # rescale y
         y /= np.abs(y).max() / 10
-        result = fit_binding(x, is_ph, y)
+        ds = Dataset(x, y, is_ph)
+        result, mini = fit_binding_glob(ds, True)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = "k"
     ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
-    plot_lmfit(ax4, result, PlotParameters(is_ph))
+    plot_fit(ax4, ds, result, n_samples=20, pp=PlotParameters(is_ph))
     kind = "pH" if is_ph else "Cl"
     _apply_common_plot_style(ax4, "LM fit", kind, "")
     ax4.set_ylabel(ylabel, color=ylabel_color)
-    return fig, result
-
-
-def plot_fit(ds: Dataset, result: MinimizerResult, n_samples: int = 0) -> plt.Figure:
-    """Plot residuals for each dataset with uncertainty."""
-    figure, ax = plt.subplots()
-    xfit = {k: np.linspace(dp.x.min(), dp.x.max(), 100) for k, dp in ds.items()}
-    yfit = _binding_1site_models(result.params, xfit, ds.is_ph)
-    # Create a color cycle
-    colors = sb.color_palette("Set2", len(ds))
-    for lbl, clr in zip(ds, colors):
-        # Plot data and fitting
-        ax.plot(ds[lbl].x, ds[lbl].y, "o", color=clr, label=lbl)
-        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
-        if n_samples:
-            # Calculate uncertainty using Monte Carlo method
-            y_samples = np.empty((n_samples, len(xfit[lbl])))
-            for i in range(n_samples):
-                p_sample = result.params.copy()
-                for param in p_sample.values():
-                    param.value = np.random.normal(param.value, param.stderr)
-                y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
-            dy = y_samples.std(axis=0)
-            # Plot uncertainty
-            kws = {"alpha": 0.4, "color": clr}
-            ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws)
-    ax.grid(True)
-    ax.legend()
-    return figure
+    return fig, result, mini
 
 
 def fit_binding_glob(
     ds: Dataset, weighting: bool = False
-) -> tuple[plt.Figure, MinimizerResult, Minimizer]:
+) -> tuple[MinimizerResult, Minimizer]:
     """Analyze multi-label binding datasets and visualize the results."""
-    xc: ArrayDict = {k: da.x for k, da in ds.items()}
-    yc: ArrayDict = {k: da.y for k, da in ds.items()}
     if weighting:
         wc: ArrayDict = {}
         # Calculate standard deviations of residuals
@@ -717,12 +699,11 @@ def fit_binding_glob(
             params = _build_params_1site(d)
             res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
             wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
-        ds = Dataset(xc, yc, is_ph=ds.is_ph, w=wc)
+        ds.add_weights(wc)
     params = _build_params_1site(ds)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
     result = mini.minimize()
-    figure = plot_fit(ds, result)
-    return figure, result, mini
+    return result, mini
 
 
 def analyze_spectra_glob(
@@ -730,7 +711,12 @@ def analyze_spectra_glob(
     ds: Dataset,
     dbands: dict[str, tuple[int, int]] | None = None,
 ) -> tuple[
-    None | plt.Figure, None | ModelResult, None | plt.Figure, None | MinimizerResult
+    plt.Figure | None,
+    MinimizerResult | None,
+    Minimizer | None,
+    plt.Figure | None,
+    MinimizerResult | None,
+    Minimizer | None,
 ]:
     """Analyze multi-label spectra visualize the results."""
     _gap_ = 1
@@ -747,9 +733,9 @@ def analyze_spectra_glob(
             adjusted_list.append(spectra_adjusted)
         spectra_merged = pd.concat(adjusted_list)
         # Analyze concatenated spectra.
-        figure_svd, result_svd = analyze_spectra(spectra_merged, ds.is_ph)
+        figure_svd, result_svd, mini_svd = analyze_spectra(spectra_merged, ds.is_ph)
     else:
-        figure_svd, result_svd = (None, None)
+        figure_svd, result_svd, mini_svd = (None, None, None)
     if len(dbands.keys()) > 1:
         params = Parameters()
         params.add("K", value=7, min=0)
@@ -757,9 +743,10 @@ def analyze_spectra_glob(
         for lbl in dbands:
             params.add(f"S0_{lbl}", value=ds[lbl].y[0])
             params.add(f"S1_{lbl}", value=ds[lbl].y[-1])
-        mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
-        result_bands = mini.minimize()
-        figure_bands = plot_fit(ds, result_bands, 200)
+        mini_bands = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
+        result_bands = mini_bands.minimize()
+        figure_bands, ax = plt.subplots()
+        plot_fit(ax, ds, result_bands, 200)
     else:
-        figure_bands, result_bands = (None, None)
-    return figure_svd, result_svd, figure_bands, result_bands
+        figure_bands, result_bands, mini_bands = (None, None, None)
+    return figure_svd, result_svd, mini_svd, figure_bands, result_bands, mini_bands

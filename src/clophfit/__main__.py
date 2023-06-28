@@ -10,6 +10,7 @@ import arviz as az
 import click
 import corner  # type: ignore
 import lmfit  # type: ignore
+import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 
@@ -325,7 +326,9 @@ def fit_enspire(
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band: tuple[int, int] | None = dbands.get(label)
-                    figure, result = binding.fitting.analyze_spectra(data, is_ph, band)
+                    figure, result, mini = binding.fitting.analyze_spectra(
+                        data, is_ph, band
+                    )
                     if band:
                         x_combined[label] = result.userkws["x"]
                         y_combined[label] = result.data
@@ -340,7 +343,14 @@ def fit_enspire(
                     dsub = {k: v for k, v in dbands.items() if k in d_tit}
                     ds = binding.fitting.Dataset(x_combined, y_combined, is_ph)
                     figs_res = binding.fitting.analyze_spectra_glob(d_tit, ds, dsub)
-                    figure_svd, result_svd, figure_bands, result_bands = figs_res
+                    (
+                        figure_svd,
+                        result_svd,
+                        mini_svd,
+                        figure_bands,
+                        result_bands,
+                        mini_bands,
+                    ) = figs_res
                     if figure_svd:
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
                         figure_svd.savefig(pdf_file)
@@ -407,7 +417,7 @@ def fit_titration(  # noqa: PLR0913
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    figure, result = binding.fitting.analyze_spectra(spectra, is_ph, band)
+    figure, result, mini = binding.fitting.analyze_spectra(spectra, is_ph, band)
     # output
     out_fp.mkdir(parents=True, exist_ok=True)
     pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
@@ -441,7 +451,9 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
         xc[label] = file_df["x"].to_numpy()
         yc[label] = file_df[label].to_numpy()
     ds = binding.fitting.Dataset(xc, yc, titration_type == "pH")
-    figure, result, mini = binding.fitting.fit_binding_glob(ds, True)
+    result, mini = binding.fitting.fit_binding_glob(ds, True)
+    figure, ax = plt.subplots()
+    binding.fitting.plot_fit(ax, ds, result)
     lmfit.printfuncs.report_fit(result, min_correl=0.65)
     figure.savefig(Path(file).with_suffix(".png"))
     result_emcee = mini.emcee(burn=150, steps=1800)
