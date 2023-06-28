@@ -330,8 +330,8 @@ def fit_enspire(
                         data, is_ph, band
                     )
                     if band:
-                        x_combined[label] = result.userkws["x"]
-                        y_combined[label] = result.data
+                        x_combined[label] = mini.userargs[0]["default"].x
+                        y_combined[label] = mini.userargs[0]["default"].y
                     pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
                     figure.savefig(pdf_file)
                     _print_result(result, pdf_file, str(band))
