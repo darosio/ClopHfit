@@ -326,15 +326,13 @@ def fit_enspire(
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band: tuple[int, int] | None = dbands.get(label)
-                    figure, result, mini = binding.fitting.analyze_spectra(
-                        data, is_ph, band
-                    )
+                    fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
                     if band:
-                        x_combined[label] = mini.userargs[0]["default"].x
-                        y_combined[label] = mini.userargs[0]["default"].y
+                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
+                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
                     pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
-                    figure.savefig(pdf_file)
-                    _print_result(result, pdf_file, str(band))
+                    fit_result.figure.savefig(pdf_file)
+                    _print_result(fit_result, pdf_file, str(band))
                 # Global spectra analysis when more than 1 (svd or band) label
                 if (
                     len(d_tit.keys() - dbands.keys()) > 1
@@ -342,38 +340,28 @@ def fit_enspire(
                 ):
                     dsub = {k: v for k, v in dbands.items() if k in d_tit}
                     ds = binding.fitting.Dataset(x_combined, y_combined, is_ph)
-                    figs_res = binding.fitting.analyze_spectra_glob(d_tit, ds, dsub)
-                    (
-                        figure_svd,
-                        result_svd,
-                        mini_svd,
-                        figure_bands,
-                        result_bands,
-                        mini_bands,
-                    ) = figs_res
-                    if figure_svd:
+                    spectra_gres = binding.fitting.analyze_spectra_glob(d_tit, ds, dsub)
+                    if spectra_gres.svd:
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
-                        figure_svd.savefig(pdf_file)
-                        _print_result(result_svd, pdf_file, "")
-                    if figure_bands:
+                        spectra_gres.svd.figure.savefig(pdf_file)
+                        _print_result(spectra_gres.svd, pdf_file, "")
+                    if spectra_gres.bands:
                         bands_slist = [f"{k}({v[0]},{v[1]})" for k, v in dbands.items()]
                         bands_str = "".join(bands_slist)
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
-                        figure_bands.savefig(pdf_file)
-                        _print_result(result_bands, pdf_file, bands_str)
+                        spectra_gres.bands.figure.savefig(pdf_file)
+                        _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
 def _print_result(
-    result: lmfit.model.ModelResult | lmfit.model.MinimizerResult,
+    fit_result: binding.fitting.FitResult,
     pdf_file: Path,
     band_str: str,
 ) -> None:
     print(str(pdf_file))
     print(f"Best fit using '{band_str}' band:\n")
-    try:
-        print(result.ci_report(ndigits=2, with_offset=False))
-    except (ValueError, AttributeError):
-        print(result.params)
+    ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
+    print(lmfit.ci_report(ci, ndigits=2, with_offset=False))
     print(f"\n Plot saved in '{pdf_file}'.\n")
 
 
@@ -417,12 +405,12 @@ def fit_titration(  # noqa: PLR0913
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    figure, result, mini = binding.fitting.analyze_spectra(spectra, is_ph, band)
+    fit_result = binding.fitting.analyze_spectra(spectra, is_ph, band)
     # output
     out_fp.mkdir(parents=True, exist_ok=True)
     pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
-    figure.savefig(pdf_file)
-    _print_result(result, pdf_file, str(band))
+    fit_result.figure.savefig(pdf_file)
+    _print_result(fit_result, pdf_file, str(band))
 
 
 @clop.command("fit_titration_global")

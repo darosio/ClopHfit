@@ -5,10 +5,9 @@ import typing
 from dataclasses import InitVar, dataclass, field
 from typing import Sequence
 
+import arviz as az
 import lmfit  # type: ignore
 import matplotlib as mpl  # type: ignore
-import matplotlib.colors as mcolors  # type: ignore
-import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 import scipy  # type: ignore
@@ -20,7 +19,7 @@ from uncertainties import ufloat  # type: ignore
 
 from clophfit.types import ArrayDict, ArrayF
 
-COLOR_MAP = plt.cm.Set1
+COLOR_MAP = mpl.cm.Paired  # for PCA components and LM fit
 
 
 @dataclass
@@ -426,7 +425,7 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     params = Parameters()
     k_initial = []
     for lbl, da in ds.items():
-        params.add(f"S0_{lbl}", value=da.y[0])
+        params.add(f"S0_{lbl}", value=da.y[0], min=0)
         params.add(f"S1_{lbl}", value=da.y[-1])
         target_y = (da.y[0] + da.y[-1]) / 2
         k_initial.append(da.x[np.argmin(np.abs(da.y - target_y))])
@@ -458,6 +457,41 @@ class PlotParameters:
             self.kind = "Cl"
 
 
+@dataclass
+class FitResult:
+    """A dataclass representing the results of a fit.
+
+    Attributes
+    ----------
+    figure : mpl.figure.Figure
+        A matplotlib figure object representing the plot of the fit result.
+    result : MinimizerResult
+        The minimizer result object representing the outcome of the fit.
+    mini : Minimizer
+        The Minimizer object used for the fit.
+    """
+
+    figure: mpl.figure.Figure
+    result: MinimizerResult
+    mini: Minimizer
+
+
+@dataclass
+class SpectraGlobResults:
+    """A dataclass representing the results of both svd and bands fits.
+
+    Attributes
+    ----------
+    svd : FitResult | None
+        The `FitResult` object representing the outcome of the svd fit, or `None` if the svd fit was not performed.
+    bands : FitResult | None
+        The `FitResult` object representing the outcome of the bands fit, or `None` if the bands fit was not performed.
+    """
+
+    svd: FitResult | None = field(default=None)
+    bands: FitResult | None = field(default=None)
+
+
 def _apply_common_plot_style(
     ax: mpl.axes.Axes, title: str, xlabel: str, ylabel: str
 ) -> None:
@@ -480,15 +514,15 @@ def plot_spectra(f: pd.DataFrame, ax: mpl.axes.Axes, pp: PlotParameters) -> None
     pp : PlotParameters
         The PlotParameters object containing plot parameters.
     """
-    color_map = plt.get_cmap(pp.palette)
-    normalize = mcolors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
+    color_map = mpl.cm.get_cmap(pp.palette)
+    normalize = mpl.colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
     for i in range(len(f.columns)):
         ax.plot(f.index, f.iloc[:, i], color=color_map(normalize(f.columns[i])))
     _apply_common_plot_style(ax, "Spectra", "Wavelength", "Fluorescence")
     # Add a colorbar for reference
-    sm = plt.cm.ScalarMappable(cmap=color_map, norm=normalize)
+    sm = mpl.cm.ScalarMappable(cmap=color_map, norm=normalize)
     sm.set_array([])
-    plt.colorbar(sm, ax=ax, label=pp.kind)
+    ax.figure.colorbar(sm, ax=ax, label=pp.kind)
 
 
 def _plot_autovectors(wl: pd.Index, u: ArrayF, ax: mpl.axes.Axes) -> None:
@@ -539,10 +573,9 @@ def plot_fit(
     ax: mpl.axes.Axes,
     ds: Dataset,
     result: MinimizerResult,
-    n_samples: int = 0,
+    nboot: int = 0,
     pp: PlotParameters | None = None,
 ) -> None:
-    # def plot_fit(ds: Dataset, result: MinimizerResult, n_samples: int = 0) -> plt.Figure:
     """Plot residuals for each dataset with uncertainty."""
     _fraction = 0.05
     xfit = {
@@ -555,19 +588,23 @@ def plot_fit(
     }
     yfit = _binding_1site_models(result.params, xfit, ds.is_ph)
     # Create a color cycle
-    colors = sb.color_palette("Set2", len(ds))
+    colors = [COLOR_MAP(i) for i in range(len(ds))]
     for (lbl, da), clr in zip(ds.items(), colors):
-        # Plot data and fitting
+        # Make sure a label will be displayed
+        label = lbl if (da.w is None and nboot == 0) else None
+        # Plot data
         if pp:
             kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
-            ax.scatter(da.x, da.y, c=da.x, s=99, edgecolors="k", label=lbl, **kws)
+            ax.scatter(da.x, da.y, c=da.x, s=99, edgecolors="k", label=label, **kws)
         else:
-            ax.plot(ds[lbl].x, ds[lbl].y, "o", label=lbl, color=clr)
+            ax.plot(da.x, da.y, "o", color=clr, label=label)
+        # Plot fitting
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
-        if n_samples:
+        kws_err = {"alpha": 0.3, "capsize": 3}
+        if nboot:
             # Calculate uncertainty using Monte Carlo method
-            y_samples = np.empty((n_samples, len(xfit[lbl])))
-            for i in range(n_samples):
+            y_samples = np.empty((nboot, len(xfit[lbl])))
+            for i in range(nboot):
                 p_sample = result.params.copy()
                 for param in p_sample.values():
                     param.value = np.random.normal(param.value, param.stderr)
@@ -575,13 +612,17 @@ def plot_fit(
             dy = y_samples.std(axis=0)
             # Plot uncertainty
             kws = {"alpha": 0.4, "color": clr}
-            ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws)
+            # Display label fill_between
+            ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws, label=lbl)
+            if da.w is not None:
+                ye = np.sqrt(1 / da.w)
+                ax.errorbar(da.x, da.y, yerr=ye, fmt="none", color="gray", **kws_err)
+        elif da.w is not None:
+            ye = np.sqrt(1 / da.w / result.nfree)
+            # Display label errorbar
+            ax.errorbar(da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, **kws_err)
     ax.grid(True)
     ax.legend()
-    # Add fit result to plot
-    k = ufloat(result.params["K"].value, result.params["K"].stderr)
-    title = "=".join(["K", str(k).replace("+/-", "±")])
-    sb.mpl.pyplot.figtext(0.26, 0.54, title, size=20)
 
 
 def plot_pca(v: ArrayF, ax: mpl.axes.Axes, conc: ArrayF, pp: PlotParameters) -> None:
@@ -610,8 +651,8 @@ def plot_pca(v: ArrayF, ax: mpl.axes.Axes, conc: ArrayF, pp: PlotParameters) -> 
 
 def analyze_spectra(
     spectra: pd.DataFrame, is_ph: bool, band: tuple[int, int] | None = None
-) -> tuple[plt.Figure, MinimizerResult, Minimizer]:
-    """Analyze spectral data and visualize the results.
+) -> FitResult:
+    """Analyze spectra titration, create and plot fit results.
 
     This function performs either Singular Value Decomposition (SVD) or integrates
     the spectral data over a specified band and fits the integrated data to a binding model.
@@ -619,18 +660,16 @@ def analyze_spectra(
     Parameters
     ----------
     spectra : pd.DataFrame
-        A DataFrame with each column representing a spectrum at different conditions.
+        The DataFrame containing spectra (one spectrum for each column).
     is_ph : bool
-        If True, use the pH model for binding.
-    band : tuple[int, int], optional
-        The band to integrate over. If None (default), performs SVD.
+        Whether the x values should be interpreted as pH values rather than concentrations.
+    band : Tuple[int, int] | None
+        The band to integrate over. If None (default), performs Singular Value Decomposition (SVD).
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        A Figure object with the plots visualizing the analysis results.
-    result : ModelResult
-        The result of the lmfit model fitting.
+    FitResult
+        A FitResult object containing the figure, result, and mini.
 
     Raises
     ------
@@ -639,30 +678,29 @@ def analyze_spectra(
 
     Notes
     -----
-    SVD method plots original spectra, principal component vectors, singular values, and fit
-    of the first principal component and PCA. Band method plots original spectra and fit only.
+    Creates plots of spectra, principal component vectors, singular values, fit of the first
+    principal component and PCA for SVD; only of spectra and fit for Band method.
     """
     y_offset = 1.0
     x = spectra.columns.to_numpy()
-    fig = sb.mpl.pyplot.figure(figsize=(12, 8))
+    fig = mpl.figure.Figure(figsize=(12, 8))
     ax1 = fig.add_axes([0.05, 0.65, 0.32, 0.31])
+    ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
+    ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
+    ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
+    ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
     plot_spectra(spectra, ax1, PlotParameters(is_ph))
-    if band is None:
-        # SVD
+    if band is None:  # SVD
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
         ds = Dataset(x, v[0, :] + y_offset, is_ph)
         result, mini = fit_binding_glob(ds, True)
-        ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
         _plot_autovectors(spectra.index, u, ax2)
-        ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
         plot_autovalues(s[:], ax3)  # don't plot last auto-values?
-        ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
         plot_pca(v, ax5, x, PlotParameters(is_ph))
         ylabel = "First Principal Component"
         ylabel_color = COLOR_MAP(0)
-    else:
-        # Band integration
+    else:  # Band integration
         ini, fin = band
         if ini not in spectra.index and fin not in spectra.index:
             msg = f"Band parameters ({ini}, {fin}) are not in the spectra's index."
@@ -677,12 +715,13 @@ def analyze_spectra(
         result, mini = fit_binding_glob(ds, True)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = "k"
-    ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
-    plot_fit(ax4, ds, result, n_samples=20, pp=PlotParameters(is_ph))
-    kind = "pH" if is_ph else "Cl"
-    _apply_common_plot_style(ax4, "LM fit", kind, "")
+    plot_fit(ax4, ds, result, nboot=20, pp=PlotParameters(is_ph))
+    k = ufloat(result.params["K"].value, result.params["K"].stderr)
+    title = "=".join(["K", str(k).replace("+/-", "±")])
+    xlabel = "pH" if is_ph else "Cl"
+    _apply_common_plot_style(ax4, f"LM fit {title}", xlabel, "")
     ax4.set_ylabel(ylabel, color=ylabel_color)
-    return fig, result, mini
+    return FitResult(fig, result, mini)
 
 
 def fit_binding_glob(
@@ -710,14 +749,7 @@ def analyze_spectra_glob(
     titration: dict[str, pd.DataFrame],
     ds: Dataset,
     dbands: dict[str, tuple[int, int]] | None = None,
-) -> tuple[
-    plt.Figure | None,
-    MinimizerResult | None,
-    Minimizer | None,
-    plt.Figure | None,
-    MinimizerResult | None,
-    Minimizer | None,
-]:
+) -> SpectraGlobResults:
     """Analyze multi-label spectra visualize the results."""
     _gap_ = 1
     dbands = dbands or {}
@@ -732,21 +764,34 @@ def analyze_spectra_glob(
             prev_max = spectra_adjusted.index.max()
             adjusted_list.append(spectra_adjusted)
         spectra_merged = pd.concat(adjusted_list)
-        # Analyze concatenated spectra.
-        figure_svd, result_svd, mini_svd = analyze_spectra(spectra_merged, ds.is_ph)
+        svd = analyze_spectra(spectra_merged, ds.is_ph)
     else:
-        figure_svd, result_svd, mini_svd = (None, None, None)
+        svd = None
     if len(dbands.keys()) > 1:
-        params = Parameters()
-        params.add("K", value=7, min=0)
-        params.add("ph", value=ds.is_ph, vary=False)
-        for lbl in dbands:
-            params.add(f"S0_{lbl}", value=ds[lbl].y[0])
-            params.add(f"S1_{lbl}", value=ds[lbl].y[-1])
-        mini_bands = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
-        result_bands = mini_bands.minimize()
-        figure_bands, ax = plt.subplots()
-        plot_fit(ax, ds, result_bands, 200)
+        result_bands, mini_bands = fit_binding_glob(ds, True)
+        figure_bands = mpl.figure.Figure()
+        ax = figure_bands.add_subplot(111)
+        plot_fit(ax, ds, result_bands, nboot=20, pp=PlotParameters(ds.is_ph))
+        bands = FitResult(figure_bands, result_bands, mini_bands)
     else:
-        figure_bands, result_bands, mini_bands = (None, None, None)
-    return figure_svd, result_svd, mini_svd, figure_bands, result_bands, mini_bands
+        bands = None
+    return SpectraGlobResults(svd, bands)
+
+
+def plot_emcee(result_emcee: MinimizerResult) -> None:
+    """Plot emcee result."""
+    samples = result_emcee.flatchain
+    # Convert the dictionary of flatchains to an ArviZ InferenceData object
+    samples_dict = {key: np.array(val) for key, val in samples.items()}
+    idata = az.from_dict(posterior=samples_dict)
+    az.plot_pair(idata, kind=["scatter", "kde"], scatter_kwargs={"marker": ".", "s": 1})
+    az.plot_posterior(idata.posterior)  # type: ignore
+
+
+def plot_emcee_on_ax(result_emcee: MinimizerResult, ax: mpl.axes.Axes) -> None:
+    """Plot emcee result."""
+    samples = result_emcee.flatchain
+    # Convert the dictionary of flatchains to an ArviZ InferenceData object
+    samples_dict = {key: np.array(val) for key, val in samples.items()}
+    idata = az.from_dict(posterior=samples_dict)
+    az.plot_posterior(idata.posterior["K"], ax=ax)  # type: ignore

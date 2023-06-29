@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import filecmp
+import re
 from pathlib import Path
 
 import pytest
@@ -92,7 +93,9 @@ def test_fit_titration(
         sbands = "None"
     result = runner.invoke(clop, base_args)
     assert result.exit_code == 0
-    assert expected_output in result.output
+    expected_output = re.sub(" ", r"\\s+", expected_output.strip())
+    # Assert that the pattern appears in the output
+    assert re.search(expected_output, result.output) is not None
     # Asserting that PDF is created
     expected_pdf_filename = out / f"{csv_fp.stem}_{sbands}_{note_fp.stem}.pdf"
     assert expected_pdf_filename.exists()
