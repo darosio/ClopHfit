@@ -694,7 +694,6 @@ def analyze_spectra(
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
         ds = Dataset(x, v[0, :] + y_offset, is_ph)
-        result, mini = fit_binding_glob(ds, True)
         _plot_autovectors(spectra.index, u, ax2)
         plot_autovalues(s[:], ax3)  # don't plot last auto-values?
         plot_pca(v, ax5, x, PlotParameters(is_ph))
@@ -712,21 +711,20 @@ def analyze_spectra(
         # rescale y
         y /= np.abs(y).max() / 10
         ds = Dataset(x, y, is_ph)
-        result, mini = fit_binding_glob(ds, True)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = "k"
+    fit_result = fit_binding_glob(ds, True)
+    result = fit_result.result
     plot_fit(ax4, ds, result, nboot=20, pp=PlotParameters(is_ph))
     k = ufloat(result.params["K"].value, result.params["K"].stderr)
     title = "=".join(["K", str(k).replace("+/-", "±")])
     xlabel = "pH" if is_ph else "Cl"
     _apply_common_plot_style(ax4, f"LM fit {title}", xlabel, "")
     ax4.set_ylabel(ylabel, color=ylabel_color)
-    return FitResult(fig, result, mini)
+    return FitResult(fig, result, fit_result.mini)
 
 
-def fit_binding_glob(
-    ds: Dataset, weighting: bool = False
-) -> tuple[MinimizerResult, Minimizer]:
+def fit_binding_glob(ds: Dataset, weighting: bool = False) -> FitResult:
     """Analyze multi-label binding datasets and visualize the results."""
     if weighting:
         wc: ArrayDict = {}
@@ -742,7 +740,10 @@ def fit_binding_glob(
     params = _build_params_1site(ds)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
     result = mini.minimize()
-    return result, mini
+    fig = mpl.figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, result, nboot=20, pp=PlotParameters(ds.is_ph))
+    return FitResult(fig, result, mini)
 
 
 def analyze_spectra_glob(
@@ -767,14 +768,7 @@ def analyze_spectra_glob(
         svd = analyze_spectra(spectra_merged, ds.is_ph)
     else:
         svd = None
-    if len(dbands.keys()) > 1:
-        result_bands, mini_bands = fit_binding_glob(ds, True)
-        figure_bands = mpl.figure.Figure()
-        ax = figure_bands.add_subplot(111)
-        plot_fit(ax, ds, result_bands, nboot=20, pp=PlotParameters(ds.is_ph))
-        bands = FitResult(figure_bands, result_bands, mini_bands)
-    else:
-        bands = None
+    bands = fit_binding_glob(ds, True) if len(dbands.keys()) > 1 else None
     return SpectraGlobResults(svd, bands)
 
 

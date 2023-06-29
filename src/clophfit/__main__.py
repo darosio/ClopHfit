@@ -439,12 +439,12 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
         xc[label] = file_df["x"].to_numpy()
         yc[label] = file_df[label].to_numpy()
     ds = binding.fitting.Dataset(xc, yc, titration_type == "pH")
-    result, mini = binding.fitting.fit_binding_glob(ds, True)
+    f_res = binding.fitting.fit_binding_glob(ds, True)
     figure, ax = plt.subplots()
-    binding.fitting.plot_fit(ax, ds, result)
-    lmfit.printfuncs.report_fit(result, min_correl=0.65)
+    binding.fitting.plot_fit(ax, ds, f_res.result)
+    lmfit.printfuncs.report_fit(f_res.result, min_correl=0.65)
     figure.savefig(Path(file).with_suffix(".png"))
-    result_emcee = mini.emcee(burn=150, steps=1800)
+    result_emcee = f_res.mini.emcee(burn=150, steps=1800)
     samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
@@ -454,5 +454,8 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
     emcee_plot.savefig("e.png")
     print(quantiles)
     for lbl in ds:
-        ratio = result.params[f"S0_{lbl}"].value / result.params[f"S1_{lbl}"].value
+        ratio = (
+            f_res.result.params[f"S0_{lbl}"].value
+            / f_res.result.params[f"S1_{lbl}"].value
+        )
         print(f"Ratio of {lbl}: {ratio}")
