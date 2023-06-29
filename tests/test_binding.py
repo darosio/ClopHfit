@@ -83,11 +83,11 @@ def test_dataset_class() -> None:
     assert np.array_equal(ds["y2"].y, y2)
     # Test the case where x and y are both ArrayDict and keys match.
     # The keys should match between x and y.
-    ds = Dataset({"x1": x1, "x2": x2}, {"x1": y1, "x2": y2})
-    assert np.array_equal(ds["x1"].x, x1)
-    assert np.array_equal(ds["x2"].x, x2)
-    assert np.array_equal(ds["x1"].y, y1)
-    assert np.array_equal(ds["x2"].y, y2)
+    ds = Dataset({"1": x1, "2": x2}, {"1": y1, "2": y2})
+    assert np.array_equal(ds["1"].x, x1)
+    assert np.array_equal(ds["2"].x, x2)
+    assert np.array_equal(ds["1"].y, y1)
+    assert np.array_equal(ds["2"].y, y2)
     # Test the case where x and y are both ArrayDict and keys don't match.
     # This should raise a ValueError.
     with pytest.raises(
@@ -101,3 +101,24 @@ def test_dataset_class() -> None:
     ww = np.array([6.8, 7.0, 7.2, 7.9])
     with pytest.raises(ValueError, match="Length of 'x' and 'w' must be equal."):
         ds = Dataset(x1, y1, w=ww)
+
+
+def test_dataset_copy() -> None:
+    """Test deep copy."""
+    x1 = np.array([5.5, 7.0, 8.5])
+    y1 = np.array([2.1, 1.6, 1.1])
+    y2 = np.array([1.8, 1.6, 1.4])
+    ds = Dataset(x1, {"1": y1, "2": y2})
+    # Test full copy
+    ds_copy = ds.copy()
+    assert ds_copy.is_ph == ds.is_ph
+    assert "1" in ds_copy
+    assert "2" in ds_copy
+    # Test partial copy
+    ds_copy = ds.copy(keys={"1"})
+    assert ds_copy.is_ph == ds.is_ph
+    assert "1" in ds_copy
+    assert "2" not in ds_copy
+    # Test KeyError
+    with pytest.raises(KeyError):
+        ds_copy = ds.copy(keys={"nonexistent"})

@@ -325,29 +325,34 @@ def fit_enspire(
                     msg = "Unknown titration type."
                     raise ValueError(msg)
                 for label, data in d_tit.items():
-                    band: tuple[int, int] | None = dbands.get(label)
+                    band = dbands.get(label)
                     fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
-                    if band:
-                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
-                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
+                    x_combined[label] = fit_result.mini.userargs[0]["default"].x
+                    y_combined[label] = fit_result.mini.userargs[0]["default"].y
                     pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
                     fit_result.figure.savefig(pdf_file)
                     _print_result(fit_result, pdf_file, str(band))
-                # Global spectra analysis when more than 1 (svd or band) label
+                # Global spectra analysis with more than 1 label.
                 if (
-                    len(d_tit.keys() - dbands.keys()) > 1
-                    or len(dbands.keys() & d_tit.keys()) > 1
+                    len(d_tit.keys() - dbands.keys()) > 1  # svd > 1
+                    or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
-                    dsub = {k: v for k, v in dbands.items() if k in d_tit}
                     ds = binding.fitting.Dataset(x_combined, y_combined, is_ph)
-                    spectra_gres = binding.fitting.analyze_spectra_glob(d_tit, ds, dsub)
+                    spectra_gres = binding.fitting.analyze_spectra_glob(
+                        d_tit, ds, dbands
+                    )
                     if spectra_gres.svd:
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
                         spectra_gres.svd.figure.savefig(pdf_file)
                         _print_result(spectra_gres.svd, pdf_file, "")
+                    if spectra_gres.gsvd:
+                        pdf_file = out_dir / f"{name}_{temp}_g_{tit}_SVD.pdf"
+                        spectra_gres.gsvd.figure.savefig(pdf_file)
+                        _print_result(spectra_gres.gsvd, pdf_file, "")
                     if spectra_gres.bands:
-                        bands_slist = [f"{k}({v[0]},{v[1]})" for k, v in dbands.items()]
-                        bands_str = "".join(bands_slist)
+                        keys = dbands.keys() & d_tit.keys()
+                        lname = [f"{k}({dbands[k][0]},{dbands[k][1]})" for k in keys]
+                        bands_str = "".join(lname)
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
                         spectra_gres.bands.figure.savefig(pdf_file)
                         _print_result(spectra_gres.bands, pdf_file, bands_str)

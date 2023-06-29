@@ -1,6 +1,7 @@
 """Fit Cl binding and pH titration."""
 from __future__ import annotations
 
+import copy
 import typing
 from dataclasses import InitVar, dataclass, field
 from typing import Sequence
@@ -19,7 +20,8 @@ from uncertainties import ufloat  # type: ignore
 
 from clophfit.types import ArrayDict, ArrayF
 
-COLOR_MAP = mpl.cm.Paired  # for PCA components and LM fit
+COLOR_MAP = mpl.cm.Paired  # To color PCA components and LM fit.
+N_BOOT = 20  # To compute fill_between uncertainty.
 
 
 @dataclass
@@ -121,6 +123,39 @@ class Dataset(typing.Dict[str, DataArrays]):
         else:
             msg = "Invalid type for w. Expected np.ndarray or dict."
             raise TypeError(msg)
+
+    def copy(self, keys: set[str] | None = None) -> Dataset:
+        """Return a copy of the Dataset.
+
+        If keys are provided, only data associated with those keys are copied.
+
+        Parameters
+        ----------
+        keys : list, optional
+            List of keys to include in the copied dataset. If None (default), copies all data.
+
+        Returns
+        -------
+        Dataset
+            A copy of the dataset.
+
+        Raises
+        ------
+        KeyError
+            If a provided key does not exist in the Dataset.
+        """
+        if keys is None:
+            copied = copy.deepcopy(self)
+        else:
+            # If keys are specified, only copy those keys
+            copied = Dataset({}, {}, is_ph=self.is_ph)
+            for key in keys:
+                if key in self:
+                    copied[key] = copy.deepcopy(self[key])
+                else:
+                    msg = f"No such key: '{key}' in the Dataset."
+                    raise KeyError(msg)
+        return copied
 
 
 @typing.overload
@@ -483,12 +518,15 @@ class SpectraGlobResults:
     Attributes
     ----------
     svd : FitResult | None
+        The `FitResult` object representing the outcome of the concatenated svd fit, or `None` if the svd fit was not performed.
+    gsvd : FitResult | None
         The `FitResult` object representing the outcome of the svd fit, or `None` if the svd fit was not performed.
     bands : FitResult | None
         The `FitResult` object representing the outcome of the bands fit, or `None` if the bands fit was not performed.
     """
 
     svd: FitResult | None = field(default=None)
+    gsvd: FitResult | None = field(default=None)
     bands: FitResult | None = field(default=None)
 
 
@@ -502,22 +540,26 @@ def _apply_common_plot_style(
     ax.set_ylabel(ylabel)
 
 
-def plot_spectra(f: pd.DataFrame, ax: mpl.axes.Axes, pp: PlotParameters) -> None:
+def plot_spectra(ax: mpl.axes.Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     """Plot spectra.
 
     Parameters
     ----------
-    f : pd.DataFrame
-        The DataFrame containing spectral data.
     ax : mpl.axes.Axes
         The Axes object to which the plot should be added.
+    spectra : pd.DataFrame
+        The DataFrame containing spectral data.
     pp : PlotParameters
         The PlotParameters object containing plot parameters.
     """
     color_map = mpl.cm.get_cmap(pp.palette)
     normalize = mpl.colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
-    for i in range(len(f.columns)):
-        ax.plot(f.index, f.iloc[:, i], color=color_map(normalize(f.columns[i])))
+    for i in range(len(spectra.columns)):
+        ax.plot(
+            spectra.index,
+            spectra.iloc[:, i],
+            color=color_map(normalize(spectra.columns[i])),
+        )
     _apply_common_plot_style(ax, "Spectra", "Wavelength", "Fluorescence")
     # Add a colorbar for reference
     sm = mpl.cm.ScalarMappable(cmap=color_map, norm=normalize)
@@ -525,17 +567,17 @@ def plot_spectra(f: pd.DataFrame, ax: mpl.axes.Axes, pp: PlotParameters) -> None
     ax.figure.colorbar(sm, ax=ax, label=pp.kind)
 
 
-def _plot_autovectors(wl: pd.Index, u: ArrayF, ax: mpl.axes.Axes) -> None:
+def _plot_autovectors(ax: mpl.axes.Axes, wl: pd.Index, u: ArrayF) -> None:
     """Plot autovectors.
 
     Parameters
     ----------
+    ax : mpl.axes.Axes
+        The Axes object to which the plot should be added.
     wl : pd.Index
         The index of spectra data frame.
     u : ArrayF
         The left singular vectors obtained from SVD.
-    ax : mpl.axes.Axes
-        The Axes object to which the plot should be added.
     """
     number_autovectors = 4
     for i in range(number_autovectors):
@@ -543,27 +585,19 @@ def _plot_autovectors(wl: pd.Index, u: ArrayF, ax: mpl.axes.Axes) -> None:
     _apply_common_plot_style(ax, "Autovectors", "Wavelength", "Magnitude")
 
 
-def plot_autovalues(s: ArrayF, ax: mpl.axes.Axes) -> None:
+def plot_autovalues(ax: mpl.axes.Axes, s: ArrayF) -> None:
     """Plot the singular values from SVD.
 
     Parameters
     ----------
-    s : ArrayF
-        The singular values from the SVD.
     ax : mpl.axes.Axes
         The axes on which to plot the singular values.
+    s : ArrayF
+        The singular values from the SVD.
     """
     data = pd.DataFrame({"index": range(1, len(s) + 1), "singular_values": s})
-    sb.scatterplot(
-        x="index",
-        y="singular_values",
-        data=data,
-        ax=ax,
-        hue="index",
-        s=99,
-        legend=False,
-        palette=COLOR_MAP.name,
-    )
+    kws = {"s": 99, "legend": False, "palette": COLOR_MAP.name}
+    sb.scatterplot(x="index", y="singular_values", data=data, ax=ax, hue="index", **kws)
     _apply_common_plot_style(ax, "Singular Values from SVD", "Index", "Singular Value")
     ax.set(yscale="log")
     ax.set_xticks(np.arange(1, len(s) + 1))
@@ -590,19 +624,19 @@ def plot_fit(
     # Create a color cycle
     colors = [COLOR_MAP(i) for i in range(len(ds))]
     for (lbl, da), clr in zip(ds.items(), colors):
-        # Make sure a label will be displayed
+        # Make sure a label will be displayed.
         label = lbl if (da.w is None and nboot == 0) else None
-        # Plot data
+        # Plot data.
         if pp:
             kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
             ax.scatter(da.x, da.y, c=da.x, s=99, edgecolors="k", label=label, **kws)
         else:
             ax.plot(da.x, da.y, "o", color=clr, label=label)
-        # Plot fitting
+        # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         kws_err = {"alpha": 0.3, "capsize": 3}
         if nboot:
-            # Calculate uncertainty using Monte Carlo method
+            # Calculate uncertainty using Monte Carlo method.
             y_samples = np.empty((nboot, len(xfit[lbl])))
             for i in range(nboot):
                 p_sample = result.params.copy()
@@ -610,30 +644,33 @@ def plot_fit(
                     param.value = np.random.normal(param.value, param.stderr)
                 y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
             dy = y_samples.std(axis=0)
-            # Plot uncertainty
+            # Plot uncertainty.
             kws = {"alpha": 0.4, "color": clr}
-            # Display label fill_between
+            # Display label in fill_between plot.
             ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws, label=lbl)
             if da.w is not None:
                 ye = np.sqrt(1 / da.w)
                 ax.errorbar(da.x, da.y, yerr=ye, fmt="none", color="gray", **kws_err)
         elif da.w is not None:
             ye = np.sqrt(1 / da.w / result.nfree)
-            # Display label errorbar
+            # Display label in error bar plot.
             ax.errorbar(da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, **kws_err)
-    ax.grid(True)
     ax.legend()
+    k = ufloat(result.params["K"].value, result.params["K"].stderr)
+    title = "=".join(["K", str(k).replace("+/-", "±")])
+    xlabel = "pH" if ds.is_ph else "Cl"
+    _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
 
 
-def plot_pca(v: ArrayF, ax: mpl.axes.Axes, conc: ArrayF, pp: PlotParameters) -> None:
+def plot_pca(ax: mpl.axes.Axes, v: ArrayF, conc: ArrayF, pp: PlotParameters) -> None:
     """Plot the first two principal components.
 
     Parameters
     ----------
-    v : ArrayF
-        The matrix containing the principal components.
     ax : mpl.axes.Axes
         The Axes object to which the plot should be added.
+    v : ArrayF
+        The matrix containing the principal components.
     conc : ArrayF
         The concentrations used for the titration.
     pp : PlotParameters
@@ -689,14 +726,14 @@ def analyze_spectra(
     ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
     ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
     ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
-    plot_spectra(spectra, ax1, PlotParameters(is_ph))
+    plot_spectra(ax1, spectra, PlotParameters(is_ph))
     if band is None:  # SVD
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
         ds = Dataset(x, v[0, :] + y_offset, is_ph)
-        _plot_autovectors(spectra.index, u, ax2)
-        plot_autovalues(s[:], ax3)  # don't plot last auto-values?
-        plot_pca(v, ax5, x, PlotParameters(is_ph))
+        _plot_autovectors(ax2, spectra.index, u)
+        plot_autovalues(ax3, s[:])  # don't plot last auto-values?
+        plot_pca(ax5, v, x, PlotParameters(is_ph))
         ylabel = "First Principal Component"
         ylabel_color = COLOR_MAP(0)
     else:  # Band integration
@@ -715,11 +752,7 @@ def analyze_spectra(
         ylabel_color = "k"
     fit_result = fit_binding_glob(ds, True)
     result = fit_result.result
-    plot_fit(ax4, ds, result, nboot=20, pp=PlotParameters(is_ph))
-    k = ufloat(result.params["K"].value, result.params["K"].stderr)
-    title = "=".join(["K", str(k).replace("+/-", "±")])
-    xlabel = "pH" if is_ph else "Cl"
-    _apply_common_plot_style(ax4, f"LM fit {title}", xlabel, "")
+    plot_fit(ax4, ds, result, nboot=N_BOOT, pp=PlotParameters(is_ph))
     ax4.set_ylabel(ylabel, color=ylabel_color)
     return FitResult(fig, result, fit_result.mini)
 
@@ -742,7 +775,7 @@ def fit_binding_glob(ds: Dataset, weighting: bool = False) -> FitResult:
     result = mini.minimize()
     fig = mpl.figure.Figure()
     ax = fig.add_subplot(111)
-    plot_fit(ax, ds, result, nboot=20, pp=PlotParameters(ds.is_ph))
+    plot_fit(ax, ds, result, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     return FitResult(fig, result, mini)
 
 
@@ -755,6 +788,7 @@ def analyze_spectra_glob(
     _gap_ = 1
     dbands = dbands or {}
     labels_svd = titration.keys() - dbands.keys()
+    labels_bands = titration.keys() - labels_svd
     if len(labels_svd) > 1:
         # Concatenate spectra.
         prev_max = 0
@@ -766,23 +800,31 @@ def analyze_spectra_glob(
             adjusted_list.append(spectra_adjusted)
         spectra_merged = pd.concat(adjusted_list)
         svd = analyze_spectra(spectra_merged, ds.is_ph)
+        ds_svd = ds.copy(labels_svd)
+        gsvd = fit_binding_glob(ds_svd, True)
     else:
-        svd = None
-    bands = fit_binding_glob(ds, True) if len(dbands.keys()) > 1 else None
-    return SpectraGlobResults(svd, bands)
+        svd, gsvd = None, None
+    if len(labels_bands) > 1:
+        ds_bands = ds.copy(labels_bands)
+        bands = fit_binding_glob(ds_bands, True)
+    else:
+        bands = None
+    return SpectraGlobResults(svd, gsvd, bands)
 
 
-def plot_emcee(result_emcee: MinimizerResult) -> None:
+def plot_emcee(mini: Minimizer) -> MinimizerResult:
     """Plot emcee result."""
+    result_emcee = mini.emcee()
     samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
     az.plot_pair(idata, kind=["scatter", "kde"], scatter_kwargs={"marker": ".", "s": 1})
     az.plot_posterior(idata.posterior)  # type: ignore
+    return result_emcee
 
 
-def plot_emcee_on_ax(result_emcee: MinimizerResult, ax: mpl.axes.Axes) -> None:
+def plot_emcee_k_on_ax(ax: mpl.axes.Axes, result_emcee: MinimizerResult) -> None:
     """Plot emcee result."""
     samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
