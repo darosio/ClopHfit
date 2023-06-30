@@ -226,7 +226,7 @@ def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bo
 
 
 def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
-    """Compute concatenated residuals (array) for multiple datasets; or model predictions (dict)."""
+    """Compute concatenated residuals (array) for multiple datasets; weight = 1/std."""
     x, y, w, is_ph = _init_from_dataset(ds)
     models = _binding_1site_models(params, x, is_ph)
     residuals: ArrayF = np.concatenate([(w[lbl] * (y[lbl] - models[lbl])) for lbl in x])
@@ -634,7 +634,7 @@ def plot_fit(
             ax.plot(da.x, da.y, "o", color=clr, label=label)
         # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
-        kws_err = {"alpha": 0.3, "capsize": 3}
+        kws_err = {"alpha": 0.4, "capsize": 3}
         if nboot:
             # Calculate uncertainty using Monte Carlo method.
             y_samples = np.empty((nboot, len(xfit[lbl])))
@@ -649,10 +649,10 @@ def plot_fit(
             # Display label in fill_between plot.
             ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws, label=lbl)
             if da.w is not None:
-                ye = np.sqrt(1 / da.w)
+                ye = 1 / da.w
                 ax.errorbar(da.x, da.y, yerr=ye, fmt="none", color="gray", **kws_err)
         elif da.w is not None:
-            ye = np.sqrt(1 / da.w / result.nfree)
+            ye = 1 / da.w
             # Display label in error bar plot.
             ax.errorbar(da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, **kws_err)
     ax.legend()
