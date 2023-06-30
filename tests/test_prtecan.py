@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -170,7 +171,7 @@ class TestLabelblock:
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """Check if a Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        assert lb0 == lb0, "Labelblock is not equal to itself"
+        assert id(lb0) == id(lb0), "Labelblock is not equal to itself"
         assert lb0 != lb1, "Different Labelblocks are incorrectly reported as equal"
         assert (
             lb0.__eq__(1) == NotImplemented
@@ -279,15 +280,15 @@ class TestTecanfile:
 class TestLabelblocksGroup:
     """Test LabelBlocksGroup class."""
 
-    tfs = [
+    tfs: ClassVar[list[prtecan.Tecanfile]] = [
         prtecan.Tecanfile(data_tests / "290513_5.5.xls"),
         prtecan.Tecanfile(data_tests / "290513_7.2.xls"),
         prtecan.Tecanfile(data_tests / "290513_8.8.xls"),
     ]
     lbg0 = prtecan.LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
     lbg1 = prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
-    lbg0.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-    lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+    lbg0.buffer_wells: ClassVar[list[str]] = ["C12", "D01", "D12", "E01", "E12", "F01"]
+    lbg1.buffer_wells: ClassVar[list[str]] = ["C12", "D01", "D12", "E01", "E12", "F01"]
 
     def test_metadata(self) -> None:
         """Merge only shared metadata."""
@@ -346,8 +347,10 @@ class TestTecanfileGroup:
     class TestAllEqLbgs:
         """Test TfG with 2 LbG in the same order."""
 
-        filenames = ["290513_5.5.xls", "290513_7.2.xls"]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+        filenames: ClassVar[list[str]] = ["290513_5.5.xls", "290513_7.2.xls"]
+        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
+            prtecan.Tecanfile(data_tests / f) for f in filenames
+        ]
         tfg = prtecan.TecanfilesGroup(tecanfiles)
 
         def test_metadata(self) -> None:
@@ -377,12 +380,14 @@ class TestTecanfileGroup:
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        filenames = [
+        filenames: ClassVar[list[str]] = [
             "290513_5.5.xls",  # Label1 and Label2
             "290513_7.2.xls",  # Label1 and Label2
             "290513_8.8.xls",  # Label1 and Label2 with different metadata
         ]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
+            prtecan.Tecanfile(data_tests / f) for f in filenames
+        ]
         with pytest.warns(UserWarning) as record:
             group = prtecan.TecanfilesGroup(tecanfiles)
 
@@ -421,12 +426,14 @@ class TestTecanfileGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        filenames = [
+        filenames: ClassVar[list[str]] = [
             "290212_5.78.xls",  # Label1 and Label2
             "290212_20.xls",  # Label2 only
             "290212_100.xls",  # Label2 only
         ]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
+            prtecan.Tecanfile(data_tests / f) for f in filenames
+        ]
         # pylint: disable=W0201
         with pytest.warns(UserWarning) as record:
             group = prtecan.TecanfilesGroup(tecanfiles)
@@ -451,8 +458,10 @@ class TestTecanfileGroup:
     class TestFailToMerge:
         """Test TfG without mergeable labelblocks."""
 
-        filenames = ["290513_5.5.xls", "290513_5.5_bad.xls"]
-        tecanfiles = [prtecan.Tecanfile(data_tests / f) for f in filenames]
+        filenames: ClassVar[list[str]] = ["290513_5.5.xls", "290513_5.5_bad.xls"]
+        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
+            prtecan.Tecanfile(data_tests / f) for f in filenames
+        ]
 
         def test_raise_exception(self) -> None:
             """Raise Exception when there is no way to build labelblocksGroup."""

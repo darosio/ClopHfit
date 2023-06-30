@@ -6,6 +6,7 @@ import sys
 import typing
 from pathlib import Path
 from typing import Any
+from typing import ClassVar
 from typing import Iterator
 from typing import List
 from typing import Tuple
@@ -26,12 +27,12 @@ class TestTitrationFit:
     """Test the old ``fit_titration.py`` script."""
 
     note_fp = "./NTT-A04-Cl_note"
-    csv_files = ["./Meas/A04 Cl_A.csv", "./Meas/A04 Cl_B.csv"]
-    res_svd = [
+    csv_files: ClassVar[list[str]] = ["./Meas/A04 Cl_A.csv", "./Meas/A04 Cl_B.csv"]
+    res_svd: ClassVar[list[str]] = [
         "K =  17.035\nsK =  0.666\nSA =  -0.0\nsSA =  0.007\nSB =  -0.275\nsSB =  0.002",
         "K =  14.824\nsK =  0.708\nSA =  0.019\nsSA =  0.004\nSB =  -0.274\nsSB =  0.002",
     ]
-    res_band = [
+    res_band: ClassVar[list[str]] = [
         "K =  15.205\nsK =  0.549\nSA =  205506.748\nsSA =  1862.684\nSB =  1781.387\nsSB =  1249.163",
         "K =  15.015\nsK =  0.701\nSA =  253789.494\nsSA =  3055.602\nSB =  -4381.091\nsSB =  2040.904",
     ]
@@ -97,11 +98,11 @@ class TestTitrationFit:
 class TestTitrationFitGlobal:
     """It test the old ``fit_titration_global.py`` script."""
 
-    dat_files = [
+    dat_files: ClassVar[list[str]] = [
         "./global/pH/D05.dat",
         "./global/Cl/B05-20130628-cor.dat",
     ]
-    res = [
+    res: ClassVar[list[str]] = [
         """SA1   683.357   714.804   740.747   767.245   800.925
 SB1   246.164   299.394   338.212   374.611   417.296
 SA2   11.0487   47.6023   76.2874     104.3   138.128
