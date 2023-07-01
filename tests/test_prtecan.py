@@ -10,9 +10,13 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 import pytest
+from numpy.testing import assert_almost_equal
+from numpy.testing import assert_array_equal
 
 from clophfit import prtecan
 from clophfit.prtecan import Labelblock
+from clophfit.prtecan import LabelblocksGroup
+from clophfit.prtecan import Tecanfile
 from clophfit.prtecan import TitrationAnalysis
 
 # By defining csvl, lb0, and lb1 as class attributes, they are created only once
@@ -88,10 +92,8 @@ def test_calculate_conc() -> None:
     """Calculates concentration values from Cl additions."""
     additions = [112, 2, 2, 2, 2, 2, 2, 6, 4]
     conc = prtecan.calculate_conc(additions, 1000)
-    np.testing.assert_almost_equal(
-        conc,
-        [0.0, 17.544, 34.483, 50.847, 66.667, 81.967, 96.774, 138.462, 164.179],
-        3,
+    assert_almost_equal(
+        conc, [0.0, 17.544, 34.483, 50.847, 66.667, 81.967, 96.774, 138.462, 164.179], 3
     )
 
 
@@ -280,63 +282,70 @@ class TestTecanfile:
 class TestLabelblocksGroup:
     """Test LabelBlocksGroup class."""
 
-    tfs: ClassVar[list[prtecan.Tecanfile]] = [
-        prtecan.Tecanfile(data_tests / "290513_5.5.xls"),
-        prtecan.Tecanfile(data_tests / "290513_7.2.xls"),
-        prtecan.Tecanfile(data_tests / "290513_8.8.xls"),
-    ]
-    lbg0 = prtecan.LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
-    lbg1 = prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
-    lbg0.buffer_wells: ClassVar[list[str]] = ["C12", "D01", "D12", "E01", "E12", "F01"]
-    lbg1.buffer_wells: ClassVar[list[str]] = ["C12", "D01", "D12", "E01", "E12", "F01"]
+    @pytest.fixture(autouse=True, scope="class")
+    def tfs(self) -> list[Tecanfile]:
+        """Set up list of Tecanfile."""
+        return [
+            Tecanfile(data_tests / "290513_5.5.xls"),
+            Tecanfile(data_tests / "290513_7.2.xls"),
+            Tecanfile(data_tests / "290513_8.8.xls"),
+        ]
 
-    def test_metadata(self) -> None:
+    @pytest.fixture(autouse=True, scope="class")
+    def lbgs(self, tfs: list[Tecanfile]) -> tuple[LabelblocksGroup, LabelblocksGroup]:
+        """Set up LabelblocksGroup 0 and 1."""
+        lbg0 = LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
+        lbg1 = LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
+        lbg0.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        lbg1.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        return lbg0, lbg1
+
+    def test_metadata(self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]) -> None:
         """Merge only shared metadata."""
-        assert self.lbg0.metadata.get("Temperature") is None
-        assert self.lbg1.metadata.get("Temperature") is None
-        assert self.lbg1.metadata.get("Gain") is None
-        assert self.lbg1.labelblocks[0].metadata["Gain"].value == 98
-        assert self.lbg1.labelblocks[1].metadata["Gain"].value == 99
+        assert lbgs[0].metadata.get("Temperature") is None
+        assert lbgs[1].metadata.get("Temperature") is None
+        assert lbgs[1].metadata.get("Gain") is None
+        assert lbgs[1].labelblocks[0].metadata["Gain"].value == 98
+        assert lbgs[1].labelblocks[1].metadata["Gain"].value == 99
         # Common metadata.
-        assert self.lbg0.metadata["Gain"].value == 94
-        assert self.lbg0.metadata["Number of Flashes"].value == 10
+        assert lbgs[0].metadata["Gain"].value == 94
+        assert lbgs[0].metadata["Number of Flashes"].value == 10
 
-    def test_data(self) -> None:
+    def test_data(self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]) -> None:
         """Merge data."""
-        assert self.lbg0.data is not None
-        assert self.lbg0.data["A01"] == [18713, 17088]
-        assert self.lbg0.data["H12"] == [28596, 25771]
-        assert self.lbg1.data is None
+        assert lbgs[0].data is not None
+        assert lbgs[0].data["A01"] == [18713, 17088]
+        assert lbgs[0].data["H12"] == [28596, 25771]
+        assert lbgs[1].data is None
 
-    def test_data_normalized(self) -> None:
+    def test_data_normalized(
+        self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
+    ) -> None:
         """Merge data_normalized."""
-        np.testing.assert_almost_equal(
-            self.lbg1.data_norm["H12"], [693.980, 714.495], 3
-        )
-        np.testing.assert_almost_equal(
-            self.lbg0.data_norm["A01"], [995.372, 908.936], 3
-        )
+        assert_almost_equal(lbgs[1].data_norm["H12"], [693.980, 714.495], 3)
+        assert_almost_equal(lbgs[0].data_norm["A01"], [995.372, 908.936], 3)
 
-    def test_data_buffersubtracted(self) -> None:
+    def test_data_buffersubtracted(
+        self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
+    ) -> None:
         """Merge data_buffersubtracted."""
-        assert self.lbg0.data_buffersubtracted is not None
-        np.testing.assert_almost_equal(
-            self.lbg0.data_buffersubtracted["B07"], [7069, 5716.7], 1
-        )
-        assert self.lbg1.data_buffersubtracted is None
+        assert lbgs[0].data_buffersubtracted is not None
+        assert_almost_equal(lbgs[0].data_buffersubtracted["B07"], [7069, 5716.7], 1)
+        assert lbgs[1].data_buffersubtracted is None
 
-    def test_data_buffersubtracted_norm(self) -> None:
+    def test_data_buffersubtracted_norm(
+        self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
+    ) -> None:
         """Merge data_buffersubtracted."""
-        np.testing.assert_almost_equal(
-            self.lbg0.data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
+        assert_almost_equal(
+            lbgs[0].data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
         )
-        np.testing.assert_almost_equal(
-            self.lbg1.data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
+        assert_almost_equal(
+            lbgs[1].data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
         )
 
-    def test_notequal_labelblocks(self) -> None:
-        """It raises Exception when concatenating unequal labelblocks."""
-        tfs = self.tfs
+    def test_notequal_labelblocks(self, tfs: list[Tecanfile]) -> None:
+        """Raise Exception when concatenating unequal labelblocks."""
         with pytest.raises(ValueError, match="Creation of labelblock group failed."):
             prtecan.LabelblocksGroup([tfs[1].labelblocks[0], tfs[2].labelblocks[1]])
 
@@ -416,10 +425,10 @@ class TestTecanfileGroup:
             assert lbg1.metadata.get("Gain") is None
             assert lbg1.data is None
             # data_normalized
-            np.testing.assert_almost_equal(
+            assert_almost_equal(
                 lbg1.data_norm["A01"], [401.9387755, 446.9897959, 450.0]
             )
-            np.testing.assert_almost_equal(
+            assert_almost_equal(
                 lbg1.data_norm["H12"], [725.8163265, 693.9795918, 714.4949494]
             )
 
@@ -533,7 +542,7 @@ class TestTitrationAnalysis:
 
     @pytest.fixture(autouse=True, scope="class")
     def titan(self) -> TitrationAnalysis:
-        """Set up test class."""
+        """Set up the TitrationAnalysis."""
         titan = prtecan.TitrationAnalysis.fromlistfile(data_tests / "140220/list.pH")
         titan.load_additions(data_tests / "140220/additions.pH")
         titan.load_scheme(data_tests / "140220/scheme.txt")
@@ -561,29 +570,27 @@ class TestTitrationAnalysis:
         """It subtracts buffer average values."""
         lbg0 = titan.labelblocksgroups[0]
         lbg1 = titan.labelblocksgroups[1]
-        np.testing.assert_almost_equal(
-            lbg0.data_norm["E01"][::2],
-            [601.72, 641.505, 674.355, 706.774],
-            3,
+        assert_almost_equal(
+            lbg0.data_norm["E01"][::2], [601.72, 641.505, 674.355, 706.774], 3
         )
         assert lbg0.data is not None
         assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
         assert lbg0.data_buffersubtracted is not None
-        np.testing.assert_array_equal(
+        assert_array_equal(
             lbg0.data_buffersubtracted["A12"][::3], [8084.5, 16621.75, 13775.0]
         )
         assert lbg1.data_buffersubtracted is not None
-        np.testing.assert_array_equal(
+        assert_array_equal(
             lbg1.data_buffersubtracted["A12"][::3], [9758.25, 1334.0, 283.5]
         )
 
     def test_dilution_correction(self, titan: TitrationAnalysis) -> None:
         """It applies dilution correction read from file listing additions."""
         assert titan.additions is not None
-        np.testing.assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
+        assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
         assert titan.data_dilutioncorrected is not None
         assert titan.data_dilutioncorrected[1] is not None
-        np.testing.assert_almost_equal(
+        assert_almost_equal(
             titan.data_dilutioncorrected[1]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
@@ -591,12 +598,12 @@ class TestTitrationAnalysis:
     def test_data_dilutioncorrected_norma(self, titan: TitrationAnalysis) -> None:
         """It normalizes data."""
         assert titan.data_dilutioncorrected_norm is not None
-        np.testing.assert_almost_equal(
+        assert_almost_equal(
             titan.data_dilutioncorrected_norm[0]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
-        np.testing.assert_almost_equal(
+        assert_almost_equal(
             titan.data_dilutioncorrected_norm[1]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
