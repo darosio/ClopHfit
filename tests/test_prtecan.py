@@ -17,6 +17,7 @@ from clophfit import prtecan
 from clophfit.prtecan import Labelblock
 from clophfit.prtecan import LabelblocksGroup
 from clophfit.prtecan import Tecanfile
+from clophfit.prtecan import TecanfilesGroup
 from clophfit.prtecan import TitrationAnalysis
 
 # By defining csvl, lb0, and lb1 as class attributes, they are created only once
@@ -356,24 +357,22 @@ class TestTecanfileGroup:
     class TestAllEqLbgs:
         """Test TfG with 2 LbG in the same order."""
 
-        filenames: ClassVar[list[str]] = ["290513_5.5.xls", "290513_7.2.xls"]
-        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
-            prtecan.Tecanfile(data_tests / f) for f in filenames
-        ]
-        tfg = prtecan.TecanfilesGroup(tecanfiles)
+        @pytest.fixture(autouse=True, scope="class")
+        def tfg(self) -> TecanfilesGroup:
+            """Set up TecanfilesGroup."""
+            filenames = ["290513_5.5.xls", "290513_7.2.xls"]
+            tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
+            return TecanfilesGroup(tecanfiles)
 
-        def test_metadata(self) -> None:
+        def test_metadata(self, tfg: TecanfilesGroup) -> None:
             """Parse general metadata."""
-            assert (
-                self.tfg.metadata["Plate"].value
-                == "PE 96 Flat Bottom White   [PE.pdfx]"
-            )
-            assert self.tfg.metadata["System"].value == "TECANROBOT"
+            assert tfg.metadata["Plate"].value == "PE 96 Flat Bottom White   [PE.pdfx]"
+            assert tfg.metadata["System"].value == "TECANROBOT"
 
-        def test_labelblocksgroups(self) -> None:
+        def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
             """Generate 2 LbG with .data and .metadata."""
-            lbg0 = self.tfg.labelblocksgroups[0]
-            lbg1 = self.tfg.labelblocksgroups[1]
+            lbg0 = tfg.labelblocksgroups[0]
+            lbg1 = tfg.labelblocksgroups[1]
             # metadata
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata["Gain"].value == 98.0
@@ -389,26 +388,36 @@ class TestTecanfileGroup:
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        filenames: ClassVar[list[str]] = [
-            "290513_5.5.xls",  # Label1 and Label2
-            "290513_7.2.xls",  # Label1 and Label2
-            "290513_8.8.xls",  # Label1 and Label2 with different metadata
-        ]
-        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
-            prtecan.Tecanfile(data_tests / f) for f in filenames
-        ]
-        with pytest.warns(UserWarning) as record:
-            group = prtecan.TecanfilesGroup(tecanfiles)
+        @pytest.fixture(autouse=True, scope="class")
+        def tfg_warn(self) -> tuple[TecanfilesGroup, pytest.WarningsRecorder]:
+            """Set up TecanfilesGroup with Warning."""
+            filenames = [
+                "290513_5.5.xls",  # Label1 and Label2
+                "290513_7.2.xls",  # Label1 and Label2
+                "290513_8.8.xls",  # Label1 and Label2 with different metadata
+            ]
+            tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
+            with pytest.warns(UserWarning) as record:
+                tfg = TecanfilesGroup(tecanfiles)
+            return tfg, record
 
-        def test_warn(self) -> None:
+        @pytest.fixture(autouse=True, scope="class")
+        def tfg(
+            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        ) -> TecanfilesGroup:
+            """Extract TecanfilesGroup."""
+            return tfg_warn[0]
+
+        def test_warn(
+            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        ) -> None:
             """Warn about labelblocks anomaly."""
-            assert "Different LabelblocksGroup among filenames:" in str(
-                self.record[0].message
-            )
+            msg_str = str(tfg_warn[1][0].message)
+            assert "Different LabelblocksGroup among filenames" in msg_str
 
-        def test_labelblocksgroups(self) -> None:
+        def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
             """Generate 1 LbG with .data and .metadata."""
-            lbg0 = self.group.labelblocksgroups[0]
+            lbg0 = tfg.labelblocksgroups[0]
             # metadata
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg0.metadata["Gain"].value == 94
@@ -417,9 +426,9 @@ class TestTecanfileGroup:
             assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
             assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
 
-        def test_mergeable_labelblocksgroups(self) -> None:
+        def test_mergeable_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
             """Generate 1 Lbg only with .data_normalized and only common .metadata."""
-            lbg1 = self.group.labelblocksgroups[1]
+            lbg1 = tfg.labelblocksgroups[1]
             # metadata
             assert lbg1.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata.get("Gain") is None
@@ -435,27 +444,36 @@ class TestTecanfileGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        filenames: ClassVar[list[str]] = [
-            "290212_5.78.xls",  # Label1 and Label2
-            "290212_20.xls",  # Label2 only
-            "290212_100.xls",  # Label2 only
-        ]
-        tecanfiles: ClassVar[list[prtecan.Tecanfile]] = [
-            prtecan.Tecanfile(data_tests / f) for f in filenames
-        ]
-        # pylint: disable=W0201
-        with pytest.warns(UserWarning) as record:
-            group = prtecan.TecanfilesGroup(tecanfiles)
+        @pytest.fixture(autouse=True, scope="class")
+        def tfg_warn(self) -> tuple[TecanfilesGroup, pytest.WarningsRecorder]:
+            """Set up TecanfilesGroup with Warning."""
+            filenames = [
+                "290212_5.78.xls",  # Label1 and Label2
+                "290212_20.xls",  # Label2 only
+                "290212_100.xls",  # Label2 only
+            ]
+            tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
+            with pytest.warns(UserWarning) as record:
+                tfg = TecanfilesGroup(tecanfiles)
+            return tfg, record
 
-        def test_warn(self) -> None:
+        @pytest.fixture(autouse=True, scope="class")
+        def tfg(
+            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        ) -> TecanfilesGroup:
+            """Extract TecanfilesGroup."""
+            return tfg_warn[0]
+
+        def test_warn(
+            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        ) -> None:
             """Warn about labelblocks anomaly."""
-            assert "Different LabelblocksGroup among filenames" in str(
-                self.record[0].message
-            )
+            msg_str = str(tfg_warn[1][0].message)
+            assert "Different LabelblocksGroup among filenames" in msg_str
 
-        def test_labelblocksgroups(self) -> None:
+        def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
             """Generates 1 LbG with .data and .metadata."""
-            lbg = self.group.labelblocksgroups[0]
+            lbg = tfg.labelblocksgroups[0]
             # metadata
             assert lbg.metadata["Number of Flashes"].value == 10.0
             assert lbg.metadata["Gain"].value == 93.0
