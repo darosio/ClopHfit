@@ -19,7 +19,7 @@ And documentation development in .org files requires:
 .. toctree::
    :numbered:
 
-   usage
-   usage2
+   LMfit
    prtecan
    prenspire
+   oldscripts_TODO

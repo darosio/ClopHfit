@@ -1,0 +1,131 @@
+#+PROPERTY: header-args:python :kernel python3 :pandoc t
+#+PROPERTY: header-args :outputs both :results output :exports both
+#+OPTIONS: toc:nil num:nil
+
+* init                                                                  :noexport:
+#+begin_src python
+import numpy as np
+import scipy
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sb
+import lmfit
+#+end_src
+
+** emcee
+# :PROPERTIES:
+# :header-args: :eval never-export
+# :END:
+
+
+
+* TODO See also this tutorial                                           :noexport:
+https://www.astro.rug.nl/software/kapteyn/kmpfittutorial.html
+
+**▶ TODO jackknife to auto-reject
+**▶ TODO uncertainty estimate
+
+
+
+* Old scripts
+** =fit_titration.py=
+
+- input ← csvtable and note _file
+  - csvtable
+  #+begin_src ditaa :exports results :file ../_static/csvtable.png
+  	+--------+-----+---+---+---+-----+
+  	| lambda | A01 | . | . | . | H12 |
+  	+--------+-----+---+---+---+-----+
+  	|  500   |  .  | . | . | . |  .  |
+  	|   .    |  .  | . | . | . |  .  |
+  	|   .    |  .  | . | . | . |  .  |
+  	|   .    |  .  | . | . | . |  .  |
+  	|  650   |  .  | . | . | . |  .  |
+  	+--------+-----+---+---+---+-----+
+  #+end_src
+
+  - note _file
+  #+begin_src ditaa :exports results :file ../_static/note_file.png
+  	+-----+----+----+-----+
+  	|well | pH | Cl | mut |
+  	+-----+----+----+-----+
+  	| A01 | .  | .  |  .  |
+  	|  .  | .  | .  |  .  |
+  	|  .  | .  | .  |  .  |
+  	| H12 | .  | .  |  .  |
+  	+-----+----+----+-----+
+  #+end_src
+
+- output → pK spK and pdf of analysis
+
+
+It is a unique script for pK and Cl and various methods:
+
+    1. svd
+    2. bands
+    3. single lambda
+
+and bootstrapping
+
+
+
+I do not know how to unittest
+TODO
+
+    - average spectra
+    - join spectra ['B', 'E', 'F']
+    - compute band integral (or sums)
+
+** =fit_titration_global.py=
+
+A script for fitting tuples (y1, y2) of values for each concentration (x). It uses lmfit confint and bootstrap.
+
+- input ← x y1 y2 (file)
+  - file
+  #+begin_src ditaa :exports results :file ../_static/file.png
+  	+------+----+----+
+  	| conc | y1 | y2 |
+  	+------+----+----+
+  	|  .   | .  | .  |
+  	|  .   | .  | .  |
+  	|  .   | .  | .  |
+  	+------+----+----+
+  #+end_src
+
+- output →
+  - params: K SA1 SB1 SA2 SB2
+  - fit.png
+  - correl.png
+
+It uses lmfit confint and bootstrap. In global fit the best approach was using lmfit without bootstrap.
+
+#+begin_src bash :eval never
+     for i in *.dat; do gfit $i png2 --boot 99 > png2/$i.txt; done
+#+end_src
+
+** IBF database uses
+
+Bash scripts (probably moved into prtecan) for:
+- =fit_titration_global.py=
+  - [[../../src/clophfit/old/bash/fit.tecan]]
+  - [[../../src/clophfit/old/bash/fit.tecan.cl]]
+- =fit_titration.py=
+  #+begin_src sh :eval never
+  cd 2014-xx-xx
+
+  (prparser) pr.enspire *.csv
+
+  fit_titration.py meas/Copy_daniele00_893_A.csv A02_37_note.csv -d fit/37C | tee fit/svd_Copy_daniele00_893_A_A02_37_note.txt
+
+  w_ave.sh > pKa.txt
+
+  head pKa??/pKa.txt >> Readme.txt
+
+
+  # fluorimeter data
+  ls > list
+  merge.py list
+  fit_titration *.csv fluo_note
+  #+end_src
+
+see: [[file:/home/dati/ibf/IBF/Database/Data and protocols_Liaisan/library after Omnichange mutagenesis/Readme_howto.txt]]
