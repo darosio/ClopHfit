@@ -1,4 +1,4 @@
-#+PROPERTY: header-args:python :kernel python3 :pandoc t
+#+PROPERTY: header-args:python :pandoc t
 #+PROPERTY: header-args :outputs both :results output :exports both
 #+OPTIONS: toc:nil num:nil
 

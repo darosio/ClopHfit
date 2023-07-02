@@ -14,7 +14,6 @@ And documentation development in .org files requires:
 
 - emacs with org babel
 - jupyter (and kernel e.g. cloph-310)
-- r
 
 .. toctree::
    :numbered:
