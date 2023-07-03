@@ -43,7 +43,8 @@ docs/_build/
 
 # Jupyter notebooks
 .ipynb*
-.ob-jupyter
+.ob-jupyter/
+.virtual_documents/
 
 # R
 .Rhistory

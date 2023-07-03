@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 
 import arviz as az
+import corner
 import numpy as np
 import pandas as pd
 from lmfit.minimizer import MinimizerResult  # type: ignore
@@ -235,15 +236,27 @@ def plot_spectra_distributed(
     fig.colorbar(sm, ax=axl, label=pp.kind)
 
 
-def plot_emcee(result_emcee: MinimizerResult) -> None:
+def plot_emcee(result_emcee: MinimizerResult) -> tuple[Figure, list[float]]:
     """Plot emcee result."""
-    # XXX: result_emcee = mini.emcee()
     samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
-    az.plot_pair(idata, kind=["scatter", "kde"], scatter_kwargs={"marker": ".", "s": 1})
-    az.plot_posterior(idata.posterior)  # type: ignore
+    f = corner.corner(
+        idata,
+        divergences=False
+        # XXX: idata, truths=list(result_emcee.params.valuesdict().values()), divergences=False
+    )
+    if "K" in idata.posterior:
+        hdi = corner.quantile(idata.posterior["K"], [0.03, 0.97])
+        frac_part = str(result_emcee.params["K"].stderr).split(".")[1]
+        # Find the position of the first non-zero digit
+        index = next((i for i, char in enumerate(frac_part) if char != "0"), None)
+        digits = 0 if index is None else index + 1
+        hdi_rounded = [round(value, digits) for value in hdi]
+        return f, hdi_rounded
+    else:
+        return f, []
 
 
 def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") -> None:
@@ -253,3 +266,45 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
     az.plot_posterior(idata.posterior[p_name], ax=ax)  # type: ignore
+
+
+def print_emcee(result_emcee: MinimizerResult) -> None:
+    """Add XXX: ."""
+    highest_prob = np.argmax(result_emcee.lnprob)
+    hp_loc = np.unravel_index(highest_prob, result_emcee.lnprob.shape)
+    mle_soln = result_emcee.chain[hp_loc]
+    # Store the parameter names
+    param_names = list(result_emcee.params.keys())
+    # Construct a dictionary mapping parameter names to MLE solutions
+    mle_dict = dict(zip(param_names, mle_soln))
+    header = "\nMaximum Likelihood Estimation from emcee"
+    line = "-------------------------------------------------"
+    format_string = "{:<5s} {:>11s} {:>11s} {:>11s}"
+    print(f"{header}\n{line}")
+    print(format_string.format("Parameter", "MLE Value", "Median Value", "Uncertainty"))
+    for name, param in result_emcee.params.items():
+        mle_value = f"{mle_dict[name]:.5f}" if name in mle_dict else "N/A"
+        median_value = f"{param.value:.5f}"
+        uncertainty = "None" if param.stderr is None else f"{param.stderr:.5f}"
+        print(format_string.format(name, mle_value, median_value, uncertainty))
+
+    print("\nError estimates from emcee:")
+    print("------------------------------------------------------")
+    print("Parameter  -2sigma  -1sigma   median  +1sigma  +2sigma")
+    format_string = "  {:5s}   {:8.4f} {:8.4f} {:8.4f} {:8.4f} {:8.4f}"
+    for name in result_emcee.params:
+        if name in result_emcee.flatchain:
+            quantiles = np.percentile(
+                result_emcee.flatchain[name], [2.275, 15.865, 50, 84.135, 97.275]
+            )
+            print(format_string.format(name, *quantiles))
+        else:
+            print(f"Key '{name}' not found in .flatchain.")
+
+    print("\nMaximum Likelihood Estimation (MLE):")
+    print("----------------------------------")
+    for ix, param in enumerate(result_emcee.params):
+        print(f"{param}: {mle_soln[ix]:.3f}")
+    quantiles = np.percentile(result_emcee.flatchain["K"], [2.28, 15.9, 50, 84.2, 97.7])
+    print(f"\n\n1 sigma spread = {0.5 * (quantiles[3] - quantiles[1]):.3f}")
+    print(f"2 sigma spread = {0.5 * (quantiles[4] - quantiles[0]):.3f}")

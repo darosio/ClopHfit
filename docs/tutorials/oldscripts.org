@@ -17,16 +17,6 @@ import lmfit
 # :header-args: :eval never-export
 # :END:
 
-
-
-* TODO See also this tutorial                                           :noexport:
-https://www.astro.rug.nl/software/kapteyn/kmpfittutorial.html
-
-**▶ TODO jackknife to auto-reject
-**▶ TODO uncertainty estimate
-
-
-
 * Old scripts
 ** =fit_titration.py=
 
@@ -129,3 +119,21 @@ Bash scripts (probably moved into prtecan) for:
   #+end_src
 
 see: [[file:/home/dati/ibf/IBF/Database/Data and protocols_Liaisan/library after Omnichange mutagenesis/Readme_howto.txt]]
+
+* new
+- Tit works for a plate organized with a pH-value for each row and a Cl conc
+  value for each column.
+- Old fit works with a list of well and corresponding cl conc orpH value; the
+  kind ["pH", "Cl"] decides
+
+Some measurements e.g. "A", "C" and "D" are at T = 20 others ("B", "E" and "F")
+are taken at T = 37.
+This temp is present in each metadata. (e.g. measurements["A"]["metadata"]["Temp"]).
+
+A future note file format:
+- well, pH, Cl, T, mut, meas labels
+
+  #+begin_src sh :results output :exports both :eval no
+echo "Well,pH,Cl,Name,Temp,Labels" > v224H_note.csv
+awk -F '\t' 'NR>1 {print $1 "," $2 "," $3 ",V224H,37.0,A B"}' v224H_note >> v224H_note.csv
+#+end_src

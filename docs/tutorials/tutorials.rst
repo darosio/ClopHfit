@@ -12,4 +12,4 @@ usage patterns.
    LMfit
    prtecan
    prenspire
-   oldscripts_TODO
+   oldscripts

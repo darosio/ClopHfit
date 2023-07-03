@@ -585,7 +585,7 @@ def analyze_spectra(
     return FitResult(fig, result, fit_result.mini)
 
 
-def fit_binding_glob(ds: Dataset, weighting: bool = False) -> FitResult:
+def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
     """Analyze multi-label binding datasets and visualize the results."""
     if weighting:
         wc: ArrayDict = {}
