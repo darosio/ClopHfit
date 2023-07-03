@@ -3,6 +3,40 @@
 
 # Changelog
 
+## v0.8.1 (2023-07-03)
+
+### Docs
+
+- fix pointer to changelog in project.toml (#274)
+
+### Build
+
+- update pandas requirement from <2.0.3 to <2.0.4 (#297)
+- update scipy requirement from <1.11.1 to <1.11.2 (#296)
+- bump sphinx-autodoc-typehints from 1.23.2 to 1.23.3 (#294)
+- update pytest requirement from <7.3.3 to <7.4.1 (#292)
+- update commitizen requirement from <3.3.1 to <3.5.3 (#291)
+- update scipy requirement from <1.10.2 to <1.11.1 (#293)
+- bump ruff from 0.0.272 to 0.0.275 (#289)
+- update mypy requirement from <1.4 to <1.5 (#286)
+- update numpy requirement from <1.24.4 to <1.25.1 (#284)
+- bump sphinx-autodoc-typehints from 1.23.0 to 1.23.2 (#283)
+- update commitizen requirement from <3.2.3 to <3.3.1 (#281)
+- update pytest requirement from <7.3.2 to <7.3.3 (#279)
+- bump ruff from 0.0.270 to 0.0.272 (#278)
+- bump pandas-stubs from 2.0.1.230501 to 2.0.2.230605 (#276)
+
+### Refactor
+
+- **docs**: Drop rpy; convert into LMfit.ipynb
+
+### chore
+
+- update pre-commit hooks (#295)
+- update pre-commit hooks (#285)
+- update pre-commit hooks (#280)
+- update pre-commit hooks (#275)
+
 ## v0.8.0 (2023-06-05)
 
 ### Feat
