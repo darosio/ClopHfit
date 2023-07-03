@@ -5,8 +5,6 @@ build:
   tools:
     python: "3.10"
   apt_packages:
-    - r-base
-    - pandoc
     - plantuml
 sphinx:
   configuration: docs/conf.py

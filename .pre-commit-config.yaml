@@ -7,8 +7,8 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
-      - id: check-added-large-files # hyper
-        exclude: "^tests/EnSpire/"
+      - id: check-added-large-files
+        exclude: "^tests/EnSpire/|^docs/tutorials/LMfit.ipynb"
       - id: check-case-conflict
       - id: check-docstring-first
       - id: check-executables-have-shebangs
