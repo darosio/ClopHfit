@@ -14,25 +14,14 @@
    }
 
 
-   class ExpNote {
-       #note_file: Path
+   class Note {
+       #fpath: Path
        #verbose: int = 0
        +wells: list
-       +titrations: list[Titration]
+       +titrations: dict[str, dict]
        +build_titrations()
    }
 
-   class Titration {
-    #conc: Sequence[float]
-    #data: dict[str, pd.DataFrame]
-    #cl: str | None = None,
-    #ph: str | None = None,
-    +plot()
-    +fit?()
-   }
-
-   Titration::conc *-- Titration::data : dataframe index
-   Titration "*" --* "1" ExpNote::titrations  : > build_titrations()
    EnspireFile "1" *-- "1" measurements : > extract_measurements()
    measurement "*" -* "1" measurements
 

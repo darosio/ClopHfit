@@ -1,6 +1,7 @@
 """Command-line interface."""
 from __future__ import annotations
 
+import csv
 import pprint
 import warnings
 from collections import namedtuple
@@ -464,3 +465,30 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
             / f_res.result.params[f"S1_{lbl}"].value
         )
         print(f"Ratio of {lbl}: {ratio}")
+
+
+@click.command()
+@click.argument("note", type=click.Path(exists=True, path_type=Path))
+@click.option("-o", "--output", default=None, help="Output CSV file.")
+@click.option("-l", "--labels", default="A B", help="Labels to be appended.")
+@click.option("-t", "--temp", default="37.0", help="Temperature to be appended.")
+def note2csv(note: str, output: str, labels: str, temp: str) -> None:
+    """Convert a tab-separated data file into a CSV file."""
+    headers = ["Well", "pH", "Cl", "Name", "Temp", "Labels"]
+
+    input_path = Path(note)
+    output_path = Path(output) if output else input_path.with_suffix(".csv")
+
+    if not output_path.exists():
+        output_path.write_text(",".join(headers) + "\n")
+
+    # read data from note file, append to output file
+    with input_path.open("r") as datafile:
+        reader = csv.reader(datafile, delimiter="\t")  # assuming tab-separated values
+        next(reader)  # skip the header row
+
+        with output_path.open("a") as f:
+            writer = csv.writer(f)
+            for row in reader:
+                new_row = row[:4] + [temp, labels]
+                writer.writerow(new_row)

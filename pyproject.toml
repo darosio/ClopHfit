@@ -84,6 +84,7 @@ tests = [
 "clop" = "clophfit.__main__:clop"
 "fit_titration_global_old" = "clophfit.old.fit_titration_global:main"
 "fit_titration_old" = "clophfit.old.fit_titration:main"
+"note_to_csv" = "clophfit.__main__:note2csv"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"

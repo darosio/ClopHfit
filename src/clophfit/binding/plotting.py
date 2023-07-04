@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 
 import arviz as az
-import corner
+import corner  # type: ignore
 import numpy as np
 import pandas as pd
 from lmfit.minimizer import MinimizerResult  # type: ignore

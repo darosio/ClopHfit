@@ -3,17 +3,15 @@
 from clophfit.prenspire.prenspire import (
     CsvLineError,
     EnspireFile,
-    ExpNote,
     ManyLinesFoundError,
-    Titration,
+    Note,
     verbose_print,
 )
 
 __all__ = [
     "CsvLineError",
     "EnspireFile",
-    "ExpNote",
+    "Note",
     "ManyLinesFoundError",
-    "Titration",
     "verbose_print",
 ]
