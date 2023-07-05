@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from clophfit.prenspire import EnspireFile
-from clophfit.prenspire import ExpNote
+from clophfit.prenspire import EnspireFile, Note
 
 data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath
@@ -164,40 +163,40 @@ class TestEnspireFile:
 
 
 @pytest.fixture(scope="module")
-def en1() -> ExpNote:
+def n1() -> Note:
     """Read note file."""
-    return ExpNote(esff("h148g-spettroC-nota"))
+    return Note(esff("h148g-spettroC-nota.csv"))
 
 
 @pytest.fixture(scope="module")
-def en1err() -> ExpNote:
+def n1err() -> Note:
     """Read note file with missing wells."""
-    return ExpNote(esff("h148g-spettroC-nota-Err"))
+    return Note(esff("h148g-spettroC-nota-Err.csv"))
 
 
-class TestExpNote:
+class TestNote:
     """Experimental notes."""
 
-    def test_get_list_from_note(self, en1: ExpNote) -> None:
+    def test_get_list_from_note(self, n1: Note) -> None:
         """Test get_well_list_from_note method."""
-        assert en1.wells[2] == "A03"
+        assert n1.wells[2] == "A03"
 
-    def test__note_list(self, en1: ExpNote) -> None:
+    def test__note_list(self, n1: Note) -> None:
         """Test well_list from note."""
-        assert en1._note_list[3][0] == "A03"
-        assert en1._note_list[65][1] == "8.2"
+        assert n1._note.loc[2, "Well"] == "A03"
+        assert n1._note.iloc[64, 1] == 8.2
 
-    def test_wells(self, en1: ExpNote, ef1: EnspireFile, en1err: ExpNote) -> None:
-        """Check wells from ExpNote vs. EnspireFile."""
-        assert en1.wells == ef1.wells
-        assert (en1err.wells == ef1.wells) is False
+    def test_wells(self, n1: Note, ef1: EnspireFile, n1err: Note) -> None:
+        """Check wells from Note vs. EnspireFile."""
+        assert n1.wells == ef1.wells
+        assert (n1err.wells == ef1.wells) is False
 
-    def test_build_titrations(self, en1: ExpNote, ef1: EnspireFile) -> None:
+    def test_build_titrations(self, n1: Note, ef1: EnspireFile) -> None:
         """Test the method extract_titrations()."""
-        en1.build_titrations(ef1)
-        assert len(en1.titrations) == 6
-        tit0 = en1.titrations[0]
-        assert tit0.conc == [5.2, 6.3, 7.4, 8.1, 8.2]
-        assert tit0.data["A"][(5.2, "A01")][272] == 3151
-        tit5 = en1.titrations[5]
-        assert tit5.data["A"][(667.0, "E11")][500] == 8734
+        n1.build_titrations(ef1)
+        assert len(n1.titrations["H148G"][20.0]) == 16
+        tit0 = n1.titrations["H148G"][20]["Cl_0.0"]["A"]
+        assert tit0.columns.to_list() == [5.2, 6.3, 7.4, 8.1, 8.2]
+        assert tit0[5.2][272] == 3151
+        tit5 = n1.titrations["H148G"][20]["pH_8.2"]["A"]
+        assert tit5[667.0][500] == 8734

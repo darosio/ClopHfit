@@ -20,6 +20,7 @@ classifiers = [
   "Development Status :: 3 - Alpha"
 ]
 dependencies = [
+  'arviz < 0.15.2',
   'click < 8.1.4',
   'corner < 2.2.3',
   'emcee < 3.1.5',
@@ -54,6 +55,7 @@ dev = [
   "commitizen < 3.5.3",
   "ipykernel",
   "jupyter",
+  "jupyterlab",
   "ruff == 0.0.277",
   "pylsp-mypy",
   "python-lsp-ruff"
@@ -82,6 +84,7 @@ tests = [
 "clop" = "clophfit.__main__:clop"
 "fit_titration_global_old" = "clophfit.old.fit_titration_global:main"
 "fit_titration_old" = "clophfit.old.fit_titration:main"
+"note_to_csv" = "clophfit.__main__:note2csv"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
@@ -257,8 +260,10 @@ template = "typeguard"
 run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.isort]
-force_single_line = true
+force_single_line = false
+include_trailing_comma = true
 known_first_party = "clophfit"
+line_length = 88  # to match black's default line length
 multi_line_output = 3
 profile = "black"
 
@@ -384,9 +389,9 @@ select = [
 
 [tool.ruff.isort]
 combine-as-imports = true
-force-single-line = true
+force-single-line = false
 known-first-party = ["clophfit"]
-required-imports = ["from __future__ import annotations"]
+required-imports = ["from __future__ import annotations"]  # until py3.8 is supported
 split-on-trailing-comma = true
 
 [tool.ruff.mccabe]

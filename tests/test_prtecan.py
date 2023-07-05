@@ -4,21 +4,21 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from typing import Any
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
 import pytest
-from numpy.testing import assert_almost_equal
-from numpy.testing import assert_array_equal
+from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
-from clophfit.prtecan import Labelblock
-from clophfit.prtecan import LabelblocksGroup
-from clophfit.prtecan import Tecanfile
-from clophfit.prtecan import TecanfilesGroup
-from clophfit.prtecan import TitrationAnalysis
+from clophfit.prtecan import (
+    Labelblock,
+    LabelblocksGroup,
+    Tecanfile,
+    TecanfilesGroup,
+    TitrationAnalysis,
+)
 
 # By defining csvl, lb0, and lb1 as class attributes, they are created only once
 # per test session. Use fixture to capture UserWarning "OVER"

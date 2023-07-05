@@ -6,8 +6,7 @@ import csv
 import datetime
 import typing
 import warnings
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.pyplot as plt  # type: ignore
@@ -19,7 +18,6 @@ from clophfit import __default_enspire_out_dir__
 from clophfit.prtecan import lookup_listoflines
 
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
-# TODO: Titration.data ['A' 'B' 'C'] -- global fit
 
 
 def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
@@ -377,99 +375,26 @@ class EnspireFile:
 
 
 @dataclass
-class ExpNote:
-    """Read and processes an Experimental Note file.
+class Note:
+    """Read and processes a Note csv file.
 
     This class is responsible for handling Experimental Note files
-    that describe an EnSpire experiment collecting spectrum. It reads the files and
-    stores the extracted information as a list of lines: note_list and list of wells.
+    that describe an EnSpire experiment collecting spectrum.
 
     Parameters
     ----------
-    note_file : Path
+    fpath : Path
         The path to the Experimental Note file to be processed.
     verbose : int
         Level of verbosity; 0 is silent, higher values are more verbose (default=0).
 
     Example
     -------
-    >>> from clophfit.prenspire import ExpNote
-    >>> en = ExpNote("tests/EnSpire/h148g-spettroC-nota")
-    >>> en.wells[2]
+    >>> from clophfit.prenspire import Note
+    >>> n = Note("tests/EnSpire/h148g-spettroC-nota.csv")
+    >>> n.wells[2]
     'A03'
     """
-
-    note_file: Path
-    verbose: int = 0
-    #: A list of wells generated from the note file.
-    wells: list[str] = field(init=False, default_factory=list)
-    # A list of lines extracted from the note file.
-    _note_list: list[list[str]] = field(init=False, default_factory=list)
-    #: A list of titrations extracted from the note file.
-    titrations: list[Titration] = field(init=False, default_factory=list)
-
-    def __post_init__(self) -> None:
-        """Complete the initialization generating wells and _note_list."""
-        verboseprint = verbose_print(self.verbose)
-        with Path(self.note_file).open(encoding="iso-8859-1") as f:
-            # Differ from pandas because all fields/cells are strings.
-            self._note_list = list(csv.reader(f, dialect="excel-tab"))
-        if callable(verboseprint):
-            verboseprint("Read (experimental) note file")
-        self.wells: list[str] = np.array(self._note_list)[1:, 0].tolist()
-        if callable(verboseprint):
-            verboseprint("Wells generated")
-
-    def build_titrations(self, ef: EnspireFile) -> None:
-        """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
-        # 1 pH titration
-        conc_well = [(line[1], line[0]) for line in self._note_list if line[2] == "0"]
-        conc = [float(tpl[0]) for tpl in conc_well]
-        well = [tpl[1] for tpl in conc_well]
-        data = {}
-        for m, measurement in ef.measurements.items():
-            data[m] = pd.DataFrame(
-                data=np.transpose([list(map(float, measurement[w])) for w in well]),
-                columns=[conc, well],
-                index=pd.Index(
-                    data=list(map(float, measurement["lambda"])), name="lambda"
-                ),
-            )
-        self.titrations = [Titration(conc, data, cl="0")]
-        # n cl titrations
-        self.pH_values = sorted(
-            {
-                line[1]
-                for line in self._note_list
-                if line[2].replace(".", "").isnumeric()
-            }
-        )
-        for ph in self.pH_values:
-            conc_well = [
-                (line[2], line[0])
-                for line in self._note_list
-                if line[1] == ph and line[2].replace(".", "").isnumeric()
-            ]
-            conc = [float(tpl[0]) for tpl in conc_well]
-            well = [tpl[1] for tpl in conc_well]
-            data = {}
-            for m, measurement in ef.measurements.items():
-                data[m] = pd.DataFrame(
-                    data=np.transpose([list(map(float, measurement[w])) for w in well]),
-                    columns=[conc, well],
-                    index=pd.Index(
-                        data=list(map(float, measurement["lambda"])),
-                        name="lambda",
-                    ),
-                )
-            self.titrations.append(Titration(conc, data, ph=ph))
-
-        # TODO: BUFFER
-
-
-@dataclass
-class Note:
-    """Read and processes an Experimental Note file."""
 
     fpath: Path
     verbose: int = 0
@@ -483,11 +408,11 @@ class Note:
     def __post_init__(self) -> None:
         """Complete the initialization generating wells and _note_list."""
         verboseprint = verbose_print(self.verbose)
-        with self.fpath.open("r", newline="") as file:
+        with Path(self.fpath).open("r", newline="") as file:
             sample_data = file.read(1024)  # Read a sample of the CSV data
         dialect = typing.cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
         self._note = pd.read_csv(self.fpath, dialect=dialect)
-        self.wells: list[str] = np.array(self._note)[1:, 0].tolist()
+        self.wells: list[str] = np.array(self._note)[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
 
     def build_titrations(self, ef: EnspireFile) -> None:
@@ -530,26 +455,4 @@ class Note:
                                     f"{grouping}_{name2}"
                                 ] = meas_dict
         self.titrations = titrations
-
-
-class Titration:
-    """Store titration data and fit results."""
-
-    def __init__(
-        self,
-        conc: typing.Sequence[float],
-        data: dict[str, pd.DataFrame],
-        cl: str | None = None,
-        ph: str | None = None,
-    ) -> None:
-        self.conc = conc
-        self.data = data
-        if ph:
-            self.ph = ph
-        if cl:
-            self.cl = cl
-
-    def plot(self) -> None:
-        """Plot the titration spectra."""
-        for m in self.data:
-            self.data[m].plot()
+        # TODO: BUFFER
