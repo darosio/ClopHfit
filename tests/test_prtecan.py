@@ -606,23 +606,23 @@ class TestTitrationAnalysis:
         """It applies dilution correction read from file listing additions."""
         assert titan.additions is not None
         assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
-        assert titan.data_dilutioncorrected is not None
-        assert titan.data_dilutioncorrected[1] is not None
+        assert titan.data is not None
+        assert titan.data[1] is not None
         assert_almost_equal(
-            titan.data_dilutioncorrected[1]["A12"],
+            titan.data[1]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
-    def test_data_dilutioncorrected_norma(self, titan: TitrationAnalysis) -> None:
+    def test_data_nrm(self, titan: TitrationAnalysis) -> None:
         """It normalizes data."""
-        assert titan.data_dilutioncorrected_norm is not None
+        assert titan.data_nrm is not None
         assert_almost_equal(
-            titan.data_dilutioncorrected_norm[0]["A12"][::2],
+            titan.data_nrm[0]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         assert_almost_equal(
-            titan.data_dilutioncorrected_norm[1]["A12"][::2],
+            titan.data_nrm[1]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )

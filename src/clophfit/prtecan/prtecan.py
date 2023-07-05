@@ -747,8 +747,8 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """Set up the initial values for the properties."""
         super().__post_init__()
         self._additions: list[float] | None = None
-        self._data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
-        self._data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
+        self._data: list[dict[str, list[float]] | None] | None = None
+        self._data_nrm: list[dict[str, list[float]]] | None = None
         self._buffer_wells: list[str] | None = None
         self._dil_corr: ArrayF = field(init=False, repr=False)
 
@@ -811,8 +811,8 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
     def additions(self, additions: list[float]) -> None:
         self._additions = additions
         self._dil_corr = dilution_correction(additions)
-        self._data_dilutioncorrected = None
-        self._data_dilutioncorrected_norm = None
+        self._data = None
+        self._data_nrm = None
 
     def load_additions(self, additions_file: Path) -> None:
         """Load additions from file."""
@@ -830,14 +830,14 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """
         for lbg in self.labelblocksgroups:
             lbg.buffer_wells = value
-        self._data_dilutioncorrected = None
-        self._data_dilutioncorrected_norm = None
+        self._data = None
+        self._data_nrm = None
 
     @property
-    def data_dilutioncorrected(self) -> list[dict[str, list[float]] | None] | None:
-        """Buffer subtracted data."""
-        if self._data_dilutioncorrected is None and self.additions:
-            self._data_dilutioncorrected = [
+    def data(self) -> list[dict[str, list[float]] | None] | None:
+        """Buffer subtracted and corrected for dilution data."""
+        if self._data is None and self.additions:
+            self._data = [
                 {
                     k: (np.array(v) * self._dil_corr).tolist()
                     for k, v in lbg.data_buffersubtracted.items()
@@ -846,20 +846,20 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
                 else None
                 for lbg in self.labelblocksgroups
             ]
-        return self._data_dilutioncorrected
+        return self._data
 
     @property
-    def data_dilutioncorrected_norm(self) -> list[dict[str, list[float]]] | None:
-        """Buffer subtracted data."""
-        if self._data_dilutioncorrected_norm is None and self.additions:
-            self._data_dilutioncorrected_norm = [
+    def data_nrm(self) -> list[dict[str, list[float]]] | None:
+        """Buffer subtracted, corrected for dilution and normalized data."""
+        if self._data_nrm is None and self.additions:
+            self._data_nrm = [
                 {
                     k: (np.array(v) * self._dil_corr).tolist()
                     for k, v in lbg.data_buffersubtracted_norm.items()
                 }
                 for lbg in self.labelblocksgroups
             ]
-        return self._data_dilutioncorrected_norm
+        return self._data_nrm
 
     def export_data(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
@@ -919,16 +919,16 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
             [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
             out_folder / DAT_BG_NRM,
         )
-        if self.data_dilutioncorrected:
+        if self.data:
             write(
                 self.conc,
-                [e for e in self.data_dilutioncorrected if e],
+                [e for e in self.data if e],
                 out_folder / DAT_BG_DIL,
             )
-        if self.data_dilutioncorrected_norm:
+        if self.data_nrm:
             write(
                 self.conc,
-                self.data_dilutioncorrected_norm,
+                self.data_nrm,
                 out_folder / DAT_BG_DIL_NRM,
             )
 
@@ -1115,11 +1115,11 @@ class TitrationAnalysis(Titration):
         fittings = []
         # datafit
         if dil:
-            if nrm and self.data_dilutioncorrected_norm:
+            if nrm and self.data_nrm:
                 # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]])
-                self._datafit = self.data_dilutioncorrected_norm
-            elif self.data_dilutioncorrected:
-                self._datafit = self.data_dilutioncorrected
+                self._datafit = self.data_nrm
+            elif self.data:
+                self._datafit = self.data
             else:  # back up to dat_nrm
                 warnings.warn(
                     "No dilution corrected data found; use normalized data.",

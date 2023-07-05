@@ -60,7 +60,7 @@ The LabelblocksGroup class has several private attributes: labelblocks, allequal
 
 The TecanfilesGroup class has several private attributes: tecanfiles, labelblocksgroups, and metadata. It represents a group of Tecanfile objects, and has a one-to-many relationship with Tecanfile and LabelblocksGroup.
 
-The Titration class has several private attributes: tecanfiles, conc, additions, buffer_wells, data_dilutioncorrected, and data_dilutioncorrected_norm. It represents a titration experiment and its associated data. It has several public methods, including load_additions(), and export_data().
+The Titration class has several private attributes: tecanfiles, conc, additions, buffer_wells, data, and data_nrm. It represents a titration experiment and its associated data. It has several public methods, including load_additions(), and export_data().
 
 The PlateScheme class has several private attributes: file, buffer, crtl, and names. It represents a scheme for a plate, and has several public methods.
 
