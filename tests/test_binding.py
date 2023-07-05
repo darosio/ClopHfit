@@ -1,5 +1,4 @@
 """Test cases for the binding functions module."""
-from __future__ import annotations
 
 import re
 

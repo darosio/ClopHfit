@@ -1,5 +1,4 @@
 """Test ``clop`` cli."""
-from __future__ import annotations
 
 import filecmp
 import re

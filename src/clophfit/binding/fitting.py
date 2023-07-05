@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import copy
 import typing
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 import lmfit  # type: ignore
 import numpy as np
@@ -52,7 +52,7 @@ class DataArrays:
             raise ValueError(msg)
 
 
-class Dataset(typing.Dict[str, DataArrays]):
+class Dataset(dict[str, DataArrays]):
     """A dataset containing pairs of matching x and y data arrays, indexed by a string key."""
 
     is_ph: bool

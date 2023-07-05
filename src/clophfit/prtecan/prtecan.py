@@ -5,10 +5,10 @@ import hashlib
 import itertools
 import typing
 import warnings
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np

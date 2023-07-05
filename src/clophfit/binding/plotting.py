@@ -25,7 +25,6 @@ Classes:
 
     PlotParameters: Parameters for plotting, depending on whether the data is pH or Cl.
 """
-
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field

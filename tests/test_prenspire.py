@@ -1,5 +1,4 @@
 """Test prenspire module."""
-from __future__ import annotations
 
 import warnings
 from pathlib import Path

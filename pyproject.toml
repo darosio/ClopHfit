@@ -10,7 +10,6 @@ classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -47,7 +46,7 @@ license = "BSD-3-Clause"
 license-files = {paths = ["LICENSE.txt"]}
 name = "clophfit"
 readme = "README.md"
-requires-python = ">=3.8, <3.12"
+requires-python = ">=3.9, <3.12"
 version = "0.8.1"
 
 [project.optional-dependencies]
@@ -241,7 +240,7 @@ features = ["tests"]
 template = "tests"
 
 [[tool.hatch.envs.tests.matrix]]
-python = ["3.11", "3.10", "3.9", "3.8"]  # reverse order to ensure the presence in older python of module included in newer versions
+python = ["3.11", "3.10", "3.9"]  # reverse order to ensure the presence in older python of module included in newer versions
 
 [tool.hatch.envs.tests.scripts]
 all = ["test", "type", "xdoc"]
@@ -391,7 +390,6 @@ select = [
 combine-as-imports = true
 force-single-line = false
 known-first-party = ["clophfit"]
-required-imports = ["from __future__ import annotations"]  # until py3.8 is supported
 split-on-trailing-comma = true
 
 [tool.ruff.mccabe]

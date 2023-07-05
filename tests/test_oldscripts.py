@@ -1,11 +1,11 @@
 """Test cases for the old scripts."""
-from __future__ import annotations
 
 import subprocess  # nosec B404
 import sys
 import typing
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, ClassVar, Iterator, List, Tuple
+from typing import Any, ClassVar
 
 import matplotlib.testing.compare as mpltc  # type: ignore
 import pytest
@@ -15,7 +15,7 @@ _data = Path(__file__).parent / "data"
 tmpoutput = _data / "_tmpoutput"
 _expected = _data / "output"
 
-Rscript = Tuple[Tuple[str, str, List[str]], Any]
+Rscript = tuple[tuple[str, str, list[str]], Any]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
