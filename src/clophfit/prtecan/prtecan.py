@@ -282,9 +282,9 @@ class BufferWellsMixin:
     @buffer_wells.setter
     def buffer_wells(self, value: list[str]) -> None:
         self._buffer_wells = value
-        self.on_buffer_wells_set(value)
+        self._on_buffer_wells_set(value)
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Provide a hook for subclasses to add behavior when buffer_wells is set."""
         pass
 
@@ -399,7 +399,7 @@ class Labelblock(BufferWellsMixin):
             raise ValueError(msg) from exc
         return data
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
         Parameters
@@ -616,7 +616,7 @@ class LabelblocksGroup(BufferWellsMixin):
                 self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
         return self._data_norm
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
         Parameters
@@ -819,7 +819,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         additions = pd.read_csv(additions_file, names=["add"])
         self.additions = additions["add"].tolist()
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
         Parameters
