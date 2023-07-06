@@ -1032,16 +1032,20 @@ class TitrationAnalysis(Titration):
     fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
     #: Function used in the fitting.
     fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
-        init=False
+        init=False, repr=False
     )
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
+    _datafit: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
+    )
+    _datafit_params: dict[str, bool] = field(init=False)
+    _scheme: PlateScheme = field(init=False)
 
     def __post_init__(self) -> None:
-        """Set up the initial values for the properties."""
+        """Set up the initial values of inherited class properties."""
         super().__post_init__()
-        self._scheme: PlateScheme = PlateScheme()
-        self._datafit: Sequence[dict[str, list[float]] | None] = []
+        self.datafit_params = {"bg": False, "nrm": False, "dil": False}
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -1069,7 +1073,51 @@ class TitrationAnalysis(Titration):
         self._scheme = PlateScheme(schemefile)
         self.buffer_wells = self._scheme.buffer
 
-    def fit(  # noqa: PLR0913, PLR0912
+    @property
+    def datafit(self) -> Sequence[dict[str, list[float]] | None]:
+        """Data used for fitting."""
+        return self._datafit
+
+    @property
+    def datafit_params(self) -> dict[str, bool]:
+        """Get the datafit parameters."""
+        return self._datafit_params
+
+    @datafit_params.setter
+    def datafit_params(self, params: dict[str, bool]) -> None:
+        """Set the datafit parameters."""
+        self._datafit_params = params
+        nrm = self._datafit_params.get("nrm", False)
+        dil = self._datafit_params.get("dil", False)
+        bg = self._datafit_params.get("bg", False)
+        if dil:
+            if nrm and self.data_nrm:
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e
+                # in [{}, {}]]) i.e. if nrm and self.data_nrm and any(self.data_nrm):
+                self._datafit = self.data_nrm
+            elif self.data:
+                self._datafit = self.data
+            else:  # back up to dat_nrm
+                warnings.warn(
+                    "No dilution corrected data found; use normalized data.",
+                    stacklevel=2,
+                )
+                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        elif bg:
+            if nrm:
+                self._datafit = [
+                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+                ]
+            else:
+                self._datafit = [
+                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+                ]
+        elif nrm:
+            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+        else:
+            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
+
+    def fit(  # noqa: PLR0913
         self,
         kind: str,
         ini: int = 0,
@@ -1114,38 +1162,12 @@ class TitrationAnalysis(Titration):
             self.fz = fz_pk_singlesite
         x = np.array(self.conc)
         fittings = []
-        # datafit
-        if dil:
-            if nrm and self.data_nrm:
-                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]])
-                self._datafit = self.data_nrm
-            elif self.data:
-                self._datafit = self.data
-            else:  # back up to dat_nrm
-                warnings.warn(
-                    "No dilution corrected data found; use normalized data.",
-                    stacklevel=2,
-                )
-                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        elif bg:
-            if nrm:
-                self._datafit = [
-                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
-                ]
-            else:
-                self._datafit = [
-                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
-                ]
-        elif nrm:
-            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        else:
-            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
+        self.datafit_params = {"nrm": nrm, "dil": dil, "bg": bg}
 
-        for data in self._datafit:
+        for data in self.datafit:
             fitting = pd.DataFrame()
             if data:
                 for k in keys_fit:
@@ -1163,8 +1185,8 @@ class TitrationAnalysis(Titration):
         fitting = pd.DataFrame()
         for k in keys_fit:
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y = self._datafit[0][k]  # type: ignore # XXX: D
-            y2 = self._datafit[1][k]  # type: ignore # XXX: D
+            y = self.datafit[0][k]  # type: ignore # XXX: D
+            y2 = self.datafit[1][k]  # type: ignore # XXX: D
             residue = y - self.fz(
                 fittings[0]["K"].loc[k],
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
@@ -1334,7 +1356,7 @@ class TitrationAnalysis(Titration):
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
         # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-        for i, (datafit, df) in enumerate(zip(self._datafit, self.fittings)):
+        for i, (datafit, df) in enumerate(zip(self.datafit, self.fittings)):
             y = np.array(datafit[key]) if datafit else np.zeros_like(x)
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
