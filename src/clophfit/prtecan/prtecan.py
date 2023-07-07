@@ -16,7 +16,8 @@ import pandas as pd
 import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 
-from clophfit.binding import fit_titration, fz_kd_singlesite, fz_pk_singlesite
+from clophfit.binding import fz_kd_singlesite, fz_pk_singlesite
+from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
 from clophfit.types import ArrayF
 
 # list_of_lines
@@ -1040,7 +1041,9 @@ class TitrationAnalysis(Titration):
     """
 
     #: List of result dataframes.
-    _fitresults: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _fitresults: list[pd.DataFrame] = field(
+        init=False, default_factory=list, repr=False
+    )
     #: Function used in the fitting.
     fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
         init=False, repr=False
@@ -1048,7 +1051,7 @@ class TitrationAnalysis(Titration):
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
     _datafit: Sequence[dict[str, list[float]] | None] = field(
-        init=False, default_factory=list
+        init=False, default_factory=list, repr=False
     )
     _datafit_params: dict[str, bool] = field(init=False, default_factory=dict)
     _fit_args: dict[str, str | int | float | bool | None] = field(
@@ -1085,6 +1088,7 @@ class TitrationAnalysis(Titration):
         """Set the datafit parameters."""
         self._datafit_params = params
         self._datafit = []
+        self._fitresults = []
 
     @property
     def datafit(self) -> Sequence[dict[str, list[float]] | None]:
@@ -1140,19 +1144,13 @@ class TitrationAnalysis(Titration):
             self._fitresults = self.fit(**self.fit_args)  # type: ignore
         return self._fitresults
 
-    @fitresults.setter
-    def fitresults(self, value: list[pd.DataFrame]) -> None:
-        """Maybe not needed."""
-        self._fitresults = value
-
-    def fit(  # noqa: PLR0913
+    def fit(
         self,
         kind: str = "pH",
         ini: int = 0,
         fin: int | None = None,
         no_weight: bool = False,
-        tval: float = 0.95,
-    ) -> list[pd.DataFrame]:
+    ) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
         Here is less general. It is for 2 labelblocks.
@@ -1167,84 +1165,51 @@ class TitrationAnalysis(Titration):
             Final point (default: None).
         no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        tval : float
-            Only for tval different from default=0.95 for the confint calculation.
 
         Returns
         -------
         list[pd.DataFrame]
             Fitting results.
-
-        Notes
-        -----
-        Create (: list) 3 fitting tables into self.fittings.
-
         """
         if kind == "Cl":
             self.fz = fz_kd_singlesite
         elif kind == "pH":
             self.fz = fz_pk_singlesite
-        x = np.array(self.conc)
+        x = np.array(self.conc)[ini:fin]
         fittings = []
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        for data in self.datafit:
-            fitting = pd.DataFrame()
-            if data:
+        for dat in self.datafit:
+            fitting = {}
+            if dat:
                 for k in keys_fit:
-                    y = data[k]
-                    res = fit_titration(
-                        kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
-                    )
-                    res.index = pd.Index([k])
-                    # fitting = fitting.append(res, sort=False) DDD
-                    fitting = pd.concat([fitting, res], sort=False)
-                    # TODO: assert (fitting.columns == res.columns).all()
-                    # better to refactor this function
+                    y = dat[k]
+                    y = y[ini:fin]
+                    ys = np.array(y)
+                    ds = Dataset(x[~np.isnan(ys)], ys[~np.isnan(ys)], kind == "pH")
+                    fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
-        fitting = pd.DataFrame()
+        fitting = {}
         for k in keys_fit:
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y = self.datafit[0][k]  # type: ignore # XXX: D
-            y2 = self.datafit[1][k]  # type: ignore # XXX: D
-            residue = y - self.fz(
-                fittings[0]["K"].loc[k],
-                [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
-                x,
-            )
-            residue /= y  # TODO: residue or
-            # log(residue/y) https://www.tandfonline.com/doi/abs/10.1080/00031305.1985.10479385
-            residue2 = y2 - self.fz(
-                fittings[1]["K"].loc[k],
-                [fittings[1]["SA"].loc[k], fittings[1]["SB"].loc[k]],
-                x,
-            )
-            residue2 /= y2
+            y0 = self.datafit[0][k][ini:fin] if self.datafit[0] else None
+            y1 = self.datafit[1][k][ini:fin] if self.datafit[1] else None
+            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, kind == "pH")
             if no_weight:
-                for i, _rr in enumerate(residue):
-                    residue[i] = 1  # TODO: use np.ones() but first find a way to test
-                    residue2[i] = 1
-            res = fit_titration(
-                kind,
-                self.conc[ini:fin],
-                np.array(y[ini:fin]),
-                y2=np.array(y2[ini:fin]),
-                residue=residue[ini:fin],
-                residue2=residue2[ini:fin],
-                tval_conf=tval,
-            )
-            res.index = pd.Index([k])
-            # fitting = fitting.append(res, sort=False) DDD
-            fitting = pd.concat([fitting, res], sort=False)
+                fitting[k] = fit_binding_glob(ds, False)
+            else:
+                fitting[k] = fit_binding_glob(ds, True)
         fittings.append(fitting)
-        # Write the name of the control e.g. S202N in the "ctrl" column
+        """
+        # XXX: # Write the name of the control e.g. S202N in the "ctrl" column
         for fitting in fittings:
             for ctrl_name, wells in self.scheme.names.items():
                 for well in wells:
                     fitting.loc[well, "ctrl"] = ctrl_name
+        """
         return fittings
 
     def plot_k(

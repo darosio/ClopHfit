@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import typing
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -67,6 +68,8 @@ class Dataset(dict[str, DataArrays]):
         """
         Initialize the Dataset object.
 
+        Here we will remove any NaN values from the x and y arrays.
+
         Parameters
         ----------
         x : ArrayF | ArrayDict
@@ -88,22 +91,61 @@ class Dataset(dict[str, DataArrays]):
         """
         self.is_ph = is_ph
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            weights = w if isinstance(w, np.ndarray) else None
+            mask = ~np.isnan(y)
+            x, y = x[mask], y[mask]
+            weights = w[mask] if isinstance(w, np.ndarray) else None
             super().__init__({"default": DataArrays(x, y, weights)})
         elif isinstance(x, np.ndarray) and isinstance(y, dict):
             if isinstance(w, dict):
-                super().__init__({k: DataArrays(x, v, w.get(k)) for k, v in y.items()})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[~np.isnan(v)],
+                            v[~np.isnan(v)],
+                            w[k][~np.isnan(v)] if k in w else None,
+                        )
+                        for k, v in y.items()
+                    }
+                )
             else:
                 # this cover w is None or ArrayF
-                super().__init__({k: DataArrays(x, v, w) for k, v in y.items()})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[~np.isnan(v)],
+                            v[~np.isnan(v)],
+                            w[~np.isnan(v)] if w else None,
+                        )
+                        for k, v in y.items()
+                    }
+                )
+
         elif isinstance(x, dict) and isinstance(y, dict):
             if x.keys() != y.keys() or (isinstance(w, dict) and x.keys() != w.keys()):
                 msg = "Keys of 'x', 'y', and 'w' (if w is a dict) must match."
                 raise ValueError(msg)
             if isinstance(w, dict):
-                super().__init__({k: DataArrays(x[k], y[k], w.get(k)) for k in x})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[k][~np.isnan(y[k])],
+                            y[k][~np.isnan(y[k])],
+                            w[k][~np.isnan(y[k])] if k in w else None,
+                        )
+                        for k in x
+                    }
+                )
             else:
-                super().__init__({k: DataArrays(x[k], y[k], w) for k in x})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[k][~np.isnan(y[k])],
+                            y[k][~np.isnan(y[k])],
+                            w[~np.isnan(y[k])] if w else None,
+                        )
+                        for k in x
+                    }
+                )
 
     def add_weights(self, w: ArrayF | ArrayDict | typing.Any) -> None:
         """Add weights to the dataset.
@@ -166,6 +208,19 @@ class Dataset(dict[str, DataArrays]):
                     msg = f"No such key: '{key}' in the Dataset."
                     raise KeyError(msg)
         return copied
+
+    def clean_data(self, n_params: int) -> None:
+        """Remove too small datasets."""
+        for key in list(
+            self.keys()
+        ):  # list() is used to avoid modifying dict during iteration
+            if n_params > len(self[key].y):
+                warnings.warn(
+                    f"Removing key '{key}' from Dataset: number of parameters ({n_params}) "
+                    f"exceeds number of data points ({len(self[key].y)}).",
+                    stacklevel=2,
+                )
+                del self[key]
 
 
 @typing.overload
@@ -499,6 +554,14 @@ class FitResult:
     result: MinimizerResult
     mini: Minimizer
 
+    def is_valid(self) -> bool:
+        """Check if the fitting process was successful based on the existence of figure, result, and minimizer."""
+        return (
+            self.figure is not None
+            and self.result is not None
+            and self.mini is not None
+        )
+
 
 @dataclass
 class SpectraGlobResults:
@@ -589,14 +652,29 @@ def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
     """Analyze multi-label binding datasets and visualize the results."""
     if weighting:
         wc: ArrayDict = {}
+        labels_to_remove = []
         # Calculate standard deviations of residuals
         for label, da in ds.items():
             x = {label: da.x}
             y = {label: da.y}
             d = Dataset(x, y, ds.is_ph)
             params = _build_params_1site(d)
+            # Mark for removal and skip minimization when parameters exceed data points in y
+            if len(params) > len(da.y):
+                warnings.warn(
+                    f"Marking dataset {label} for removal due to insufficient data points.",
+                    stacklevel=2,
+                )
+                labels_to_remove.append(label)
+                continue
             res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
             wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
+        # Remove marked datasets
+        for label in labels_to_remove:
+            del ds[label]
+        if not ds:  # check if ds is now empty
+            warnings.warn("No datasets left after cleaning. Exiting.", stacklevel=2)
+            return FitResult(None, None, None)
         ds.add_weights(wc)
     params = _build_params_1site(ds)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
