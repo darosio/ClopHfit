@@ -528,9 +528,9 @@ class Tecanfile:
 
     path: Path
     #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
-    metadata: dict[str, Metadata] = field(init=False, repr=True)
+    metadata: dict[str, Metadata] = field(init=False, repr=False)
     #: All labelblocks contained in this file.
-    labelblocks: list[Labelblock] = field(init=False, repr=True)
+    labelblocks: list[Labelblock] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize."""
@@ -572,7 +572,7 @@ class LabelblocksGroup(BufferWellsMixin):
         When labelblocks are neither equal nor almost equal.
     """
 
-    labelblocks: list[Labelblock]
+    labelblocks: list[Labelblock] = field(repr=False)
     allequal: bool = False
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
@@ -730,6 +730,83 @@ class TecanfilesGroup:
 
 
 @dataclass
+class PlateScheme:
+    """Define buffer, ctrl and unk wells, and ctrl names.
+
+    Parameters
+    ----------
+    file: Path
+        File path to the scheme file [<well Id, sample name>].
+    """
+
+    file: Path | None = None
+    _buffer: list[str] = field(default_factory=list, init=False)
+    _ctrl: list[str] = field(default_factory=list, init=False)
+    _names: dict[str, set[str]] = field(default_factory=dict, init=False)
+
+    @property
+    def buffer(self) -> list[str]:
+        """List of buffer wells."""
+        return self._buffer
+
+    @buffer.setter
+    def buffer(self, value: list[str]) -> None:
+        if not all(isinstance(item, str) for item in value):
+            msg = "Buffer wells must be a list of strings"
+            raise TypeError(msg)
+        self._buffer = value
+
+    @property
+    def ctrl(self) -> list[str]:
+        """List of CTR wells."""
+        return self._ctrl
+
+    @ctrl.setter
+    def ctrl(self, value: list[str]) -> None:
+        if not all(isinstance(item, str) for item in value):
+            msg = "Ctrl wells must be a list of strings"
+            raise TypeError(msg)
+        self._ctrl = value
+
+    @property
+    def names(self) -> dict[str, set[str]]:
+        """A dictionary mapping sample names to their associated list of wells."""
+        return self._names
+
+    @names.setter
+    def names(self, value: dict[str, set[str]]) -> None:
+        msg = "Names must be a dictionary mapping strings to sets of strings"
+        if not isinstance(value, dict):
+            raise TypeError(msg)
+        if not all(
+            isinstance(k, str)  # type: ignore
+            and isinstance(v, set)  # type: ignore
+            and all(isinstance(item, str) for item in v)
+            for k, v in value.items()
+        ):
+            raise TypeError(msg)
+        self._names = value
+
+    def __post_init__(self) -> None:
+        """Complete initialization."""
+        if self.file:
+            table = pd.read_csv(self.file, sep="\t")
+            if (
+                table.columns.tolist() != ["well", "sample"]
+                or table["well"].count() != table["sample"].count()
+            ):
+                msg = f"Check format [well sample] for schemefile: {self.file}"
+                raise ValueError(msg)
+            scheme = table.groupby("sample")["well"].unique()
+            self.buffer = list(scheme["buffer"])
+            self.ctrl = list(
+                {well for sample in scheme.tolist() for well in sample}
+                - set(self.buffer)
+            )
+            self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
+
+
+@dataclass
 class Titration(TecanfilesGroup, BufferWellsMixin):
     """TecanfileGroup + concentrations.
 
@@ -743,6 +820,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
 
     tecanfiles: list[Tecanfile]
     conc: Sequence[float]
+    _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
     def __post_init__(self) -> None:
         """Set up the initial values for the properties."""
@@ -819,6 +897,16 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """Load additions from file."""
         additions = pd.read_csv(additions_file, names=["add"])
         self.additions = additions["add"].tolist()
+
+    @property
+    def scheme(self) -> PlateScheme:
+        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
+        return self._scheme
+
+    def load_scheme(self, schemefile: Path) -> None:
+        """Load scheme from file. Set buffer_wells."""
+        self._scheme = PlateScheme(schemefile)
+        self.buffer_wells = self._scheme.buffer
 
     def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
@@ -934,83 +1022,6 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
             )
 
 
-@dataclass
-class PlateScheme:
-    """Define buffer, ctrl and unk wells, and ctrl names.
-
-    Parameters
-    ----------
-    file: Path
-        File path to the scheme file [<well Id, sample name>].
-    """
-
-    file: Path | None = None
-    _buffer: list[str] = field(default_factory=list, init=False)
-    _ctrl: list[str] = field(default_factory=list, init=False)
-    _names: dict[str, set[str]] = field(default_factory=dict, init=False)
-
-    @property
-    def buffer(self) -> list[str]:
-        """List of buffer wells."""
-        return self._buffer
-
-    @buffer.setter
-    def buffer(self, value: list[str]) -> None:
-        if not all(isinstance(item, str) for item in value):
-            msg = "Buffer wells must be a list of strings"
-            raise TypeError(msg)
-        self._buffer = value
-
-    @property
-    def ctrl(self) -> list[str]:
-        """List of CTR wells."""
-        return self._ctrl
-
-    @ctrl.setter
-    def ctrl(self, value: list[str]) -> None:
-        if not all(isinstance(item, str) for item in value):
-            msg = "Ctrl wells must be a list of strings"
-            raise TypeError(msg)
-        self._ctrl = value
-
-    @property
-    def names(self) -> dict[str, set[str]]:
-        """A dictionary mapping sample names to their associated list of wells."""
-        return self._names
-
-    @names.setter
-    def names(self, value: dict[str, set[str]]) -> None:
-        msg = "Names must be a dictionary mapping strings to sets of strings"
-        if not isinstance(value, dict):
-            raise TypeError(msg)
-        if not all(
-            isinstance(k, str)  # type: ignore
-            and isinstance(v, set)  # type: ignore
-            and all(isinstance(item, str) for item in v)
-            for k, v in value.items()
-        ):
-            raise TypeError(msg)
-        self._names = value
-
-    def __post_init__(self) -> None:
-        """Complete initialization."""
-        if self.file:
-            table = pd.read_csv(self.file, sep="\t")
-            if (
-                table.columns.tolist() != ["well", "sample"]
-                or table["well"].count() != table["sample"].count()
-            ):
-                msg = f"Check format [well sample] for schemefile: {self.file}"
-                raise ValueError(msg)
-            scheme = table.groupby("sample")["well"].unique()
-            self.buffer = list(scheme["buffer"])
-            self.ctrl = list(
-                {well for sample in scheme.tolist() for well in sample}
-                - set(self.buffer)
-            )
-            self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
-
-
 class FitFirstError(Exception):
     """Error when plotting before fitting."""
 
@@ -1043,7 +1054,6 @@ class TitrationAnalysis(Titration):
     _fit_args: dict[str, str | int | float | bool | None] = field(
         init=False, default_factory=dict
     )
-    _scheme: PlateScheme = field(init=False)
 
     def __post_init__(self) -> None:
         """Set up the initial values of inherited class properties."""
@@ -1066,31 +1076,50 @@ class TitrationAnalysis(Titration):
         return cls(tecanfiles, conc)
 
     @property
-    def scheme(self) -> PlateScheme:
-        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
-        return self._scheme
+    def datafit_params(self) -> dict[str, bool]:
+        """Get the datafit parameters."""
+        return self._datafit_params
 
-    def load_scheme(self, schemefile: Path) -> None:
-        """Load scheme from file. Set buffer_wells."""
-        self._scheme = PlateScheme(schemefile)
-        self.buffer_wells = self._scheme.buffer
-        self._fitresults = []
-
-    @property
-    def fitresults(self) -> list[pd.DataFrame]:
-        """Result dataframes."""
-        if not self._fitresults:
-            self._fitresults = self.fit(**self.fit_args)  # type: ignore
-        return self._fitresults
-
-    @fitresults.setter
-    def fitresults(self, value: list[pd.DataFrame]) -> None:
-        """Maybe not needed."""
-        self._fitresults = value
+    @datafit_params.setter
+    def datafit_params(self, params: dict[str, bool]) -> None:
+        """Set the datafit parameters."""
+        self._datafit_params = params
+        self._datafit = []
 
     @property
     def datafit(self) -> Sequence[dict[str, list[float]] | None]:
         """Data used for fitting."""
+        if not self._datafit:
+            self._fitresults = []
+            nrm = self.datafit_params.get("nrm", False)
+            dil = self.datafit_params.get("dil", False)
+            bg = self.datafit_params.get("bg", False)
+            if dil:
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
+                # DDD if nrm and self.data_nrm and any(self.data_nrm):
+                if nrm and self.data_nrm:
+                    self._datafit = self.data_nrm
+                elif self.data:
+                    self._datafit = self.data
+                else:  # back up to dat_nrm
+                    warnings.warn(
+                        "No dilution corrected data found; use normalized data.",
+                        stacklevel=2,
+                    )
+                    self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+            elif bg:
+                if nrm:
+                    self._datafit = [
+                        lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+                    ]
+                else:
+                    self._datafit = [
+                        lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+                    ]
+            elif nrm:
+                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+            else:
+                self._datafit = [lbg.data for lbg in self.labelblocksgroups]
         return self._datafit
 
     @property
@@ -1105,44 +1134,16 @@ class TitrationAnalysis(Titration):
         self._fitresults = []
 
     @property
-    def datafit_params(self) -> dict[str, bool]:
-        """Get the datafit parameters."""
-        return self._datafit_params
+    def fitresults(self) -> list[pd.DataFrame]:
+        """Result dataframes."""
+        if not self._fitresults:
+            self._fitresults = self.fit(**self.fit_args)  # type: ignore
+        return self._fitresults
 
-    @datafit_params.setter
-    def datafit_params(self, params: dict[str, bool]) -> None:
-        """Set the datafit parameters."""
-        self._datafit_params = params
-        nrm = self._datafit_params.get("nrm", False)
-        dil = self._datafit_params.get("dil", False)
-        bg = self._datafit_params.get("bg", False)
-        if dil:
-            # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
-            # DDD if nrm and self.data_nrm and any(self.data_nrm):
-            if nrm and self.data_nrm:
-                self._datafit = self.data_nrm
-            elif self.data:
-                self._datafit = self.data
-            else:  # back up to dat_nrm
-                warnings.warn(
-                    "No dilution corrected data found; use normalized data.",
-                    stacklevel=2,
-                )
-                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        elif bg:
-            if nrm:
-                self._datafit = [
-                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
-                ]
-            else:
-                self._datafit = [
-                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
-                ]
-        elif nrm:
-            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        else:
-            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-        self._fitresults = []
+    @fitresults.setter
+    def fitresults(self, value: list[pd.DataFrame]) -> None:
+        """Maybe not needed."""
+        self._fitresults = value
 
     def fit(  # noqa: PLR0913
         self,
@@ -1491,12 +1492,12 @@ class TitrationAnalysis(Titration):
             When no fitting results are yet available.
 
         """
-        if not hasattr(self, "fittings"):
+        if not hasattr(self, "fitresults"):
             raise FitFirstError()
         out = PdfPages(path)
-        for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
+        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
             out.savefig(self.plot_well(str(k)))
-        for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
+        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
             out.savefig(self.plot_well(str(k)))
         out.close()
 
