@@ -1029,7 +1029,7 @@ class TitrationAnalysis(Titration):
     """
 
     #: List of result dataframes.
-    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _fitresults: list[pd.DataFrame] = field(init=False, default_factory=list)
     #: Function used in the fitting.
     fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
         init=False, repr=False
@@ -1039,13 +1039,15 @@ class TitrationAnalysis(Titration):
     _datafit: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )
-    _datafit_params: dict[str, bool] = field(init=False)
+    _datafit_params: dict[str, bool] = field(init=False, default_factory=dict)
+    _fit_args: dict[str, str | int | float | bool | None] = field(
+        init=False, default_factory=dict
+    )
     _scheme: PlateScheme = field(init=False)
 
     def __post_init__(self) -> None:
         """Set up the initial values of inherited class properties."""
         super().__post_init__()
-        self.datafit_params = {"bg": False, "nrm": False, "dil": False}
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -1072,11 +1074,35 @@ class TitrationAnalysis(Titration):
         """Load scheme from file. Set buffer_wells."""
         self._scheme = PlateScheme(schemefile)
         self.buffer_wells = self._scheme.buffer
+        self._fitresults = []
+
+    @property
+    def fitresults(self) -> list[pd.DataFrame]:
+        """Result dataframes."""
+        if not self._fitresults:
+            self._fitresults = self.fit(**self.fit_args)  # type: ignore
+        return self._fitresults
+
+    @fitresults.setter
+    def fitresults(self, value: list[pd.DataFrame]) -> None:
+        """Maybe not needed."""
+        self._fitresults = value
 
     @property
     def datafit(self) -> Sequence[dict[str, list[float]] | None]:
         """Data used for fitting."""
         return self._datafit
+
+    @property
+    def fit_args(self) -> dict[str, str | int | float | bool | None]:
+        """Get the arguments for fitting."""
+        return self._fit_args
+
+    @fit_args.setter
+    def fit_args(self, params: dict[str, str | int | float | bool | None]) -> None:
+        """Set the datafit parameters."""
+        self._fit_args = params
+        self._fitresults = []
 
     @property
     def datafit_params(self) -> dict[str, bool]:
@@ -1091,9 +1117,9 @@ class TitrationAnalysis(Titration):
         dil = self._datafit_params.get("dil", False)
         bg = self._datafit_params.get("bg", False)
         if dil:
+            # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
+            # DDD if nrm and self.data_nrm and any(self.data_nrm):
             if nrm and self.data_nrm:
-                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e
-                # in [{}, {}]]) i.e. if nrm and self.data_nrm and any(self.data_nrm):
                 self._datafit = self.data_nrm
             elif self.data:
                 self._datafit = self.data
@@ -1116,18 +1142,16 @@ class TitrationAnalysis(Titration):
             self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
         else:
             self._datafit = [lbg.data for lbg in self.labelblocksgroups]
+        self._fitresults = []
 
     def fit(  # noqa: PLR0913
         self,
-        kind: str,
+        kind: str = "pH",
         ini: int = 0,
         fin: int | None = None,
         no_weight: bool = False,
         tval: float = 0.95,
-        nrm: bool = False,
-        bg: bool = False,
-        dil: bool = False,
-    ) -> None:
+    ) -> list[pd.DataFrame]:
         """Fit titrations.
 
         Here is less general. It is for 2 labelblocks.
@@ -1144,12 +1168,11 @@ class TitrationAnalysis(Titration):
             Do not use residues from single Labelblock fit as weight for global fitting.
         tval : float
             Only for tval different from default=0.95 for the confint calculation.
-        nrm: bool
-            Data normalization flag (default=False).
-        bg: bool
-            Buffer subtraction flag (default=False).
-        dil: bool
-            Dilution correction flag (default=False).
+
+        Returns
+        -------
+        list[pd.DataFrame]
+            Fitting results.
 
         Notes
         -----
@@ -1165,7 +1188,6 @@ class TitrationAnalysis(Titration):
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
-        self.datafit_params = {"nrm": nrm, "dil": dil, "bg": bg}
 
         for data in self.datafit:
             fitting = pd.DataFrame()
@@ -1178,7 +1200,7 @@ class TitrationAnalysis(Titration):
                     res.index = pd.Index([k])
                     # fitting = fitting.append(res, sort=False) DDD
                     fitting = pd.concat([fitting, res], sort=False)
-                    # TODO assert (fitting.columns == res.columns).all()
+                    # TODO: assert (fitting.columns == res.columns).all()
                     # better to refactor this function
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
@@ -1192,7 +1214,7 @@ class TitrationAnalysis(Titration):
                 [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
                 x,
             )
-            residue /= y  # TODO residue or
+            residue /= y  # TODO: residue or
             # log(residue/y) https://www.tandfonline.com/doi/abs/10.1080/00031305.1985.10479385
             residue2 = y2 - self.fz(
                 fittings[1]["K"].loc[k],
@@ -1202,7 +1224,7 @@ class TitrationAnalysis(Titration):
             residue2 /= y2
             if no_weight:
                 for i, _rr in enumerate(residue):
-                    residue[i] = 1  # TODO use np.ones() but first find a way to test
+                    residue[i] = 1  # TODO: use np.ones() but first find a way to test
                     residue2[i] = 1
             res = fit_titration(
                 kind,
@@ -1222,7 +1244,7 @@ class TitrationAnalysis(Titration):
             for ctrl_name, wells in self.scheme.names.items():
                 for well in wells:
                     fitting.loc[well, "ctrl"] = ctrl_name
-        self.fittings = fittings
+        return fittings
 
     def plot_k(
         self,
@@ -1252,14 +1274,14 @@ class TitrationAnalysis(Titration):
             When no fitting results are yet available.
 
         """
-        if not hasattr(self, "fittings"):
+        if not hasattr(self, "fitresults"):
             raise FitFirstError()
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.fittings[lb].loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = self.fitresults[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1278,7 +1300,7 @@ class TitrationAnalysis(Titration):
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = self.fittings[lb].loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = self.fitresults[lb].loc[self.keys_unk].sort_index(ascending=False)
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
             x=res_unk["K"],
@@ -1342,7 +1364,7 @@ class TitrationAnalysis(Titration):
 
         """
         fourdigits = 1e4
-        if not hasattr(self, "fittings"):
+        if not hasattr(self, "fitresults"):
             raise FitFirstError()
         plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
         out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
@@ -1356,7 +1378,7 @@ class TitrationAnalysis(Titration):
         ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
         # labelblocks
         # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-        for i, (datafit, df) in enumerate(zip(self.datafit, self.fittings)):
+        for i, (datafit, df) in enumerate(zip(self.datafit, self.fitresults)):
             y = np.array(datafit[key]) if datafit else np.zeros_like(x)
             colors.append(plt.cm.Set2((i + 2) * 10))
             ax_data.plot(
@@ -1395,7 +1417,7 @@ class TitrationAnalysis(Titration):
         ax1.set_xlim(ax_data.get_xlim())
         ax_data.legend()
         # global
-        fit_df = self.fittings[-1]
+        fit_df = self.fitresults[-1]
         lines.append(
             [
                 f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
@@ -1491,9 +1513,9 @@ class TitrationAnalysis(Titration):
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        if not hasattr(self, "fittings"):
+        if not hasattr(self, "fitresults"):
             raise FitFirstError()
-        fit_df = self.fittings[lb]
+        fit_df = self.fitresults[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
@@ -1554,7 +1576,7 @@ class TitrationAnalysis(Titration):
                     print(f"{r[k]:7.0f}", end=" ")
                 print()
 
-        fit_df = self.fittings[lb]
+        fit_df = self.fitresults[lb]
         if "SA2" in fit_df:
             out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
         else:

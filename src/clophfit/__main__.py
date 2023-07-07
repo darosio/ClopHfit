@@ -35,15 +35,9 @@ def fit_routine(  # noqa: PLR0913
     pdf: bool,
 ) -> None:
     """Help main."""
-    titan.fit(
-        kind,
-        no_weight=(not weight),
-        tval=float(confint),
-        nrm=norm,
-        bg=bg,
-        dil=dil,
-    )
-    for i, fit in enumerate(titan.fittings):
+    titan.datafit_params = {"bg": bg, "nrm": norm, "dil": dil}
+    titan.fit_args = {"kind": kind, "no_weight": (not weight), "tval": float(confint)}
+    for i, fit in enumerate(titan.fitresults):
         # Printout
         if verbose:
             try:

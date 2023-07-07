@@ -636,9 +636,9 @@ class TestTitrationAnalysis:
     @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
-        titan.fit("pH", nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
+        titan.datafit_params = {"bg": True, "nrm": True, "dil": True}
+        fit0 = titan.fitresults[0].sort_index()
+        fit1 = titan.fitresults[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
         pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
@@ -649,10 +649,10 @@ class TestTitrationAnalysis:
             check_categorical=False,
             atol=1e-3,
         )
-        # fit up to the second-last data point
-        titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
+        #  fit up to the second-last data point
+        titan.fit_args = {"fin": -1}
+        fit0 = titan.fitresults[0].sort_index()
+        fit1 = titan.fitresults[1].sort_index()
         df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)
         df1 = pd.read_csv(data_tests / "140220/fit1-1.csv", index_col=0)
         pd.testing.assert_frame_equal(
