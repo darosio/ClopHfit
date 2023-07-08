@@ -10,11 +10,13 @@ from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
+import lmfit  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
+from uncertainties import ufloat  # type: ignore
 
 from clophfit.binding import fz_kd_singlesite, fz_pk_singlesite
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
@@ -1041,7 +1043,7 @@ class TitrationAnalysis(Titration):
     """
 
     #: List of result dataframes.
-    _fitresults: list[pd.DataFrame] = field(
+    _fitresults: list[dict[str, FitResult]] = field(
         init=False, default_factory=list, repr=False
     )
     #: Function used in the fitting.
@@ -1057,6 +1059,7 @@ class TitrationAnalysis(Titration):
     _fit_args: dict[str, str | int | float | bool | None] = field(
         init=False, default_factory=dict
     )
+    _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         """Set up the initial values of inherited class properties."""
@@ -1138,11 +1141,38 @@ class TitrationAnalysis(Titration):
         self._fitresults = []
 
     @property
-    def fitresults(self) -> list[pd.DataFrame]:
+    def fitresults(self) -> list[dict[str, FitResult]]:
         """Result dataframes."""
         if not self._fitresults:
             self._fitresults = self.fit(**self.fit_args)  # type: ignore
         return self._fitresults
+
+    @property
+    def dataframes(self) -> list[pd.DataFrame]:
+        """Result dataframes."""
+        if not self._dataframes:
+            for fitresult in self.fitresults:
+                data = []
+                for lbl, fr in fitresult.items():
+                    pars = fr.result.params if fr.result else None
+                    row = {"well": lbl}
+                    if pars is not None:
+                        for k in pars:
+                            row[k] = pars[k].value
+                            row[f"s{k}"] = pars[k].stderr
+                    data.append(row)
+                    df0 = pd.DataFrame(data).set_index("well")
+                    # ctrl
+                    for ctrl_name, wells in self.scheme.names.items():
+                        for well in wells:
+                            df0.loc[well, "ctrl"] = ctrl_name
+                self._dataframes.append(df0)
+        return self._dataframes
+
+    @dataframes.setter
+    def dataframes(self, dfs: list[pd.DataFrame]) -> None:
+        """Set the datafit parameters."""
+        self._dataframes = dfs
 
     def fit(
         self,
@@ -1240,6 +1270,41 @@ class TitrationAnalysis(Titration):
             When no fitting results are yet available.
 
         """
+        # Create dataframes directly from dictionary comprehensions
+        df1 = pd.DataFrame(
+            list(
+                {
+                    k: fr.result.params["K"].value
+                    for k, fr in self.fitresults[lb].items()
+                }.items()
+            ),
+            columns=["Well", "K"],
+        ).set_index("Well")
+        df2 = pd.DataFrame(
+            list(
+                {
+                    k: fr.result.params["K"].stderr
+                    for k, fr in self.fitresults[lb].items()
+                }.items()
+            ),
+            columns=["Well", "sK"],
+        ).set_index("Well")
+        df3 = pd.DataFrame(
+            list(
+                {
+                    k: fr.result.params["S1_default"].value
+                    for k, fr in self.fitresults[lb].items()
+                }.items()
+            ),
+            columns=["Well", "S1_default"],
+        ).set_index("Well")
+        # Merge the dataframes
+        merged_df = pd.concat([df1, df2, df3], axis=1)
+        # XXX: # Write the name of the control e.g. S202N in the "ctrl" column
+        for ctrl_name, wells in self.scheme.names.items():
+            for well in wells:
+                merged_df.loc[well, "ctrl"] = ctrl_name
+
         if not hasattr(self, "fitresults"):
             raise FitFirstError()
         sb.set(style="whitegrid")
@@ -1247,7 +1312,7 @@ class TitrationAnalysis(Titration):
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.fitresults[lb].loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = merged_df.loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1256,6 +1321,7 @@ class TitrationAnalysis(Titration):
                 hue=res_ctrl.ctrl,
                 ax=ax1,
             )
+            plt.legend(loc="upper left", frameon=False)
             plt.errorbar(
                 res_ctrl.K,
                 range(len(res_ctrl)),
@@ -1266,7 +1332,12 @@ class TitrationAnalysis(Titration):
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = self.fitresults[lb].loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = merged_df.loc[self.keys_unk].sort_index(ascending=False)
+        # Compute 'K - 2*sK' for each row in res_unk
+        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
+        # Sort the DataFrame by this computed value in descending order
+        res_unk = res_unk.sort_values(by="sort_val", ascending=True)
+
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
             x=res_unk["K"],
@@ -1275,10 +1346,10 @@ class TitrationAnalysis(Titration):
             orient="h",
             lw=2,
             palette="Blues",
-            hue=res_unk["SA"],
+            hue=res_unk["S1_default"],
             ax=ax2,
         )
-        plt.legend("")
+        plt.legend(loc="upper left", frameon=False)
         plt.errorbar(
             res_unk["K"],
             range(len(res_unk)),
@@ -1308,163 +1379,35 @@ class TitrationAnalysis(Titration):
         f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
         return f
 
-    def plot_well(self, key: str) -> plt.figure:
-        """Plot global fitting using 2 labelblocks.
-
-        Here is less general. It is for 2 labelblocks.
-
-        Parameters
-        ----------
-        key: str
-            Well position as dictionary key like "A01".
-
-        Returns
-        -------
-        plt.figure
-            Pointer to mpl.figure.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
+    def plot_all_wells(self, lb: int, path: str | Path) -> None:
+        """Plot all wells into a pdf."""
+        # Create a PdfPages object
+        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))
+        """# XXX: Order
+        "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
+        #     out.savefig(self.plot_well(str(k)))
+        # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
+        #     out.savefig(self.plot_well(str(k)))
         """
-        fourdigits = 1e4
-        if not hasattr(self, "fitresults"):
-            raise FitFirstError()
-        plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
-        out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-        out2 = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
-        x = np.array(self.conc)
-        xfit = np.linspace(min(x) * 0.98, max(x) * 1.02, 50)
-        residues = []
-        colors = []
-        lines = []
-        f = plt.figure(figsize=(10, 7))
-        ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
-        # labelblocks
-        # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-        for i, (datafit, df) in enumerate(zip(self.datafit, self.fitresults)):
-            y = np.array(datafit[key]) if datafit else np.zeros_like(x)
-            colors.append(plt.cm.Set2((i + 2) * 10))
-            ax_data.plot(
-                x, y, "o", color=colors[i], markersize=12, label="label" + str(i)
-            )
-            ax_data.plot(
-                xfit,
-                self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
-                "-",
-                lw=2,
-                color=colors[i],
-                alpha=0.8,
-            )
-            ax_data.set_xticks(ax_data.get_xticks()[1:-1])
-            residues.append(
-                y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
-            )
-            # Print out.
-            line = [
-                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
-                for v in list(df[out].loc[key])
-            ]
-            for _i in range(4):
-                line.append("")
-            lines.append(line)
-        # ## residues
-        ax1 = plt.subplot2grid((3, 1), loc=(2, 0))
-        ax1.plot(
-            x, residues[0], "o-", lw=2.5, color=colors[0], alpha=0.6, markersize=12
-        )
-        ax2 = plt.twinx(ax1)
-        ax2.plot(
-            x, residues[1], "o-", lw=2.5, color=colors[1], alpha=0.6, markersize=12
-        )
-        plt.subplots_adjust(hspace=0)
-        ax1.set_xlim(ax_data.get_xlim())
-        ax_data.legend()
-        # global
-        fit_df = self.fitresults[-1]
-        lines.append(
-            [
-                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
-                for v in list(fit_df[out2].loc[key])
-            ]
-        )
-        ax_data.plot(
-            xfit,
-            self.fz(fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], xfit),
-            "b--",
-            lw=0.5,
-        )
-        ax_data.plot(
-            xfit,
-            self.fz(
-                fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], xfit
-            ),
-            "b--",
-            lw=0.5,
-        )
-        ax_data.table(cellText=lines, colLabels=out2, loc="top")
-        ax1.grid(0, axis="y")  # switch off horizontal
-        ax2.grid(1, axis="both")
-        # ## only residues
-        y = self.labelblocksgroups[0].data[key]  # type: ignore # XXX: D
-        ax1.plot(
-            x,
-            (
-                y
-                - self.fz(
-                    fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], x
-                )
-            ),
-            "--",
-            lw=1.5,
-            color=colors[0],
-        )
-        y = self.labelblocksgroups[1].data[key]  # type: ignore # XXX: D
-        ax2.plot(
-            x,
-            (
-                y
-                - self.fz(
-                    fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], x
-                )
-            ),
-            "--",
-            lw=1.5,
-            color=colors[1],
-        )
-        if key in self.scheme.ctrl:
-            plt.title(
-                "Ctrl: " + fit_df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
-            )
-        else:
-            plt.title(key, {"fontsize": 16})
-        plt.close()
-        return f
-
-    def plot_all_wells(self, path: Path) -> None:
-        """Plot all wells into a pdf.
-
-        Parameters
-        ----------
-        path : Path
-            Where the pdf file is saved.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
-        """
-        if not hasattr(self, "fitresults"):
-            raise FitFirstError()
-        out = PdfPages(path)
-        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-            out.savefig(self.plot_well(str(k)))
-        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
-            out.savefig(self.plot_well(str(k)))
-        out.close()
+        for lbl, fr in self.fitresults[lb].items():
+            fig = fr.figure
+            # A4 size in inches. You can adjust this as per your need.
+            fig.set_size_inches([8.27, 11.69])
+            # Get the first axes in the figure to adjust the positions
+            ax = fig.get_axes()[0]
+            # Adjust position as needed. Values are [left, bottom, width, height]
+            ax.set_position([0.1, 0.5, 0.8, 0.4])
+            # Create a new axes for the text
+            text_ax = fig.add_axes([0.1, 0.05, 0.8, 0.35])  # Adjust as needed
+            text = lmfit.printfuncs.fit_report(self.fitresults[lb][lbl].result)
+            text_ax.text(0.0, 0.0, text, fontsize=14)
+            text_ax.axis("off")  # Hide the axes for the text
+            # Save the figure into the PDF
+            pdf_pages.savefig(fig, bbox_inches="tight")
+        # Close the PdfPages object
+        pdf_pages.close()
+        # Close all the figures
+        plt.close("all")
 
     def plot_ebar(  # noqa: PLR0913
         self,
@@ -1481,7 +1424,7 @@ class TitrationAnalysis(Titration):
         """Plot SA vs. K with errorbar for the whole plate."""
         if not hasattr(self, "fitresults"):
             raise FitFirstError()
-        fit_df = self.fitresults[lb]
+        fit_df = self.dataframes[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
@@ -1533,32 +1476,43 @@ class TitrationAnalysis(Titration):
     def print_fitting(self, lb: int) -> None:
         """Print fitting parameters for the whole plate."""
 
-        def df_print(df: pd.DataFrame) -> None:
-            for i, r in df.iterrows():
-                print(f"{i:s}", end=" ")
-                for k in out[:2]:
-                    print(f"{r[k]:7.2f}", end=" ")
-                for k in out[2:]:
-                    print(f"{r[k]:7.0f}", end=" ")
-                print()
+        def format_row(index: str, row: pd.Series[float], keys: list[str]) -> str:
+            formatted_values = []
+            for key in keys:
+                val = ufloat(row[key], row["s" + key])
+                # Format the values with 4 significant figures
+                nominal = f"{val.nominal_value:.3g}"
+                std_dev = f"{val.std_dev:.2g}"
+                # Ensure each value occupies a fixed space
+                formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
+            return f"{index:s} {' '.join(formatted_values)}"
 
-        fit_df = self.fitresults[lb]
-        if "SA2" in fit_df:
-            out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
-        else:
-            out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
+        fit_df = self.dataframes[lb]
+        out_keys = ["K"] + [
+            col
+            for col in fit_df.columns
+            if col not in ["ctrl", "K", "sK"] and not col.startswith("s")
+        ]
+        header = "    " + " ".join([f"{x:>7s} s{x:>7s}" for x in out_keys])
         if len(self.scheme.ctrl) > 0:
             res_ctrl = fit_df.loc[self.scheme.ctrl]
-            gr = res_ctrl.groupby("ctrl")
-            print("    " + " ".join([f"{x:>7s}" for x in out]))
-            for g in gr:
-                print(" ", g[0])
-                df_print(g[1][out])
+            groups = res_ctrl.groupby("ctrl")
+            print(header)
+            for name, group in groups:
+                print(f" {name}")
+                for i, r in group.iterrows():
+                    print(format_row(str(i), r, out_keys))
         res_unk = fit_df.loc[self.keys_unk]
-        print()
-        print("    " + " ".join([f"{x:>7s}" for x in out]))
+        # Compute 'K - 2*sK' for each row in res_unk
+        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
+        # Sort the DataFrame by this computed value in descending order
+        res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
+        # in case: del res_unk["sort_val"]  # if you want to remove the temporary sorting column
+        print("\n" + header)
         print("  UNK")
-        df_print(res_unk.sort_index())
+        # for i, r in res_unk.sort_index().iterrows():
+        for i, r in res_unk_sorted.iterrows():
+            print(format_row(str(i), r, out_keys))
 
     def plot_buffer(self, title: str | None = None) -> plt.figure:
         """Plot buffers of all labelblocksgroups."""
@@ -1617,3 +1571,11 @@ class TitrationAnalysis(Titration):
         f.suptitle(title, fontsize=16)
         f.tight_layout()
         return f
+
+    def export_png(self, lb: int, path: str | Path) -> None:
+        """Export png like lb1/ lb2/ lb1_lb2/."""
+        # Make sure the directory exists
+        folder = Path(path) / f"lb{lb}"
+        folder.mkdir(parents=True, exist_ok=True)
+        for k, v in self.fitresults[lb].items():
+            v.figure.savefig(folder / f"{k}.png")

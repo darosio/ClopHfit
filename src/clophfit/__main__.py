@@ -78,7 +78,7 @@ def fit_routine(  # noqa: PLR0913
                 f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(out / Path("ebarZ" + str(i) + ".png"))
     if pdf:
-        titan.plot_all_wells(out / "all_wells.pdf")
+        titan.plot_all_wells(2, out / "all_wells.pdf")
 
 
 @click.group()
