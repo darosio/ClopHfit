@@ -1028,6 +1028,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
 class FitFirstError(Exception):
     """Error when plotting before fitting."""
 
+    # XXX: This is a nice way to define exceptions.
     def __init__(self) -> None:
         super().__init__("Run fit first")
 
@@ -1233,20 +1234,10 @@ class TitrationAnalysis(Titration):
             else:
                 fitting[k] = fit_binding_glob(ds, True)
         fittings.append(fitting)
-        """
-        # XXX: # Write the name of the control e.g. S202N in the "ctrl" column
-        for fitting in fittings:
-            for ctrl_name, wells in self.scheme.names.items():
-                for well in wells:
-                    fitting.loc[well, "ctrl"] = ctrl_name
-        """
         return fittings
 
     def plot_k(
-        self,
-        lb: int,
-        xlim: tuple[float, float] | None = None,
-        title: str | None = None,
+        self, lb: int, xlim: tuple[float, float] | None = None, title: str | None = None
     ) -> plt.figure:
         """Plot K values as stripplot.
 
@@ -1263,56 +1254,13 @@ class TitrationAnalysis(Titration):
         -------
         plt.figure
             The figure.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
         """
-        # Create dataframes directly from dictionary comprehensions
-        df1 = pd.DataFrame(
-            list(
-                {
-                    k: fr.result.params["K"].value
-                    for k, fr in self.fitresults[lb].items()
-                }.items()
-            ),
-            columns=["Well", "K"],
-        ).set_index("Well")
-        df2 = pd.DataFrame(
-            list(
-                {
-                    k: fr.result.params["K"].stderr
-                    for k, fr in self.fitresults[lb].items()
-                }.items()
-            ),
-            columns=["Well", "sK"],
-        ).set_index("Well")
-        df3 = pd.DataFrame(
-            list(
-                {
-                    k: fr.result.params["S1_default"].value
-                    for k, fr in self.fitresults[lb].items()
-                }.items()
-            ),
-            columns=["Well", "S1_default"],
-        ).set_index("Well")
-        # Merge the dataframes
-        merged_df = pd.concat([df1, df2, df3], axis=1)
-        # XXX: # Write the name of the control e.g. S202N in the "ctrl" column
-        for ctrl_name, wells in self.scheme.names.items():
-            for well in wells:
-                merged_df.loc[well, "ctrl"] = ctrl_name
-
-        if not hasattr(self, "fitresults"):
-            raise FitFirstError()
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = merged_df.loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = self.dataframes[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1325,19 +1273,18 @@ class TitrationAnalysis(Titration):
             plt.errorbar(
                 res_ctrl.K,
                 range(len(res_ctrl)),
-                xerr=res_ctrl["sK"],  # xerr=res_ctrl.sK*res_ctrl.tval,
+                xerr=res_ctrl["sK"],
                 fmt=".",
                 c="lightgray",
                 lw=8,
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = merged_df.loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = self.dataframes[lb].loc[self.keys_unk].sort_index(ascending=False)
         # Compute 'K - 2*sK' for each row in res_unk
         res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
         # Sort the DataFrame by this computed value in descending order
         res_unk = res_unk.sort_values(by="sort_val", ascending=True)
-
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
             x=res_unk["K"],
@@ -1422,8 +1369,6 @@ class TitrationAnalysis(Titration):
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        if not hasattr(self, "fitresults"):
-            raise FitFirstError()
         fit_df = self.dataframes[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
@@ -1534,7 +1479,7 @@ class TitrationAnalysis(Titration):
                     ]
                 ]
             ]
-            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore # XXX: D
+            buf = {key: lbg.data[key] for key in self.scheme.buffer if lbg.data}
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
