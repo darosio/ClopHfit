@@ -4,14 +4,11 @@ from __future__ import annotations
 import copy
 import typing
 import warnings
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import lmfit  # type: ignore
 import numpy as np
 import pandas as pd
-import scipy  # type: ignore
-import scipy.stats  # type: ignore
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore
 from matplotlib import axes, figure  # type: ignore
@@ -298,42 +295,8 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     return residuals
 
 
-@typing.overload
-def _binding_pk(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
-    ...
-
-
-@typing.overload
-def _binding_pk(x: ArrayF, K: float, S0: float, S1: float) -> ArrayF:  # noqa: N803
-    ...
-
-
-def _binding_pk(
-    x: float | ArrayF, K: float, S0: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
-
-
-def _binding_pkr(
-    x: float | ArrayF, K: float, R: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
-
-
-@typing.overload
-def _binding_kd(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
-    ...
-
-
-@typing.overload
-def _binding_kd(x: ArrayF, K: float, S0: float, S1: float) -> ArrayF:  # noqa: N803
-    ...
-
-
-def _binding_kd(
-    x: float | ArrayF, K: float, S0: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S1 + (S0 - S1) * x / K / (1 + x / K)
+# MAYBE: R ;= S0 / S1
+# returns S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
 
 
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
@@ -367,159 +330,6 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)
 
 
-# TODO other from datan
-# TODO: use this like fz in prtecan
-def fz_kd_singlesite(k: float, p: ArrayF | Sequence[float], x: ArrayF) -> ArrayF:
-    """Fit function for Cl titration."""
-    return (float(p[0]) + float(p[1]) * x / k) / (1 + x / k)
-
-
-def fz_pk_singlesite(k: float, p: ArrayF | Sequence[float], x: ArrayF) -> ArrayF:
-    """Fit function for pH titration."""
-    return (float(p[1]) + float(p[0]) * 10 ** (k - x)) / (1 + 10 ** (k - x))
-
-
-# `fit_titration` is exported and use in prtecan.
-def fit_titration(  # noqa: PLR0913, PLR0915
-    kind: str,
-    x: Sequence[float],
-    y: ArrayF,
-    y2: ArrayF | None = None,
-    residue: ArrayF | None = None,
-    residue2: ArrayF | None = None,
-    tval_conf: float = 0.95,
-) -> pd.DataFrame:
-    """Fit pH or Cl titration using a single-site binding model.
-
-    Returns confidence interval (default=0.95) for fitting params (cov*tval), rather than
-    standard error of the fit. Use scipy leastsq. Determine 3 fitting parameters:
-    - binding constant *K*
-    - and 2 plateau *SA* and *SB*.
-
-    Parameters
-    ----------
-    kind : str
-        Titration type {'pH'|'Cl'}
-    x : Sequence[float]
-        Dataset x-values.
-    y : ArrayF
-        Dataset y-values.
-    y2 : ArrayF, optional
-        Optional second dataset y-values (share x with main dataset).
-    residue : ArrayF, optional
-        Residues for main dataset.
-    residue2 : ArrayF, optional
-        Residues for second dataset.
-    tval_conf : float
-        Confidence level (default 0.95) for parameter estimations.
-
-    Returns
-    -------
-    pd.DataFrame
-        Fitting results.
-
-    Raises
-    ------
-    NameError
-        When kind is different than "pH" or "Cl".
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> fit_titration("Cl", np.array([1.0, 10, 30, 100, 200]), \
-          np.array([10, 8, 5, 1, 0.1]))[["K", "sK"]]
-               K         sK
-    0  38.955406  30.201929
-
-    """
-    if kind == "pH":
-        fz = fz_pk_singlesite
-    elif kind == "Cl":
-        fz = fz_kd_singlesite
-    else:
-        msg = "kind= pH or Cl"
-        raise NameError(msg)
-
-    def compute_p0(x: Sequence[float], y: ArrayF) -> ArrayF:
-        data = pd.DataFrame({"x": x, "y": y})
-        p0sa = data.y[data.x == min(data.x)].to_numpy()[0]
-        p0sb = data.y[data.x == max(data.x)].to_numpy()[0]
-        p0k = np.average([max(y), min(y)])
-        try:
-            x1, y1 = data[data["y"] >= p0k].to_numpy()[0]
-        except IndexError:
-            x1 = np.nan
-            y1 = np.nan
-        try:
-            x2, y2 = data[data["y"] <= p0k].to_numpy()[0]
-        except IndexError:
-            x2 = np.nan
-            y2 = np.nan
-        p0k = (x2 - x1) / (y2 - y1) * (p0k - y1) + x1
-        return np.array(np.r_[p0k, p0sa, p0sb])
-
-    if y2 is None:
-
-        def ssq1(p: ArrayF, x: ArrayF, y1: ArrayF) -> ArrayF:
-            return np.array(np.r_[y1 - fz(p[0], p[1:3], x)])
-
-        p0 = compute_p0(x, y)
-        p, cov, info, msg, success = scipy.optimize.leastsq(
-            ssq1, p0, args=(np.array(x), y), full_output=True, xtol=1e-11
-        )
-    else:
-
-        def ssq2(  # noqa: PLR0913
-            p: ArrayF, x: ArrayF, y1: ArrayF, y2: ArrayF, rd1: ArrayF, rd2: ArrayF
-        ) -> ArrayF:
-            return np.array(
-                np.r_[
-                    (y1 - fz(p[0], p[1:3], x)) / rd1**2,
-                    (y2 - fz(p[0], p[3:5], x)) / rd2**2,
-                ]
-            )
-
-        p1 = compute_p0(x, y)
-        p2 = compute_p0(x, y2)
-        ave = np.average([p1[0], p2[0]])
-        p0 = np.r_[ave, p1[1], p1[2], p2[1], p2[2]]
-        tmp = scipy.optimize.leastsq(
-            ssq2,
-            p0,
-            full_output=True,
-            xtol=1e-11,
-            args=(np.array(x), y, y2, residue, residue2),
-        )
-        p, cov, info, msg, success = tmp
-    res = pd.DataFrame({"ss": [success]})
-    res["msg"] = msg
-    if 1 <= success <= 4:  # noqa: PLR2004
-        try:
-            tval = (tval_conf + 1) / 2
-            chisq = sum(info["fvec"] * info["fvec"])
-            res["df"] = len(y) - len(p)
-            res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
-            res["chisqr"] = chisq / res.df
-            res["K"] = p[0]
-            res["SA"] = p[1]
-            res["SB"] = p[2]
-            if y2 is not None:
-                res["df"] += len(y2)
-                res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
-                res["chisqr"] = chisq / res.df
-                res["SA2"] = p[3]
-                res["SB2"] = p[4]
-                res["sSA2"] = np.sqrt(cov[3][3] * res.chisqr) * res.tval
-                res["sSB2"] = np.sqrt(cov[4][4] * res.chisqr) * res.tval
-            res["sK"] = np.sqrt(cov[0][0] * res.chisqr) * res.tval
-            res["sSA"] = np.sqrt(cov[1][1] * res.chisqr) * res.tval
-            res["sSB"] = np.sqrt(cov[2][2] * res.chisqr) * res.tval
-        except TypeError:
-            pass  # if some params are not successfully determined.
-    return res
-
-
-###############
 def _build_params_1site(ds: Dataset) -> Parameters:
     """Initialize parameters for 1 site model based on the given dataset."""
     params = Parameters()
