@@ -10,7 +10,6 @@ Please consult the documentation for each function in this module for more detai
 
 """
 from clophfit.prtecan.prtecan import (
-    FitFirstError,
     Labelblock,
     LabelblocksGroup,
     Metadata,
@@ -29,7 +28,6 @@ from clophfit.prtecan.prtecan import (
 )
 
 __all__ = [
-    "FitFirstError",
     "Labelblock",
     "LabelblocksGroup",
     "Metadata",

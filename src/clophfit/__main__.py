@@ -35,8 +35,8 @@ def fit_routine(  # noqa: PLR0913
     pdf: bool,
 ) -> None:
     """Help main."""
-    titan.datafit_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fit_args = {"kind": kind, "no_weight": (not weight)}
+    titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
+    titan.fitkws = {"kind": kind, "no_weight": (not weight)}
     for i, fit in enumerate(titan.fitresults):
         # Printout
         if verbose:

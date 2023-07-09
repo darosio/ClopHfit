@@ -508,7 +508,9 @@ class TestTitration:
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
         """It reads pH values."""
-        assert self.tit_ph.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+        assert_array_equal(
+            self.tit_ph.conc, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+        )
 
     def test_labelblocksgroups(self) -> None:
         """It reads labelblocksgroups data and metadata."""
@@ -639,7 +641,7 @@ class TestTitrationAnalysis:
 
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
-        titan.datafit_params = {"bg": True, "nrm": True, "dil": True}
+        titan.fitdata_params = {"bg": True, "nrm": True, "dil": True}
         fres = titan.fitresults
         # Check that the first fit result dictionary has 92 elements
         assert len(fres[0]) == 92
@@ -664,7 +666,7 @@ class TestTitrationAnalysis:
         assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
         # Fit up to the second-last data point
-        titan.fit_args = {"fin": -1}
+        titan.fitkws = {"fin": -1}
         fres = titan.fitresults
         # Check that the first fit result for 'H02' is still None
         assert fres[0]["H02"] == FitResult(None, None, None)

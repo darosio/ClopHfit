@@ -18,9 +18,8 @@ import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from uncertainties import ufloat  # type: ignore
 
-from clophfit.binding import fz_kd_singlesite, fz_pk_singlesite
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
-from clophfit.types import ArrayF
+from clophfit.types import ArrayF, Kwargs
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -811,28 +810,37 @@ class PlateScheme:
 
 @dataclass
 class Titration(TecanfilesGroup, BufferWellsMixin):
-    """TecanfileGroup + concentrations.
+    """Build titrations from grouped Tecanfiles and corresponding concentrations or pH values.
 
     Parameters
     ----------
     tecanfiles : list[Tecanfile]
         Tecanfiles to be grouped.
-    conc : Sequence[float]
+    conc : ArrayF
         Concentration or pH values.
     """
 
     tecanfiles: list[Tecanfile]
-    conc: Sequence[float]
+    conc: ArrayF
+
+    _additions: list[float] = field(init=False, default_factory=list)
+    _buffer_wells: list[str] = field(init=False, default_factory=list)
+    _data: list[dict[str, list[float]] | None] = field(init=False, default_factory=list)
+    _data_nrm: list[dict[str, list[float]]] = field(init=False, default_factory=list)
+    _dil_corr: ArrayF | None = field(init=False, default=None)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
     def __post_init__(self) -> None:
         """Set up the initial values for the properties."""
         super().__post_init__()
-        self._additions: list[float] | None = None
-        self._data: list[dict[str, list[float]] | None] | None = None
-        self._data_nrm: list[dict[str, list[float]]] | None = None
-        self._buffer_wells: list[str] | None = None
-        self._dil_corr: ArrayF = field(init=False, repr=False)
+
+    def __repr__(self) -> str:
+        """Return a string representation of the instance."""
+        return (
+            f'Titration(files=["{self.tecanfiles[0].path}", "{self.tecanfiles[1].path}", ...], '
+            f"conc={self.conc!r}, "
+            f"data_size={len(self.data) if self.data else 0})"
+        )
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> Titration:
@@ -851,7 +859,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         return cls(tecanfiles, conc)
 
     @staticmethod
-    def _listfile(listfile: Path) -> tuple[list[Tecanfile], Sequence[float]]:
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
         """Help construction from file.
 
         Parameters
@@ -879,7 +887,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         if table["filenames"].count() != table["conc"].count():
             msg = f"Check format [filenames conc] for listfile: {listfile}"
             raise ValueError(msg)
-        conc = table["conc"].tolist()
+        conc = table["conc"].to_numpy()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
         return tecanfiles, conc
 
@@ -888,28 +896,18 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """List of initial volume followed by additions."""
         return self._additions
 
-    # Here there is not any check on the validity of additions (e.g. length).
+    # MAYBE: Here there is not any check on the validity of additions (e.g. length).
     @additions.setter
     def additions(self, additions: list[float]) -> None:
         self._additions = additions
         self._dil_corr = dilution_correction(additions)
-        self._data = None
-        self._data_nrm = None
+        self._data = []
+        self._data_nrm = []
 
     def load_additions(self, additions_file: Path) -> None:
         """Load additions from file."""
         additions = pd.read_csv(additions_file, names=["add"])
         self.additions = additions["add"].tolist()
-
-    @property
-    def scheme(self) -> PlateScheme:
-        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
-        return self._scheme
-
-    def load_scheme(self, schemefile: Path) -> None:
-        """Load scheme from file. Set buffer_wells."""
-        self._scheme = PlateScheme(schemefile)
-        self.buffer_wells = self._scheme.buffer
 
     def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
@@ -922,13 +920,13 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """
         for lbg in self.labelblocksgroups:
             lbg.buffer_wells = value
-        self._data = None
-        self._data_nrm = None
+        self._data = []
+        self._data_nrm = []
 
     @property
     def data(self) -> list[dict[str, list[float]] | None] | None:
         """Buffer subtracted and corrected for dilution data."""
-        if self._data is None and self.additions:
+        if not self._data and self.additions:
             self._data = [
                 {
                     k: (np.array(v) * self._dil_corr).tolist()
@@ -943,7 +941,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
     @property
     def data_nrm(self) -> list[dict[str, list[float]]] | None:
         """Buffer subtracted, corrected for dilution and normalized data."""
-        if self._data_nrm is None and self.additions:
+        if not self._data_nrm and self.additions:
             self._data_nrm = [
                 {
                     k: (np.array(v) * self._dil_corr).tolist()
@@ -952,6 +950,16 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
                 for lbg in self.labelblocksgroups
             ]
         return self._data_nrm
+
+    @property
+    def scheme(self) -> PlateScheme:
+        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
+        return self._scheme
+
+    def load_scheme(self, schemefile: Path) -> None:
+        """Load scheme from file. Set buffer_wells."""
+        self._scheme = PlateScheme(schemefile)
+        self.buffer_wells = self._scheme.buffer
 
     def export_data(self, out_folder: Path) -> None:
         """Export dat files [x,y1,..,yN] from labelblocksgroups.
@@ -974,7 +982,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         out_folder.mkdir(parents=True, exist_ok=True)
 
         def write(
-            conc: Sequence[float], data: list[dict[str, list[float]]], out_folder: Path
+            conc: ArrayF, data: list[dict[str, list[float]]], out_folder: Path
         ) -> None:
             """Write data."""
             if any(data):
@@ -1025,14 +1033,6 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
             )
 
 
-class FitFirstError(Exception):
-    """Error when plotting before fitting."""
-
-    # XXX: This is a nice way to define exceptions.
-    def __init__(self) -> None:
-        super().__init__("Run fit first")
-
-
 @dataclass
 class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
@@ -1043,28 +1043,28 @@ class TitrationAnalysis(Titration):
         For unexpected file format, e.g. header `names`.
     """
 
-    #: List of result dataframes.
-    _fitresults: list[dict[str, FitResult]] = field(
-        init=False, default_factory=list, repr=False
-    )
-    #: Function used in the fitting.
-    fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
-        init=False, repr=False
-    )
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
-    _datafit: Sequence[dict[str, list[float]] | None] = field(
-        init=False, default_factory=list, repr=False
+    _fitdata: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
     )
-    _datafit_params: dict[str, bool] = field(init=False, default_factory=dict)
-    _fit_args: dict[str, str | int | float | bool | None] = field(
-        init=False, default_factory=dict
-    )
-    _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _fitdata_params: dict[str, bool] = field(init=False, default_factory=dict)
+    _fitkws: Kwargs = field(init=False, default_factory=dict)
+    _fitresults: list[dict[str, FitResult]] = field(init=False, default_factory=list)
+    _fitresults_df: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         """Set up the initial values of inherited class properties."""
         super().__post_init__()
+
+    def __repr__(self) -> str:
+        """Return a string representation of the instance."""
+        return (
+            f"TitrationAnalysis({super().__repr__()!r}\n"
+            f"       (kwargs)    fitkws        ={self.fitkws!r}\n"
+            f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
+            f"                   results_size  ={len(self.fitresults) if self.fitresults else 0})"
+        )
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -1083,75 +1083,77 @@ class TitrationAnalysis(Titration):
         return cls(tecanfiles, conc)
 
     @property
-    def datafit_params(self) -> dict[str, bool]:
-        """Get the datafit parameters."""
-        return self._datafit_params
-
-    @datafit_params.setter
-    def datafit_params(self, params: dict[str, bool]) -> None:
-        """Set the datafit parameters."""
-        self._datafit_params = params
-        self._datafit = []
-        self._fitresults = []
-
-    @property
-    def datafit(self) -> Sequence[dict[str, list[float]] | None]:
+    def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
         """Data used for fitting."""
-        if not self._datafit:
+        if not self._fitdata:
             self._fitresults = []
-            nrm = self.datafit_params.get("nrm", False)
-            dil = self.datafit_params.get("dil", False)
-            bg = self.datafit_params.get("bg", False)
+            nrm = self.fitdata_params.get("nrm", False)
+            dil = self.fitdata_params.get("dil", False)
+            bg = self.fitdata_params.get("bg", False)
             if dil:
                 # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
                 # DDD if nrm and self.data_nrm and any(self.data_nrm):
                 if nrm and self.data_nrm:
-                    self._datafit = self.data_nrm
+                    self._fitdata = self.data_nrm
                 elif self.data:
-                    self._datafit = self.data
+                    self._fitdata = self.data
                 else:  # back up to dat_nrm
                     warnings.warn(
                         "No dilution corrected data found; use normalized data.",
                         stacklevel=2,
                     )
-                    self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+                    self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
             elif bg:
                 if nrm:
-                    self._datafit = [
+                    self._fitdata = [
                         lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
                     ]
                 else:
-                    self._datafit = [
+                    self._fitdata = [
                         lbg.data_buffersubtracted for lbg in self.labelblocksgroups
                     ]
             elif nrm:
-                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
+                self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
             else:
-                self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-        return self._datafit
+                self._fitdata = [lbg.data for lbg in self.labelblocksgroups]
+        return self._fitdata
 
     @property
-    def fit_args(self) -> dict[str, str | int | float | bool | None]:
-        """Get the arguments for fitting."""
-        return self._fit_args
+    def fitdata_params(self) -> dict[str, bool]:
+        """Get the datafit parameters."""
+        return self._fitdata_params
 
-    @fit_args.setter
-    def fit_args(self, params: dict[str, str | int | float | bool | None]) -> None:
+    @fitdata_params.setter
+    def fitdata_params(self, params: dict[str, bool]) -> None:
         """Set the datafit parameters."""
-        self._fit_args = params
+        self._fitdata_params = params
+        self._fitdata = []
         self._fitresults = []
+        self._fitresults_df = []
+
+    @property
+    def fitkws(self) -> Kwargs:
+        """Get the arguments for fitting."""
+        return self._fitkws
+
+    @fitkws.setter
+    def fitkws(self, params: dict[str, str | int | float | bool | None]) -> None:
+        """Set the datafit parameters."""
+        self._fitkws = params
+        self._fitresults = []
+        self._fitresults_df = []
 
     @property
     def fitresults(self) -> list[dict[str, FitResult]]:
         """Result dataframes."""
         if not self._fitresults:
-            self._fitresults = self.fit(**self.fit_args)  # type: ignore
+            self._fitresults = self.fit(**self.fitkws)  # type: ignore
         return self._fitresults
 
     @property
-    def dataframes(self) -> list[pd.DataFrame]:
+    def fitresults_df(self) -> list[pd.DataFrame]:
         """Result dataframes."""
-        if not self._dataframes:
+        if not self._fitresults_df:
             for fitresult in self.fitresults:
                 data = []
                 for lbl, fr in fitresult.items():
@@ -1167,13 +1169,8 @@ class TitrationAnalysis(Titration):
                     for ctrl_name, wells in self.scheme.names.items():
                         for well in wells:
                             df0.loc[well, "ctrl"] = ctrl_name
-                self._dataframes.append(df0)
-        return self._dataframes
-
-    @dataframes.setter
-    def dataframes(self, dfs: list[pd.DataFrame]) -> None:
-        """Set the datafit parameters."""
-        self._dataframes = dfs
+                self._fitresults_df.append(df0)
+        return self._fitresults_df
 
     def fit(
         self,
@@ -1202,17 +1199,13 @@ class TitrationAnalysis(Titration):
         list[pd.DataFrame]
             Fitting results.
         """
-        if kind == "Cl":
-            self.fz = fz_kd_singlesite
-        elif kind == "pH":
-            self.fz = fz_pk_singlesite
         x = np.array(self.conc)[ini:fin]
         fittings = []
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        for dat in self.datafit:
+        for dat in self.fitdata:
             fitting = {}
             if dat:
                 for k in keys_fit:
@@ -1226,8 +1219,8 @@ class TitrationAnalysis(Titration):
         fitting = {}
         for k in keys_fit:
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y0 = self.datafit[0][k][ini:fin] if self.datafit[0] else None
-            y1 = self.datafit[1][k][ini:fin] if self.datafit[1] else None
+            y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
+            y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
             ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, kind == "pH")
             if no_weight:
                 fitting[k] = fit_binding_glob(ds, False)
@@ -1260,7 +1253,7 @@ class TitrationAnalysis(Titration):
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.dataframes[lb].loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = self.fitresults_df[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1280,7 +1273,7 @@ class TitrationAnalysis(Titration):
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = self.dataframes[lb].loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = self.fitresults_df[lb].loc[self.keys_unk].sort_index(ascending=False)
         # Compute 'K - 2*sK' for each row in res_unk
         res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
         # Sort the DataFrame by this computed value in descending order
@@ -1369,7 +1362,7 @@ class TitrationAnalysis(Titration):
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        fit_df = self.dataframes[lb]
+        fit_df = self.fitresults_df[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
@@ -1432,7 +1425,7 @@ class TitrationAnalysis(Titration):
                 formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
             return f"{index:s} {' '.join(formatted_values)}"
 
-        fit_df = self.dataframes[lb]
+        fit_df = self.fitresults_df[lb]
         out_keys = ["K"] + [
             col
             for col in fit_df.columns
