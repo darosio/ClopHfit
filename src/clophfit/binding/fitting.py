@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import copy
 import typing
-from collections.abc import Sequence
+import warnings
 from dataclasses import dataclass, field
 
 import lmfit  # type: ignore
 import numpy as np
 import pandas as pd
-import scipy  # type: ignore
-import scipy.stats  # type: ignore
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore
 from matplotlib import axes, figure  # type: ignore
@@ -67,6 +65,8 @@ class Dataset(dict[str, DataArrays]):
         """
         Initialize the Dataset object.
 
+        Here we will remove any NaN values from the x and y arrays.
+
         Parameters
         ----------
         x : ArrayF | ArrayDict
@@ -88,22 +88,61 @@ class Dataset(dict[str, DataArrays]):
         """
         self.is_ph = is_ph
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            weights = w if isinstance(w, np.ndarray) else None
+            mask = ~np.isnan(y)
+            x, y = x[mask], y[mask]
+            weights = w[mask] if isinstance(w, np.ndarray) else None
             super().__init__({"default": DataArrays(x, y, weights)})
         elif isinstance(x, np.ndarray) and isinstance(y, dict):
             if isinstance(w, dict):
-                super().__init__({k: DataArrays(x, v, w.get(k)) for k, v in y.items()})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[~np.isnan(v)],
+                            v[~np.isnan(v)],
+                            w[k][~np.isnan(v)] if k in w else None,
+                        )
+                        for k, v in y.items()
+                    }
+                )
             else:
                 # this cover w is None or ArrayF
-                super().__init__({k: DataArrays(x, v, w) for k, v in y.items()})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[~np.isnan(v)],
+                            v[~np.isnan(v)],
+                            w[~np.isnan(v)] if w else None,
+                        )
+                        for k, v in y.items()
+                    }
+                )
+
         elif isinstance(x, dict) and isinstance(y, dict):
             if x.keys() != y.keys() or (isinstance(w, dict) and x.keys() != w.keys()):
                 msg = "Keys of 'x', 'y', and 'w' (if w is a dict) must match."
                 raise ValueError(msg)
             if isinstance(w, dict):
-                super().__init__({k: DataArrays(x[k], y[k], w.get(k)) for k in x})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[k][~np.isnan(y[k])],
+                            y[k][~np.isnan(y[k])],
+                            w[k][~np.isnan(y[k])] if k in w else None,
+                        )
+                        for k in x
+                    }
+                )
             else:
-                super().__init__({k: DataArrays(x[k], y[k], w) for k in x})
+                super().__init__(
+                    {
+                        k: DataArrays(
+                            x[k][~np.isnan(y[k])],
+                            y[k][~np.isnan(y[k])],
+                            w[~np.isnan(y[k])] if w else None,
+                        )
+                        for k in x
+                    }
+                )
 
     def add_weights(self, w: ArrayF | ArrayDict | typing.Any) -> None:
         """Add weights to the dataset.
@@ -166,6 +205,19 @@ class Dataset(dict[str, DataArrays]):
                     msg = f"No such key: '{key}' in the Dataset."
                     raise KeyError(msg)
         return copied
+
+    def clean_data(self, n_params: int) -> None:
+        """Remove too small datasets."""
+        for key in list(
+            self.keys()
+        ):  # list() is used to avoid modifying dict during iteration
+            if n_params > len(self[key].y):
+                warnings.warn(
+                    f"Removing key '{key}' from Dataset: number of parameters ({n_params}) "
+                    f"exceeds number of data points ({len(self[key].y)}).",
+                    stacklevel=2,
+                )
+                del self[key]
 
 
 @typing.overload
@@ -243,42 +295,8 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     return residuals
 
 
-@typing.overload
-def _binding_pk(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
-    ...
-
-
-@typing.overload
-def _binding_pk(x: ArrayF, K: float, S0: float, S1: float) -> ArrayF:  # noqa: N803
-    ...
-
-
-def _binding_pk(
-    x: float | ArrayF, K: float, S0: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
-
-
-def _binding_pkr(
-    x: float | ArrayF, K: float, R: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
-
-
-@typing.overload
-def _binding_kd(x: float, K: float, S0: float, S1: float) -> float:  # noqa: N803
-    ...
-
-
-@typing.overload
-def _binding_kd(x: ArrayF, K: float, S0: float, S1: float) -> ArrayF:  # noqa: N803
-    ...
-
-
-def _binding_kd(
-    x: float | ArrayF, K: float, S0: float, S1: float  # noqa: N803
-) -> float | ArrayF:
-    return S1 + (S0 - S1) * x / K / (1 + x / K)
+# MAYBE: R ;= S0 / S1
+# returns S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
 
 
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
@@ -312,159 +330,6 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)
 
 
-# TODO other from datan
-# TODO: use this like fz in prtecan
-def fz_kd_singlesite(k: float, p: ArrayF | Sequence[float], x: ArrayF) -> ArrayF:
-    """Fit function for Cl titration."""
-    return (float(p[0]) + float(p[1]) * x / k) / (1 + x / k)
-
-
-def fz_pk_singlesite(k: float, p: ArrayF | Sequence[float], x: ArrayF) -> ArrayF:
-    """Fit function for pH titration."""
-    return (float(p[1]) + float(p[0]) * 10 ** (k - x)) / (1 + 10 ** (k - x))
-
-
-# `fit_titration` is exported and use in prtecan.
-def fit_titration(  # noqa: PLR0913, PLR0915
-    kind: str,
-    x: Sequence[float],
-    y: ArrayF,
-    y2: ArrayF | None = None,
-    residue: ArrayF | None = None,
-    residue2: ArrayF | None = None,
-    tval_conf: float = 0.95,
-) -> pd.DataFrame:
-    """Fit pH or Cl titration using a single-site binding model.
-
-    Returns confidence interval (default=0.95) for fitting params (cov*tval), rather than
-    standard error of the fit. Use scipy leastsq. Determine 3 fitting parameters:
-    - binding constant *K*
-    - and 2 plateau *SA* and *SB*.
-
-    Parameters
-    ----------
-    kind : str
-        Titration type {'pH'|'Cl'}
-    x : Sequence[float]
-        Dataset x-values.
-    y : ArrayF
-        Dataset y-values.
-    y2 : ArrayF, optional
-        Optional second dataset y-values (share x with main dataset).
-    residue : ArrayF, optional
-        Residues for main dataset.
-    residue2 : ArrayF, optional
-        Residues for second dataset.
-    tval_conf : float
-        Confidence level (default 0.95) for parameter estimations.
-
-    Returns
-    -------
-    pd.DataFrame
-        Fitting results.
-
-    Raises
-    ------
-    NameError
-        When kind is different than "pH" or "Cl".
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> fit_titration("Cl", np.array([1.0, 10, 30, 100, 200]), \
-          np.array([10, 8, 5, 1, 0.1]))[["K", "sK"]]
-               K         sK
-    0  38.955406  30.201929
-
-    """
-    if kind == "pH":
-        fz = fz_pk_singlesite
-    elif kind == "Cl":
-        fz = fz_kd_singlesite
-    else:
-        msg = "kind= pH or Cl"
-        raise NameError(msg)
-
-    def compute_p0(x: Sequence[float], y: ArrayF) -> ArrayF:
-        data = pd.DataFrame({"x": x, "y": y})
-        p0sa = data.y[data.x == min(data.x)].to_numpy()[0]
-        p0sb = data.y[data.x == max(data.x)].to_numpy()[0]
-        p0k = np.average([max(y), min(y)])
-        try:
-            x1, y1 = data[data["y"] >= p0k].to_numpy()[0]
-        except IndexError:
-            x1 = np.nan
-            y1 = np.nan
-        try:
-            x2, y2 = data[data["y"] <= p0k].to_numpy()[0]
-        except IndexError:
-            x2 = np.nan
-            y2 = np.nan
-        p0k = (x2 - x1) / (y2 - y1) * (p0k - y1) + x1
-        return np.array(np.r_[p0k, p0sa, p0sb])
-
-    if y2 is None:
-
-        def ssq1(p: ArrayF, x: ArrayF, y1: ArrayF) -> ArrayF:
-            return np.array(np.r_[y1 - fz(p[0], p[1:3], x)])
-
-        p0 = compute_p0(x, y)
-        p, cov, info, msg, success = scipy.optimize.leastsq(
-            ssq1, p0, args=(np.array(x), y), full_output=True, xtol=1e-11
-        )
-    else:
-
-        def ssq2(  # noqa: PLR0913
-            p: ArrayF, x: ArrayF, y1: ArrayF, y2: ArrayF, rd1: ArrayF, rd2: ArrayF
-        ) -> ArrayF:
-            return np.array(
-                np.r_[
-                    (y1 - fz(p[0], p[1:3], x)) / rd1**2,
-                    (y2 - fz(p[0], p[3:5], x)) / rd2**2,
-                ]
-            )
-
-        p1 = compute_p0(x, y)
-        p2 = compute_p0(x, y2)
-        ave = np.average([p1[0], p2[0]])
-        p0 = np.r_[ave, p1[1], p1[2], p2[1], p2[2]]
-        tmp = scipy.optimize.leastsq(
-            ssq2,
-            p0,
-            full_output=True,
-            xtol=1e-11,
-            args=(np.array(x), y, y2, residue, residue2),
-        )
-        p, cov, info, msg, success = tmp
-    res = pd.DataFrame({"ss": [success]})
-    res["msg"] = msg
-    if 1 <= success <= 4:  # noqa: PLR2004
-        try:
-            tval = (tval_conf + 1) / 2
-            chisq = sum(info["fvec"] * info["fvec"])
-            res["df"] = len(y) - len(p)
-            res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
-            res["chisqr"] = chisq / res.df
-            res["K"] = p[0]
-            res["SA"] = p[1]
-            res["SB"] = p[2]
-            if y2 is not None:
-                res["df"] += len(y2)
-                res["tval"] = scipy.stats.distributions.t.ppf(tval, res.df)
-                res["chisqr"] = chisq / res.df
-                res["SA2"] = p[3]
-                res["SB2"] = p[4]
-                res["sSA2"] = np.sqrt(cov[3][3] * res.chisqr) * res.tval
-                res["sSB2"] = np.sqrt(cov[4][4] * res.chisqr) * res.tval
-            res["sK"] = np.sqrt(cov[0][0] * res.chisqr) * res.tval
-            res["sSA"] = np.sqrt(cov[1][1] * res.chisqr) * res.tval
-            res["sSB"] = np.sqrt(cov[2][2] * res.chisqr) * res.tval
-        except TypeError:
-            pass  # if some params are not successfully determined.
-    return res
-
-
-###############
 def _build_params_1site(ds: Dataset) -> Parameters:
     """Initialize parameters for 1 site model based on the given dataset."""
     params = Parameters()
@@ -498,6 +363,14 @@ class FitResult:
     figure: figure.Figure
     result: MinimizerResult
     mini: Minimizer
+
+    def is_valid(self) -> bool:
+        """Check if the fitting process was successful based on the existence of figure, result, and minimizer."""
+        return (
+            self.figure is not None
+            and self.result is not None
+            and self.mini is not None
+        )
 
 
 @dataclass
@@ -587,16 +460,32 @@ def analyze_spectra(
 
 def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
     """Analyze multi-label binding datasets and visualize the results."""
+    # TODO: return weights in FitResult
     if weighting:
         wc: ArrayDict = {}
+        labels_to_remove = []
         # Calculate standard deviations of residuals
         for label, da in ds.items():
             x = {label: da.x}
             y = {label: da.y}
             d = Dataset(x, y, ds.is_ph)
             params = _build_params_1site(d)
+            # Mark for removal and skip minimization when parameters exceed data points in y
+            if len(params) > len(da.y):
+                warnings.warn(
+                    f"Marking dataset {label} for removal due to insufficient data points.",
+                    stacklevel=2,
+                )
+                labels_to_remove.append(label)
+                continue
             res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
             wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
+        # Remove marked datasets
+        for label in labels_to_remove:
+            del ds[label]
+        if not ds:  # check if ds is now empty
+            warnings.warn("No datasets left after cleaning. Exiting.", stacklevel=2)
+            return FitResult(None, None, None)
         ds.add_weights(wc)
     params = _build_params_1site(ds)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))

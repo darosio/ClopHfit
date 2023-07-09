@@ -71,8 +71,8 @@
 	 +load_additions(Path)
 	 +@additions: list[float]
 	 +@buffer_wells: list[str]
-	 +@data_dilutioncorrected: list[dict[str, list[float]]|None|{}]
-	 +@data_dilutioncorrected_norm: list[dict[str, list[float]]|{}]
+	 +@data: list[dict[str, list[float]]|None|{}]
+	 +@data_nrm: list[dict[str, list[float]]|{}]
 	 +export_data()
    }
 

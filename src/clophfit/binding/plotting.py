@@ -57,11 +57,11 @@ class PlotParameters:
         """Set attributes based on whether the data is pH or Cl."""
         if is_ph:
             self.hue_norm = (5.7, 8.7)
-            self.palette = "vlag_r"
+            self.palette = "coolwarm_r"  # sb vlag_r
             self.kind = "pH"
         else:
             self.hue_norm = (0.0, 200.0)
-            self.palette = "crest"
+            self.palette = "viridis_r"  # sb crest
             self.kind = "Cl"
 
 

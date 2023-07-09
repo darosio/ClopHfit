@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -12,6 +11,7 @@ import pytest
 from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
+from clophfit.binding.fitting import FitResult
 from clophfit.prtecan import (
     Labelblock,
     LabelblocksGroup,
@@ -508,7 +508,9 @@ class TestTitration:
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
         """It reads pH values."""
-        assert self.tit_ph.conc == [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+        assert_array_equal(
+            self.tit_ph.conc, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+        )
 
     def test_labelblocksgroups(self) -> None:
         """It reads labelblocksgroups data and metadata."""
@@ -606,23 +608,23 @@ class TestTitrationAnalysis:
         """It applies dilution correction read from file listing additions."""
         assert titan.additions is not None
         assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
-        assert titan.data_dilutioncorrected is not None
-        assert titan.data_dilutioncorrected[1] is not None
+        assert titan.data is not None
+        assert titan.data[1] is not None
         assert_almost_equal(
-            titan.data_dilutioncorrected[1]["A12"],
+            titan.data[1]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
-    def test_data_dilutioncorrected_norma(self, titan: TitrationAnalysis) -> None:
+    def test_data_nrm(self, titan: TitrationAnalysis) -> None:
         """It normalizes data."""
-        assert titan.data_dilutioncorrected_norm is not None
+        assert titan.data_nrm is not None
         assert_almost_equal(
-            titan.data_dilutioncorrected_norm[0]["A12"][::2],
+            titan.data_nrm[0]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         assert_almost_equal(
-            titan.data_dilutioncorrected_norm[1]["A12"][::2],
+            titan.data_nrm[1]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
@@ -633,29 +635,46 @@ class TestTitrationAnalysis:
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
         assert set(titan.scheme.ctrl) - {"A01", "A12"} == x
 
+    """
     @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
+    """
+
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
-        titan.fit("pH", nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
-        df0 = pd.read_csv(data_tests / "140220/fit0.csv", index_col=0)
-        df1 = pd.read_csv(data_tests / "140220/fit1.csv", index_col=0)
-        pd.testing.assert_frame_equal(df0.sort_index(), fit0, rtol=1e0)
-        pd.testing.assert_frame_equal(
-            df1,
-            fit1,
-            check_like=True,
-            check_categorical=False,
-            atol=1e-3,
-        )
-        # fit up to the second-last data point
-        titan.fit("pH", fin=-1, nrm=True, bg=True, dil=True)
-        fit0 = titan.fittings[0].sort_index()
-        fit1 = titan.fittings[1].sort_index()
-        df0 = pd.read_csv(data_tests / "140220/fit0-1.csv", index_col=0)
-        df1 = pd.read_csv(data_tests / "140220/fit1-1.csv", index_col=0)
-        pd.testing.assert_frame_equal(
-            df0.sort_index()[1:], fit0[1:], check_like=True, atol=1e-4
-        )
-        pd.testing.assert_frame_equal(df1.sort_index(), fit1, atol=1e-5)
+        titan.fitdata_params = {"bg": True, "nrm": True, "dil": True}
+        fres = titan.fitresults
+        # Check that the first fit result dictionary has 92 elements
+        assert len(fres[0]) == 92
+        # Check that the first fit result for 'H02' is None
+        assert fres[0]["H02"] == FitResult(None, None, None)
+        # Check that the second fit result for 'H02' is not None
+        assert fres[1]["H02"].is_valid()
+        # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result
+        k_h02 = fres[1]["H02"].result.params["K"]
+        assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
+        assert k_h02.stderr == pytest.approx(0.0170, abs=1e-4)
+        # Check the value and standard error of the 'K' parameter for 'H02' in the third fit result
+        k_h02 = fres[2]["H02"].result.params["K"]
+        assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
+        assert k_h02.stderr == pytest.approx(0.0169, abs=1e-4)
+        # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result
+        k_e02 = fres[1]["E02"].result.params["K"]
+        assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0243, abs=1e-4)
+        # Check the value and standard error of the 'K' parameter for 'E02' in the third fit result
+        k_e02 = fres[2]["E02"].result.params["K"]
+        assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
+        # Fit up to the second-last data point
+        titan.fitkws = {"fin": -1}
+        fres = titan.fitresults
+        # Check that the first fit result for 'H02' is still None
+        assert fres[0]["H02"] == FitResult(None, None, None)
+        # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result, after fitting up to the second-last data point
+        k_h02 = fres[1]["H02"].result.params["K"]
+        assert k_h02.value == pytest.approx(7.8942, abs=1e-4)
+        assert k_h02.stderr == pytest.approx(0.0195, abs=1e-4)
+        # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result, after fitting up to the second-last data point
+        k_e02 = fres[1]["E02"].result.params["K"]
+        assert k_e02.value == pytest.approx(7.9837, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0267, abs=1e-4)

@@ -10,14 +10,16 @@ from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
+import lmfit  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 import seaborn as sb  # type: ignore  # noqa: ICN001
 from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
+from uncertainties import ufloat  # type: ignore
 
-from clophfit.binding import fit_titration, fz_kd_singlesite, fz_pk_singlesite
-from clophfit.types import ArrayF
+from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
+from clophfit.types import ArrayF, Kwargs
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -118,7 +120,8 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     return [[e for e in line if e] for line in lines]
 
 
-# TODO with a filter ectract_metadata with a map
+# TODO: with a filter ectract_metadata with a map
+# MAYBE: Add ipynb to ruff see 277
 
 
 @dataclass(frozen=False)
@@ -282,9 +285,9 @@ class BufferWellsMixin:
     @buffer_wells.setter
     def buffer_wells(self, value: list[str]) -> None:
         self._buffer_wells = value
-        self.on_buffer_wells_set(value)
+        self._on_buffer_wells_set(value)
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Provide a hook for subclasses to add behavior when buffer_wells is set."""
         pass
 
@@ -399,7 +402,7 @@ class Labelblock(BufferWellsMixin):
             raise ValueError(msg) from exc
         return data
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
         Parameters
@@ -527,9 +530,9 @@ class Tecanfile:
 
     path: Path
     #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
-    metadata: dict[str, Metadata] = field(init=False, repr=True)
+    metadata: dict[str, Metadata] = field(init=False, repr=False)
     #: All labelblocks contained in this file.
-    labelblocks: list[Labelblock] = field(init=False, repr=True)
+    labelblocks: list[Labelblock] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize."""
@@ -571,7 +574,7 @@ class LabelblocksGroup(BufferWellsMixin):
         When labelblocks are neither equal nor almost equal.
     """
 
-    labelblocks: list[Labelblock]
+    labelblocks: list[Labelblock] = field(repr=False)
     allequal: bool = False
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
@@ -616,7 +619,7 @@ class LabelblocksGroup(BufferWellsMixin):
                 self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
         return self._data_norm
 
-    def on_buffer_wells_set(self, value: list[str]) -> None:
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Update related attributes upon setting 'buffer_wells' in Labelblock class.
 
         Parameters
@@ -729,211 +732,6 @@ class TecanfilesGroup:
 
 
 @dataclass
-class Titration(TecanfilesGroup, BufferWellsMixin):
-    """TecanfileGroup + concentrations.
-
-    Parameters
-    ----------
-    tecanfiles : list[Tecanfile]
-        Tecanfiles to be grouped.
-    conc : Sequence[float]
-        Concentration or pH values.
-    """
-
-    tecanfiles: list[Tecanfile]
-    conc: Sequence[float]
-
-    def __post_init__(self) -> None:
-        """Set up the initial values for the properties."""
-        super().__post_init__()
-        self._additions: list[float] | None = None
-        self._data_dilutioncorrected: list[dict[str, list[float]] | None] | None = None
-        self._data_dilutioncorrected_norm: list[dict[str, list[float]]] | None = None
-        self._buffer_wells: list[str] | None = None
-        self._dil_corr: ArrayF = field(init=False, repr=False)
-
-    @classmethod
-    def fromlistfile(cls, list_file: Path | str) -> Titration:
-        """Build `Titration` from a list[.pH|.Cl] file.
-
-        Parameters
-        ----------
-        list_file: Path | str
-            File path to the listfile ([fpath conc]).
-
-        Returns
-        -------
-        Titration
-        """
-        tecanfiles, conc = Titration._listfile(Path(list_file))
-        return cls(tecanfiles, conc)
-
-    @staticmethod
-    def _listfile(listfile: Path) -> tuple[list[Tecanfile], Sequence[float]]:
-        """Help construction from file.
-
-        Parameters
-        ----------
-        listfile: Path
-            File path to the listfile ([fpath conc]).
-
-        Returns
-        -------
-        tecanfiles and conc.
-
-        Raises
-        ------
-        FileNotFoundError
-            When cannot access `list_file`.
-        ValueError
-            For unexpected file format, e.g. length of filename column differs from
-            length of conc values.
-        """
-        try:
-            table = pd.read_csv(listfile, sep="\t", names=["filenames", "conc"])
-        except FileNotFoundError as exc:
-            msg = f"Cannot find: {listfile}"
-            raise FileNotFoundError(msg) from exc
-        if table["filenames"].count() != table["conc"].count():
-            msg = f"Check format [filenames conc] for listfile: {listfile}"
-            raise ValueError(msg)
-        conc = table["conc"].tolist()
-        tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
-        return tecanfiles, conc
-
-    @property
-    def additions(self) -> list[float] | None:
-        """List of initial volume followed by additions."""
-        return self._additions
-
-    # Here there is not any check on the validity of additions (e.g. length).
-    @additions.setter
-    def additions(self, additions: list[float]) -> None:
-        self._additions = additions
-        self._dil_corr = dilution_correction(additions)
-        self._data_dilutioncorrected = None
-        self._data_dilutioncorrected_norm = None
-
-    def load_additions(self, additions_file: Path) -> None:
-        """Load additions from file."""
-        additions = pd.read_csv(additions_file, names=["add"])
-        self.additions = additions["add"].tolist()
-
-    def on_buffer_wells_set(self, value: list[str]) -> None:
-        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
-
-        Parameters
-        ----------
-        value: list[str]
-            The new value of 'buffer_wells'
-
-        """
-        for lbg in self.labelblocksgroups:
-            lbg.buffer_wells = value
-        self._data_dilutioncorrected = None
-        self._data_dilutioncorrected_norm = None
-
-    @property
-    def data_dilutioncorrected(self) -> list[dict[str, list[float]] | None] | None:
-        """Buffer subtracted data."""
-        if self._data_dilutioncorrected is None and self.additions:
-            self._data_dilutioncorrected = [
-                {
-                    k: (np.array(v) * self._dil_corr).tolist()
-                    for k, v in lbg.data_buffersubtracted.items()
-                }
-                if lbg.data_buffersubtracted
-                else None
-                for lbg in self.labelblocksgroups
-            ]
-        return self._data_dilutioncorrected
-
-    @property
-    def data_dilutioncorrected_norm(self) -> list[dict[str, list[float]]] | None:
-        """Buffer subtracted data."""
-        if self._data_dilutioncorrected_norm is None and self.additions:
-            self._data_dilutioncorrected_norm = [
-                {
-                    k: (np.array(v) * self._dil_corr).tolist()
-                    for k, v in lbg.data_buffersubtracted_norm.items()
-                }
-                for lbg in self.labelblocksgroups
-            ]
-        return self._data_dilutioncorrected_norm
-
-    def export_data(self, out_folder: Path) -> None:
-        """Export dat files [x,y1,..,yN] from labelblocksgroups.
-
-        Remember that a Titration has at least 1 normalized Lbg dataset `dat_nrm`.
-
-        dat:            [d1, None] | [d1, d2]
-        dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
-        dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
-        dat_nrm:        [d1,d2]
-        dat_bg_nrm:     [{}, {}] | [d1, d2]
-        dat_bg_dil_nrm: [{}, {}] | [d1, d2]
-
-        Parameters
-        ----------
-        out_folder : Path
-            Path to output folder.
-
-        """
-        out_folder.mkdir(parents=True, exist_ok=True)
-
-        def write(
-            conc: Sequence[float], data: list[dict[str, list[float]]], out_folder: Path
-        ) -> None:
-            """Write data."""
-            if any(data):
-                out_folder.mkdir(parents=True, exist_ok=True)
-                columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
-                for key in data[0]:
-                    dat = np.vstack((conc, [dt[key] for dt in data]))
-                    datxy = pd.DataFrame(dat.T, columns=columns)
-                    datxy.to_csv(
-                        out_folder / Path(key).with_suffix(".dat"), index=False
-                    )
-
-        write(
-            self.conc,
-            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
-            out_folder / DAT,
-        )
-        write(
-            self.conc,
-            [lbg.data_norm for lbg in self.labelblocksgroups],
-            out_folder / DAT_NRM,
-        )
-        write(
-            self.conc,
-            [
-                lbg.data_buffersubtracted
-                for lbg in self.labelblocksgroups
-                if lbg.data_buffersubtracted
-            ],
-            out_folder / DAT_BG,
-        )
-        write(
-            self.conc,
-            [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
-            out_folder / DAT_BG_NRM,
-        )
-        if self.data_dilutioncorrected:
-            write(
-                self.conc,
-                [e for e in self.data_dilutioncorrected if e],
-                out_folder / DAT_BG_DIL,
-            )
-        if self.data_dilutioncorrected_norm:
-            write(
-                self.conc,
-                self.data_dilutioncorrected_norm,
-                out_folder / DAT_BG_DIL_NRM,
-            )
-
-
-@dataclass
 class PlateScheme:
     """Define buffer, ctrl and unk wells, and ctrl names.
 
@@ -1010,11 +808,229 @@ class PlateScheme:
             self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
 
 
-class FitFirstError(Exception):
-    """Error when plotting before fitting."""
+@dataclass
+class Titration(TecanfilesGroup, BufferWellsMixin):
+    """Build titrations from grouped Tecanfiles and corresponding concentrations or pH values.
 
-    def __init__(self) -> None:
-        super().__init__("Run fit first")
+    Parameters
+    ----------
+    tecanfiles : list[Tecanfile]
+        Tecanfiles to be grouped.
+    conc : ArrayF
+        Concentration or pH values.
+    """
+
+    tecanfiles: list[Tecanfile]
+    conc: ArrayF
+
+    _additions: list[float] = field(init=False, default_factory=list)
+    _buffer_wells: list[str] = field(init=False, default_factory=list)
+    _data: list[dict[str, list[float]] | None] = field(init=False, default_factory=list)
+    _data_nrm: list[dict[str, list[float]]] = field(init=False, default_factory=list)
+    _dil_corr: ArrayF | None = field(init=False, default=None)
+    _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
+
+    def __post_init__(self) -> None:
+        """Set up the initial values for the properties."""
+        super().__post_init__()
+
+    def __repr__(self) -> str:
+        """Return a string representation of the instance."""
+        return (
+            f'Titration(files=["{self.tecanfiles[0].path}", "{self.tecanfiles[1].path}", ...], '
+            f"conc={self.conc!r}, "
+            f"data_size={len(self.data) if self.data else 0})"
+        )
+
+    @classmethod
+    def fromlistfile(cls, list_file: Path | str) -> Titration:
+        """Build `Titration` from a list[.pH|.Cl] file.
+
+        Parameters
+        ----------
+        list_file: Path | str
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        Titration
+        """
+        tecanfiles, conc = Titration._listfile(Path(list_file))
+        return cls(tecanfiles, conc)
+
+    @staticmethod
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
+        """Help construction from file.
+
+        Parameters
+        ----------
+        listfile: Path
+            File path to the listfile ([fpath conc]).
+
+        Returns
+        -------
+        tecanfiles and conc.
+
+        Raises
+        ------
+        FileNotFoundError
+            When cannot access `list_file`.
+        ValueError
+            For unexpected file format, e.g. length of filename column differs from
+            length of conc values.
+        """
+        try:
+            table = pd.read_csv(listfile, sep="\t", names=["filenames", "conc"])
+        except FileNotFoundError as exc:
+            msg = f"Cannot find: {listfile}"
+            raise FileNotFoundError(msg) from exc
+        if table["filenames"].count() != table["conc"].count():
+            msg = f"Check format [filenames conc] for listfile: {listfile}"
+            raise ValueError(msg)
+        conc = table["conc"].to_numpy()
+        tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
+        return tecanfiles, conc
+
+    @property
+    def additions(self) -> list[float] | None:
+        """List of initial volume followed by additions."""
+        return self._additions
+
+    # MAYBE: Here there is not any check on the validity of additions (e.g. length).
+    @additions.setter
+    def additions(self, additions: list[float]) -> None:
+        self._additions = additions
+        self._dil_corr = dilution_correction(additions)
+        self._data = []
+        self._data_nrm = []
+
+    def load_additions(self, additions_file: Path) -> None:
+        """Load additions from file."""
+        additions = pd.read_csv(additions_file, names=["add"])
+        self.additions = additions["add"].tolist()
+
+    def _on_buffer_wells_set(self, value: list[str]) -> None:
+        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
+
+        Parameters
+        ----------
+        value: list[str]
+            The new value of 'buffer_wells'
+
+        """
+        for lbg in self.labelblocksgroups:
+            lbg.buffer_wells = value
+        self._data = []
+        self._data_nrm = []
+
+    @property
+    def data(self) -> list[dict[str, list[float]] | None] | None:
+        """Buffer subtracted and corrected for dilution data."""
+        if not self._data and self.additions:
+            self._data = [
+                {
+                    k: (np.array(v) * self._dil_corr).tolist()
+                    for k, v in lbg.data_buffersubtracted.items()
+                }
+                if lbg.data_buffersubtracted
+                else None
+                for lbg in self.labelblocksgroups
+            ]
+        return self._data
+
+    @property
+    def data_nrm(self) -> list[dict[str, list[float]]] | None:
+        """Buffer subtracted, corrected for dilution and normalized data."""
+        if not self._data_nrm and self.additions:
+            self._data_nrm = [
+                {
+                    k: (np.array(v) * self._dil_corr).tolist()
+                    for k, v in lbg.data_buffersubtracted_norm.items()
+                }
+                for lbg in self.labelblocksgroups
+            ]
+        return self._data_nrm
+
+    @property
+    def scheme(self) -> PlateScheme:
+        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
+        return self._scheme
+
+    def load_scheme(self, schemefile: Path) -> None:
+        """Load scheme from file. Set buffer_wells."""
+        self._scheme = PlateScheme(schemefile)
+        self.buffer_wells = self._scheme.buffer
+
+    def export_data(self, out_folder: Path) -> None:
+        """Export dat files [x,y1,..,yN] from labelblocksgroups.
+
+        Remember that a Titration has at least 1 normalized Lbg dataset `dat_nrm`.
+
+        dat:            [d1, None] | [d1, d2]
+        dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+        dat_nrm:        [d1,d2]
+        dat_bg_nrm:     [{}, {}] | [d1, d2]
+        dat_bg_dil_nrm: [{}, {}] | [d1, d2]
+
+        Parameters
+        ----------
+        out_folder : Path
+            Path to output folder.
+
+        """
+        out_folder.mkdir(parents=True, exist_ok=True)
+
+        def write(
+            conc: ArrayF, data: list[dict[str, list[float]]], out_folder: Path
+        ) -> None:
+            """Write data."""
+            if any(data):
+                out_folder.mkdir(parents=True, exist_ok=True)
+                columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
+                for key in data[0]:
+                    dat = np.vstack((conc, [dt[key] for dt in data]))
+                    datxy = pd.DataFrame(dat.T, columns=columns)
+                    datxy.to_csv(
+                        out_folder / Path(key).with_suffix(".dat"), index=False
+                    )
+
+        write(
+            self.conc,
+            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
+            out_folder / DAT,
+        )
+        write(
+            self.conc,
+            [lbg.data_norm for lbg in self.labelblocksgroups],
+            out_folder / DAT_NRM,
+        )
+        write(
+            self.conc,
+            [
+                lbg.data_buffersubtracted
+                for lbg in self.labelblocksgroups
+                if lbg.data_buffersubtracted
+            ],
+            out_folder / DAT_BG,
+        )
+        write(
+            self.conc,
+            [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
+            out_folder / DAT_BG_NRM,
+        )
+        if self.data:
+            write(
+                self.conc,
+                [e for e in self.data if e],
+                out_folder / DAT_BG_DIL,
+            )
+        if self.data_nrm:
+            write(
+                self.conc,
+                self.data_nrm,
+                out_folder / DAT_BG_DIL_NRM,
+            )
 
 
 @dataclass
@@ -1027,20 +1043,28 @@ class TitrationAnalysis(Titration):
         For unexpected file format, e.g. header `names`.
     """
 
-    #: List of result dataframes.
-    fittings: list[pd.DataFrame] = field(init=False, default_factory=list)
-    #: Function used in the fitting.
-    fz: typing.Callable[[float, ArrayF | Sequence[float], ArrayF], ArrayF] = field(
-        init=False
-    )
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
+    _fitdata: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
+    )
+    _fitdata_params: dict[str, bool] = field(init=False, default_factory=dict)
+    _fitkws: Kwargs = field(init=False, default_factory=dict)
+    _fitresults: list[dict[str, FitResult]] = field(init=False, default_factory=list)
+    _fitresults_df: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
-        """Set up the initial values for the properties."""
+        """Set up the initial values of inherited class properties."""
         super().__post_init__()
-        self._scheme: PlateScheme = PlateScheme()
-        self._datafit: Sequence[dict[str, list[float]] | None] = []
+
+    def __repr__(self) -> str:
+        """Return a string representation of the instance."""
+        return (
+            f"TitrationAnalysis({super().__repr__()!r}\n"
+            f"       (kwargs)    fitkws        ={self.fitkws!r}\n"
+            f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
+            f"                   results_size  ={len(self.fitresults) if self.fitresults else 0})"
+        )
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
@@ -1059,26 +1083,102 @@ class TitrationAnalysis(Titration):
         return cls(tecanfiles, conc)
 
     @property
-    def scheme(self) -> PlateScheme:
-        """Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}."""
-        return self._scheme
+    def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
+        """Data used for fitting."""
+        if not self._fitdata:
+            self._fitresults = []
+            nrm = self.fitdata_params.get("nrm", False)
+            dil = self.fitdata_params.get("dil", False)
+            bg = self.fitdata_params.get("bg", False)
+            if dil:
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
+                # DDD if nrm and self.data_nrm and any(self.data_nrm):
+                if nrm and self.data_nrm:
+                    self._fitdata = self.data_nrm
+                elif self.data:
+                    self._fitdata = self.data
+                else:  # back up to dat_nrm
+                    warnings.warn(
+                        "No dilution corrected data found; use normalized data.",
+                        stacklevel=2,
+                    )
+                    self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
+            elif bg:
+                if nrm:
+                    self._fitdata = [
+                        lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
+                    ]
+                else:
+                    self._fitdata = [
+                        lbg.data_buffersubtracted for lbg in self.labelblocksgroups
+                    ]
+            elif nrm:
+                self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
+            else:
+                self._fitdata = [lbg.data for lbg in self.labelblocksgroups]
+        return self._fitdata
 
-    def load_scheme(self, schemefile: Path) -> None:
-        """Load scheme from file. Set buffer_wells."""
-        self._scheme = PlateScheme(schemefile)
-        self.buffer_wells = self._scheme.buffer
+    @property
+    def fitdata_params(self) -> dict[str, bool]:
+        """Get the datafit parameters."""
+        return self._fitdata_params
 
-    def fit(  # noqa: PLR0913, PLR0912
+    @fitdata_params.setter
+    def fitdata_params(self, params: dict[str, bool]) -> None:
+        """Set the datafit parameters."""
+        self._fitdata_params = params
+        self._fitdata = []
+        self._fitresults = []
+        self._fitresults_df = []
+
+    @property
+    def fitkws(self) -> Kwargs:
+        """Get the arguments for fitting."""
+        return self._fitkws
+
+    @fitkws.setter
+    def fitkws(self, params: dict[str, str | int | float | bool | None]) -> None:
+        """Set the datafit parameters."""
+        self._fitkws = params
+        self._fitresults = []
+        self._fitresults_df = []
+
+    @property
+    def fitresults(self) -> list[dict[str, FitResult]]:
+        """Result dataframes."""
+        if not self._fitresults:
+            self._fitresults = self.fit(**self.fitkws)  # type: ignore
+        return self._fitresults
+
+    @property
+    def fitresults_df(self) -> list[pd.DataFrame]:
+        """Result dataframes."""
+        if not self._fitresults_df:
+            for fitresult in self.fitresults:
+                data = []
+                for lbl, fr in fitresult.items():
+                    pars = fr.result.params if fr.result else None
+                    row = {"well": lbl}
+                    if pars is not None:
+                        for k in pars:
+                            row[k] = pars[k].value
+                            row[f"s{k}"] = pars[k].stderr
+                    data.append(row)
+                    df0 = pd.DataFrame(data).set_index("well")
+                    # ctrl
+                    for ctrl_name, wells in self.scheme.names.items():
+                        for well in wells:
+                            df0.loc[well, "ctrl"] = ctrl_name
+                self._fitresults_df.append(df0)
+        return self._fitresults_df
+
+    def fit(
         self,
-        kind: str,
+        kind: str = "pH",
         ini: int = 0,
         fin: int | None = None,
         no_weight: bool = False,
-        tval: float = 0.95,
-        nrm: bool = False,
-        bg: bool = False,
-        dil: bool = False,
-    ) -> None:
+    ) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
         Here is less general. It is for 2 labelblocks.
@@ -1093,119 +1193,44 @@ class TitrationAnalysis(Titration):
             Final point (default: None).
         no_weight : bool
             Do not use residues from single Labelblock fit as weight for global fitting.
-        tval : float
-            Only for tval different from default=0.95 for the confint calculation.
-        nrm: bool
-            Data normalization flag (default=False).
-        bg: bool
-            Buffer subtraction flag (default=False).
-        dil: bool
-            Dilution correction flag (default=False).
 
-        Notes
-        -----
-        Create (: list) 3 fitting tables into self.fittings.
-
+        Returns
+        -------
+        list[pd.DataFrame]
+            Fitting results.
         """
-        if kind == "Cl":
-            self.fz = fz_kd_singlesite
-        elif kind == "pH":
-            self.fz = fz_pk_singlesite
-        x = np.array(self.conc)
+        x = np.array(self.conc)[ini:fin]
         fittings = []
-        # datafit
-        if dil:
-            if nrm and self.data_dilutioncorrected_norm:
-                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]])
-                self._datafit = self.data_dilutioncorrected_norm
-            elif self.data_dilutioncorrected:
-                self._datafit = self.data_dilutioncorrected
-            else:  # back up to dat_nrm
-                warnings.warn(
-                    "No dilution corrected data found; use normalized data.",
-                    stacklevel=2,
-                )
-                self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        elif bg:
-            if nrm:
-                self._datafit = [
-                    lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
-                ]
-            else:
-                self._datafit = [
-                    lbg.data_buffersubtracted for lbg in self.labelblocksgroups
-                ]
-        elif nrm:
-            self._datafit = [lbg.data_norm for lbg in self.labelblocksgroups]
-        else:
-            self._datafit = [lbg.data for lbg in self.labelblocksgroups]
-
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        for data in self._datafit:
-            fitting = pd.DataFrame()
-            if data:
+        for dat in self.fitdata:
+            fitting = {}
+            if dat:
                 for k in keys_fit:
-                    y = data[k]
-                    res = fit_titration(
-                        kind, self.conc[ini:fin], np.array(y[ini:fin]), tval_conf=tval
-                    )
-                    res.index = pd.Index([k])
-                    # fitting = fitting.append(res, sort=False) DDD
-                    fitting = pd.concat([fitting, res], sort=False)
-                    # TODO assert (fitting.columns == res.columns).all()
-                    # better to refactor this function
+                    y = dat[k]
+                    y = y[ini:fin]
+                    ys = np.array(y)
+                    ds = Dataset(x[~np.isnan(ys)], ys[~np.isnan(ys)], kind == "pH")
+                    fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
-        fitting = pd.DataFrame()
+        fitting = {}
         for k in keys_fit:
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y = self._datafit[0][k]  # type: ignore # XXX: D
-            y2 = self._datafit[1][k]  # type: ignore # XXX: D
-            residue = y - self.fz(
-                fittings[0]["K"].loc[k],
-                [fittings[0]["SA"].loc[k], fittings[0]["SB"].loc[k]],
-                x,
-            )
-            residue /= y  # TODO residue or
-            # log(residue/y) https://www.tandfonline.com/doi/abs/10.1080/00031305.1985.10479385
-            residue2 = y2 - self.fz(
-                fittings[1]["K"].loc[k],
-                [fittings[1]["SA"].loc[k], fittings[1]["SB"].loc[k]],
-                x,
-            )
-            residue2 /= y2
+            y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
+            y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
+            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, kind == "pH")
             if no_weight:
-                for i, _rr in enumerate(residue):
-                    residue[i] = 1  # TODO use np.ones() but first find a way to test
-                    residue2[i] = 1
-            res = fit_titration(
-                kind,
-                self.conc[ini:fin],
-                np.array(y[ini:fin]),
-                y2=np.array(y2[ini:fin]),
-                residue=residue[ini:fin],
-                residue2=residue2[ini:fin],
-                tval_conf=tval,
-            )
-            res.index = pd.Index([k])
-            # fitting = fitting.append(res, sort=False) DDD
-            fitting = pd.concat([fitting, res], sort=False)
+                fitting[k] = fit_binding_glob(ds, False)
+            else:
+                fitting[k] = fit_binding_glob(ds, True)
         fittings.append(fitting)
-        # Write the name of the control e.g. S202N in the "ctrl" column
-        for fitting in fittings:
-            for ctrl_name, wells in self.scheme.names.items():
-                for well in wells:
-                    fitting.loc[well, "ctrl"] = ctrl_name
-        self.fittings = fittings
+        return fittings
 
     def plot_k(
-        self,
-        lb: int,
-        xlim: tuple[float, float] | None = None,
-        title: str | None = None,
+        self, lb: int, xlim: tuple[float, float] | None = None, title: str | None = None
     ) -> plt.figure:
         """Plot K values as stripplot.
 
@@ -1222,21 +1247,13 @@ class TitrationAnalysis(Titration):
         -------
         plt.figure
             The figure.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
         """
-        if not hasattr(self, "fittings"):
-            raise FitFirstError()
         sb.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.fittings[lb].loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = self.fitresults_df[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1245,17 +1262,22 @@ class TitrationAnalysis(Titration):
                 hue=res_ctrl.ctrl,
                 ax=ax1,
             )
+            plt.legend(loc="upper left", frameon=False)
             plt.errorbar(
                 res_ctrl.K,
                 range(len(res_ctrl)),
-                xerr=res_ctrl["sK"],  # xerr=res_ctrl.sK*res_ctrl.tval,
+                xerr=res_ctrl["sK"],
                 fmt=".",
                 c="lightgray",
                 lw=8,
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = self.fittings[lb].loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = self.fitresults_df[lb].loc[self.keys_unk].sort_index(ascending=False)
+        # Compute 'K - 2*sK' for each row in res_unk
+        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
+        # Sort the DataFrame by this computed value in descending order
+        res_unk = res_unk.sort_values(by="sort_val", ascending=True)
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
         sb.stripplot(
             x=res_unk["K"],
@@ -1264,10 +1286,10 @@ class TitrationAnalysis(Titration):
             orient="h",
             lw=2,
             palette="Blues",
-            hue=res_unk["SA"],
+            hue=res_unk["S1_default"],
             ax=ax2,
         )
-        plt.legend("")
+        plt.legend(loc="upper left", frameon=False)
         plt.errorbar(
             res_unk["K"],
             range(len(res_unk)),
@@ -1297,163 +1319,35 @@ class TitrationAnalysis(Titration):
         f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
         return f
 
-    def plot_well(self, key: str) -> plt.figure:
-        """Plot global fitting using 2 labelblocks.
-
-        Here is less general. It is for 2 labelblocks.
-
-        Parameters
-        ----------
-        key: str
-            Well position as dictionary key like "A01".
-
-        Returns
-        -------
-        plt.figure
-            Pointer to mpl.figure.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
+    def plot_all_wells(self, lb: int, path: str | Path) -> None:
+        """Plot all wells into a pdf."""
+        # Create a PdfPages object
+        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))
+        """# XXX: Order
+        "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
+        #     out.savefig(self.plot_well(str(k)))
+        # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
+        #     out.savefig(self.plot_well(str(k)))
         """
-        fourdigits = 1e4
-        if not hasattr(self, "fittings"):
-            raise FitFirstError()
-        plt.style.use(["seaborn-ticks", "seaborn-whitegrid"])
-        out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-        out2 = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
-        x = np.array(self.conc)
-        xfit = np.linspace(min(x) * 0.98, max(x) * 1.02, 50)
-        residues = []
-        colors = []
-        lines = []
-        f = plt.figure(figsize=(10, 7))
-        ax_data = plt.subplot2grid((3, 1), loc=(0, 0), rowspan=2)
-        # labelblocks
-        # for i, (lbg, df) in enumerate(zip(self.labelblocksgroups, self.fittings)):
-        for i, (datafit, df) in enumerate(zip(self._datafit, self.fittings)):
-            y = np.array(datafit[key]) if datafit else np.zeros_like(x)
-            colors.append(plt.cm.Set2((i + 2) * 10))
-            ax_data.plot(
-                x, y, "o", color=colors[i], markersize=12, label="label" + str(i)
-            )
-            ax_data.plot(
-                xfit,
-                self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], xfit),
-                "-",
-                lw=2,
-                color=colors[i],
-                alpha=0.8,
-            )
-            ax_data.set_xticks(ax_data.get_xticks()[1:-1])
-            residues.append(
-                y - self.fz(df.K.loc[key], [df.SA.loc[key], df.SB.loc[key]], x)
-            )
-            # Print out.
-            line = [
-                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
-                for v in list(df[out].loc[key])
-            ]
-            for _i in range(4):
-                line.append("")
-            lines.append(line)
-        # ## residues
-        ax1 = plt.subplot2grid((3, 1), loc=(2, 0))
-        ax1.plot(
-            x, residues[0], "o-", lw=2.5, color=colors[0], alpha=0.6, markersize=12
-        )
-        ax2 = plt.twinx(ax1)
-        ax2.plot(
-            x, residues[1], "o-", lw=2.5, color=colors[1], alpha=0.6, markersize=12
-        )
-        plt.subplots_adjust(hspace=0)
-        ax1.set_xlim(ax_data.get_xlim())
-        ax_data.legend()
-        # global
-        fit_df = self.fittings[-1]
-        lines.append(
-            [
-                f"{v:.3g}" if v < fourdigits else f"{v:.0f}"
-                for v in list(fit_df[out2].loc[key])
-            ]
-        )
-        ax_data.plot(
-            xfit,
-            self.fz(fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], xfit),
-            "b--",
-            lw=0.5,
-        )
-        ax_data.plot(
-            xfit,
-            self.fz(
-                fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], xfit
-            ),
-            "b--",
-            lw=0.5,
-        )
-        ax_data.table(cellText=lines, colLabels=out2, loc="top")
-        ax1.grid(0, axis="y")  # switch off horizontal
-        ax2.grid(1, axis="both")
-        # ## only residues
-        y = self.labelblocksgroups[0].data[key]  # type: ignore # XXX: D
-        ax1.plot(
-            x,
-            (
-                y
-                - self.fz(
-                    fit_df.K.loc[key], [fit_df.SA.loc[key], fit_df.SB.loc[key]], x
-                )
-            ),
-            "--",
-            lw=1.5,
-            color=colors[0],
-        )
-        y = self.labelblocksgroups[1].data[key]  # type: ignore # XXX: D
-        ax2.plot(
-            x,
-            (
-                y
-                - self.fz(
-                    fit_df.K.loc[key], [fit_df.SA2.loc[key], fit_df.SB2.loc[key]], x
-                )
-            ),
-            "--",
-            lw=1.5,
-            color=colors[1],
-        )
-        if key in self.scheme.ctrl:
-            plt.title(
-                "Ctrl: " + fit_df["ctrl"].loc[key] + "  [" + key + "]", {"fontsize": 16}
-            )
-        else:
-            plt.title(key, {"fontsize": 16})
-        plt.close()
-        return f
-
-    def plot_all_wells(self, path: Path) -> None:
-        """Plot all wells into a pdf.
-
-        Parameters
-        ----------
-        path : Path
-            Where the pdf file is saved.
-
-        Raises
-        ------
-        FitFirstError
-            When no fitting results are yet available.
-
-        """
-        if not hasattr(self, "fittings"):
-            raise FitFirstError()
-        out = PdfPages(path)
-        for k in self.fittings[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-            out.savefig(self.plot_well(str(k)))
-        for k in self.fittings[0].loc[self.keys_unk].sort_index().index:
-            out.savefig(self.plot_well(str(k)))
-        out.close()
+        for lbl, fr in self.fitresults[lb].items():
+            fig = fr.figure
+            # A4 size in inches. You can adjust this as per your need.
+            fig.set_size_inches([8.27, 11.69])
+            # Get the first axes in the figure to adjust the positions
+            ax = fig.get_axes()[0]
+            # Adjust position as needed. Values are [left, bottom, width, height]
+            ax.set_position([0.1, 0.5, 0.8, 0.4])
+            # Create a new axes for the text
+            text_ax = fig.add_axes([0.1, 0.05, 0.8, 0.35])  # Adjust as needed
+            text = lmfit.printfuncs.fit_report(self.fitresults[lb][lbl].result)
+            text_ax.text(0.0, 0.0, text, fontsize=14)
+            text_ax.axis("off")  # Hide the axes for the text
+            # Save the figure into the PDF
+            pdf_pages.savefig(fig, bbox_inches="tight")
+        # Close the PdfPages object
+        pdf_pages.close()
+        # Close all the figures
+        plt.close("all")
 
     def plot_ebar(  # noqa: PLR0913
         self,
@@ -1468,9 +1362,7 @@ class TitrationAnalysis(Titration):
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        if not hasattr(self, "fittings"):
-            raise FitFirstError()
-        fit_df = self.fittings[lb]
+        fit_df = self.fitresults_df[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
@@ -1522,32 +1414,43 @@ class TitrationAnalysis(Titration):
     def print_fitting(self, lb: int) -> None:
         """Print fitting parameters for the whole plate."""
 
-        def df_print(df: pd.DataFrame) -> None:
-            for i, r in df.iterrows():
-                print(f"{i:s}", end=" ")
-                for k in out[:2]:
-                    print(f"{r[k]:7.2f}", end=" ")
-                for k in out[2:]:
-                    print(f"{r[k]:7.0f}", end=" ")
-                print()
+        def format_row(index: str, row: pd.Series[float], keys: list[str]) -> str:
+            formatted_values = []
+            for key in keys:
+                val = ufloat(row[key], row["s" + key])
+                # Format the values with 4 significant figures
+                nominal = f"{val.nominal_value:.3g}"
+                std_dev = f"{val.std_dev:.2g}"
+                # Ensure each value occupies a fixed space
+                formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
+            return f"{index:s} {' '.join(formatted_values)}"
 
-        fit_df = self.fittings[lb]
-        if "SA2" in fit_df:
-            out = ["K", "sK", "SA", "sSA", "SB", "sSB", "SA2", "sSA2", "SB2", "sSB2"]
-        else:
-            out = ["K", "sK", "SA", "sSA", "SB", "sSB"]
+        fit_df = self.fitresults_df[lb]
+        out_keys = ["K"] + [
+            col
+            for col in fit_df.columns
+            if col not in ["ctrl", "K", "sK"] and not col.startswith("s")
+        ]
+        header = "    " + " ".join([f"{x:>7s} s{x:>7s}" for x in out_keys])
         if len(self.scheme.ctrl) > 0:
             res_ctrl = fit_df.loc[self.scheme.ctrl]
-            gr = res_ctrl.groupby("ctrl")
-            print("    " + " ".join([f"{x:>7s}" for x in out]))
-            for g in gr:
-                print(" ", g[0])
-                df_print(g[1][out])
+            groups = res_ctrl.groupby("ctrl")
+            print(header)
+            for name, group in groups:
+                print(f" {name}")
+                for i, r in group.iterrows():
+                    print(format_row(str(i), r, out_keys))
         res_unk = fit_df.loc[self.keys_unk]
-        print()
-        print("    " + " ".join([f"{x:>7s}" for x in out]))
+        # Compute 'K - 2*sK' for each row in res_unk
+        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
+        # Sort the DataFrame by this computed value in descending order
+        res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
+        # in case: del res_unk["sort_val"]  # if you want to remove the temporary sorting column
+        print("\n" + header)
         print("  UNK")
-        df_print(res_unk.sort_index())
+        # for i, r in res_unk.sort_index().iterrows():
+        for i, r in res_unk_sorted.iterrows():
+            print(format_row(str(i), r, out_keys))
 
     def plot_buffer(self, title: str | None = None) -> plt.figure:
         """Plot buffers of all labelblocksgroups."""
@@ -1569,7 +1472,7 @@ class TitrationAnalysis(Titration):
                     ]
                 ]
             ]
-            buf = {key: lbg.data[key] for key in self.scheme.buffer}  # type: ignore # XXX: D
+            buf = {key: lbg.data[key] for key in self.scheme.buffer if lbg.data}
             colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
@@ -1606,3 +1509,11 @@ class TitrationAnalysis(Titration):
         f.suptitle(title, fontsize=16)
         f.tight_layout()
         return f
+
+    def export_png(self, lb: int, path: str | Path) -> None:
+        """Export png like lb1/ lb2/ lb1_lb2/."""
+        # Make sure the directory exists
+        folder = Path(path) / f"lb{lb}"
+        folder.mkdir(parents=True, exist_ok=True)
+        for k, v in self.fitresults[lb].items():
+            v.figure.savefig(folder / f"{k}.png")

@@ -35,18 +35,15 @@ def fit_routine(  # noqa: PLR0913
     pdf: bool,
 ) -> None:
     """Help main."""
-    titan.fit(
-        kind,
-        no_weight=(not weight),
-        tval=float(confint),
-        nrm=norm,
-        bg=bg,
-        dil=dil,
-    )
-    for i, fit in enumerate(titan.fittings):
+    titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
+    titan.fitkws = {"kind": kind, "no_weight": (not weight)}
+    for i, fit in enumerate(titan.fitresults):
         # Printout
         if verbose:
             try:
+                print(fit)
+                print(klim)
+                print(confint)
                 meta = titan.labelblocksgroups[i].metadata
                 print("-" * 79)
                 print(f"\nlabel{i:d}")
@@ -55,6 +52,7 @@ def fit_routine(  # noqa: PLR0913
                 print("-" * 79)
                 print("\nGlobal on both labels")
             titan.print_fitting(i)
+        """# XXX: plots
         # Csv tables
         fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
         if "SA2" in fit:
@@ -65,11 +63,12 @@ def fit_routine(  # noqa: PLR0913
         fit[out_cols].sort_index().to_csv(
             out / Path("fit" + str(i) + ".csv"), float_format="%5.1f"
         )
-        # Plots
+        Plots
         f = titan.plot_k(i, xlim=klim, title=title)
         f.savefig(out / Path("K" + str(i) + ".png"))
         f = titan.plot_ebar(i, title=title)
         f.savefig(out / Path("ebar" + str(i) + ".png"))
+        """
         if sel:
             if kind.lower() == "ph":
                 xmin, ymin = sel
@@ -79,7 +78,7 @@ def fit_routine(  # noqa: PLR0913
                 f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
             f.savefig(out / Path("ebarZ" + str(i) + ".png"))
     if pdf:
-        titan.plot_all_wells(out / "all_wells.pdf")
+        titan.plot_all_wells(2, out / "all_wells.pdf")
 
 
 @click.group()
@@ -328,10 +327,11 @@ def fit_enspire(
                 for label, data in d_tit.items():
                     band = dbands.get(label)
                     fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
-                    x_combined[label] = fit_result.mini.userargs[0]["default"].x
-                    y_combined[label] = fit_result.mini.userargs[0]["default"].y
-                    pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
-                    fit_result.figure.savefig(pdf_file)
+                    if fit_result.is_valid():
+                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
+                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
+                        pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
+                        fit_result.figure.savefig(pdf_file)
                     _print_result(fit_result, pdf_file, str(band))
                 # Global spectra analysis with more than 1 label.
                 if (
@@ -415,7 +415,8 @@ def fit_titration(  # noqa: PLR0913
     # output
     out_fp.mkdir(parents=True, exist_ok=True)
     pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
-    fit_result.figure.savefig(pdf_file)
+    if fit_result.figure:
+        fit_result.figure.savefig(pdf_file)
     _print_result(fit_result, pdf_file, str(band))
 
 
