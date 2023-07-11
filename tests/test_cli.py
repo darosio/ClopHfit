@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from matplotlib.testing.compare import compare_images  # type: ignore
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-from clophfit.__main__ import clop
+from clophfit.__main__ import clop, enspire, tecan
 
 # tests path
 tpath = Path(__file__).parent
@@ -30,10 +30,7 @@ def test_prenspire(tmp_path: Path) -> None:
     out = tmp_path / "E"
     out.mkdir()
     runner = CliRunner()
-    result = runner.invoke(
-        clop,
-        ["pr.enspire", str(input_csv), "--out", str(out)],
-    )
+    result = runner.invoke(enspire, [str(input_csv), "--out", str(out)])
     assert result.exit_code == 0
     # validate output files
     assert (out / "NTT_37C_pKa_A.csv").exists()
@@ -59,8 +56,7 @@ def test_prtecan(tmp_path: Path) -> None:
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
-        clop,
-        ["pr.tecan", list_f, "--out", str(out), "--fit", "--scheme", scheme_f, "--bg"],
+        tecan, [list_f, "--out", str(out), "--fit", "--scheme", scheme_f, "--bg"]
     )
     assert result.exit_code == 0
 

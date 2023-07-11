@@ -36,7 +36,10 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
     click.echo(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
-@clop.command("pr.tecan")
+######################################
+# pr.tecan                           #
+######################################
+@click.command()
 @click.argument("list_file", type=click.Path(exists=True))
 @click.option(
     "--scheme", type=click.Path(exists=True), help="Plate scheme (buffers CTRs)."
@@ -255,7 +258,10 @@ def fit_tecan(  # noqa: PLR0913
         titan.plot_all_wells(2, out / "all_wells.pdf")
 
 
-@clop.command("pr.enspire")
+########################################
+# pr.enspire                           #
+########################################
+@click.command()
 @click.argument("csv_f", type=click.Path(exists=True, path_type=str))
 @click.argument("note_f", type=click.Path(exists=True), required=False)
 @click.option(
@@ -449,6 +455,9 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
         print(f"Ratio of {lbl}: {ratio}")
 
 
+########################################
+# note_to_csv                          #
+########################################
 @click.command()
 @click.argument("note", type=click.Path(exists=True))
 @click.option("-o", "--output", default=None, help="Output CSV file.")
