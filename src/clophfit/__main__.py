@@ -6,6 +6,7 @@ import pprint
 import warnings
 from collections import namedtuple
 from pathlib import Path
+from typing import Any
 
 import arviz as az
 import click
@@ -15,7 +16,7 @@ import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 
-from clophfit import __default_enspire_out_dir__, binding, prenspire, prtecan
+from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
 
 
@@ -99,13 +100,13 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @clop.command("pr.tecan")
 @click.argument("list_file", type=click.Path(exists=True))
 @click.option(
-    "--dil", type=click.Path(exists=True), help="Initial volume and additions"
-)
-@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
-@click.option(
     "--scheme", type=click.Path(exists=True), help="Plate scheme (buffers CTRs)."
 )
+@click.option(
+    "--dil", type=click.Path(exists=True), help="Initial volume and additions."
+)
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
+@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
     "--kind",
     "-k",
@@ -121,10 +122,7 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
     help="Global fitting without relative residues weights.",
 )
 @click.option(
-    "--fit/--no-fit",
-    default=True,
-    show_default=True,
-    help="Perform also fit.",
+    "--fit/--no-fit", default=True, show_default=True, help="Perform also fit."
 )
 @click.option("--fit-all", is_flag=True, help="Fit all exported data.")
 @click.option(
@@ -135,14 +133,10 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
     help="Confidence value for the calculation of parameter errors.",
 )
 @click.option(
-    "--out",
-    type=Path,
-    default=Path("out2"),
-    show_default=True,
-    help="Path to output results.",
+    "--out", "-o", default=__tecan_out_dir__, show_default=True, help="Output folder."
 )
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
-@click.option("--title", "-t", default=None, help="Title for some plots.")
+@click.option("--title", "-t", default="", help="Title for some plots.")
 @click.option(
     "--Klim",
     default=None,
@@ -158,19 +152,19 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def tecan(  # noqa: PLR0913
     list_file: str,
-    scheme: str,
-    dil: str,
+    scheme: str | None,
+    dil: str | None,
     verbose: int,
     bg: bool,
     kind: str,
     norm: bool,
-    out: Path,
+    out: str,
     weight: bool,
     fit: bool,
     fit_all: bool,
     confint: float,
     klim: tuple[float, float] | None,
-    title: str | None,
+    title: str,
     sel: tuple[float, float] | None,
     pdf: bool,
 ) -> None:
@@ -190,6 +184,7 @@ def tecan(  # noqa: PLR0913
 
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
+    out_fp = Path(out)
     list_fp = Path(list_file)
     titan = prtecan.TitrationAnalysis.fromlistfile(list_fp)
     if scheme:
@@ -200,13 +195,13 @@ def tecan(  # noqa: PLR0913
             # exported values; however ``dil imply bg```
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)  # type: ignore
-    titan.export_data(out)
-    with (out / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
+    titan.export_data(out_fp)
+    with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in titan.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
     if scheme:
         f = titan.plot_buffer(title=title)
-        f.savefig(out / "buffer.png")
+        f.savefig(out_fp / "buffer.png")
 
     if fit:
         if bg and not scheme:
@@ -221,7 +216,7 @@ def tecan(  # noqa: PLR0913
                 (0, 1, 1, "dat_bg_dil"),
                 (1, 1, 1, "dat_bg_dil_nrm"),
             ]:
-                out_fit = out / out2 / "0fit"
+                out_fit = out_fp / out2 / "0fit"
                 out_fit.mkdir(parents=True, exist_ok=True)
                 fit_routine(
                     titan,
@@ -248,7 +243,7 @@ def tecan(  # noqa: PLR0913
                 bg,
                 bool(dil),
                 verbose,
-                out,
+                out_fp,
                 klim,
                 title,
                 sel,
@@ -257,45 +252,38 @@ def tecan(  # noqa: PLR0913
 
 
 @clop.command("pr.enspire")
-@click.argument("csv", type=click.Path(exists=True))
-@click.argument("note_fp", type=click.Path(exists=True), required=False)
+@click.argument("csv_f", type=click.Path(exists=True, path_type=str))
+@click.argument("note_f", type=click.Path(exists=True), required=False)
 @click.option(
     "-b",
-    "--band-intervals",
     "bands",
     multiple=True,
+    default=None,
     nargs=3,
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
 @click.option(
-    "--out",
-    "-d",
-    type=click.Path(),
-    default=__default_enspire_out_dir__,
-    help="Path to output results.",
-    show_default=True,
+    "--out", "-o", default=__enspire_out_dir__, show_default=True, help="Output folder."
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def enspire(
-    csv: str,
-    note_fp: str,
-    out: str,
-    bands: list[tuple[str, int, int]] | None,
-    verbose: int,
+    csv_f: str, note_f: str | None, out: str, bands: tuple[Any], verbose: int
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
-    ef = EnspireFile(Path(csv), verbose=verbose)
+    print(type(bands))
+    print(bands)
+    ef = EnspireFile(Path(csv_f), verbose=verbose)
     ef.export_measurements(Path(out))
-    if note_fp is not None:
-        fit_enspire(ef, Path(note_fp), Path(out), bands, verbose)
+    if note_f is not None:
+        fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
 
 
 def fit_enspire(
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
-    bands: list[tuple[str, int, int]] | None,
+    bands: list[tuple[str, int, int]],
     verbose: int,
 ) -> None:
     """Fit prenspire titration (all labels, temp, mutant, titrations)."""
