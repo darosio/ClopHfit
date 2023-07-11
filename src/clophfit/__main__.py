@@ -18,68 +18,7 @@ import pandas as pd
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
-
-
-def fit_routine(  # noqa: PLR0913
-    titan: prtecan.TitrationAnalysis,
-    kind: str,
-    weight: bool,
-    confint: float,
-    norm: bool,
-    bg: bool,
-    dil: bool,
-    verbose: int,
-    out: Path,
-    klim: tuple[float, float] | None,
-    title: str | None,
-    sel: tuple[float, float] | None,
-    pdf: bool,
-) -> None:
-    """Help main."""
-    titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fitkws = {"kind": kind, "no_weight": (not weight)}
-    for i, fit in enumerate(titan.fitresults):
-        # Printout
-        if verbose:
-            try:
-                print(fit)
-                print(klim)
-                print(confint)
-                meta = titan.labelblocksgroups[i].metadata
-                print("-" * 79)
-                print(f"\nlabel{i:d}")
-                pprint.pprint(meta)
-            except IndexError:
-                print("-" * 79)
-                print("\nGlobal on both labels")
-            titan.print_fitting(i)
-        """# XXX: plots
-        # Csv tables
-        fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
-        if "SA2" in fit:
-            out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-            out_cols.extend(["SA2", "sSA2", "SB2", "sSB2"])
-        else:
-            out_cols = ["K", "sK", "SA", "sSA", "SB", "sSB"]
-        fit[out_cols].sort_index().to_csv(
-            out / Path("fit" + str(i) + ".csv"), float_format="%5.1f"
-        )
-        Plots
-        f = titan.plot_k(i, xlim=klim, title=title)
-        f.savefig(out / Path("K" + str(i) + ".png"))
-        f = titan.plot_ebar(i, title=title)
-        f.savefig(out / Path("ebar" + str(i) + ".png"))
-        """
-        if sel:
-            if kind.lower() == "ph":
-                xmin, ymin = sel
-                f = titan.plot_ebar(i, xmin=xmin, ymin=ymin, title=title)
-            if kind.lower() == "cl":
-                xmax, ymin = sel
-                f = titan.plot_ebar(i, xmax=xmax, ymin=ymin, title=title)
-            f.savefig(out / Path("ebarZ" + str(i) + ".png"))
-    if pdf:
-        titan.plot_all_wells(2, out / "all_wells.pdf")
+from clophfit.prtecan import TitrationAnalysis
 
 
 @click.group()
@@ -116,10 +55,10 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
     show_default=True,
 )
 @click.option(
-    "--weight/--no-weight",  # TODO: correct this insanity
-    default=False,
+    "--use-weight/--no-use-weight",
+    default=True,
     show_default=True,
-    help="Global fitting without relative residues weights.",
+    help="Toggle use of relative residue weights.",
 )
 @click.option(
     "--fit/--no-fit", default=True, show_default=True, help="Perform also fit."
@@ -159,7 +98,7 @@ def tecan(  # noqa: PLR0913
     kind: str,
     norm: bool,
     out: str,
-    weight: bool,
+    use_weight: bool,
     fit: bool,
     fit_all: bool,
     confint: float,
@@ -186,7 +125,8 @@ def tecan(  # noqa: PLR0913
     """
     out_fp = Path(out)
     list_fp = Path(list_file)
-    titan = prtecan.TitrationAnalysis.fromlistfile(list_fp)
+    titan = TitrationAnalysis.fromlistfile(list_fp)
+
     if scheme:
         titan.load_scheme(Path(scheme))
         if dil:
@@ -196,6 +136,7 @@ def tecan(  # noqa: PLR0913
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
                 titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)  # type: ignore
     titan.export_data(out_fp)
+
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in titan.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
@@ -218,10 +159,10 @@ def tecan(  # noqa: PLR0913
             ]:
                 out_fit = out_fp / out2 / "0fit"
                 out_fit.mkdir(parents=True, exist_ok=True)
-                fit_routine(
+                fit_tecan(
                     titan,
                     kind,
-                    weight,
+                    use_weight,
                     confint,
                     bool(n),
                     bool(b),
@@ -234,10 +175,10 @@ def tecan(  # noqa: PLR0913
                     pdf,
                 )
         else:
-            fit_routine(  # TODO: Adjust or remove fit_routine
+            fit_tecan(
                 titan,
                 kind,
-                weight,
+                use_weight,
                 confint,
                 norm,
                 bg,
@@ -249,6 +190,69 @@ def tecan(  # noqa: PLR0913
                 sel,
                 pdf,
             )
+
+
+def fit_tecan(  # noqa: PLR0913
+    titan: TitrationAnalysis,
+    kind: str,
+    use_weight: bool,
+    confint: float,
+    norm: bool,
+    bg: bool,
+    dil: bool,
+    verbose: int,
+    out: Path,
+    klim: tuple[float, float] | None,
+    title: str | None,
+    sel: tuple[float, float] | None,
+    pdf: bool,
+) -> None:
+    """Help main."""
+    titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
+    titan.fitkws = {"kind": kind, "use_weight": use_weight}
+    # lb = 0, 1, 2(for glob)
+    for i, fit in enumerate(titan.fitresults_df):
+        if verbose:
+            try:
+                print(fit)
+                print(klim)
+                print(confint)
+                meta = titan.labelblocksgroups[i].metadata
+                print("-" * 79)
+                print(f"\nlabel{i:d}")
+                pprint.pprint(meta)
+            except IndexError:
+                print("-" * 79)
+                print("\nGlobal on both labels")
+            titan.print_fitting(i)
+        # CSV tables
+        fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
+        if "S1_y1" in fit.columns:
+            order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0", "sS1_y0"]
+            order.extend(["S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
+            ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
+        else:
+            order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
+            order.extend(["S1_default", "sS1_default"])
+            ebar_y, ebar_yerr = "S1_default", "sS1_default"
+        out_df = fit.reindex(order, axis=1).sort_index()
+        out_df.to_csv(out / f"fit{i}.csv", float_format="%.3g")
+        # Plots
+        f = titan.plot_k(i, hue_column=ebar_y, xlim=klim, title=title)
+        f.savefig(out / f"K{i}.png")
+        f = titan.plot_ebar(i, ebar_y, ebar_yerr, title=title)
+        f.savefig(out / f"ebar{i}.png")
+        if sel:
+            if kind.lower() == "ph":
+                xm, ym = sel
+                f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmin=xm, ymin=ym, title=title)
+            if kind.lower() == "cl":
+                xm, ym = sel
+                f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmax=xm, ymin=ym, title=title)
+            f.savefig(out / f"ebar{i}_sel{xm},{ym}.png")
+    if pdf:
+        # FIXME: export pdf
+        titan.plot_all_wells(2, out / "all_wells.pdf")
 
 
 @clop.command("pr.enspire")

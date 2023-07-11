@@ -1177,7 +1177,7 @@ class TitrationAnalysis(Titration):
         kind: str = "pH",
         ini: int = 0,
         fin: int | None = None,
-        no_weight: bool = False,
+        use_weight: bool = True,
     ) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
@@ -1191,8 +1191,8 @@ class TitrationAnalysis(Titration):
             Initial point (default: 0).
         fin : int, optional
             Final point (default: None).
-        no_weight : bool
-            Do not use residues from single Labelblock fit as weight for global fitting.
+        use_weight : bool
+            Use residues from single Labelblock fit as weights per self and for global fitting.
 
         Returns
         -------
@@ -1222,15 +1222,19 @@ class TitrationAnalysis(Titration):
             y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
             y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
             ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, kind == "pH")
-            if no_weight:
-                fitting[k] = fit_binding_glob(ds, False)
-            else:
+            if use_weight:
                 fitting[k] = fit_binding_glob(ds, True)
+            else:
+                fitting[k] = fit_binding_glob(ds, False)
         fittings.append(fitting)
         return fittings
 
     def plot_k(
-        self, lb: int, xlim: tuple[float, float] | None = None, title: str | None = None
+        self,
+        lb: int,
+        hue_column: str,
+        xlim: tuple[float, float] | None = None,
+        title: str | None = None,
     ) -> plt.figure:
         """Plot K values as stripplot.
 
@@ -1238,6 +1242,8 @@ class TitrationAnalysis(Titration):
         ----------
         lb: int
             Labelblock index.
+        hue_column: str
+            Column in `fitresults_df` used for color-coding data points in the stripplot.
         xlim : tuple[float, float], optional
             Range.
         title : str, optional
@@ -1286,7 +1292,7 @@ class TitrationAnalysis(Titration):
             orient="h",
             lw=2,
             palette="Blues",
-            hue=res_unk["S1_default"],
+            hue=res_unk[hue_column],
             ax=ax2,
         )
         plt.legend(loc="upper left", frameon=False)
@@ -1352,10 +1358,10 @@ class TitrationAnalysis(Titration):
     def plot_ebar(  # noqa: PLR0913
         self,
         lb: int,
+        y: str,
+        yerr: str,
         x: str = "K",
-        y: str = "SA",
         xerr: str = "sK",
-        yerr: str = "sSA",
         xmin: float | None = None,
         ymin: float | None = None,
         xmax: float | None = None,

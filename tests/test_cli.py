@@ -53,14 +53,14 @@ def test_prenspire(tmp_path: Path) -> None:
 @pytest.mark.filterwarnings("ignore:OVER")
 def test_prtecan(tmp_path: Path) -> None:
     """Test prtecan command with actual data."""
-    lfile = str(tpath / "Tecan" / "140220" / "list.pH")
-    sfile = str(tpath / "Tecan" / "140220" / "scheme.txt")
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH")
+    scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
     out = tmp_path / "out3"
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
         clop,
-        ["pr.tecan", lfile, "--out", str(out), "--fit", "--scheme", sfile, "--bg"],
+        ["pr.tecan", list_f, "--out", str(out), "--fit", "--scheme", scheme_f, "--bg"],
     )
     assert result.exit_code == 0
 
