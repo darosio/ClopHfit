@@ -6,6 +6,7 @@ import pprint
 import warnings
 from collections import namedtuple
 from pathlib import Path
+from typing import Any
 
 import arviz as az
 import click
@@ -15,7 +16,7 @@ import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
 
-from clophfit import __default_enspire_out_dir__, binding, prenspire, prtecan
+from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
 
 
@@ -87,39 +88,25 @@ def clop() -> None:  # pragma: no cover
     """Group command."""
 
 
-@clop.command("eq1")
+@clop.command()
 @click.argument("kd1", type=float)
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
-def eq1(  # type: ignore
-    kd1,
-    pka,
-    ph,
-):
+def eq1(kd1: float, pka: float, ph: float) -> None:
     """pH-deps for Kd."""
-    print(binding.kd(kd1=kd1, pka=pka, ph=ph))
+    click.echo(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
 @clop.command("pr.tecan")
-@click.argument("list_file", type=click.Path(path_type=Path))
+@click.argument("list_file", type=click.Path(exists=True))
 @click.option(
-    "--dil",
-    type=click.Path(path_type=Path),
-    is_flag=False,
-    flag_value="additions.pH",
-    show_default="additions.pH",
-    help="Initial volume and additions",
+    "--scheme", type=click.Path(exists=True), help="Plate scheme (buffers CTRs)."
 )
-@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
-    "--scheme",
-    type=click.Path(path_type=Path),
-    is_flag=False,
-    flag_value="scheme.txt",
-    show_default="scheme.txt",
-    help="Positions of buffer and controls wells.",
+    "--dil", type=click.Path(exists=True), help="Initial volume and additions."
 )
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
+@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
     "--kind",
     "-k",
@@ -129,16 +116,13 @@ def eq1(  # type: ignore
     show_default=True,
 )
 @click.option(
-    "--weight/--no-weight",
+    "--weight/--no-weight",  # TODO: correct this insanity
     default=False,
     show_default=True,
     help="Global fitting without relative residues weights.",
 )
 @click.option(
-    "--fit/--no-fit",
-    default=True,
-    show_default=True,
-    help="Perform also fit.",
+    "--fit/--no-fit", default=True, show_default=True, help="Perform also fit."
 )
 @click.option("--fit-all", is_flag=True, help="Fit all exported data.")
 @click.option(
@@ -149,14 +133,10 @@ def eq1(  # type: ignore
     help="Confidence value for the calculation of parameter errors.",
 )
 @click.option(
-    "--out",
-    type=click.Path(path_type=Path),
-    default="out2",
-    help="Path to output results.",
-    show_default=True,
+    "--out", "-o", default=__tecan_out_dir__, show_default=True, help="Output folder."
 )
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
-@click.option("--title", "-t", default=None, help="Title for some plots.")
+@click.option("--title", "-t", default="", help="Title for some plots.")
 @click.option(
     "--Klim",
     default=None,
@@ -170,31 +150,29 @@ def eq1(  # type: ignore
     help="Errorbar plot for selection with K_min SA_min.",
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def tecan(  # type: ignore  # noqa: PLR0913
-    list_file,
-    scheme,
-    dil,
-    verbose,
-    bg,
-    kind,
-    norm,
-    out,
-    weight,
-    fit,
-    fit_all,
-    confint,
-    klim,
-    title,
-    sel,
-    pdf,
-):
+def tecan(  # noqa: PLR0913
+    list_file: str,
+    scheme: str | None,
+    dil: str | None,
+    verbose: int,
+    bg: bool,
+    kind: str,
+    norm: bool,
+    out: str,
+    weight: bool,
+    fit: bool,
+    fit_all: bool,
+    confint: float,
+    klim: tuple[float, float] | None,
+    title: str,
+    sel: tuple[float, float] | None,
+    pdf: bool,
+) -> None:
     """Convert a list of plate reader acquisitions into titrations.
 
     LIST_FILE : List of Tecan files and concentration values.
 
-    Save titrations as .dat files.
-
-    Fits all wells using 2 labels and produces:
+    Saves titrations as .dat files and fits all wells using 2 labels. The function produces:
 
     - K plot
 
@@ -204,25 +182,26 @@ def tecan(  # type: ignore  # noqa: PLR0913
 
     - csv tables for all labelblocks and global fittings.
 
-    Notes: Buffer is always subtracted if scheme indicates buffer well positions.
-
+    Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
-    titan = prtecan.TitrationAnalysis.fromlistfile(list_file)
+    out_fp = Path(out)
+    list_fp = Path(list_file)
+    titan = prtecan.TitrationAnalysis.fromlistfile(list_fp)
     if scheme:
-        titan.load_scheme(scheme)
+        titan.load_scheme(Path(scheme))
         if dil:
-            titan.load_additions(dil)
+            titan.load_additions(Path(dil))
             bg = True  # should not be needed but influence decimals of
             # exported values; however ``dil imply bg```
             if kind.lower() == "cl":  # XXX cl conc must be elsewhere
-                titan.conc = list(prtecan.calculate_conc(titan.additions, 1000.0))  # type: ignore
-    titan.export_data(out)
-    with (out / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
+                titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)  # type: ignore
+    titan.export_data(out_fp)
+    with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in titan.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
     if scheme:
         f = titan.plot_buffer(title=title)
-        f.savefig(out / Path("buffer.png"))
+        f.savefig(out_fp / "buffer.png")
 
     if fit:
         if bg and not scheme:
@@ -237,7 +216,7 @@ def tecan(  # type: ignore  # noqa: PLR0913
                 (0, 1, 1, "dat_bg_dil"),
                 (1, 1, 1, "dat_bg_dil_nrm"),
             ]:
-                out_fit = out / out2 / "0fit"
+                out_fit = out_fp / out2 / "0fit"
                 out_fit.mkdir(parents=True, exist_ok=True)
                 fit_routine(
                     titan,
@@ -255,7 +234,7 @@ def tecan(  # type: ignore  # noqa: PLR0913
                     pdf,
                 )
         else:
-            fit_routine(
+            fit_routine(  # TODO: Adjust or remove fit_routine
                 titan,
                 kind,
                 weight,
@@ -264,7 +243,7 @@ def tecan(  # type: ignore  # noqa: PLR0913
                 bg,
                 bool(dil),
                 verbose,
-                out,
+                out_fp,
                 klim,
                 title,
                 sel,
@@ -273,39 +252,38 @@ def tecan(  # type: ignore  # noqa: PLR0913
 
 
 @clop.command("pr.enspire")
-@click.argument("csv", type=click.Path(exists=True, path_type=Path))
-@click.argument("note_fp", type=click.Path(exists=True, path_type=Path), required=False)
+@click.argument("csv_f", type=click.Path(exists=True, path_type=str))
+@click.argument("note_f", type=click.Path(exists=True), required=False)
 @click.option(
     "-b",
-    "--band-intervals",
     "bands",
     multiple=True,
+    default=None,
     nargs=3,
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
 @click.option(
-    "--out",
-    "-d",
-    type=click.Path(path_type=Path),
-    default=__default_enspire_out_dir__,
-    help="Path to output results.",
-    show_default=True,
+    "--out", "-o", default=__enspire_out_dir__, show_default=True, help="Output folder."
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def enspire(csv, note_fp, out, bands, verbose):  # type: ignore
+def enspire(
+    csv_f: str, note_f: str | None, out: str, bands: tuple[Any], verbose: int
+) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
-    ef = EnspireFile(csv, verbose=verbose)
-    ef.export_measurements(out)
-    if note_fp is not None:
-        fit_enspire(ef, note_fp, out, bands, verbose)
+    print(type(bands))
+    print(bands)
+    ef = EnspireFile(Path(csv_f), verbose=verbose)
+    ef.export_measurements(Path(out))
+    if note_f is not None:
+        fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
 
 
 def fit_enspire(
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
-    bands: list[tuple[str, int, int]] | None,
+    bands: list[tuple[str, int, int]],
     verbose: int,
 ) -> None:
     """Fit prenspire titration (all labels, temp, mutant, titrations)."""
@@ -372,8 +350,8 @@ def _print_result(
 
 
 @clop.command("fit_titration")
-@click.argument("csv_fp", type=click.Path(exists=True, path_type=Path))
-@click.argument("note_fp", type=click.Path(exists=True, path_type=Path))
+@click.argument("csv_f", type=click.Path(exists=True))
+@click.argument("note_f", type=click.Path(exists=True))
 @click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
 @click.option(
     "-t",
@@ -387,17 +365,16 @@ def _print_result(
 )
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
 def fit_titration(  # noqa: PLR0913
-    csv_fp: Path,
-    note_fp: Path,
+    csv_f: str,
+    note_f: str,
     out: Path,
     titration_type: str,
     band: tuple[int, int] | None,
     verbose: bool,
 ) -> None:
     """Update old svd or band fit of titration spectra."""
-    note_df = pd.read_csv(note_fp, sep="\t")
-    csv = pd.read_csv(csv_fp)
-    out_fp = Path(out)
+    note_df = pd.read_csv(note_f, sep="\t")
+    csv = pd.read_csv(csv_f)
     # Ignore buffer wells! SVD will use differences between spectra.
     note_df = note_df[note_df["mutant"] != "buffer"]
     Notes = namedtuple("Notes", ["wells", "conc"])
@@ -407,21 +384,21 @@ def fit_titration(  # noqa: PLR0913
     spectra.columns = np.array(note.conc)
     if verbose:
         print(csv)
-        click.echo(note_fp)
+        click.echo(note_f)
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
     fit_result = binding.fitting.analyze_spectra(spectra, is_ph, band)
     # output
-    out_fp.mkdir(parents=True, exist_ok=True)
-    pdf_file = out_fp / f"{csv_fp.stem}_{band}_{note_fp.stem}.pdf"
+    out.mkdir(parents=True, exist_ok=True)
+    pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
     if fit_result.figure:
         fit_result.figure.savefig(pdf_file)
     _print_result(fit_result, pdf_file, str(band))
 
 
 @clop.command("fit_titration_global")
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("file", type=click.Path(exists=True))
 @click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
 @click.option(
     "-t",
@@ -469,7 +446,7 @@ def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ign
 
 
 @click.command()
-@click.argument("note", type=click.Path(exists=True, path_type=Path))
+@click.argument("note", type=click.Path(exists=True))
 @click.option("-o", "--output", default=None, help="Output CSV file.")
 @click.option("-l", "--labels", default="A B", help="Labels to be appended.")
 @click.option("-t", "--temp", default="37.0", help="Temperature to be appended.")

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pyparsing
 
-from clophfit import __default_enspire_out_dir__
+from clophfit import __enspire_out_dir__
 from clophfit.prtecan import lookup_listoflines
 
 # TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
@@ -89,7 +89,7 @@ class EnspireFile:
             csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
         )
 
-    def export_measurements(self, out_dir: Path = __default_enspire_out_dir__) -> None:
+    def export_measurements(self, out_dir: Path = Path(__enspire_out_dir__)) -> None:
         """Save measurements, metadata and plots into out_dir."""
         out_dir.mkdir(parents=True, exist_ok=True)
         for m in self.measurements:
