@@ -120,7 +120,7 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     return [[e for e in line if e] for line in lines]
 
 
-# TODO: with a filter ectract_metadata with a map
+# MAYBE: with a filter ectract_metadata with a map
 # MAYBE: Add ipynb to ruff see 277
 
 
@@ -458,7 +458,7 @@ class Labelblock(BufferWellsMixin):
             try:
                 norm = 1000.0
                 for k in Labelblock._NORM_KEYS:
-                    norm /= self.metadata[k].value  # type: ignore # XXX: D
+                    norm /= self.metadata[k].value  # type: ignore # FIXME: D
             except TypeError:
                 warnings.warn(
                     "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
@@ -1329,7 +1329,7 @@ class TitrationAnalysis(Titration):
         """Plot all wells into a pdf."""
         # Create a PdfPages object
         pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))
-        """# XXX: Order
+        """# TODO: Order
         "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
         #     out.savefig(self.plot_well(str(k)))
         # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:

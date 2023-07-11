@@ -17,7 +17,7 @@ import pyparsing
 from clophfit import __enspire_out_dir__
 from clophfit.prtecan import lookup_listoflines
 
-# TODO: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
+# MAYBE: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 
 
 def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
@@ -415,6 +415,8 @@ class Note:
         self.wells: list[str] = np.array(self._note)[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
 
+    # MAYBE: Add buffer subtraction logic to prenspire Note.
+
     def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
         df_no_buffer = self._note.query('Name != "buffer"')
@@ -455,4 +457,3 @@ class Note:
                                     f"{grouping}_{name2}"
                                 ] = meas_dict
         self.titrations = titrations
-        # TODO: BUFFER

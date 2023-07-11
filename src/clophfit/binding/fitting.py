@@ -460,7 +460,7 @@ def analyze_spectra(
 
 def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
     """Analyze multi-label binding datasets and visualize the results."""
-    # TODO: return weights in FitResult
+    # MAYBE: return weights in FitResult
     if weighting:
         wc: ArrayDict = {}
         labels_to_remove = []

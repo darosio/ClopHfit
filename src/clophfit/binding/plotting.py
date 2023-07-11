@@ -267,8 +267,9 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     az.plot_posterior(idata.posterior[p_name], ax=ax)  # type: ignore
 
 
+# TODO: Complete print emcee
 def print_emcee(result_emcee: MinimizerResult) -> None:
-    """Add XXX: ."""
+    """Print maximum likelihood estimation (MLE) results from an emcee fitting."""
     highest_prob = np.argmax(result_emcee.lnprob)
     hp_loc = np.unravel_index(highest_prob, result_emcee.lnprob.shape)
     mle_soln = result_emcee.chain[hp_loc]

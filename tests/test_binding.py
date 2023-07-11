@@ -171,7 +171,7 @@ def test_dataset_class() -> None:
     ):
         ds = Dataset({"x1": x1, "x2": x2}, {"y1": y1, "y2": y2})
     """
-    # XXX:     xx = np.array([6.8, 7.0, 7.2, 7.9])
+    # TODO:     xx = np.array([6.8, 7.0, 7.2, 7.9])
     with pytest.raises(ValueError, match="Length of 'x' and 'y' must be equal."):
         ds = Dataset(xx, y1)
     ww = np.array([6.8, 7.0, 7.2, 7.9])

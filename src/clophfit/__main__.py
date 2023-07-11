@@ -68,13 +68,6 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 )
 @click.option("--fit-all", is_flag=True, help="Fit all exported data.")
 @click.option(
-    "--confint",
-    default=0.95,
-    type=click.FloatRange(0, 1, clamp=True),
-    show_default=True,
-    help="Confidence value for the calculation of parameter errors.",
-)
-@click.option(
     "--out", "-o", default=__tecan_out_dir__, show_default=True, help="Output folder."
 )
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
@@ -104,7 +97,6 @@ def tecan(  # noqa: PLR0913
     use_weight: bool,
     fit: bool,
     fit_all: bool,
-    confint: float,
     klim: tuple[float, float] | None,
     title: str,
     sel: tuple[float, float] | None,
@@ -166,7 +158,6 @@ def tecan(  # noqa: PLR0913
                     titan,
                     kind,
                     use_weight,
-                    confint,
                     bool(n),
                     bool(b),
                     bool(d),
@@ -182,7 +173,6 @@ def tecan(  # noqa: PLR0913
                 titan,
                 kind,
                 use_weight,
-                confint,
                 norm,
                 bg,
                 bool(dil),
@@ -199,7 +189,6 @@ def fit_tecan(  # noqa: PLR0913
     titan: TitrationAnalysis,
     kind: str,
     use_weight: bool,
-    confint: float,
     norm: bool,
     bg: bool,
     dil: bool,
@@ -219,7 +208,6 @@ def fit_tecan(  # noqa: PLR0913
             try:
                 print(fit)
                 print(klim)
-                print(confint)
                 meta = titan.labelblocksgroups[i].metadata
                 print("-" * 79)
                 print(f"\nlabel{i:d}")
