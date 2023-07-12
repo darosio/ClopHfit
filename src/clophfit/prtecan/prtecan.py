@@ -1174,10 +1174,10 @@ class TitrationAnalysis(Titration):
 
     def fit(
         self,
-        kind: str = "pH",
+        is_ph: bool = True,
         ini: int = 0,
         fin: int | None = None,
-        use_weight: bool = True,
+        weight: bool = True,
     ) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
@@ -1185,13 +1185,13 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        kind : str
-            Titration type {'pH'|'Cl'}
+        is_ph : bool
+            Titration type is 'pH'.
         ini : int
             Initial point (default: 0).
         fin : int, optional
             Final point (default: None).
-        use_weight : bool
+        weight : bool
             Use residues from single Labelblock fit as weights per self and for global fitting.
 
         Returns
@@ -1212,7 +1212,7 @@ class TitrationAnalysis(Titration):
                     y = dat[k]
                     y = y[ini:fin]
                     ys = np.array(y)
-                    ds = Dataset(x[~np.isnan(ys)], ys[~np.isnan(ys)], kind == "pH")
+                    ds = Dataset(x[~np.isnan(ys)], ys[~np.isnan(ys)], is_ph=is_ph)
                     fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
@@ -1221,8 +1221,8 @@ class TitrationAnalysis(Titration):
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
             y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
             y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
-            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, kind == "pH")
-            if use_weight:
+            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=is_ph)
+            if weight:
                 fitting[k] = fit_binding_glob(ds, True)
             else:
                 fitting[k] = fit_binding_glob(ds, False)

@@ -50,18 +50,10 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
 @click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
-    "--kind",
-    "-k",
-    type=click.Choice(["pH", "Cl"], case_sensitive=False),
-    default="pH",
-    help="Kind of titration.",
-    show_default=True,
+    "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
 )
 @click.option(
-    "--use-weight/--no-use-weight",
-    default=True,
-    show_default=True,
-    help="Toggle use of relative residue weights.",
+    "--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH."
 )
 @click.option(
     "--fit/--no-fit", default=True, show_default=True, help="Perform also fit."
@@ -73,34 +65,28 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
 @click.option("--title", "-t", default="", help="Title for some plots.")
 @click.option(
-    "--Klim",
-    default=None,
-    type=(float, float),
-    help="Range MIN, MAX (xlim) for plot_K.",
+    "--Klim", default=None, type=(float, float), help="Range MIN, MAX of plot_K."
 )
 @click.option(
-    "--sel",
-    default=None,
-    type=(float, float),
-    help="Errorbar plot for selection with K_min SA_min.",
+    "--sel", default=None, type=(float, float), help="Select from K_MIN S1_MIN."
 )
 @click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def tecan(  # noqa: PLR0913
     list_file: str,
     scheme: str | None,
     dil: str | None,
-    verbose: int,
     bg: bool,
-    kind: str,
     norm: bool,
-    out: str,
-    use_weight: bool,
+    weight: bool,
+    is_ph: bool,
     fit: bool,
     fit_all: bool,
-    klim: tuple[float, float] | None,
-    title: str,
-    sel: tuple[float, float] | None,
+    out: str,
     pdf: bool,
+    title: str,
+    klim: tuple[float, float] | None,
+    sel: tuple[float, float] | None,
+    verbose: int,
 ) -> None:
     """Convert a list of plate reader acquisitions into titrations.
 
@@ -128,7 +114,7 @@ def tecan(  # noqa: PLR0913
             titan.load_additions(Path(dil))
             bg = True  # should not be needed but influence decimals of
             # exported values; however ``dil imply bg```
-            if kind.lower() == "cl":  # XXX cl conc must be elsewhere
+            if not is_ph:  # XXX cl conc must be elsewhere
                 titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)  # type: ignore
     titan.export_data(out_fp)
 
@@ -156,8 +142,8 @@ def tecan(  # noqa: PLR0913
                 out_fit.mkdir(parents=True, exist_ok=True)
                 fit_tecan(
                     titan,
-                    kind,
-                    use_weight,
+                    is_ph,
+                    weight,
                     bool(n),
                     bool(b),
                     bool(d),
@@ -171,8 +157,8 @@ def tecan(  # noqa: PLR0913
         else:
             fit_tecan(
                 titan,
-                kind,
-                use_weight,
+                is_ph,
+                weight,
                 norm,
                 bg,
                 bool(dil),
@@ -187,8 +173,8 @@ def tecan(  # noqa: PLR0913
 
 def fit_tecan(  # noqa: PLR0913
     titan: TitrationAnalysis,
-    kind: str,
-    use_weight: bool,
+    is_ph: bool,
+    weight: bool,
     norm: bool,
     bg: bool,
     dil: bool,
@@ -201,7 +187,7 @@ def fit_tecan(  # noqa: PLR0913
 ) -> None:
     """Help main."""
     titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fitkws = {"kind": kind, "use_weight": use_weight}
+    titan.fitkws = {"is_ph": is_ph, "weight": weight}
     # lb = 0, 1, 2(for glob)
     for i, fit in enumerate(titan.fitresults_df):
         if verbose:
@@ -234,10 +220,10 @@ def fit_tecan(  # noqa: PLR0913
         f = titan.plot_ebar(i, ebar_y, ebar_yerr, title=title)
         f.savefig(out / f"ebar{i}.png")
         if sel:
-            if kind.lower() == "ph":
-                xm, ym = sel
+            if is_ph:
+                xm, ym = sel  # FIXME: can be easy simplified
                 f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmin=xm, ymin=ym, title=title)
-            if kind.lower() == "cl":
+            else:
                 xm, ym = sel
                 f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmax=xm, ymin=ym, title=title)
             f.savefig(out / f"ebar{i}_sel{xm},{ym}.png")
