@@ -1200,9 +1200,7 @@ class TitrationAnalysis(Titration):
                     y = dat[k]
                     y = y[ini:fin]
                     ys = np.array(y)
-                    ds = Dataset(
-                        x[~np.isnan(ys)], ys[~np.isnan(ys)], is_ph=self.is_ph
-                    )  # FIXME: redundant filtering
+                    ds = Dataset(x, ys, is_ph=self.is_ph)
                     fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
