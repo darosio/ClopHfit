@@ -502,8 +502,8 @@ class TestTecanfileGroup:
 class TestTitration:
     """Test Titration class."""
 
-    tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH")
-    tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20")
+    tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
+    tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
 
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
@@ -548,12 +548,12 @@ class TestTitration:
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
-            prtecan.Titration.fromlistfile(Path("aax"))
+            prtecan.Titration.fromlistfile(Path("aax"), True)
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            prtecan.Titration.fromlistfile(data_tests / "list.pH2")
+            prtecan.Titration.fromlistfile(data_tests / "list.pH2", True)
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
@@ -563,7 +563,9 @@ class TestTitrationAnalysis:
     @pytest.fixture(autouse=True, scope="class")
     def titan(self) -> TitrationAnalysis:
         """Set up the TitrationAnalysis."""
-        titan = prtecan.TitrationAnalysis.fromlistfile(data_tests / "140220/list.pH")
+        titan = prtecan.TitrationAnalysis.fromlistfile(
+            data_tests / "140220/list.pH", is_ph=True
+        )
         titan.load_additions(data_tests / "140220/additions.pH")
         titan.load_scheme(data_tests / "140220/scheme.txt")
         return titan

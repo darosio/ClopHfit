@@ -61,6 +61,21 @@ def test_prtecan(tmp_path: Path) -> None:
     assert result.exit_code == 0
 
 
+@pytest.mark.filterwarnings("ignore:OVER")
+def test_prtecan_cl(tmp_path: Path) -> None:
+    """Test prtecan command with actual data."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.cl")
+    scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
+    adds_f = str(tpath / "Tecan" / "140220" / "additions.cl")
+    out = tmp_path / "out4"
+    out.mkdir()
+    runner = CliRunner()
+    base_args = [list_f, "--out", str(out), "--fit", "--scheme", scheme_f]
+    base_args.extend(["--dil", adds_f, "--bg", "--no-is-ph"])
+    result = runner.invoke(tecan, base_args)
+    assert result.exit_code == 0
+
+
 @pytest.mark.parametrize(
     ("csv_file", "expected_output", "additional_params"),
     [

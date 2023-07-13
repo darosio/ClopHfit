@@ -818,10 +818,13 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         Tecanfiles to be grouped.
     conc : ArrayF
         Concentration or pH values.
+    is_ph : bool
+        Indicate if x values represent pH (default is False).
     """
 
     tecanfiles: list[Tecanfile]
     conc: ArrayF
+    is_ph: bool
 
     _additions: list[float] = field(init=False, default_factory=list)
     _buffer_wells: list[str] = field(init=False, default_factory=list)
@@ -843,20 +846,22 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         )
 
     @classmethod
-    def fromlistfile(cls, list_file: Path | str) -> Titration:
+    def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> Titration:
         """Build `Titration` from a list[.pH|.Cl] file.
 
         Parameters
         ----------
         list_file: Path | str
             File path to the listfile ([fpath conc]).
+        is_ph : bool
+            Indicate if x values represent pH.
 
         Returns
         -------
         Titration
         """
         tecanfiles, conc = Titration._listfile(Path(list_file))
-        return cls(tecanfiles, conc)
+        return cls(tecanfiles, conc, is_ph)
 
     @staticmethod
     def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
@@ -1063,24 +1068,13 @@ class TitrationAnalysis(Titration):
             f"TitrationAnalysis({super().__repr__()!r}\n"
             f"       (kwargs)    fitkws        ={self.fitkws!r}\n"
             f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
-            f"                   results_size  ={len(self.fitresults) if self.fitresults else 0})"
         )
 
     @classmethod
-    def fromlistfile(cls, list_file: Path | str) -> TitrationAnalysis:
-        """Build `TitrationAnalysis` from a list[.pH|.Cl] file.
-
-        Parameters
-        ----------
-        list_file: Path | str
-            File path to the listfile ([fpath conc]).
-
-        Returns
-        -------
-        TitrationAnalysis
-        """
-        tecanfiles, conc = TitrationAnalysis._listfile(Path(list_file))
-        return cls(tecanfiles, conc)
+    def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> TitrationAnalysis:
+        """Build `TitrationAnalysis` from a list[.pH|.Cl] file."""
+        tecanfiles, conc = Titration._listfile(Path(list_file))
+        return cls(tecanfiles, conc, is_ph)
 
     @property
     def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
@@ -1173,11 +1167,7 @@ class TitrationAnalysis(Titration):
         return self._fitresults_df
 
     def fit(
-        self,
-        is_ph: bool = True,
-        ini: int = 0,
-        fin: int | None = None,
-        weight: bool = True,
+        self, ini: int = 0, fin: int | None = None, weight: bool = True
     ) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
@@ -1185,8 +1175,6 @@ class TitrationAnalysis(Titration):
 
         Parameters
         ----------
-        is_ph : bool
-            Titration type is 'pH'.
         ini : int
             Initial point (default: 0).
         fin : int, optional
@@ -1212,7 +1200,9 @@ class TitrationAnalysis(Titration):
                     y = dat[k]
                     y = y[ini:fin]
                     ys = np.array(y)
-                    ds = Dataset(x[~np.isnan(ys)], ys[~np.isnan(ys)], is_ph=is_ph)
+                    ds = Dataset(
+                        x[~np.isnan(ys)], ys[~np.isnan(ys)], is_ph=self.is_ph
+                    )  # FIXME: redundant filtering
                     fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
@@ -1221,7 +1211,7 @@ class TitrationAnalysis(Titration):
             # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
             y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
             y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
-            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=is_ph)
+            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph)
             if weight:
                 fitting[k] = fit_binding_glob(ds, True)
             else:

@@ -5,6 +5,7 @@ import copy
 import typing
 import warnings
 from dataclasses import dataclass, field
+from sys import float_info
 
 import lmfit  # type: ignore
 import numpy as np
@@ -342,7 +343,8 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     if ds.is_ph:
         params.add("K", value=np.mean(k_initial), min=3, max=11)
     else:
-        params.add("K", value=np.mean(k_initial), min=0)
+        # epsilon avoids x/K raise x/0 error
+        params.add("K", value=np.mean(k_initial), min=float_info.epsilon)
     return params
 
 

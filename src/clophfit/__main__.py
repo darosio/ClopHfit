@@ -106,7 +106,7 @@ def tecan(  # noqa: PLR0913
     """
     out_fp = Path(out)
     list_fp = Path(list_file)
-    titan = TitrationAnalysis.fromlistfile(list_fp)
+    titan = TitrationAnalysis.fromlistfile(list_fp, is_ph)
 
     if scheme:
         titan.load_scheme(Path(scheme))
@@ -142,7 +142,6 @@ def tecan(  # noqa: PLR0913
                 out_fit.mkdir(parents=True, exist_ok=True)
                 fit_tecan(
                     titan,
-                    is_ph,
                     weight,
                     bool(n),
                     bool(b),
@@ -157,7 +156,6 @@ def tecan(  # noqa: PLR0913
         else:
             fit_tecan(
                 titan,
-                is_ph,
                 weight,
                 norm,
                 bg,
@@ -173,7 +171,6 @@ def tecan(  # noqa: PLR0913
 
 def fit_tecan(  # noqa: PLR0913
     titan: TitrationAnalysis,
-    is_ph: bool,
     weight: bool,
     norm: bool,
     bg: bool,
@@ -187,7 +184,7 @@ def fit_tecan(  # noqa: PLR0913
 ) -> None:
     """Help main."""
     titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fitkws = {"is_ph": is_ph, "weight": weight}
+    titan.fitkws = {"weight": weight}
     # lb = 0, 1, 2(for glob)
     for i, fit in enumerate(titan.fitresults_df):
         if verbose:
@@ -220,7 +217,7 @@ def fit_tecan(  # noqa: PLR0913
         f = titan.plot_ebar(i, ebar_y, ebar_yerr, title=title)
         f.savefig(out / f"ebar{i}.png")
         if sel:
-            if is_ph:
+            if titan.is_ph:
                 xm, ym = sel  # FIXME: can be easy simplified
                 f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmin=xm, ymin=ym, title=title)
             else:
