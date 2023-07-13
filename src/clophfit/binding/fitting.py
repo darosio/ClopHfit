@@ -569,7 +569,9 @@ def plot_fit(
             for i in range(nboot):
                 p_sample = result.params.copy()
                 for param in p_sample.values():
-                    param.value = np.random.normal(param.value, param.stderr)
+                    # Especially stderr can be None in case of critical fitting
+                    if param.value and param.stderr:
+                        param.value = np.random.normal(param.value, param.stderr)
                 y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
             dy = y_samples.std(axis=0)
             # Plot uncertainty.
@@ -584,7 +586,10 @@ def plot_fit(
             # Display label in error bar plot.
             ax.errorbar(da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, **kws_err)
     ax.legend()
-    k = ufloat(result.params["K"].value, result.params["K"].stderr)
+    if result.params["K"].stderr:  # Can be None in case of critical fitting
+        k = ufloat(result.params["K"].value, result.params["K"].stderr)
+    else:
+        k = f'{result.params["K"].value:.3g}' if result.params["K"].value else None
     title = "=".join(["K", str(k).replace("+/-", "±")])
     xlabel = "pH" if ds.is_ph else "Cl"
     _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")

@@ -217,12 +217,12 @@ def fit_tecan(  # noqa: PLR0913
         f = titan.plot_ebar(i, ebar_y, ebar_yerr, title=title)
         f.savefig(out / f"ebar{i}.png")
         if sel:
-            if titan.is_ph:
-                xm, ym = sel  # FIXME: can be easy simplified
-                f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmin=xm, ymin=ym, title=title)
-            else:
-                xm, ym = sel
-                f = titan.plot_ebar(i, ebar_y, ebar_yerr, xmax=xm, ymin=ym, title=title)
+            xm, ym = sel
+            xmin = xm if titan.is_ph else None
+            xmax = xm if not titan.is_ph else None
+            f = titan.plot_ebar(
+                i, ebar_y, ebar_yerr, xmin=xmin, xmax=xmax, ymin=ym, title=title
+            )
             f.savefig(out / f"ebar{i}_sel{xm},{ym}.png")
     if pdf:
         # FIXME: export pdf
