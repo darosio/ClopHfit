@@ -55,7 +55,7 @@ dev = [
   "ipykernel",
   "jupyter",
   "jupyterlab",
-  "ruff == 0.0.277",
+  "ruff == 0.0.278",
   "pylsp-mypy",
   "python-lsp-ruff"
 ]
