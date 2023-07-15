@@ -200,7 +200,7 @@ def fit_tecan(  # noqa: PLR0913
     titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
     titan.fitkws = {"weight": weight}
     # lb = 0, 1, 2(for glob)
-    for i, fit in enumerate(titan.fitresults_df):
+    for i, fit in enumerate(titan.result_dfs):
         if verbose:
             try:
                 print(fit)

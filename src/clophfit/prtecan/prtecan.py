@@ -1055,8 +1055,8 @@ class TitrationAnalysis(Titration):
     )
     _fitdata_params: dict[str, bool] = field(init=False, default_factory=dict)
     _fitkws: Kwargs = field(init=False, default_factory=dict)
-    _fitresults: list[dict[str, FitResult]] = field(init=False, default_factory=list)
-    _fitresults_df: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
+    _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         """Set up the initial values of inherited class properties."""
@@ -1080,7 +1080,7 @@ class TitrationAnalysis(Titration):
     def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
         """Data used for fitting."""
         if not self._fitdata:
-            self._fitresults = []
+            self._results = []
             nrm = self.fitdata_params.get("nrm", False)
             dil = self.fitdata_params.get("dil", False)
             bg = self.fitdata_params.get("bg", False)
@@ -1122,8 +1122,8 @@ class TitrationAnalysis(Titration):
         """Set the datafit parameters."""
         self._fitdata_params = params
         self._fitdata = []
-        self._fitresults = []
-        self._fitresults_df = []
+        self._results = []
+        self._result_dfs = []
 
     @property
     def fitkws(self) -> Kwargs:
@@ -1134,21 +1134,21 @@ class TitrationAnalysis(Titration):
     def fitkws(self, params: dict[str, str | int | float | bool | None]) -> None:
         """Set the datafit parameters."""
         self._fitkws = params
-        self._fitresults = []
-        self._fitresults_df = []
+        self._results = []
+        self._result_dfs = []
 
     @property
-    def fitresults(self) -> list[dict[str, FitResult]]:
+    def results(self) -> list[dict[str, FitResult]]:
         """Result dataframes."""
-        if not self._fitresults:
-            self._fitresults = self.fit(**self.fitkws)  # type: ignore
-        return self._fitresults
+        if not self._results:
+            self._results = self.fit(**self.fitkws)  # type: ignore
+        return self._results
 
     @property
-    def fitresults_df(self) -> list[pd.DataFrame]:
+    def result_dfs(self) -> list[pd.DataFrame]:
         """Result dataframes."""
-        if not self._fitresults_df:
-            for fitresult in self.fitresults:
+        if not self._result_dfs:
+            for fitresult in self.results:
                 data = []
                 for lbl, fr in fitresult.items():
                     pars = fr.result.params if fr.result else None
@@ -1163,8 +1163,8 @@ class TitrationAnalysis(Titration):
                     for ctrl_name, wells in self.scheme.names.items():
                         for well in wells:
                             df0.loc[well, "ctrl"] = ctrl_name
-                self._fitresults_df.append(df0)
-        return self._fitresults_df
+                self._result_dfs.append(df0)
+        return self._result_dfs
 
     def fit(
         self, ini: int = 0, fin: int | None = None, weight: bool = True
@@ -1247,7 +1247,7 @@ class TitrationAnalysis(Titration):
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.fitresults_df[lb].loc[self.scheme.ctrl].sort_values("ctrl")
+            res_ctrl = self.result_dfs[lb].loc[self.scheme.ctrl].sort_values("ctrl")
             sb.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
@@ -1267,7 +1267,7 @@ class TitrationAnalysis(Titration):
             )
             plt.grid(1, axis="both")
         # Unk
-        res_unk = self.fitresults_df[lb].loc[self.keys_unk].sort_index(ascending=False)
+        res_unk = self.result_dfs[lb].loc[self.keys_unk].sort_index(ascending=False)
         # Compute 'K - 2*sK' for each row in res_unk
         res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
         # Sort the DataFrame by this computed value in descending order
@@ -1323,7 +1323,7 @@ class TitrationAnalysis(Titration):
         # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
         #     out.savefig(self.plot_well(str(k)))
         """
-        for lbl, fr in self.fitresults[lb].items():
+        for lbl, fr in self.results[lb].items():
             fig = fr.figure
             # A4 size in inches. You can adjust this as per your need.
             fig.set_size_inches([8.27, 11.69])
@@ -1333,7 +1333,7 @@ class TitrationAnalysis(Titration):
             ax.set_position([0.1, 0.5, 0.8, 0.4])
             # Create a new axes for the text
             text_ax = fig.add_axes([0.1, 0.05, 0.8, 0.35])  # Adjust as needed
-            text = lmfit.printfuncs.fit_report(self.fitresults[lb][lbl].result)
+            text = lmfit.printfuncs.fit_report(self.results[lb][lbl].result)
             text_ax.text(0.0, 0.0, text, fontsize=14)
             text_ax.axis("off")  # Hide the axes for the text
             # Save the figure into the PDF
@@ -1356,7 +1356,7 @@ class TitrationAnalysis(Titration):
         title: str | None = None,
     ) -> plt.figure:
         """Plot SA vs. K with errorbar for the whole plate."""
-        fit_df = self.fitresults_df[lb]
+        fit_df = self.result_dfs[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))
             if xmin:
@@ -1419,7 +1419,7 @@ class TitrationAnalysis(Titration):
                 formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
             return f"{index:s} {' '.join(formatted_values)}"
 
-        fit_df = self.fitresults_df[lb]
+        fit_df = self.result_dfs[lb]
         out_keys = ["K"] + [
             col
             for col in fit_df.columns
@@ -1509,6 +1509,6 @@ class TitrationAnalysis(Titration):
         # Make sure the directory exists
         folder = Path(path) / f"lb{lb}"
         folder.mkdir(parents=True, exist_ok=True)
-        for k, v in self.fitresults[lb].items():
+        for k, v in self.results[lb].items():
             if v.figure:
                 v.figure.savefig(folder / f"{k}.png")

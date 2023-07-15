@@ -261,6 +261,7 @@ template = "typeguard"
 run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.isort]
+combine_as_imports = true
 force_single_line = false
 include_trailing_comma = true
 known_first_party = "clophfit"
@@ -395,7 +396,7 @@ known-first-party = ["clophfit"]
 split-on-trailing-comma = true
 
 [tool.ruff.mccabe]
-max-complexity = 33
+max-complexity = 12
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["I002"]  # don't need annotations
