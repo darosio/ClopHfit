@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from matplotlib.testing.compare import compare_images  # type: ignore
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-from clophfit.__main__ import clop, enspire, tecan
+from clophfit.__main__ import clop, ppr
 
 # tests path
 tpath = Path(__file__).parent
@@ -30,7 +30,7 @@ def test_prenspire(tmp_path: Path) -> None:
     out = tmp_path / "E"
     out.mkdir()
     runner = CliRunner()
-    result = runner.invoke(enspire, [str(input_csv), "--out", str(out)])
+    result = runner.invoke(ppr, ["--out", str(out), "enspire", str(input_csv)])
     assert result.exit_code == 0
     # validate output files
     assert (out / "NTT_37C_pKa_A.csv").exists()
@@ -56,7 +56,7 @@ def test_prtecan(tmp_path: Path) -> None:
     out.mkdir()
     runner = CliRunner()
     result = runner.invoke(
-        tecan, [list_f, "--out", str(out), "--fit", "--scheme", scheme_f, "--bg"]
+        ppr, ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"]
     )
     assert result.exit_code == 0
 
@@ -70,9 +70,9 @@ def test_prtecan_cl(tmp_path: Path) -> None:
     out = tmp_path / "out4"
     out.mkdir()
     runner = CliRunner()
-    base_args = [list_f, "--out", str(out), "--fit", "--scheme", scheme_f]
+    base_args = ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f]
     base_args.extend(["--dil", adds_f, "--bg", "--no-is-ph"])
-    result = runner.invoke(tecan, base_args)
+    result = runner.invoke(ppr, base_args)
     assert result.exit_code == 0
 
 

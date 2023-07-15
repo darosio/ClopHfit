@@ -15,6 +15,7 @@ import lmfit  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
 import pandas as pd
+from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
@@ -36,17 +37,26 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
     click.echo(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 
+@click.group()
+@click.pass_context
+@click.version_option(message="%(version)s")
+@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
+@click.option("--out", "-o", type=cPath(), help="Output folder.")
+def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
+    """Parse Plate Reader `ppr` group command."""
+    ctx.ensure_object(dict)
+    ctx.obj["VERBOSE"] = verbose
+    ctx.obj["OUT"] = out
+
+
 ######################################
 # pr.tecan                           #
 ######################################
-@click.command()
-@click.argument("list_file", type=click.Path(exists=True))
-@click.option(
-    "--scheme", type=click.Path(exists=True), help="Plate scheme (buffers CTRs)."
-)
-@click.option(
-    "--dil", type=click.Path(exists=True), help="Initial volume and additions."
-)
+@ppr.command()
+@click.pass_context
+@click.argument("list_file", type=cPath(exists=True))
+@click.option("--scheme", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
+@click.option("--dil", type=cPath(exists=True), help="Initial volume and additions.")
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
 @click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
@@ -60,9 +70,6 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 )
 @click.option("--fit-all", is_flag=True, help="Fit all exported data.")
 @click.option(
-    "--out", "-o", default=__tecan_out_dir__, show_default=True, help="Output folder."
-)
-@click.option(
     "--png/--no-png", default=True, show_default=True, help="Export png files."
 )
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
@@ -73,8 +80,8 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option(
     "--sel", default=None, type=(float, float), help="Select from K_MIN S1_MIN."
 )
-@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
 def tecan(  # noqa: PLR0913
+    ctx: Context,
     list_file: str,
     scheme: str | None,
     dil: str | None,
@@ -84,13 +91,11 @@ def tecan(  # noqa: PLR0913
     is_ph: bool,
     fit: bool,
     fit_all: bool,
-    out: str,
     png: bool,
     pdf: bool,
     title: str,
     klim: tuple[float, float] | None,
     sel: tuple[float, float] | None,
-    verbose: int,
 ) -> None:
     """Convert a list of plate reader acquisitions into titrations.
 
@@ -108,6 +113,8 @@ def tecan(  # noqa: PLR0913
 
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
+    verbose = ctx.obj.get("VERBOSE", 0)
+    out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
     list_fp = Path(list_file)
     titan = TitrationAnalysis.fromlistfile(list_fp, is_ph)
@@ -241,9 +248,10 @@ def fit_tecan(  # noqa: PLR0913
 ########################################
 # pr.enspire                           #
 ########################################
-@click.command()
-@click.argument("csv_f", type=click.Path(exists=True, path_type=str))
-@click.argument("note_f", type=click.Path(exists=True), required=False)
+@ppr.command()
+@click.pass_context
+@click.argument("csv_f", type=cPath(exists=True, path_type=str))
+@click.argument("note_f", type=cPath(exists=True), required=False)
 @click.option(
     "-b",
     "bands",
@@ -253,16 +261,10 @@ def fit_tecan(  # noqa: PLR0913
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option(
-    "--out", "-o", default=__enspire_out_dir__, show_default=True, help="Output folder."
-)
-@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
-def enspire(
-    csv_f: str, note_f: str | None, out: str, bands: tuple[Any], verbose: int
-) -> None:
+def enspire(ctx: Context, csv_f: str, note_f: str | None, bands: tuple[Any]) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
-    print(type(bands))
-    print(bands)
+    verbose = ctx.obj.get("VERBOSE", 0)
+    out = ctx.obj.get("OUT", __enspire_out_dir__)
     ef = EnspireFile(Path(csv_f), verbose=verbose)
     ef.export_measurements(Path(out))
     if note_f is not None:

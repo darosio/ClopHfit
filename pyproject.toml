@@ -85,8 +85,7 @@ tests = [
 "fit_titration_global_old" = "clophfit.old.fit_titration_global:main"
 "fit_titration_old" = "clophfit.old.fit_titration:main"
 "note_to_csv" = "clophfit.__main__:note2csv"
-"pr.enspire" = "clophfit.__main__:enspire"
-"pr.tecan" = "clophfit.__main__:tecan"
+"ppr" = "clophfit.__main__:ppr"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
