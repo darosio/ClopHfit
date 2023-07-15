@@ -66,13 +66,15 @@
 
    class Titration{
      #tecanfiles: list[Tecanfile]
-     #conc: Sequence[float]
-	 #fromlistfile(Path|str)
-	 +load_additions(Path)
+     #conc: ArrayF
+     #is_ph: bool
+	 #fromlistfile()
 	 +@additions: list[float]
-	 +@buffer_wells: list[str]
+	 +load_additions(Path)
 	 +@data: list[dict[str, list[float]]|None|{}]
 	 +@data_nrm: list[dict[str, list[float]]|{}]
+	 +@scheme: PlateScheme
+	 +load_scheme(Path)
 	 +export_data()
    }
 
@@ -86,19 +88,21 @@
    }
 
    class TitrationAnalysis{
-	 #fromlistfile(Path|str)
-	 +load_scheme(Path)
-	 +fittings: list[pd.DataFrame]
-     +fz: Callable
      +keys_unk: list[str]
-	 +scheme: PlateScheme
+	 #fromlistfile()
+     +@fitdata: Sequence[dict[str, list[float]]
+     +@fitdata_params: dict[str, bool]
+     +@fitkws: Kwargs
+     +@results: list[dict[str, FitResult]]
+     +@result_dfs: list[pd.DataFrame]
+	 +load_scheme(Path)
 	 +fit()
 	 +plot_k()
-	 +plot_well()
 	 +plot_all_wells()
 	 +plot_ebar()
 	 +print_fitting()
 	 +plot_buffers()
+	 +export_data()
    }
 
    TitrationAnalysis --|> Titration
