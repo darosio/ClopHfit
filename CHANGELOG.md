@@ -3,6 +3,53 @@
 
 # Changelog
 
+## v0.9.0 (2023-07-15)
+
+### Feat
+
+- Change tecan and enspire as subcommands of `ppr`
+- pr.tecan exports png for each well
+- **prtecan**: new fit; sort results; add export_png
+- New glob-emcee fitting; add note_to_csv
+
+### Fix
+
+- plots of critical cl fit
+- tit_cl K>epsilon; refactor is_ph as Titration attribute
+- fit_tecan in main cli
+
+### Docs
+
+- Update tutorials and (partially) UML
+- Update zotero DOI
+- Add click doc for note_to_csv
+
+### Build
+
+- update click requirement from <8.1.5 to <8.1.6 (#311)
+- update lmfit requirement from <1.2.2 to <1.2.3 (#312)
+- update arviz requirement from <0.15.2 to <0.16.1 (#310)
+- bump ruff from 0.0.277 to 0.0.278 (#309)
+- bump actions/upload-pages-artifact from 1 to 2 (#308)
+- update numpy requirement from <1.25.1 to <1.25.2 (#306)
+- update click requirement from <8.1.4 to <8.1.5 (#304)
+- update matplotlib requirement from <3.7.2 to <3.7.3 (#303)
+- bump ruff from 0.0.275 to 0.0.277 (#301)
+
+### Refactor
+
+- Rename TitrationAnalysis.results and .result_dfs
+- Use `is_ph` instead of `kind`
+- Removes confint
+- **cli**: pr.tecan and pr.enspire
+- Drop py3.8
+
+### chore
+
+- Remove redundant NaN filtering
+- update pre-commit hooks (#307)
+- update pre-commit hooks (#300)
+
 ## v0.8.1 (2023-07-03)
 
 ### Docs
