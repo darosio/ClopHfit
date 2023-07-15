@@ -210,10 +210,18 @@ def extract_metadata(
 def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
     """Merge a list of metadata dict if the key value is the same in the list."""
     mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
+
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
-    if mmd.get("Gain") is None and mds[0].get("Gain") is not None:  # noqa: SIM102
-        if all(mds[0]["Gain"].value == md["Gain"].value for md in mds[1:]):
-            mmd["Gain"] = Metadata(mds[0]["Gain"].value)
+    def all_same_gain(mds: list[dict[str, Metadata]]) -> bool:
+        return all(md["Gain"].value == mds[0]["Gain"].value for md in mds[1:])
+
+    if (
+        mmd.get("Gain") is None
+        and mds[0].get("Gain") is not None
+        and all_same_gain(mds)
+    ):
+        mmd["Gain"] = Metadata(mds[0]["Gain"].value)
+
     return mmd
 
 
@@ -458,7 +466,9 @@ class Labelblock(BufferWellsMixin):
             try:
                 norm = 1000.0
                 for k in Labelblock._NORM_KEYS:
-                    norm /= self.metadata[k].value  # type: ignore # FIXME: D
+                    val = self.metadata[k].value
+                    if isinstance(val, (float, int)):
+                        norm /= val
             except TypeError:
                 warnings.warn(
                     "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",

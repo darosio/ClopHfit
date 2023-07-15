@@ -257,7 +257,6 @@ python = "3.11"
 template = "typeguard"
 
 [tool.hatch.envs.typeguard.scripts]
-# guard = "pytest", f"--typeguard-packages={package} {args}" see also {env:}  # XXX:
 run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.isort]
