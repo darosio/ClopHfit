@@ -3,6 +3,16 @@
 
 # Changelog
 
+## v0.9.1 (2023-07-15)
+
+### Docs
+
+- Fix zenodo badge to auto-update
+
+### Refactor
+
+- Remove silencer noqa for merge_md and norm metadata
+
 ## v0.9.0 (2023-07-15)
 
 ### Feat
