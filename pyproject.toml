@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
   'arviz < 0.16.1',
-  'click < 8.1.5',
+  'click < 8.1.6',
   'corner < 2.2.3',
   'emcee < 3.1.5',
   'lmfit < 1.2.3',
