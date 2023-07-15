@@ -1510,4 +1510,5 @@ class TitrationAnalysis(Titration):
         folder = Path(path) / f"lb{lb}"
         folder.mkdir(parents=True, exist_ok=True)
         for k, v in self.fitresults[lb].items():
-            v.figure.savefig(folder / f"{k}.png")
+            if v.figure:
+                v.figure.savefig(folder / f"{k}.png")

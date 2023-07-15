@@ -62,6 +62,9 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option(
     "--out", "-o", default=__tecan_out_dir__, show_default=True, help="Output folder."
 )
+@click.option(
+    "--png/--no-png", default=True, show_default=True, help="Export png files."
+)
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
 @click.option("--title", "-t", default="", help="Title for some plots.")
 @click.option(
@@ -82,6 +85,7 @@ def tecan(  # noqa: PLR0913
     fit: bool,
     fit_all: bool,
     out: str,
+    png: bool,
     pdf: bool,
     title: str,
     klim: tuple[float, float] | None,
@@ -104,7 +108,7 @@ def tecan(  # noqa: PLR0913
 
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
-    out_fp = Path(out)
+    out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
     list_fp = Path(list_file)
     titan = TitrationAnalysis.fromlistfile(list_fp, is_ph)
 
@@ -151,6 +155,7 @@ def tecan(  # noqa: PLR0913
                     klim,
                     title,
                     sel,
+                    png,
                     pdf,
                 )
         else:
@@ -165,6 +170,7 @@ def tecan(  # noqa: PLR0913
                 klim,
                 title,
                 sel,
+                png,
                 pdf,
             )
 
@@ -180,6 +186,7 @@ def fit_tecan(  # noqa: PLR0913
     klim: tuple[float, float] | None,
     title: str | None,
     sel: tuple[float, float] | None,
+    png: bool,
     pdf: bool,
 ) -> None:
     """Help main."""
@@ -224,6 +231,8 @@ def fit_tecan(  # noqa: PLR0913
                 i, ebar_y, ebar_yerr, xmin=xmin, xmax=xmax, ymin=ym, title=title
             )
             f.savefig(out / f"ebar{i}_sel{xm},{ym}.png")
+        if png:
+            titan.export_png(i, out)
     if pdf:
         # FIXME: export pdf
         titan.plot_all_wells(2, out / "all_wells.pdf")
