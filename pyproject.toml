@@ -75,7 +75,6 @@ tests = [
   "pandas-stubs == 2.0.2.230605",
   "Pygments < 2.15.2",
   "pytest < 7.4.1",
-  "typeguard == 4.0.0",
   "types-click == 7.1.8",
   "xdoctest < 1.1.2"
 ]
@@ -250,14 +249,6 @@ sync = "pip-df sync -x tests"  # XXX:
 test = "coverage run --parallel -m pytest"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
-
-[tool.hatch.envs.typeguard]
-features = ["tests"]
-python = "3.11"
-template = "typeguard"
-
-[tool.hatch.envs.typeguard.scripts]
-run = "pytest --typeguard-packages=clophfit {args}"
 
 [tool.isort]
 combine_as_imports = true

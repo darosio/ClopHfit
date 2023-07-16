@@ -8,7 +8,6 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 import pytest
-import typeguard
 from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -570,21 +569,21 @@ class TestPlateScheme:
         """Set buffer and test raise error."""
         ps.buffer = ["A1", "A2"]
         assert ps.buffer == ["A1", "A2"]
-        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+        with pytest.raises(TypeError):
             ps.buffer = [1, 2]  # type: ignore
 
     def test_ctrl(self, ps: PlateScheme) -> None:
         """Set ctrl and test raise error."""
         ps.ctrl = ["B1", "B2"]
         assert ps.ctrl == ["B1", "B2"]
-        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+        with pytest.raises(TypeError):
             ps.ctrl = [1, 2]  # type: ignore
 
     def test_names(self, ps: PlateScheme) -> None:
         """Set names and test raise error."""
         ps.names = {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
         assert ps.names == {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
-        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+        with pytest.raises(TypeError):
             ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore
 
     def test_invalid_file(self) -> None:

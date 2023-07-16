@@ -1190,23 +1190,13 @@ class TitrationAnalysis(Titration):
         The fitting process uses the initial point (`ini`), the final point (`fin`), and weighting (`weight`) parameters
         defined in the `FitKwargs` instance (accessible through `self.fitkws`).
 
+        To perform a fit, you would first define the fit parameters and then call the fit method:
+        titan.fitkws = TitrationAnalysis.FitKwargs(ini=0, fin=None, weight=True)
+
         Returns
         -------
         list[dict[str, FitResult]]
             A list of dictionaries with fitting results.
-
-        Raises
-        ------
-        NotImplementedError
-            If the fitting procedure encounters an unanticipated scenario or data type.
-
-        Examples
-        --------
-        To perform a fit, you would first define the fit parameters and then call the fit method:
-
-        >>> titan = TitrationAnalysis()
-        >>> titan.fitkws = TitrationAnalysis.FitKwargs(ini=0, fin=None, weight=True)
-        >>> fit_results = titan.fit()
 
         Notes
         -----
