@@ -8,6 +8,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 import pytest
+import typeguard
 from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -15,6 +16,7 @@ from clophfit.binding.fitting import FitResult
 from clophfit.prtecan import (
     Labelblock,
     LabelblocksGroup,
+    PlateScheme,
     Tecanfile,
     TecanfilesGroup,
     TitrationAnalysis,
@@ -554,6 +556,41 @@ class TestTitration:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
             prtecan.Titration.fromlistfile(data_tests / "list.pH2", True)
+
+
+class TestPlateScheme:
+    """Test PlateScheme."""
+
+    @pytest.fixture(autouse=True, scope="class")
+    def ps(self) -> PlateScheme:
+        """Create a void PlateScheme."""
+        return PlateScheme()
+
+    def test_buffer(self, ps: PlateScheme) -> None:
+        """Set buffer and test raise error."""
+        ps.buffer = ["A1", "A2"]
+        assert ps.buffer == ["A1", "A2"]
+        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+            ps.buffer = [1, 2]  # type: ignore
+
+    def test_ctrl(self, ps: PlateScheme) -> None:
+        """Set ctrl and test raise error."""
+        ps.ctrl = ["B1", "B2"]
+        assert ps.ctrl == ["B1", "B2"]
+        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+            ps.ctrl = [1, 2]  # type: ignore
+
+    def test_names(self, ps: PlateScheme) -> None:
+        """Set names and test raise error."""
+        ps.names = {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
+        assert ps.names == {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
+        with pytest.raises((TypeError, typeguard.TypeCheckError)):
+            ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore
+
+    def test_invalid_file(self) -> None:
+        """Test providing an incorrect file."""
+        with pytest.raises(FileNotFoundError):
+            PlateScheme(file=Path("incorrect_file.csv"))
 
 
 @pytest.mark.filterwarnings("ignore:OVER")

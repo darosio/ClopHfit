@@ -790,13 +790,13 @@ class PlateScheme:
         msg = "Names must be a dictionary mapping strings to sets of strings"
         if not isinstance(value, dict):
             raise TypeError(msg)
-        if not all(
-            isinstance(k, str)  # type: ignore
-            and isinstance(v, set)  # type: ignore
-            and all(isinstance(item, str) for item in v)
-            for k, v in value.items()
-        ):
-            raise TypeError(msg)
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise TypeError(msg)
+            if not isinstance(v, set):
+                raise TypeError(msg)
+            if not all(isinstance(item, str) for item in v):
+                raise TypeError(msg)
         self._names = value
 
     def __post_init__(self) -> None:
