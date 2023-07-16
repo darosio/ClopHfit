@@ -705,7 +705,7 @@ class TestTitrationAnalysis:
         assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
         # Fit up to the second-last data point
-        titan.fitkws = {"fin": -1}
+        titan.fitkws = TitrationAnalysis.FitKwargs(fin=-1)
         fres = titan.results
         # Check that the first fit result for 'H02' is still None
         assert fres[0]["H02"] == FitResult(None, None, None)

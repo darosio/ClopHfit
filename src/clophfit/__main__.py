@@ -198,7 +198,7 @@ def fit_tecan(  # noqa: PLR0913
 ) -> None:
     """Help main."""
     titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fitkws = {"weight": weight}
+    titan.fitkws = TitrationAnalysis.FitKwargs(weight=weight)
     # lb = 0, 1, 2(for glob)
     for i, fit in enumerate(titan.result_dfs):
         if verbose:

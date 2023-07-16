@@ -19,7 +19,7 @@ from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
 from uncertainties import ufloat  # type: ignore
 
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
-from clophfit.types import ArrayF, Kwargs
+from clophfit.types import ArrayF
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -1058,13 +1058,21 @@ class TitrationAnalysis(Titration):
         For unexpected file format, e.g. header `names`.
     """
 
+    @dataclass
+    class FitKwargs:
+        """Represent arguments for fit method."""
+
+        ini: int = 0
+        fin: int | None = None
+        weight: bool = True
+
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
     _fitdata: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )
     _fitdata_params: dict[str, bool] = field(init=False, default_factory=dict)
-    _fitkws: Kwargs = field(init=False, default_factory=dict)
+    _fitkws: FitKwargs = field(init=False, default_factory=FitKwargs)
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
 
@@ -1136,12 +1144,12 @@ class TitrationAnalysis(Titration):
         self._result_dfs = []
 
     @property
-    def fitkws(self) -> Kwargs:
+    def fitkws(self) -> FitKwargs:
         """Get the arguments for fitting."""
         return self._fitkws
 
     @fitkws.setter
-    def fitkws(self, params: dict[str, str | int | float | bool | None]) -> None:
+    def fitkws(self, params: FitKwargs) -> None:
         """Set the datafit parameters."""
         self._fitkws = params
         self._results = []
@@ -1151,7 +1159,7 @@ class TitrationAnalysis(Titration):
     def results(self) -> list[dict[str, FitResult]]:
         """Result dataframes."""
         if not self._results:
-            self._results = self.fit(**self.fitkws)  # type: ignore
+            self._results = self.fit()
         return self._results
 
     @property
@@ -1176,27 +1184,35 @@ class TitrationAnalysis(Titration):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
-    def fit(
-        self, ini: int = 0, fin: int | None = None, weight: bool = True
-    ) -> list[dict[str, FitResult]]:
+    def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
-        Here is less general. It is for 2 labelblocks.
-
-        Parameters
-        ----------
-        ini : int
-            Initial point (default: 0).
-        fin : int, optional
-            Final point (default: None).
-        weight : bool
-            Use residues from single Labelblock fit as weights per self and for global fitting.
+        The fitting process uses the initial point (`ini`), the final point (`fin`), and weighting (`weight`) parameters
+        defined in the `FitKwargs` instance (accessible through `self.fitkws`).
 
         Returns
         -------
-        list[pd.DataFrame]
-            Fitting results.
+        list[dict[str, FitResult]]
+            A list of dictionaries with fitting results.
+
+        Raises
+        ------
+        NotImplementedError
+            If the fitting procedure encounters an unanticipated scenario or data type.
+
+        Examples
+        --------
+        To perform a fit, you would first define the fit parameters and then call the fit method:
+
+        >>> titan = TitrationAnalysis()
+        >>> titan.fitkws = TitrationAnalysis.FitKwargs(ini=0, fin=None, weight=True)
+        >>> fit_results = titan.fit()
+
+        Notes
+        -----
+        This method is less general and is designed for two label blocks.
         """
+        ini, fin = self.fitkws.ini, self.fitkws.fin
         x = np.array(self.conc)[ini:fin]
         fittings = []
         # Any Lbg at least contains normalized data.
@@ -1220,7 +1236,7 @@ class TitrationAnalysis(Titration):
             y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
             y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
             ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph)
-            if weight:
+            if self.fitkws.weight:
                 fitting[k] = fit_binding_glob(ds, True)
             else:
                 fitting[k] = fit_binding_glob(ds, False)
