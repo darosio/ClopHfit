@@ -49,8 +49,8 @@ processing data.
 Extract and fit titrations from a list of Tecan files collected at various pH or
 chloride concentrations:
 
-    clop prtecan list.pH -k ph --scheme ../scheme.txt --dil additions.pH --norm
-        --out prova2 --Klim 6.8,8.4 --sel 7.6,20
+    ppr -o prova2 --is-ph tecan list.pH --scheme ../scheme.txt --norm
+        --dil additions.pH --Klim 6.8,8.4 --sel 7.6,20
 
 Use the --no-weight option to reproduce an older pr.tecan version.
 
@@ -64,7 +64,7 @@ Predict chloride dissociation constant K_d at a given pH:
 
 Parser for EnSpire (PerkinElmer) file:
 
-    clop prenspire file.csv -out folder
+    ppr -o folder enspire file.csv
 
 Destination folder (default: "./Meas") will contain for each Measurement:
 

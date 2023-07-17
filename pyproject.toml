@@ -188,7 +188,6 @@ omit = ["*__init__.py", "*/old/*"]
 source = ["clophfit", "tests"]
 
 [tool.hatch.envs.default]
-# type = "pip-deepfreeze"  # pipx runpip hatch install hatch-pip-deepfreeze
 features = ["dev", "tests", "docs"]
 
 [tool.hatch.envs.default.scripts]
@@ -210,7 +209,6 @@ lint = [
   "pre-commit --version",
   "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 ]
-sync = "pip-df sync -x dev,docs,tests"
 
 [tool.hatch.envs.tests]
 features = ["tests"]
@@ -226,7 +224,6 @@ cov = [
   "coverage report",
   "coverage xml"
 ]
-sync = "pip-df sync -x tests"  # XXX:
 test = "coverage run --parallel -m pytest"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
