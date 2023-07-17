@@ -9,7 +9,7 @@ from click.testing import CliRunner
 from matplotlib.testing.compare import compare_images  # type: ignore
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-from clophfit.__main__ import clop, ppr
+from clophfit.__main__ import clop, fit_titration, ppr
 
 # tests path
 tpath = Path(__file__).parent
@@ -77,7 +77,7 @@ def test_prtecan_cl(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("csv_file", "expected_output", "additional_params"),
+    ("csv_file", "output", "opts"),
     [
         ("A04 Cl_A.csv", " K :  13.64  14.28  14.86  15.44  16.04  16.71  17.51", None),
         ("A04 Cl_A.csv", " K :  13.52  14.11  14.66  15.20", ["-b", "480", "530"]),
@@ -86,7 +86,7 @@ def test_prtecan_cl(tmp_path: Path) -> None:
     ],
 )
 def test_fit_titration(
-    csv_file: str, expected_output: str, additional_params: list[str], tmp_path: Path
+    csv_file: str, output: str, opts: list[str], tmp_path: Path
 ) -> None:
     """Test the old ``fit_titration.py`` script with actual data and validate output."""
     note_fp = tpath / "data" / "NTT-A04-Cl_note"
@@ -96,16 +96,50 @@ def test_fit_titration(
     runner = CliRunner()
     base_args = ["fit_titration", str(csv_fp), str(note_fp)]
     base_args.extend(["-t", "cl", "-d", str(out)])
-    if additional_params:
-        base_args.extend(additional_params)
-        sbands = f"({additional_params[1]}, {additional_params[2]})"
+    if opts:
+        base_args.extend(opts)
+        sbands = f"({opts[1]}, {opts[2]})"
     else:
         sbands = "None"
     result = runner.invoke(clop, base_args)
     assert result.exit_code == 0
-    expected_output = re.sub(" ", r"\\s+", expected_output.strip())
+    expected_output = re.sub(" ", r"\\s+", output.strip())
     # Assert that the pattern appears in the output
     assert re.search(expected_output, result.output) is not None
     # Asserting that PDF is created
     expected_pdf_filename = out / f"{csv_fp.stem}_{sbands}_{note_fp.stem}.pdf"
     assert expected_pdf_filename.exists()
+
+
+class TestFitTitration:
+    """It test the old ``fit_titration_global.py`` script."""
+
+    @pytest.mark.parametrize(
+        ("dat_ff", "ph_opt", "output", "opts"),
+        [
+            (["pH", "D05.dat"], "--is-ph", "K: 7.5313", None),
+            (["pH", "D05.dat"], "--is-ph", "K: 7.65166", ["--no-weight"]),
+            (["Cl", "B05-20130628-cor.dat"], "--no-is-ph", "K: 6.4537", None),
+        ],
+    )
+    def test_glob(self, dat_ff: list[str], ph_opt: str, output: str, opts: str) -> None:
+        """Fit result for K is correct and png are generated."""
+        dat_fp = tpath / "data" / "global" / dat_ff[0] / dat_ff[1]
+        base_args = ["-v", ph_opt, "glob", str(dat_fp), "-b", "77"]
+        # TODO: option b = 0 false emcee
+        # TODO: use arviz directly for pandas
+        if opts:
+            base_args.extend(opts)
+        runner = CliRunner()
+        result = runner.invoke(fit_titration, base_args)
+        assert result.exit_code == 0
+        expected_output = re.sub(" ", r"\\s+", output.strip())
+        assert re.search(expected_output, result.output) is not None
+        # assert that the png files are generated
+        png_files = [dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png")]
+        png_files.append(dat_fp.with_suffix(".png"))
+        for file in png_files:
+            assert file.exists(), f"{file} does not exist!"
+        # delete the png files
+        for file in png_files:
+            file.unlink()

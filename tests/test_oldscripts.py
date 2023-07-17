@@ -2,7 +2,6 @@
 
 import subprocess  # nosec B404
 import sys
-import typing
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, ClassVar
@@ -87,69 +86,3 @@ class TestTitrationFit:
         msg = mpltc.compare_images(fp_test, fp_expected, 80.0)
         if msg:
             raise ImageComparisonFailure(msg)  # pragma: no cover
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
-@typing.no_type_check
-class TestTitrationFitGlobal:
-    """It test the old ``fit_titration_global.py`` script."""
-
-    dat_files: ClassVar[list[str]] = [
-        "./global/pH/D05.dat",
-        "./global/Cl/B05-20130628-cor.dat",
-    ]
-    res: ClassVar[list[str]] = [
-        """SA1   683.357   714.804   740.747   767.245   800.925
-SB1   246.164   299.394   338.212   374.611   417.296
-SA2   11.0487   47.6023   76.2874     104.3   138.128
-SB2    491.64   534.936   571.809   611.045   664.602
-  K   7.34376   7.51152   7.65166   7.80003   7.99971
-bootstrap:""",
-        """SA1   26910.8   27072.2   27216.7   27361.3   27522.7
-SB1   916.697   1037.35   1144.64    1251.2   1369.35
-SA2   3813.97   3970.34   4110.42   4250.52   4406.96
-SB2      -INF   24.2754   87.1125   149.801   219.626
-  K   7.51099   7.78702   8.03881   8.29508   8.58663
-bootstrap:""",
-    ]
-
-    @pytest.fixture(
-        scope="class",
-        params=[
-            (dat_files[0], res[0], ["--boot", "3"]),
-            (dat_files[1], res[1], ["--boot", "3", "-t", "cl"]),
-        ],
-    )
-    def run_script(self, request: pytest.FixtureRequest) -> Iterator[Rscript]:
-        """Run the script as class fixture."""
-        cli = "../../src/clophfit/old/fit_titration_global.py"
-        dat_file = request.param[0]
-        with subprocess.Popen(  # nosec B603
-            [cli, dat_file, "_tmpoutput"] + request.param[2],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            cwd=_data,
-            shell=False,  # noqa: S603
-        ) as process:
-            yield request.param, process.communicate()
-
-    def test_stdout(self, run_script: Rscript) -> None:
-        """It print out results."""
-        expected = run_script[0][1]
-        assert expected in run_script[1][0]
-
-    @pytest.mark.xfail(reason="Deprecation from dependency.")
-    def test_stderr(self, run_script: Rscript) -> None:
-        """Stderr is empty."""
-        assert not run_script[1][1]
-
-    @pytest.mark.xfail(reason="Image sizes do not match.")
-    def test_png(self, run_script: Rscript) -> None:
-        """It saves pdf file."""
-        f = ".".join([run_script[0][0], "png"])
-        fp_test = tmpoutput / f.rsplit("/", maxsplit=1)[-1]
-        fp_expected = _expected / f.lstrip("./")
-        msg = mpltc.compare_images(fp_test, fp_expected, 1.01)
-        if msg:  # pragma: no cover
-            raise ImageComparisonFailure(msg)

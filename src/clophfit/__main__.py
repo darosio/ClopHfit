@@ -356,7 +356,7 @@ def _print_result(
     "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
 )
 @click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit_titration(  # noqa: PLR0913
+def fit_titration_c(  # noqa: PLR0913
     csv_f: str,
     note_f: str,
     out: Path,
@@ -389,52 +389,98 @@ def fit_titration(  # noqa: PLR0913
     _print_result(fit_result, pdf_file, str(band))
 
 
-@clop.command("fit_titration_global")
-@click.argument("file", type=click.Path(exists=True))
-@click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
+#############################
+#  fit_titration_global     #
+#############################
+@click.group()
+@click.pass_context
+@click.version_option(message="%(version)s")
+@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
+@click.option("--out", "-o", type=cPath(), help="Output folder.")
 @click.option(
-    "-t",
-    "titration_type",
-    default="pH",
-    type=click.Choice(["pH", "Cl"], case_sensitive=False),
-    help="titration type (default: pH)",
+    "--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH."
 )
+def fit_titration(
+    ctx: Context, verbose: int, out: str, is_ph: bool
+) -> None:  # pragma: no cover
+    """Fit Titration group command."""
+    ctx.ensure_object(dict)
+    ctx.obj["VERBOSE"] = verbose
+    ctx.obj["OUT"] = out
+    ctx.obj["IS_PH"] = is_ph
+
+
+@fit_titration.command()
+@click.pass_context
+@click.argument("file", type=click.Path(exists=True))
 @click.option("-b", "--boot", type=int, help="Number of booting iterations")
-@click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit_titration_global(file, out, titration_type, boot, verbose):  # type: ignore
+@click.option(
+    "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
+)
+def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     """Update old svd or band fit of titration spectra."""
+    verbose = ctx.obj.get("VERBOSE", 0)
+    is_ph = ctx.obj.get("IS_PH", True)
     file_df = pd.read_csv(file)
+    min_correl_to_print = 0.65
+    burn = 75
     if verbose:
         click.echo(file_df)
-        print(out)
-        print(titration_type)
-        print(boot)
-    xc = {}
-    yc = {}
-    for label in file_df.columns[1:]:
-        xc[label] = file_df["x"].to_numpy()
-        yc[label] = file_df[label].to_numpy()
-    ds = binding.fitting.Dataset(xc, yc, titration_type == "pH")
-    f_res = binding.fitting.fit_binding_glob(ds, True)
+    yc = {lbl: file_df[lbl].to_numpy() for lbl in file_df.columns[1:]}
+    ds = binding.fitting.Dataset(file_df["x"].to_numpy(), yc, is_ph)
+    f_res = binding.fitting.fit_binding_glob(ds, weight)
+    # Figure
     figure, ax = plt.subplots()
-    binding.fitting.plot_fit(ax, ds, f_res.result)
-    lmfit.printfuncs.report_fit(f_res.result, min_correl=0.65)
+    binding.fitting.plot_fit(
+        ax, ds, f_res.result, nboot=30, pp=binding.plotting.PlotParameters(is_ph)
+    )
+    lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
     figure.savefig(Path(file).with_suffix(".png"))
-    result_emcee = f_res.mini.emcee(burn=150, steps=1800)
+    # Emcee
+    result_emcee = f_res.mini.emcee(burn=burn, steps=boot)
     samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
     quantiles = np.percentile(idata.posterior["K"], [2.275, 15.865, 50, 84.135, 97.275])
     emcee_plot = corner.corner(samples)
-    emcee_plot.savefig("e.png")
-    print(quantiles)
-    for lbl in ds:
-        ratio = (
-            f_res.result.params[f"S0_{lbl}"].value
-            / f_res.result.params[f"S1_{lbl}"].value
+    emcee_plot.savefig(
+        Path(file).with_suffix(".png").with_stem(Path(file).stem + "-emcee")
+    )
+    print(f"Quantiles for K: {[f'{q:.3g}' for q in quantiles]}")
+    if is_ph:  # ratio between protonated un-protonated states
+        for lbl in ds:
+            ratio = (
+                f_res.result.params[f"S0_{lbl}"].value
+                / f_res.result.params[f"S1_{lbl}"].value
+            )
+            print(f"Ratio of {lbl}: {ratio}")
+        # Compute ratio of parameters for each sample
+        ratios = {lbl: samples[f"S0_{lbl}"] / samples[f"S1_{lbl}"] for lbl in ds}
+        # Combine ratio and K samples into a DataFrame for corner plot
+        samples_for_corner = pd.DataFrame({**ratios, **{"K": samples["K"]}})
+        # Create corner plot
+        corner_plot = corner.corner(samples_for_corner)
+        corner_plot.savefig(
+            Path(file)
+            .with_suffix(".png")
+            .with_stem(Path(file).stem + "-corner-ratios-K")
         )
-        print(f"Ratio of {lbl}: {ratio}")
+        # Convert the dictionary of ratio samples to an ArviZ InferenceData object
+        ratio_samples_dict = {key: np.array(val) for key, val in ratios.items()}
+        idata_ratios = az.from_dict(posterior=ratio_samples_dict)
+        # Compute quantiles
+        quantiles_ratios = {
+            lbl: np.percentile(
+                idata_ratios.posterior[lbl], [2.275, 15.865, 50, 84.135, 97.275]
+            )
+            for lbl in ds
+        }
+        # Print quantiles
+        for lbl, quants in quantiles_ratios.items():
+            print(
+                f"Quantiles of ratio for {lbl}: {', '.join(f'{q:.3g}' for q in quants)}"
+            )
 
 
 ########################################
