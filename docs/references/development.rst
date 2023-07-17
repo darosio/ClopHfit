@@ -92,8 +92,8 @@ Or use hatch:
 ::
 
    hatch run tests:all
-   hatch run coverage:combine
-   hatch run coverage:report
+   (hatch run tests:ccov)
+   hatch run tests:cov
 
 Building docs
 ~~~~~~~~~~~~~

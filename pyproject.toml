@@ -187,15 +187,6 @@ branch = true
 omit = ["*__init__.py", "*/old/*"]
 source = ["clophfit", "tests"]
 
-[tool.hatch.envs.coverage]
-dependencies = ["coverage[toml]"]
-detached = true
-
-[tool.hatch.envs.coverage.scripts]
-combine = "coverage combine {args}"
-report = "coverage report"
-xml = "coverage xml"
-
 [tool.hatch.envs.default]
 # type = "pip-deepfreeze"  # pipx runpip hatch install hatch-pip-deepfreeze
 features = ["dev", "tests", "docs"]
@@ -207,14 +198,6 @@ bump = [
   "hatch publish -r test"
 ]
 ch = "cz ch --incremental --unreleased-version HEAD"
-# # --cov must not come before an argument in order to use the sources defined by config
-# _cov = "pytest --cov --cov-report={env:COVERAGE_REPORT:term-missing} --cov-config=pyproject.toml"
-# dev = "pytest -p no:randomly --no-cov {args:tests}"
-# cov = "_cov -p no:randomly {args:tests}"
-# full = "_cov -n auto --reruns 5 --reruns-delay 3 -r aR {args:tests}"
-# [tool.hatch.envs.default.overrides]
-# env.GITHUB_ACTIONS.env-vars = "COVERAGE_REPORT="
-ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"  # XXX:
 clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
 init = [
   "pre-commit --version",
@@ -243,7 +226,12 @@ template = "tests"
 python = ["3.11", "3.10", "3.9"]  # reverse order to ensure the presence in older python of module included in newer versions
 
 [tool.hatch.envs.tests.scripts]
-all = ["test", "type", "xdoc"]
+all = ["test", "type", "xdoc", "cov"]
+ccov = ["coverage combine"]
+cov = [
+  "coverage report",
+  "coverage xml"
+]
 sync = "pip-df sync -x tests"  # XXX:
 test = "coverage run --parallel -m pytest"
 type = "mypy src tests docs/conf.py"
