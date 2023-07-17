@@ -38,7 +38,7 @@ jobs:
           pip --version
           hatch --version
       - name: Run
-        run: hatch run lint:run
+        run: hatch run lint
 
   checks:
     name:

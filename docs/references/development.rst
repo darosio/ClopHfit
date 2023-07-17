@@ -18,7 +18,7 @@ You need the following requirements:
         hatch run init  # init repo with pre-commit hooks
         hatch run sync  # sync venv with deepfreeze
 
-        hatch run lint:run
+        hatch run lint
         hatch run tests.py3.11:all
 
    Hatch handles everything for you, including setting up an temporary

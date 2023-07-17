@@ -56,6 +56,7 @@ dev = [
   "jupyter",
   "jupyterlab",
   "ruff == 0.0.278",
+  "pre-commit == 3.0.1",
   "pylsp-mypy",
   "python-lsp-ruff"
 ]
@@ -187,7 +188,7 @@ omit = ["*__init__.py", "*/old/*"]
 source = ["clophfit", "tests"]
 
 [tool.hatch.envs.coverage]
-dependencies = ["coverage[toml]>=7.1.0"]  # XXX:
+dependencies = ["coverage[toml]"]
 detached = true
 
 [tool.hatch.envs.coverage.scripts]
@@ -216,8 +217,13 @@ ch = "cz ch --incremental --unreleased-version HEAD"
 ciao = "echo 'ciao' {args:pilo liscio} {env:{home}}"  # XXX:
 clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
 init = [
+  "pre-commit --version",
   "pre-commit install",
   "pre-commit install --hook-type commit-msg --hook-type pre-push"
+]
+lint = [
+  "pre-commit --version",
+  "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 ]
 sync = "pip-df sync -x dev,docs,tests"
 
@@ -228,13 +234,6 @@ template = "docs"
 [tool.hatch.envs.docs.scripts]
 build = "sphinx-build docs docs/_build"
 serve = "python -m http.server 8000 -d docs/_build"
-
-[tool.hatch.envs.lint]
-dependencies = ["pre-commit>=3.0.1"]  # XXX:
-detached = true
-
-[tool.hatch.envs.lint.scripts]
-run = "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 
 [tool.hatch.envs.tests]
 features = ["tests"]
