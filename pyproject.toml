@@ -199,6 +199,8 @@ bump = [
 ]
 ch = "cz ch --incremental --unreleased-version HEAD"
 clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
+docs = "sphinx-build docs docs/_build"
+docserve = "python -m http.server 8000 -d docs/_build"
 init = [
   "pre-commit --version",
   "pre-commit install",
@@ -209,14 +211,6 @@ lint = [
   "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
 ]
 sync = "pip-df sync -x dev,docs,tests"
-
-[tool.hatch.envs.docs]
-features = ["docs"]
-template = "docs"
-
-[tool.hatch.envs.docs.scripts]
-build = "sphinx-build docs docs/_build"
-serve = "python -m http.server 8000 -d docs/_build"
 
 [tool.hatch.envs.tests]
 features = ["tests"]

@@ -102,14 +102,13 @@ You can build the docs using:
 
 ::
 
-   hatch run docs:sync
-   hatch run docs:build
+   hatch run docs
 
 You can see a preview with:
 
 ::
 
-   hatch run docs:serve
+   hatch run docserve
 
 When needed (e.g. API updates):
 

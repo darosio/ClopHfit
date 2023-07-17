@@ -36,7 +36,7 @@ jobs:
           hatch --version
       - name: Run hatch
         run: |
-          hatch run docs:build
+          hatch run docs
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v2
         with:
