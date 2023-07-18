@@ -115,16 +115,16 @@ class TestFitTitration:
     """It test the old ``fit_titration_global.py`` script."""
 
     @pytest.mark.parametrize(
-        ("dat_ff", "ph_opt", "output", "opts"),
+        ("dat_f", "ph_opt", "output", "opts"),
         [
-            (["pH", "D05.dat"], "--is-ph", "K: 7.5313", None),
-            (["pH", "D05.dat"], "--is-ph", "K: 7.65166", ["--no-weight"]),
-            (["Cl", "B05-20130628-cor.dat"], "--no-is-ph", "K: 6.4537", None),
+            ("pH_D05.dat", "--is-ph", "K: 7.5313", None),
+            ("pH_D05.dat", "--is-ph", "K: 7.65166", ["--no-weight"]),
+            ("Cl_B05-20130628-cor.dat", "--no-is-ph", "K: 6.4537", None),
         ],
     )
-    def test_glob(self, dat_ff: list[str], ph_opt: str, output: str, opts: str) -> None:
+    def test_glob(self, dat_f: str, ph_opt: str, output: str, opts: str) -> None:
         """Fit result for K is correct and png are generated."""
-        dat_fp = tpath / "data" / "global" / dat_ff[0] / dat_ff[1]
+        dat_fp = tpath / "glob" / dat_f
         base_args = ["-v", ph_opt, "glob", str(dat_fp), "-b", "77"]
         # TODO: option b = 0 false emcee
         # TODO: use arviz directly for pandas
