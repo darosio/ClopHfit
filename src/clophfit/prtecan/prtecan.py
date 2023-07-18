@@ -121,7 +121,6 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 
 
 # MAYBE: with a filter ectract_metadata with a map
-# MAYBE: Add ipynb to ruff see 277
 
 
 @dataclass(frozen=False)
