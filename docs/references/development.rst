@@ -86,15 +86,14 @@ Use ``coverage`` to generate coverage reports:
 
 ::
 
-   coverage run --parallel -m pytest
+   coverage run --branch -p -m pytest
 
 Or use hatch:
 
 ::
 
    hatch run tests:all
-   (hatch run tests:ccov)
-   hatch run tests:cov
+   (hatch run tests:cov)
 
 Building docs
 ~~~~~~~~~~~~~
