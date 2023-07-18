@@ -90,7 +90,7 @@ jobs:
           pip install .[tests]
       - name: Run test
         run: |
-          coverage run --parallel -m pytest
+          coverage run -p -m pytest
           coverage combine
           coverage report
           coverage xml
