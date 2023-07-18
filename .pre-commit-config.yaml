@@ -31,7 +31,7 @@ repos:
         exclude: "^tests/EnSpire/|^tests/data/tmp/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.9.0
+    rev: v2.10.0
     hooks:
       - id: pretty-format-ini
         args: [--autofix]
@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.0.277
+    rev: v0.0.278
     hooks:
       - id: ruff
         # args: [--exclude, "src/clophfit/prenspire/*"]
@@ -101,7 +101,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: 3.5.2
+    rev: 3.5.3
     hooks:
       - id: commitizen
       - id: commitizen-branch
