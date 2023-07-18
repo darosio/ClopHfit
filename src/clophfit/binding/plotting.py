@@ -235,27 +235,16 @@ def plot_spectra_distributed(
     fig.colorbar(sm, ax=axl, label=pp.kind)
 
 
-def plot_emcee(result_emcee: MinimizerResult) -> tuple[Figure, list[float]]:
+def plot_emcee(flatchain: pd.DataFrame) -> Figure:
     """Plot emcee result."""
-    samples = result_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
-    samples_dict = {key: np.array(val) for key, val in samples.items()}
+    samples_dict = {key: np.array(val) for key, val in flatchain.items()}
     idata = az.from_dict(posterior=samples_dict)
-    f = corner.corner(
+    return corner.corner(
         idata,
         divergences=False
         # XXX: idata, truths=list(result_emcee.params.valuesdict().values()), divergences=False
     )
-    if "K" in idata.posterior:
-        hdi = corner.quantile(idata.posterior["K"], [0.03, 0.97])
-        frac_part = str(result_emcee.params["K"].stderr).split(".")[1]
-        # Find the position of the first non-zero digit
-        index = next((i for i, char in enumerate(frac_part) if char != "0"), None)
-        digits = 0 if index is None else index + 1
-        hdi_rounded = [round(value, digits) for value in hdi]
-        return f, hdi_rounded
-    else:
-        return f, []
 
 
 def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") -> None:

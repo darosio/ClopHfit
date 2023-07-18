@@ -296,10 +296,6 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     return residuals
 
 
-# MAYBE: R ;= S0 / S1
-# returns S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
-
-
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     """Infinite cooperativity model.
 

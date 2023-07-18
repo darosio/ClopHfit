@@ -8,9 +8,7 @@ from collections import namedtuple
 from pathlib import Path
 from typing import Any
 
-import arviz as az
 import click
-import corner  # type: ignore
 import lmfit  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np
@@ -46,7 +44,8 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
     """Parse Plate Reader `ppr` group command."""
     ctx.ensure_object(dict)
     ctx.obj["VERBOSE"] = verbose
-    ctx.obj["OUT"] = out
+    if out:
+        ctx.obj["OUT"] = out
 
 
 ######################################
@@ -413,7 +412,7 @@ def fit_titration(
 @fit_titration.command()
 @click.pass_context
 @click.argument("file", type=click.Path(exists=True))
-@click.option("-b", "--boot", type=int, help="Number of booting iterations")
+@click.option("-b", "--boot", type=int, help="Number of booting iterations.")
 @click.option(
     "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
 )
@@ -422,6 +421,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     verbose = ctx.obj.get("VERBOSE", 0)
     is_ph = ctx.obj.get("IS_PH", True)
     file_df = pd.read_csv(file)
+    fp = Path(file)
     min_correl_to_print = 0.65
     burn = 75
     if verbose:
@@ -436,51 +436,28 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     )
     lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
     figure.savefig(Path(file).with_suffix(".png"))
-    # Emcee
-    result_emcee = f_res.mini.emcee(burn=burn, steps=boot)
-    samples = result_emcee.flatchain
-    # Convert the dictionary of flatchains to an ArviZ InferenceData object
-    samples_dict = {key: np.array(val) for key, val in samples.items()}
-    idata = az.from_dict(posterior=samples_dict)
-    quantiles = np.percentile(idata.posterior["K"], [2.275, 15.865, 50, 84.135, 97.275])
-    emcee_plot = corner.corner(samples)
-    emcee_plot.savefig(
-        Path(file).with_suffix(".png").with_stem(Path(file).stem + "-emcee")
-    )
-    print(f"Quantiles for K: {[f'{q:.3g}' for q in quantiles]}")
-    if is_ph:  # ratio between protonated un-protonated states
-        for lbl in ds:
-            ratio = (
-                f_res.result.params[f"S0_{lbl}"].value
-                / f_res.result.params[f"S1_{lbl}"].value
-            )
-            print(f"Ratio of {lbl}: {ratio}")
-        # Compute ratio of parameters for each sample
-        ratios = {lbl: samples[f"S0_{lbl}"] / samples[f"S1_{lbl}"] for lbl in ds}
-        # Combine ratio and K samples into a DataFrame for corner plot
-        samples_for_corner = pd.DataFrame({**ratios, **{"K": samples["K"]}})
-        # Create corner plot
-        corner_plot = corner.corner(samples_for_corner)
-        corner_plot.savefig(
-            Path(file)
-            .with_suffix(".png")
-            .with_stem(Path(file).stem + "-corner-ratios-K")
-        )
-        # Convert the dictionary of ratio samples to an ArviZ InferenceData object
-        ratio_samples_dict = {key: np.array(val) for key, val in ratios.items()}
-        idata_ratios = az.from_dict(posterior=ratio_samples_dict)
-        # Compute quantiles
-        quantiles_ratios = {
-            lbl: np.percentile(
-                idata_ratios.posterior[lbl], [2.275, 15.865, 50, 84.135, 97.275]
-            )
-            for lbl in ds
-        }
-        # Print quantiles
-        for lbl, quants in quantiles_ratios.items():
-            print(
-                f"Quantiles of ratio for {lbl}: {', '.join(f'{q:.3g}' for q in quants)}"
-            )
+    if boot:
+        # Emcee
+        samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain
+        fig = binding.plotting.plot_emcee(samples)
+        fig.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emcee"))
+        hdi = samples.quantile([0.025, 0.975])["K"].to_list()
+        print(f"Quantiles for K: {[f'{q:.3g}' for q in hdi]}")
+        hdi = samples.quantile([0.03, 0.97])["K"].to_list()
+        print(f"HDI (94%): {[f'{q:.3g}' for q in hdi]}")
+        # R := S0 / S1
+        # function := S1 * (R + (1 - R) * 10 ** (K - x) / (1 + 10 ** (K - x)))
+        if is_ph:  # ratio between protonated un-protonated states
+            ratios = {lbl: samples[f"S0_{lbl}"] / samples[f"S1_{lbl}"] for lbl in ds}
+            # Combine ratio and K samples into a DataFrame for corner plot
+            samples_ratios = pd.DataFrame({**ratios, **{"K": samples["K"]}})
+            fig_ratio = binding.plotting.plot_emcee(samples_ratios)
+            fig_ratio.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emc-ratios"))
+            for lbl in ds:
+                hdi = samples_ratios.quantile([0.025, 0.5, 0.975])[lbl].to_list()
+                print(
+                    f"HDI (94%) for plateau ratio in dataset {lbl}: {[f'{q:.3g}' for q in hdi]}"
+                )
 
 
 ########################################

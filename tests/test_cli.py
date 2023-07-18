@@ -117,7 +117,7 @@ class TestFitTitration:
     @pytest.mark.parametrize(
         ("dat_f", "ph_opt", "output", "opts"),
         [
-            ("pH_D05.dat", "--is-ph", "K: 7.5313", None),
+            ("pH_D05.dat", "--is-ph", "K: 7.5313", ["-b", "78"]),
             ("pH_D05.dat", "--is-ph", "K: 7.65166", ["--no-weight"]),
             ("Cl_B05-20130628-cor.dat", "--no-is-ph", "K: 6.4537", None),
         ],
@@ -125,9 +125,7 @@ class TestFitTitration:
     def test_glob(self, dat_f: str, ph_opt: str, output: str, opts: str) -> None:
         """Fit result for K is correct and png are generated."""
         dat_fp = tpath / "glob" / dat_f
-        base_args = ["-v", ph_opt, "glob", str(dat_fp), "-b", "77"]
-        # TODO: option b = 0 false emcee
-        # TODO: use arviz directly for pandas
+        base_args = ["-v", ph_opt, "glob", str(dat_fp)]
         if opts:
             base_args.extend(opts)
         runner = CliRunner()
@@ -136,10 +134,15 @@ class TestFitTitration:
         expected_output = re.sub(" ", r"\\s+", output.strip())
         assert re.search(expected_output, result.output) is not None
         # assert that the png files are generated
-        png_files = [dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png")]
-        png_files.append(dat_fp.with_suffix(".png"))
-        for file in png_files:
+        pngs = [dat_fp.with_suffix(".png")]
+        if opts and "-b" in opts:
+            pngs.append(dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png"))
+            if "--is-ph" in opts:
+                pngs.append(
+                    dat_fp.with_stem(dat_fp.stem + "-emc-ratios").with_suffix(".png")
+                )
+        for file in pngs:
             assert file.exists(), f"{file} does not exist!"
         # delete the png files
-        for file in png_files:
+        for file in pngs:
             file.unlink()
