@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path("../..").resolve()))
 project = "ClopHfit"
 copyright = "2023, Daniele Arosio"  # noqa: A001
 author = "Daniele Arosio"
-release = "0.9.1"
+release = "0.10.0"
 html_title = "ClopHfit"
 
 # -- General configuration ---------------------------------------------------

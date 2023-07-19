@@ -3,6 +3,44 @@
 
 # Changelog
 
+## v0.10.0 (2023-07-19)
+
+### Feat
+
+- Add spec to `fit-titration` dropping fit_titration_old
+- Add fit-titration glob dropping fit_titration_glob_old
+
+### Docs
+
+- Update ipynb
+
+### Test
+
+- Update coverage run
+
+### Build
+
+- update arviz requirement from <0.16.1 to <0.16.2 (#317)
+- bump pre-commit from 3.0.1 to 3.3.3 (#315)
+- Eliminate pip-deepfreeze
+- Relocate 'docs' from 'envs.docs.scripts' to 'default.scripts'
+- Relocate coverage into tests
+- Relocate 'lint' from 'envs.lint.scripts' to 'default.scripts'
+- bump pip from 23.1.2 to 23.2 in /.github/workflows (#314)
+- update commitizen requirement from <3.5.3 to <3.5.4 (#313)
+- Eliminate dependency on typeguard
+
+### Refactor
+
+- Simplify plot_emcee fix options in fit-titration glob
+- Reorganize `fit-titration glob` test data files
+- Add FitKwargs into TitrationAnalysis to streamline fit() method
+- Remove type ignore in PlateScheme also add PlateScheme test
+
+### chore
+
+- update pre-commit hooks (#316)
+
 ## v0.9.1 (2023-07-15)
 
 ### Docs
