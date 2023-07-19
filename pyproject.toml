@@ -83,7 +83,6 @@ tests = [
 [project.scripts]
 "clop" = "clophfit.__main__:clop"
 "fit-titration" = "clophfit.__main__:fit_titration"
-"fit_titration_old" = "clophfit.old.fit_titration:main"
 "note_to_csv" = "clophfit.__main__:note2csv"
 "ppr" = "clophfit.__main__:ppr"
 

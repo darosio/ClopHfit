@@ -89,19 +89,18 @@ def test_fit_titration(
     csv_file: str, output: str, opts: list[str], tmp_path: Path
 ) -> None:
     """Test the old ``fit_titration.py`` script with actual data and validate output."""
-    note_fp = tpath / "data" / "NTT-A04-Cl_note"
-    csv_fp = tpath / "data" / "Meas" / csv_file
+    note_fp = tpath / "spec" / "NTT-A04-Cl_note"
+    csv_fp = tpath / "spec" / "Meas" / csv_file
     out = tmp_path / "tit_fit"
     out.mkdir()
     runner = CliRunner()
-    base_args = ["fit_titration", str(csv_fp), str(note_fp)]
-    base_args.extend(["-t", "cl", "-d", str(out)])
+    base_args = ["--no-is-ph", "-o", str(out), "spec", str(csv_fp), str(note_fp)]
     if opts:
         base_args.extend(opts)
         sbands = f"({opts[1]}, {opts[2]})"
     else:
         sbands = "None"
-    result = runner.invoke(clop, base_args)
+    result = runner.invoke(fit_titration, base_args)
     assert result.exit_code == 0
     expected_output = re.sub(" ", r"\\s+", output.strip())
     # Assert that the pattern appears in the output
@@ -111,38 +110,35 @@ def test_fit_titration(
     assert expected_pdf_filename.exists()
 
 
-class TestFitTitration:
-    """It test the old ``fit_titration_global.py`` script."""
-
-    @pytest.mark.parametrize(
-        ("dat_f", "ph_opt", "output", "opts"),
-        [
-            ("pH_D05.dat", "--is-ph", "K: 7.5313", ["-b", "78"]),
-            ("pH_D05.dat", "--is-ph", "K: 7.65166", ["--no-weight"]),
-            ("Cl_B05-20130628-cor.dat", "--no-is-ph", "K: 6.4537", None),
-        ],
-    )
-    def test_glob(self, dat_f: str, ph_opt: str, output: str, opts: str) -> None:
-        """Fit result for K is correct and png are generated."""
-        dat_fp = tpath / "glob" / dat_f
-        base_args = ["-v", ph_opt, "glob", str(dat_fp)]
-        if opts:
-            base_args.extend(opts)
-        runner = CliRunner()
-        result = runner.invoke(fit_titration, base_args)
-        assert result.exit_code == 0
-        expected_output = re.sub(" ", r"\\s+", output.strip())
-        assert re.search(expected_output, result.output) is not None
-        # assert that the png files are generated
-        pngs = [dat_fp.with_suffix(".png")]
-        if opts and "-b" in opts:
-            pngs.append(dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png"))
-            if "--is-ph" in opts:
-                pngs.append(
-                    dat_fp.with_stem(dat_fp.stem + "-emc-ratios").with_suffix(".png")
-                )
-        for file in pngs:
-            assert file.exists(), f"{file} does not exist!"
-        # delete the png files
-        for file in pngs:
-            file.unlink()
+@pytest.mark.parametrize(
+    ("dat_f", "ph_opt", "output", "opts"),
+    [
+        ("pH_D05.dat", "--is-ph", "K: 7.5313", ["-b", "78"]),
+        ("pH_D05.dat", "--is-ph", "K: 7.65166", ["--no-weight"]),
+        ("Cl_B05-20130628-cor.dat", "--no-is-ph", "K: 6.4537", None),
+    ],
+)
+def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> None:
+    """Fit result for K is correct and png are generated as with old ``fit_titration_global.py`` script."""
+    dat_fp = tpath / "glob" / dat_f
+    base_args = ["-v", ph_opt, "glob", str(dat_fp)]
+    if opts:
+        base_args.extend(opts)
+    runner = CliRunner()
+    result = runner.invoke(fit_titration, base_args)
+    assert result.exit_code == 0
+    expected_output = re.sub(" ", r"\\s+", output.strip())
+    assert re.search(expected_output, result.output) is not None
+    # assert that the png files are generated
+    pngs = [dat_fp.with_suffix(".png")]
+    if opts and "-b" in opts:
+        pngs.append(dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png"))
+        if "--is-ph" in opts:
+            pngs.append(
+                dat_fp.with_stem(dat_fp.stem + "-emc-ratios").with_suffix(".png")
+            )
+    for file in pngs:
+        assert file.exists(), f"{file} does not exist!"
+    # delete the png files
+    for file in pngs:
+        file.unlink()

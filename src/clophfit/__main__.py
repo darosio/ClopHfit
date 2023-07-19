@@ -340,54 +340,6 @@ def _print_result(
     print(f"\n Plot saved in '{pdf_file}'.\n")
 
 
-@clop.command("fit_titration")
-@click.argument("csv_f", type=click.Path(exists=True))
-@click.argument("note_f", type=click.Path(exists=True))
-@click.option("-d", "--out", default=Path("."), type=Path, help="destination directory")
-@click.option(
-    "-t",
-    "titration_type",
-    default="pH",
-    type=click.Choice(["pH", "Cl"], case_sensitive=False),
-    help="titration type (default: pH)",
-)
-@click.option(
-    "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
-)
-@click.option("-v", "--verbose", is_flag=True, help="increase output verbosity")
-def fit_titration_c(  # noqa: PLR0913
-    csv_f: str,
-    note_f: str,
-    out: Path,
-    titration_type: str,
-    band: tuple[int, int] | None,
-    verbose: bool,
-) -> None:
-    """Update old svd or band fit of titration spectra."""
-    note_df = pd.read_csv(note_f, sep="\t")
-    csv = pd.read_csv(csv_f)
-    # Ignore buffer wells! SVD will use differences between spectra.
-    note_df = note_df[note_df["mutant"] != "buffer"]
-    Notes = namedtuple("Notes", ["wells", "conc"])
-    note = Notes(list(note_df["well"]), list(note_df[titration_type]))
-    spectra = csv[note.wells]
-    spectra.index = csv["lambda"]
-    spectra.columns = np.array(note.conc)
-    if verbose:
-        print(csv)
-        click.echo(note_f)
-        print(note)
-        print("DataFrame\n", spectra)
-    is_ph = titration_type == "pH"
-    fit_result = binding.fitting.analyze_spectra(spectra, is_ph, band)
-    # output
-    out.mkdir(parents=True, exist_ok=True)
-    pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
-    if fit_result.figure:
-        fit_result.figure.savefig(pdf_file)
-    _print_result(fit_result, pdf_file, str(band))
-
-
 #############################
 #  fit_titration_global     #
 #############################
@@ -411,13 +363,51 @@ def fit_titration(
 
 @fit_titration.command()
 @click.pass_context
+@click.argument("csv_f", type=click.Path(exists=True))
+@click.argument("note_f", type=click.Path(exists=True))
+@click.option(
+    "-b", "--band", nargs=2, type=int, help="Integration interval from <1> to <2>"
+)
+def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) -> None:
+    """Update old svd or band fit of titration spectra."""
+    verbose = ctx.obj.get("VERBOSE", 0)
+    is_ph = ctx.obj.get("IS_PH", True)
+    out = Path(ctx.obj.get("OUT", "."))
+
+    note_df = pd.read_csv(note_f, sep="\t")
+    csv = pd.read_csv(csv_f)
+    # Ignore buffer wells! SVD will use differences between spectra.
+    note_df = note_df[note_df["mutant"] != "buffer"]
+    Notes = namedtuple("Notes", ["wells", "conc"])
+    titration_type = "pH" if is_ph else "Cl"
+    note = Notes(list(note_df["well"]), list(note_df[titration_type]))
+    spectra = csv[note.wells]
+    spectra.index = csv["lambda"]
+    spectra.columns = np.array(note.conc)
+    if verbose:
+        print(csv)
+        click.echo(note_f)
+        print(note)
+        print("DataFrame\n", spectra)
+    is_ph = titration_type == "pH"
+    fit_result = binding.fitting.analyze_spectra(spectra, is_ph, band)
+    # output
+    out.mkdir(parents=True, exist_ok=True)
+    pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
+    if fit_result.figure:
+        fit_result.figure.savefig(pdf_file)
+    _print_result(fit_result, pdf_file, str(band))
+
+
+@fit_titration.command()
+@click.pass_context
 @click.argument("file", type=click.Path(exists=True))
 @click.option("-b", "--boot", type=int, help="Number of booting iterations.")
 @click.option(
     "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
 )
 def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
-    """Update old svd or band fit of titration spectra."""
+    """Update old glob fit of multiple datasets."""
     verbose = ctx.obj.get("VERBOSE", 0)
     is_ph = ctx.obj.get("IS_PH", True)
     file_df = pd.read_csv(file)
