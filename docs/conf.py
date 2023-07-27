@@ -63,6 +63,16 @@ source_suffix = {
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
+latex_elements = {
+    "papersize": "a4paper",
+    "pointsize": "10pt",
+    # Additional preamble content
+    "preamble": r"""
+\usepackage[utf8]{inputenc}
+\usepackage{newunicodechar}
+\newunicodechar{█}{\rule{1ex}{1ex}}
+""",
+}
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
