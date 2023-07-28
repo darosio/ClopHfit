@@ -145,7 +145,7 @@ class Dataset(dict[str, DataArrays]):
                     }
                 )
 
-    def add_weights(self, w: ArrayF | ArrayDict | typing.Any) -> None:
+    def add_weights(self, w: ArrayF | ArrayDict) -> None:
         """Add weights to the dataset.
 
         Parameters
@@ -157,8 +157,6 @@ class Dataset(dict[str, DataArrays]):
         ------
         ValueError
             If a key in the weights dictionary does not match any key in the current Dataset object.
-        TypeError
-            If the type of weights is not np.ndarray or dict.
         """
         if isinstance(w, np.ndarray):
             for da in self.values():
@@ -170,9 +168,6 @@ class Dataset(dict[str, DataArrays]):
                 else:
                     msg = f"No matching dataset found for key '{k}' in the current Dataset object."
                     raise ValueError(msg)
-        else:
-            msg = "Invalid type for w. Expected np.ndarray or dict."
-            raise TypeError(msg)
 
     def copy(self, keys: set[str] | None = None) -> Dataset:
         """Return a copy of the Dataset.

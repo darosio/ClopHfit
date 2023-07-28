@@ -208,11 +208,11 @@ class EnspireFile:
         for i in range(pre_md_start_line, pre_md_end_line):
             metadata[pre[1][i]] = pre[2][i]
         metadata["Protocol name"] = post[7][4]
-        metadata["Exported data"] = [
+        metadata["Exported data"] = next(
             ll[4]
             for ll in [line for line in post if line[:-1]]
             if ll[0] == "Exported data"
-        ][0]
+        )
         metadata["warnings"] = [
             line[0] for line in post if len(line) == 1 and "WARNING:" in line[0]
         ]
@@ -273,7 +273,7 @@ class EnspireFile:
                 c = collections.Counter(x)
                 if (
                     len(c) != 1
-                    or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
+                    or next(iter(c.keys())) != measurement["metadata"]["Wavelength"]
                 ):
                     msg = f"Excitation spectra with unexpected emission in {label}"
                     raise CsvLineError(msg)
@@ -286,7 +286,7 @@ class EnspireFile:
                 c = collections.Counter(x)
                 if (
                     len(c) != 1
-                    or list(c.keys())[0] != measurement["metadata"]["Wavelength"]
+                    or next(iter(c.keys())) != measurement["metadata"]["Wavelength"]
                 ):
                     msg = f"Emission spectra with unexpected excitation in {label}"
                     raise CsvLineError(msg)
