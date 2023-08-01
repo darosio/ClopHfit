@@ -128,7 +128,7 @@ def test_dataset_clean_data() -> None:
     # Call clean_data
     ds.clean_data(4)
     # Check keys after clean_data
-    assert "y0" not in ds.keys()
+    assert "y0" not in ds
 
 
 def test_dataset_class() -> None:
