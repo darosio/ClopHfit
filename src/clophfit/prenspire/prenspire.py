@@ -333,7 +333,7 @@ class EnspireFile:
                 return
             if name == "Meas":
                 meas_key[0] = value
-                if value not in measurements.keys():
+                if value not in measurements:
                     measurements[meas_key[0]] = {}
                     measurements[value]["metadata"] = {}
                     measurements[value]["metadata"]["temp"] = temp[0]
