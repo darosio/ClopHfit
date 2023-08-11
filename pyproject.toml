@@ -72,7 +72,7 @@ docs = [
 ]
 tests = [
   "coverage[toml] < 7.2.8",
-  "mypy < 1.5",
+  "mypy < 1.6",
   "pandas-stubs == 2.0.2.230605",
   "Pygments < 2.16.2",
   "pytest < 7.4.1",
