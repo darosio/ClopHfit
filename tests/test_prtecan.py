@@ -175,7 +175,7 @@ class TestLabelblock:
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """Check if a Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        assert id(lb0) == id(lb0), "Labelblock is not equal to itself"
+        assert lb0 == lb0, "Labelblock is not equal to itself"  # noqa: PLR0124
         assert lb0 != lb1, "Different Labelblocks are incorrectly reported as equal"
         assert (
             lb0.__eq__(1) == NotImplemented
