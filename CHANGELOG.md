@@ -3,6 +3,52 @@
 
 # Changelog
 
+## v0.10.1 (2023-08-16)
+
+### Fix
+
+- (#342)
+- pd.Index generic (#341)
+- Refactor to accommodate ruff update to 0.0.280
+
+### Docs
+
+- Add pdf to RtD
+- Add all formats to RtD
+
+### Build
+
+- bump pandas-stubs from 2.0.2.230605 to 2.0.3.230814
+- bump pandas-stubs from 2.0.2.230605 to 2.0.3.230814
+- update coverage[toml] requirement from <7.2.8 to <7.3.1 (#340)
+- update mypy requirement from <1.5 to <1.6 (#339)
+- update tqdm requirement from <4.65.3 to <4.66.2 (#338)
+- bump ruff from 0.0.283 to 0.0.284 (#337)
+- update tqdm requirement from <4.65.1 to <4.65.3 (#335)
+- bump ruff from 0.0.282 to 0.0.283 (#334)
+- update pygments requirement from <2.15.2 to <2.16.2 (#332)
+- prettier --prose-wrap=preserve
+- bump sphinx from 7.1.1 to 7.1.2 (#331)
+- bump ruff from 0.0.281 to 0.0.282 (#330)
+- update commitizen requirement from <3.5.5 to <3.6.1 (#327)
+- update numpy requirement from <1.25.2 to <1.25.3 (#328)
+- bump ruff from 0.0.280 to 0.0.281 (#326)
+- update commitizen requirement from <3.5.4 to <3.5.5 (#325)
+- bump sphinx from 7.0.1 to 7.1.1 (#324)
+- bump pip from 23.2 to 23.2.1 in /.github/workflows (#321)
+- bump ruff from 0.0.278 to 0.0.280 (#320)
+- bump sphinx-autodoc-typehints from 1.23.3 to 1.24.0 (#319)
+- update click requirement from <8.1.6 to <8.1.7 (#318)
+
+### chore
+
+- update pre-commit hooks
+- update pre-commit hooks
+- update pre-commit hooks (#333)
+- ruff 0.281 keys() refactor
+- update pre-commit hooks
+- update pre-commit hooks
+
 ## v0.10.0 (2023-07-19)
 
 ### Feat
