@@ -133,7 +133,7 @@ def plot_autovalues(ax: Axes, s: ArrayF) -> None:
     ax.set_xticks(np.arange(1, N_AUTOVALS + 1))
 
 
-def plot_autovectors(ax: Axes, wl: pd.Index, u: ArrayF) -> None:
+def plot_autovectors(ax: Axes, wl: pd.Index[int], u: ArrayF) -> None:
     """Plot autovectors.
 
     Parameters
