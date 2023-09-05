@@ -3,6 +3,39 @@
 
 # Changelog
 
+## v0.10.2 (2023-09-05)
+
+### Fix
+
+- **docs**: click cli
+
+### Build
+
+- bump actions/checkout from 3 to 4 (#363)
+- update commitizen requirement from <3.7.1 to <3.7.2 (#361)
+- bump pre-commit from 3.3.3 to 3.4.0 (#360)
+- bump ruff from 0.0.286 to 0.0.287 (#359)
+- update pytest requirement from <7.4.1 to <7.4.2 (#358)
+- update pandas requirement from <2.0.4 to <2.1.1 (#357)
+- bump sphinx from 7.2.4 to 7.2.5 (#356)
+- bump sphinx from 7.2.3 to 7.2.4 (#354)
+- update commitizen requirement from <3.6.1 to <3.7.1 (#353)
+- bump sphinxcontrib-plantuml from 0.25 to 0.26 (#352)
+- bump nbsphinx from 0.9.2 to 0.9.3 (#351)
+- bump ruff from 0.0.285 to 0.0.286 (#350)
+- bump sphinx from 7.2.2 to 7.2.3 (#349)
+- bump sphinx-click from 4.4.0 to 5.0.1 (#346)
+- update click requirement from <8.1.7 to <8.1.8 (#347)
+- bump ruff from 0.0.284 to 0.0.285 (#345)
+- update scipy requirement from <1.11.2 to <1.11.3 (#344)
+- bump sphinx from 7.1.2 to 7.2.2 (#343)
+
+### chore
+
+- update pre-commit hooks (#362)
+- update pre-commit hooks (#355)
+- update pre-commit hooks (#348)
+
 ## v0.10.1 (2023-08-16)
 
 ### Fix
