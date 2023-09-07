@@ -474,7 +474,7 @@ def note2csv(note: str, output: str, labels: str, temp: str) -> None:
         next(reader)  # skip the header row
 
         with output_path.open("a") as f:
-            writer = csv.writer(f)
+            writer = csv.writer(f, lineterminator="\n")
             for row in reader:
                 new_row = row[:4] + [temp, labels]
                 writer.writerow(new_row)
