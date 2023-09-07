@@ -66,10 +66,24 @@ Parser for EnSpire (PerkinElmer) file:
 
     ppr -o folder enspire file.csv
 
-Destination folder (default: "./Meas") will contain for each Measurement:
+Destination folder (default: "./Meas-${version}") will contain for each Measurement:
 
 - a table (csv) in wide tabular form e.g. <lambda, A01, ..., H12>;
 - corresponding graphical (png) representation of spectra from all wells.
+
+  ppr -o folder enspire file.csv note.csv
+
+Destination folder (default: "./Meas-${version}") will also contain:
+
+- a pdf for each titration and label;
+- a pdf for global (multiband) analysis pdfalong with global and all_SVD;
+- a pdf for SVD analysis of all concatenated spectra.
+
+#### note_to_csv
+
+    note_to_csv -t 37 -l "B E F" -o 37 NTT-G03-Cl_note
+    note_to_csv -t 20 -l "A C D" -o 20 NTT-G03-Cl_note
+    cat 20 37 > G03_Cl_note.csv
 
 ### Python
 
