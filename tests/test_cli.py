@@ -1,18 +1,81 @@
 """Test ``clop`` cli."""
 
+import csv
 import filecmp
 import re
+import tempfile
 from pathlib import Path
+from typing import IO, cast
 
 import pytest
 from click.testing import CliRunner
 from matplotlib.testing.compare import compare_images  # type: ignore
 from matplotlib.testing.exceptions import ImageComparisonFailure  # type: ignore
 
-from clophfit.__main__ import clop, fit_titration, ppr
+from clophfit.__main__ import clop, fit_titration, note2csv, ppr
 
 # tests path
 tpath = Path(__file__).parent
+
+
+@pytest.fixture()
+def runner() -> CliRunner:
+    """Fixture for invoking command-line interfaces."""
+    return CliRunner()
+
+
+def create_temp_tsv_file(content: str) -> IO[str]:
+    """Create a temporary TSV file and populate it with content."""
+    temp_file = tempfile.NamedTemporaryFile(delete=False, mode="w+", suffix=".tsv")
+    temp_file.write(content)
+    temp_file.seek(0)
+    return cast(IO[str], temp_file)
+
+
+def test_default_case(runner: CliRunner) -> None:
+    """Test default case for note2csv function."""
+    temp_file = create_temp_tsv_file("Well\tpH\tCl\tName\nD01\t9.15\t0\tNTT-G10\n")
+
+    result = runner.invoke(note2csv, [temp_file.name])
+
+    assert result.exit_code == 0
+
+    # Read the output CSV and check its contents
+    output_path = Path(temp_file.name).with_suffix(".csv")
+    with output_path.open("r") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        assert header == ["Well", "pH", "Cl", "Name", "Temp", "Labels"]
+        row = next(reader)
+        assert row == ["D01", "9.15", "0", "NTT-G10", "37.0", "A B"]
+
+
+def test_custom_output(runner: CliRunner) -> None:
+    """Test custom case for note2csv function."""
+    temp_file = create_temp_tsv_file("Well\tpH\tCl\tName\nD01\t9.15\t0\tNTT-G10\n")
+
+    with tempfile.NamedTemporaryFile(
+        delete=False, mode="w+", suffix=".csv"
+    ) as output_file:
+        output_file.write(
+            ",".join(["Well", "pH", "Cl", "Name", "Temp", "Labels"]) + "\n"
+        )
+        output_file.seek(0)  # Important to rewind the file to the beginning
+        result = runner.invoke(
+            note2csv,
+            [temp_file.name, "-o", output_file.name, "-t", "22.3", "-l", "A F G"],
+        )
+
+    assert result.exit_code == 0
+
+    # Read the output CSV and check its contents
+    output_path = Path(output_file.name)
+    with output_path.open("r") as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        assert header == ["Well", "pH", "Cl", "Name", "Temp", "Labels"]
+        row = next(reader)
+        assert row == ["D01", "9.15", "0", "NTT-G10", "22.3", "A F G"]
 
 
 def test_eq1() -> None:
