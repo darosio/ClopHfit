@@ -71,9 +71,11 @@ Destination folder (default: "./Meas-${version}") will contain for each Measurem
 - a table (csv) in wide tabular form e.g. <lambda, A01, ..., H12>;
 - corresponding graphical (png) representation of spectra from all wells.
 
-  ppr -o folder enspire file.csv note.csv
+By adding a note.csv file:
 
-Destination folder (default: "./Meas-${version}") will also contain:
+    ppr -o folder enspire file.csv note.csv
+
+destination folder (default: "./Meas-${version}") will also contain:
 
 - a pdf for each titration and label;
 - a pdf for global (multiband) analysis pdfalong with global and all_SVD;
