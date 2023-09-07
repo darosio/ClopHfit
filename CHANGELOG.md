@@ -3,6 +3,25 @@
 
 # Changelog
 
+## v0.10.3 (2023-09-07)
+
+### Fix
+
+- **note_to_csv**: Ensure unix EOL
+
+### Docs
+
+- Add usage instruction for `ppr enspire` and `note_to_csv`
+
+### Test
+
+- For note_to_csv
+
+### Build
+
+- update coverage[toml] requirement from <7.3.1 to <7.3.2 (#365)
+- update commitizen requirement from <3.7.2 to <3.8.1 (#364)
+
 ## v0.10.2 (2023-09-05)
 
 ### Fix
