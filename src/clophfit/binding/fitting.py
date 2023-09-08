@@ -327,7 +327,7 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     params = Parameters()
     k_initial = []
     for lbl, da in ds.items():
-        params.add(f"S0_{lbl}", value=da.y[0], min=0)
+        params.add(f"S0_{lbl}", value=da.y[0])
         params.add(f"S1_{lbl}", value=da.y[-1])
         target_y = (da.y[0] + da.y[-1]) / 2
         k_initial.append(da.x[np.argmin(np.abs(da.y - target_y))])
