@@ -3,6 +3,24 @@
 
 # Changelog
 
+## v0.10.4 (2023-09-08)
+
+### Fix
+
+- Remove insane `min=0` for S0
+
+### Docs
+
+- Fix readme usage instruction
+
+### Test
+
+- Fix test_fit_titration_glob missing a parametrized condition test
+
+### Build
+
+- update pytest requirement from <7.4.2 to <7.4.3 (#366)
+
 ## v0.10.3 (2023-09-07)
 
 ### Fix
