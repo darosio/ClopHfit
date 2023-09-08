@@ -83,8 +83,8 @@ destination folder (default: "./Meas-${version}") will also contain:
 
 #### note_to_csv
 
-    note_to_csv -t 37 -l "B E F" -o 37 NTT-G03-Cl_note
-    note_to_csv -t 20 -l "A C D" -o 20 NTT-G03-Cl_note
+    note_to_csv -t 37.0 -l "B E F" -o 37 NTT-G03-Cl_note
+    note_to_csv -t 20.0 -l "A C D" -o 20 NTT-G03-Cl_note
     cat 20 37 > G03_Cl_note.csv
 
 ### Python
