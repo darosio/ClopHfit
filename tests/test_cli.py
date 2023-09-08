@@ -196,7 +196,7 @@ def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> 
     pngs = [dat_fp.with_suffix(".png")]
     if opts and "-b" in opts:
         pngs.append(dat_fp.with_stem(dat_fp.stem + "-emcee").with_suffix(".png"))
-        if "--is-ph" in opts:
+        if "--is-ph" in ph_opt:
             pngs.append(
                 dat_fp.with_stem(dat_fp.stem + "-emc-ratios").with_suffix(".png")
             )
