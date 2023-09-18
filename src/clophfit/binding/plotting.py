@@ -34,13 +34,13 @@ import corner  # type: ignore
 import numpy as np
 import pandas as pd
 from lmfit.minimizer import MinimizerResult  # type: ignore
-from matplotlib import cm, colors  # type: ignore
-from matplotlib.axes import Axes  # type: ignore
-from matplotlib.figure import Figure  # type: ignore
+from matplotlib import cm, colormaps, colors
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from clophfit.types import ArrayF
 
-COLOR_MAP = cm.Paired  # To color PCA components and LM fit.
+COLOR_MAP = colormaps["Paired"]  # To color PCA components and LM fit.
 N_AUTOVALS = 4
 
 
@@ -75,11 +75,11 @@ def _apply_common_plot_style(ax: Axes, title: str, xlabel: str, ylabel: str) -> 
 
 def _create_spectra_canvas() -> tuple[Figure, tuple[Axes, Axes, Axes, Axes, Axes]]:
     fig = Figure(figsize=(12, 8))
-    ax1 = fig.add_axes([0.05, 0.65, 0.32, 0.31])
-    ax2 = fig.add_axes([0.42, 0.65, 0.32, 0.31])
-    ax3 = fig.add_axes([0.80, 0.65, 0.18, 0.31])
-    ax4 = fig.add_axes([0.05, 0.08, 0.50, 0.50])
-    ax5 = fig.add_axes([0.63, 0.08, 0.35, 0.50])
+    ax1 = fig.add_axes((0.05, 0.65, 0.32, 0.31))
+    ax2 = fig.add_axes((0.42, 0.65, 0.32, 0.31))
+    ax3 = fig.add_axes((0.80, 0.65, 0.18, 0.31))
+    ax4 = fig.add_axes((0.05, 0.08, 0.50, 0.50))
+    ax5 = fig.add_axes((0.63, 0.08, 0.35, 0.50))
     return fig, (ax1, ax2, ax3, ax4, ax5)
 
 
@@ -109,7 +109,7 @@ def distribute_axes(fig: Figure, num_axes: int) -> list[Axes]:
         bottom = 0.65
         width = 1 / num_axes - 0.0  # Subtract some amount to prevent overlap
         height = 0.31
-        ax.set_position([left, bottom, width, height])
+        ax.set_position((left, bottom, width, height))
         axs.append(ax)
     return axs
 
@@ -164,8 +164,16 @@ def plot_pca(ax: Axes, v: ArrayF, conc: ArrayF, pp: PlotParameters) -> None:
     pp : PlotParameters
         The PlotParameters object containing plot parameters.
     """
-    kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
-    ax.scatter(v[1], v[0], c=conc, s=99, edgecolors="k", **kws)
+    ax.scatter(
+        v[1],
+        v[0],
+        c=list(conc),
+        s=99,
+        edgecolors="k",
+        vmin=pp.hue_norm[0],
+        vmax=pp.hue_norm[1],
+        cmap=pp.palette,
+    )
     _apply_common_plot_style(ax, "PCA plot", "", "")
     ax.set_ylabel("First Principal Component", color=COLOR_MAP(0))
     ax.set_xlabel("Second Principal Component", color=COLOR_MAP(1))
@@ -198,7 +206,7 @@ def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     # Add a colorbar for reference
     sm = cm.ScalarMappable(cmap=color_map, norm=normalize)
     sm.set_array([])
-    ax.figure.colorbar(sm, ax=ax, label=pp.kind)
+    ax.figure.colorbar(sm, ax=ax, label=pp.kind)  # type: ignore
 
 
 def plot_spectra_distributed(
@@ -240,11 +248,8 @@ def plot_emcee(flatchain: pd.DataFrame) -> Figure:
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in flatchain.items()}
     idata = az.from_dict(posterior=samples_dict)
-    return corner.corner(
-        idata,
-        divergences=False
-        # XXX: idata, truths=list(result_emcee.params.valuesdict().values()), divergences=False
-    )
+    corner_fig: Figure = corner.corner(idata, divergences=False)
+    return corner_fig
 
 
 def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") -> None:

@@ -9,7 +9,7 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import matplotlib.pyplot as plt  # type: ignore
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyparsing

@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore
-from matplotlib import axes, figure  # type: ignore
+from matplotlib import axes, figure
 from uncertainties import ufloat  # type: ignore
 
 from clophfit.binding.plotting import (
@@ -353,9 +353,9 @@ class FitResult:
         The Minimizer object used for the fit.
     """
 
-    figure: figure.Figure
-    result: MinimizerResult
-    mini: Minimizer
+    figure: figure.Figure | None = None
+    result: MinimizerResult | None = None
+    mini: Minimizer | None = None
 
     def is_valid(self) -> bool:
         """Check if the fitting process was successful based on the existence of figure, result, and minimizer."""
@@ -443,7 +443,7 @@ def analyze_spectra(
         y /= np.abs(y).max() / 10
         ds = Dataset(x, y, is_ph)
         ylabel = "Integrated Band Fluorescence"
-        ylabel_color = "k"
+        ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
     fit_result = fit_binding_glob(ds, True)
     result = fit_result.result
     plot_fit(ax4, ds, result, nboot=N_BOOT, pp=PlotParameters(is_ph))
@@ -547,13 +547,21 @@ def plot_fit(
         label = lbl if (da.w is None and nboot == 0) else None
         # Plot data.
         if pp:
-            kws = {"vmin": pp.hue_norm[0], "vmax": pp.hue_norm[1], "cmap": pp.palette}
-            ax.scatter(da.x, da.y, c=da.x, s=99, edgecolors="k", label=label, **kws)
+            ax.scatter(
+                da.x,
+                da.y,
+                c=list(da.x),
+                s=99,
+                edgecolors="k",
+                label=label,
+                vmin=pp.hue_norm[0],
+                vmax=pp.hue_norm[1],
+                cmap=pp.palette,
+            )
         else:
             ax.plot(da.x, da.y, "o", color=clr, label=label)
         # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
-        kws_err = {"alpha": 0.4, "capsize": 3}
         if nboot:
             # Calculate uncertainty using Monte Carlo method.
             y_samples = np.empty((nboot, len(xfit[lbl])))
@@ -566,16 +574,26 @@ def plot_fit(
                 y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
             dy = y_samples.std(axis=0)
             # Plot uncertainty.
-            kws = {"alpha": 0.4, "color": clr}
             # Display label in fill_between plot.
-            ax.fill_between(xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, **kws, label=lbl)
+            ax.fill_between(
+                xfit[lbl],
+                yfit[lbl] - dy,
+                yfit[lbl] + dy,
+                alpha=0.4,
+                color=clr,
+                label=lbl,
+            )
             if da.w is not None:
                 ye = 1 / da.w
-                ax.errorbar(da.x, da.y, yerr=ye, fmt="none", color="gray", **kws_err)
+                ax.errorbar(
+                    da.x, da.y, yerr=ye, fmt="none", color="gray", alpha=0.4, capsize=3
+                )
         elif da.w is not None:
             ye = 1 / da.w
             # Display label in error bar plot.
-            ax.errorbar(da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, **kws_err)
+            ax.errorbar(
+                da.x, da.y, yerr=ye, fmt=".", label=lbl, color=clr, alpha=0.4, capsize=3
+            )
     ax.legend()
     if result.params["K"].stderr:  # Can be None in case of critical fitting
         k = ufloat(result.params["K"].value, result.params["K"].stderr)
@@ -600,6 +618,6 @@ def _plot_spectra_glob_emcee(
     tit_filtered = {k: spec for k, spec in titration.items() if k in ds}
     plot_spectra_distributed(fig, tit_filtered, pparams, dbands)
     plot_fit(ax4, ds, f_res.result, nboot=N_BOOT, pp=pparams)
-    result_emcee = f_res.mini.emcee(steps=EMCEE_STEPS, workers=8)
+    result_emcee = f_res.mini.emcee(steps=EMCEE_STEPS, workers=8)  # type: ignore
     plot_emcee_k_on_ax(ax5, result_emcee)
     return fig

@@ -688,18 +688,22 @@ class TestTitrationAnalysis:
         # Check that the second fit result for 'H02' is not None
         assert fres[1]["H02"].is_valid()
         # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result
+        assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0170, abs=1e-4)
         # Check the value and standard error of the 'K' parameter for 'H02' in the third fit result
+        assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0169, abs=1e-4)
         # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result
+        assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0243, abs=1e-4)
         # Check the value and standard error of the 'K' parameter for 'E02' in the third fit result
+        assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
@@ -709,10 +713,12 @@ class TestTitrationAnalysis:
         # Check that the first fit result for 'H02' is still None
         assert fres[0]["H02"] == FitResult(None, None, None)
         # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result, after fitting up to the second-last data point
+        assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8942, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0195, abs=1e-4)
         # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result, after fitting up to the second-last data point
+        assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9837, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0267, abs=1e-4)
