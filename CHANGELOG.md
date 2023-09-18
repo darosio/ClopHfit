@@ -3,6 +3,33 @@
 
 # Changelog
 
+## v0.10.5 (2023-09-18)
+
+### Docs
+
+- Improve README.md
+
+### Build
+
+- update matplotlib requirement from <3.7.4 to <3.8.1
+- update numpy requirement from <1.25.3 to <1.26.1 (#377)
+- bump pydata-sphinx-theme from 0.13.3 to 0.14.0 (#376)
+- update commitizen requirement from <3.8.3 to <3.9.1 (#374)
+- bump ruff from 0.0.289 to 0.0.290 (#373)
+- bump sphinx from 7.2.5 to 7.2.6 (#372)
+- bump ruff from 0.0.288 to 0.0.289 (#371)
+- bump ruff from 0.0.287 to 0.0.288 (#369)
+- update matplotlib requirement from <3.7.3 to <3.7.4 (#368)
+- update commitizen requirement from <3.8.1 to <3.8.3 (#367)
+
+### Refactor
+
+- Fix type annotations of matplotlib-3.8.1
+
+### chore
+
+- update pre-commit hooks (#370)
+
 ## v0.10.4 (2023-09-08)
 
 ### Fix
