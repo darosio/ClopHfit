@@ -11,11 +11,12 @@ from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
 import lmfit  # type: ignore
-import matplotlib.pyplot as plt  # type: ignore
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sb  # type: ignore  # noqa: ICN001
-from matplotlib.backends.backend_pdf import PdfPages  # type: ignore
+from matplotlib import colormaps, figure
+from matplotlib.backends.backend_pdf import PdfPages
 from uncertainties import ufloat  # type: ignore
 
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
@@ -1238,7 +1239,7 @@ class TitrationAnalysis(Titration):
         hue_column: str,
         xlim: tuple[float, float] | None = None,
         title: str | None = None,
-    ) -> plt.figure:
+    ) -> figure.Figure:
         """Plot K values as stripplot.
 
         Parameters
@@ -1280,7 +1281,7 @@ class TitrationAnalysis(Titration):
                 c="lightgray",
                 lw=8,
             )
-            plt.grid(1, axis="both")
+            plt.grid(True, axis="both")
         # Unk
         res_unk = self.result_dfs[lb].loc[self.keys_unk].sort_index(ascending=False)
         # Compute 'K - 2*sK' for each row in res_unk
@@ -1293,7 +1294,6 @@ class TitrationAnalysis(Titration):
             y=res_unk.index,
             size=12,
             orient="h",
-            lw=2,
             palette="Blues",
             hue=res_unk[hue_column],
             ax=ax2,
@@ -1307,9 +1307,10 @@ class TitrationAnalysis(Titration):
             c="gray",
             lw=2,
         )
-        plt.yticks(range(len(res_unk)), res_unk.index)
+        ytick_labels = [str(label) for label in res_unk.index]
+        plt.yticks(range(len(res_unk)), ytick_labels)
         plt.ylim(-1, len(res_unk))
-        plt.grid(1, axis="both")
+        plt.grid(True, axis="both")
         if not xlim:
             xlim = (res_unk["K"].min(), res_unk["K"].max())
             if len(self.scheme.ctrl) > 0:
@@ -1331,7 +1332,7 @@ class TitrationAnalysis(Titration):
     def plot_all_wells(self, lb: int, path: str | Path) -> None:
         """Plot all wells into a pdf."""
         # Create a PdfPages object
-        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))
+        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore
         """# TODO: Order
         "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
         #     out.savefig(self.plot_well(str(k)))
@@ -1340,21 +1341,22 @@ class TitrationAnalysis(Titration):
         """
         for lbl, fr in self.results[lb].items():
             fig = fr.figure
-            # A4 size in inches. You can adjust this as per your need.
-            fig.set_size_inches([8.27, 11.69])
-            # Get the first axes in the figure to adjust the positions
-            ax = fig.get_axes()[0]
-            # Adjust position as needed. Values are [left, bottom, width, height]
-            ax.set_position([0.1, 0.5, 0.8, 0.4])
-            # Create a new axes for the text
-            text_ax = fig.add_axes([0.1, 0.05, 0.8, 0.35])  # Adjust as needed
-            text = lmfit.printfuncs.fit_report(self.results[lb][lbl].result)
-            text_ax.text(0.0, 0.0, text, fontsize=14)
-            text_ax.axis("off")  # Hide the axes for the text
-            # Save the figure into the PDF
-            pdf_pages.savefig(fig, bbox_inches="tight")
+            if fig is not None:
+                # A4 size in inches. You can adjust this as per your need.
+                fig.set_size_inches((8.27, 11.69))
+                # Get the first axes in the figure to adjust the positions
+                ax = fig.get_axes()[0]
+                # Adjust position as needed. Values are [left, bottom, width, height]
+                ax.set_position((0.1, 0.5, 0.8, 0.4))
+                # Create a new axes for the text
+                text_ax = fig.add_axes((0.1, 0.05, 0.8, 0.35))  # Adjust as needed
+                text = lmfit.printfuncs.fit_report(self.results[lb][lbl].result)
+                text_ax.text(0.0, 0.0, text, fontsize=14)
+                text_ax.axis("off")  # Hide the axes for the text
+                # Save the figure into the PDF
+                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore
         # Close the PdfPages object
-        pdf_pages.close()
+        pdf_pages.close()  # type: ignore
         # Close all the figures
         plt.close("all")
 
@@ -1369,7 +1371,7 @@ class TitrationAnalysis(Titration):
         ymin: float | None = None,
         xmax: float | None = None,
         title: str | None = None,
-    ) -> plt.figure:
+    ) -> figure.Figure:
         """Plot SA vs. K with errorbar for the whole plate."""
         fit_df = self.result_dfs[lb]
         with plt.style.context("fivethirtyeight"):
@@ -1412,7 +1414,7 @@ class TitrationAnalysis(Titration):
             min_y = min(max([0.01, fit_df[y].min()]), 5000)
             plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
             plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
-            plt.grid(1, axis="both")
+            plt.grid(True, axis="both")
             plt.ylabel(y)
             plt.xlabel(x)
             title = title if title else ""
@@ -1461,7 +1463,7 @@ class TitrationAnalysis(Titration):
         for i, r in res_unk_sorted.iterrows():
             print(format_row(str(i), r, out_keys))
 
-    def plot_buffer(self, title: str | None = None) -> plt.figure:
+    def plot_buffer(self, title: str | None = None) -> figure.Figure:
         """Plot buffers of all labelblocksgroups."""
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(9, 9))
@@ -1482,7 +1484,14 @@ class TitrationAnalysis(Titration):
                 ]
             ]
             buf = {key: lbg.data[key] for key in self.scheme.buffer if lbg.data}
-            colors = plt.cm.Set3(np.linspace(0, 1, len(buf) + 1))
+            # Create a colormap object, for example, 'Set3'
+            cmap = colormaps["Set3"]
+            # Define the number of colors you want to generate
+            num_colors = len(buf) + 1
+            # Generate an array of evenly spaced values between 0 and 1
+            values = np.linspace(0, 1, num_colors)
+            # Use the colormap to map the values to colors
+            colors = cmap(values)
             for j, (k, v) in enumerate(buf.items(), start=1):
                 rowlabel.append(k)
                 lines.append([f"{x:6.1f}" for x in v])
@@ -1515,7 +1524,8 @@ class TitrationAnalysis(Titration):
             ax[i].set_yticks(ax[i].get_yticks()[:-1])
         ax[0].set_yticks(ax[0].get_yticks()[1:])
         ax[0].set_xticklabels("")
-        f.suptitle(title, fontsize=16)
+        if title:
+            f.suptitle(title, fontsize=16)
         f.tight_layout()
         return f
 

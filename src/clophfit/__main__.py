@@ -10,7 +10,7 @@ from typing import Any
 
 import click
 import lmfit  # type: ignore
-import matplotlib.pyplot as plt  # type: ignore
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
@@ -297,10 +297,10 @@ def fit_enspire(
                     band = dbands.get(label)
                     fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
                     if fit_result.is_valid():
-                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
-                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
+                        x_combined[label] = fit_result.mini.userargs[0]["default"].x  # type: ignore
+                        y_combined[label] = fit_result.mini.userargs[0]["default"].y  # type: ignore
                         pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
-                        fit_result.figure.savefig(pdf_file)
+                        fit_result.figure.savefig(pdf_file)  # type: ignore
                     _print_result(fit_result, pdf_file, str(band))
                 # Global spectra analysis with more than 1 label.
                 if (
@@ -311,20 +311,20 @@ def fit_enspire(
                     spectra_gres = binding.fitting.analyze_spectra_glob(
                         d_tit, ds, dbands
                     )
-                    if spectra_gres.svd:
+                    if spectra_gres.svd and spectra_gres.svd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
-                        spectra_gres.svd.figure.savefig(pdf_file)
+                        spectra_gres.svd.figure.savefig(pdf_file)  # type: ignore
                         _print_result(spectra_gres.svd, pdf_file, "")
-                    if spectra_gres.gsvd:
+                    if spectra_gres.gsvd and spectra_gres.gsvd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_g_{tit}_SVD.pdf"
-                        spectra_gres.gsvd.figure.savefig(pdf_file)
+                        spectra_gres.gsvd.figure.savefig(pdf_file)  # type: ignore
                         _print_result(spectra_gres.gsvd, pdf_file, "")
-                    if spectra_gres.bands:
+                    if spectra_gres.bands and spectra_gres.bands.is_valid():
                         keys = dbands.keys() & d_tit.keys()
                         lname = [f"{k}({dbands[k][0]},{dbands[k][1]})" for k in keys]
                         bands_str = "".join(lname)
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
-                        spectra_gres.bands.figure.savefig(pdf_file)
+                        spectra_gres.bands.figure.savefig(pdf_file)  # type: ignore
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
@@ -394,7 +394,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
     # output
     out.mkdir(parents=True, exist_ok=True)
     pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
-    if fit_result.figure:
+    if fit_result.figure is not None:
         fit_result.figure.savefig(pdf_file)
     _print_result(fit_result, pdf_file, str(band))
 
@@ -428,7 +428,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     figure.savefig(Path(file).with_suffix(".png"))
     if boot:
         # Emcee
-        samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain
+        samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain  # type: ignore
         fig = binding.plotting.plot_emcee(samples)
         fig.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emcee"))
         hdi = samples.quantile([0.025, 0.975])["K"].to_list()
