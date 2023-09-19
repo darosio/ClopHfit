@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.0.288
+    rev: v0.0.290
     hooks:
       - id: ruff
         # args: [--exclude, "src/clophfit/prenspire/*"]
@@ -101,7 +101,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: 3.8.2
+    rev: 3.9.0
     hooks:
       - id: commitizen
       - id: commitizen-branch
