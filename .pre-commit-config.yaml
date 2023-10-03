@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.0.291
+    rev: v0.0.292
     hooks:
       - id: ruff
         # args: [--exclude, "src/clophfit/prenspire/*"]
@@ -90,12 +90,12 @@ repos:
         stages: [manual]
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.2.5
+    rev: v2.2.6
     hooks:
       - id: codespell
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.5
+    rev: v0.9.0.6
     hooks:
       - id: shellcheck
         args: [-x]
