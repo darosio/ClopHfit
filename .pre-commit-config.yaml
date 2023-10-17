@@ -31,7 +31,7 @@ repos:
         exclude: "^tests/EnSpire/|^tests/data/tmp/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.10.0
+    rev: v2.11.0
     hooks:
       - id: pretty-format-ini
         args: [--autofix]
@@ -101,7 +101,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: 3.10.0
+    rev: 3.10.1
     hooks:
       - id: commitizen
       - id: commitizen-branch
