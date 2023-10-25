@@ -75,7 +75,7 @@ tests = [
   "mypy < 1.7",
   "pandas-stubs == 2.1.1.230928",
   "Pygments < 2.16.2",
-  "pytest < 7.4.3",
+  "pytest < 7.4.4",
   "types-click == 7.1.8",
   "xdoctest < 1.1.2"
 ]
