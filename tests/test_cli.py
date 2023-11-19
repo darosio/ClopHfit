@@ -4,6 +4,7 @@ import csv
 import filecmp
 import re
 import tempfile
+import warnings
 from pathlib import Path
 from typing import IO, cast
 
@@ -118,9 +119,13 @@ def test_prtecan(tmp_path: Path) -> None:
     out = tmp_path / "out3"
     out.mkdir()
     runner = CliRunner()
-    result = runner.invoke(
-        ppr, ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"]
-    )
+    with warnings.catch_warnings():
+        # Suppress the UserWarnings related to insufficient data points and cleaning
+        warnings.simplefilter("ignore", category=UserWarning)
+        result = runner.invoke(
+            ppr,
+            ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
+        )
     assert result.exit_code == 0
 
 

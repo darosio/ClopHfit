@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -680,7 +681,10 @@ class TestTitrationAnalysis:
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
         titan.fitdata_params = {"bg": True, "nrm": True, "dil": True}
-        fres = titan.results
+        with warnings.catch_warnings():
+            # Suppress the UserWarning related to dataset removal
+            warnings.simplefilter("ignore", category=UserWarning)
+            fres = titan.results
         # Check that the first fit result dictionary has 92 elements
         assert len(fres[0]) == 92
         # Check that the first fit result for 'H02' is None
@@ -709,7 +713,10 @@ class TestTitrationAnalysis:
         assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
         # Fit up to the second-last data point
         titan.fitkws = TitrationAnalysis.FitKwargs(fin=-1)
-        fres = titan.results
+        with warnings.catch_warnings():
+            # Suppress the UserWarning related to dataset removal
+            warnings.simplefilter("ignore", category=UserWarning)
+            fres = titan.results
         # Check that the first fit result for 'H02' is still None
         assert fres[0]["H02"] == FitResult(None, None, None)
         # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result, after fitting up to the second-last data point

@@ -1,6 +1,7 @@
 """Test cases for the binding functions module."""
 
 import re
+import warnings
 
 import numpy as np
 import pytest
@@ -126,8 +127,15 @@ def test_dataset_clean_data() -> None:
     ds = Dataset(x, {"y0": y}, is_ph=True)
     # Check initial keys
     assert "y0" in ds
-    # Call clean_data
-    ds.clean_data(4)
+    # Call clean_data and check for warning
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")  # Always record warnings
+        ds.clean_data(4)
+        assert len(w) == 1  # Check that one warning was issued
+        assert (
+            str(w[0].message)
+            == "Removing key 'y0' from Dataset: number of parameters (4) exceeds number of data points (3)."
+        )
     # Check keys after clean_data
     assert "y0" not in ds
 
