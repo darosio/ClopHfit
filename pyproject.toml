@@ -74,7 +74,7 @@ tests = [
   "coverage[toml] < 7.3.3",
   "mypy < 1.8",
   "pandas-stubs == 2.1.1.230928",
-  "Pygments < 2.17.2",
+  "Pygments < 2.17.3",
   "pytest < 7.4.4",
   "types-click == 7.1.8",
   "xdoctest < 1.1.3"
