@@ -1,0 +1,1717 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>clophfit.prtecan &#8212; ClopHfit</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=5b4479735964841361fd" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd" />
+  <script src="../_static/vendor/fontawesome/6.1.2/js/all.min.js?digest=5b4479735964841361fd"></script>
+
+    <script src="../_static/documentation_options.js?v=da6fbbfd"></script>
+    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/prtecan';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="clophfit.prenspire" href="prenspire.html" />
+    <link rel="prev" title="clophfit.binding" href="binding.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>
+    Back to top
+  </button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__primary"
+          id="__primary"/>
+  <label class="overlay overlay-primary" for="__primary"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__secondary"
+          id="__secondary"/>
+  <label class="overlay overlay-secondary" for="__secondary"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+  
+    <nav class="bd-header navbar navbar-expand-lg bd-navbar">
+<div class="bd-header__inner bd-page-width">
+  <label class="sidebar-toggle primary-toggle" for="__primary">
+    <span class="fa-solid fa-bars"></span>
+  </label>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">ClopHfit</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../tutorials/tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../references/references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+    </div>
+  
+
+  
+    <label class="sidebar-toggle secondary-toggle" for="__secondary" tabindex="0">
+      <span class="fa-solid fa-outdent"></span>
+    </label>
+  
+</div>
+
+    </nav>
+  
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../tutorials/tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../references/references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="binding.html">clophfit.binding</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">clophfit.prtecan</a></li>
+<li class="toctree-l1"><a class="reference internal" href="prenspire.html">clophfit.prenspire</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+
+
+<nav aria-label="Breadcrumb">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="api.html" class="nav-link">API references</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page">clophfit.prtecan</li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article" role="main">
+                  
+  <section id="module-clophfit.prtecan">
+<span id="clophfit-prtecan"></span><h1>clophfit.prtecan<a class="headerlink" href="#module-clophfit.prtecan" title="Link to this heading">#</a></h1>
+<p>Parse Tecan files and fit files that are grouped into titrations.</p>
+<p>A ‘titration’ in this context is defined within a list.pH or list.cl file. These files describe the properties and parameters of the titration experiment.</p>
+<p>The command-line interface ‘prtecan’ is used to construct 96 distinct titrations and export the results to .txt files. This allows for further analysis or visualization of the titration data.</p>
+<p>In cases where two label blocks exist in the Tecan files, the module performs a ‘global fitting’ operation. Global fitting is a method used in data analysis to best fit a model to multiple data sets simultaneously, under the assumption that some underlying parameters are shared between the data sets.</p>
+<p>Please consult the documentation for each function in this module for more detailed information on their operation and use.</p>
+<p><strong>Classes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock" title="clophfit.prtecan.Labelblock"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Labelblock</span></code></a>(_lines[, path])</p></td>
+<td><p>Parse a label block.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup" title="clophfit.prtecan.LabelblocksGroup"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LabelblocksGroup</span></code></a>(labelblocks[, allequal])</p></td>
+<td><p>Group labelblocks with compatible metadata.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.Metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Metadata</span></code></a>(value[, unit])</p></td>
+<td><p>Represents the value of a metadata dictionary.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.PlateScheme" title="clophfit.prtecan.PlateScheme"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PlateScheme</span></code></a>([file])</p></td>
+<td><p>Define buffer, ctrl and unk wells, and ctrl names.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.Tecanfile"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Tecanfile</span></code></a>(path)</p></td>
+<td><p>Parse a Tecan .xls file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TecanfilesGroup" title="clophfit.prtecan.TecanfilesGroup"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TecanfilesGroup</span></code></a>(tecanfiles)</p></td>
+<td><p>Group of Tecanfiles containing at least one common Labelblock.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration" title="clophfit.prtecan.Titration"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Titration</span></code></a>(tecanfiles, conc, is_ph)</p></td>
+<td><p>Build titrations from grouped Tecanfiles and corresponding concentrations or pH values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis" title="clophfit.prtecan.TitrationAnalysis"><code class="xref py py-obj docutils literal notranslate"><span class="pre">TitrationAnalysis</span></code></a>(tecanfiles, conc, is_ph)</p></td>
+<td><p>Perform analysis of a titration.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Functions:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.calculate_conc" title="clophfit.prtecan.calculate_conc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">calculate_conc</span></code></a>(additions, conc_stock[, conc_ini])</p></td>
+<td><p>Calculate concentration values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.dilution_correction" title="clophfit.prtecan.dilution_correction"><code class="xref py py-obj docutils literal notranslate"><span class="pre">dilution_correction</span></code></a>(additions)</p></td>
+<td><p>Apply dilution correction.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.extract_metadata" title="clophfit.prtecan.extract_metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">extract_metadata</span></code></a>(lines)</p></td>
+<td><p>Extract metadata into both Tecanfile and Labelblock.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.lookup_listoflines" title="clophfit.prtecan.lookup_listoflines"><code class="xref py py-obj docutils literal notranslate"><span class="pre">lookup_listoflines</span></code></a>(csvl[, pattern, col])</p></td>
+<td><p>Lookup line numbers (row index) where given pattern occurs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.merge_md" title="clophfit.prtecan.merge_md"><code class="xref py py-obj docutils literal notranslate"><span class="pre">merge_md</span></code></a>(mds)</p></td>
+<td><p>Merge a list of metadata dict if the key value is the same in the list.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.read_xls" title="clophfit.prtecan.read_xls"><code class="xref py py-obj docutils literal notranslate"><span class="pre">read_xls</span></code></a>(path)</p></td>
+<td><p>Read first sheet of an xls file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.strip_lines" title="clophfit.prtecan.strip_lines"><code class="xref py py-obj docutils literal notranslate"><span class="pre">strip_lines</span></code></a>(lines)</p></td>
+<td><p>Remove empty fields/cells from lines read from a csv file.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">Labelblock</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">_lines</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Labelblock" title="Link to this definition">#</a></dt>
+<dd><p>Parse a label block.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>_lines</strong> (<em>list</em><em>[</em><em>list</em><em>[</em><em>str</em><em> | </em><em>int</em><em> | </em><em>float</em><em>]</em><em>]</em>) – Lines to create this Labelblock.</p></li>
+<li><p><strong>path</strong> (<em>Path</em><em>, </em><em>optional</em>) – Path to the containing file, if it exists.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>Exception</strong> – When data do not correspond to a complete 96-well plate.</p>
+</dd>
+<dt class="field-odd">Warns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>Warning</strong> – When it replaces “OVER” with <code class="docutils literal notranslate"><span class="pre">np.nan</span></code> for saturated values.</p>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.path" title="clophfit.prtecan.Labelblock.path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">path</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.metadata" title="clophfit.prtecan.Labelblock.metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metadata</span></code></a></p></td>
+<td><p>Metadata specific for this Labelblock.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.data" title="clophfit.prtecan.Labelblock.data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data</span></code></a></p></td>
+<td><p>The 96 data values as {'well_name', value}.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.buffer" title="clophfit.prtecan.Labelblock.buffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer</span></code></a></p></td>
+<td><p>Background value to be subtracted before dilution correction.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.buffer_norm" title="clophfit.prtecan.Labelblock.buffer_norm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer_norm</span></code></a></p></td>
+<td><p>Background value to be subtracted before dilution correction.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.buffer_sd" title="clophfit.prtecan.Labelblock.buffer_sd"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer_sd</span></code></a></p></td>
+<td><p>Get standard deviation of buffer_wells values.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.buffer_norm_sd" title="clophfit.prtecan.Labelblock.buffer_norm_sd"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer_norm_sd</span></code></a></p></td>
+<td><p>Get standard deviation of normalized buffer_wells values.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.data_norm" title="clophfit.prtecan.Labelblock.data_norm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_norm</span></code></a></p></td>
+<td><p>Normalize data by number of flashes, integration time and gain.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.data_buffersubtracted" title="clophfit.prtecan.Labelblock.data_buffersubtracted"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_buffersubtracted</span></code></a></p></td>
+<td><p>Buffer subtracted data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.data_buffersubtracted_norm" title="clophfit.prtecan.Labelblock.data_buffersubtracted_norm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_buffersubtracted_norm</span></code></a></p></td>
+<td><p>Normalize buffer-subtracted data.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Methods:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Labelblock.__almost_eq__" title="clophfit.prtecan.Labelblock.__almost_eq__"><code class="xref py py-obj docutils literal notranslate"><span class="pre">__almost_eq__</span></code></a>(other)</p></td>
+<td><p>Two labelblocks are almost equal when they could be merged after normalization.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.path">
+<span class="sig-name descname"><span class="pre">path</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.path" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.metadata" title="Link to this definition">#</a></dt>
+<dd><p>Metadata specific for this Labelblock.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.data">
+<span class="sig-name descname"><span class="pre">data</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.data" title="Link to this definition">#</a></dt>
+<dd><p>The 96 data values as {‘well_name’, value}.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.buffer">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buffer</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.buffer" title="Link to this definition">#</a></dt>
+<dd><p>Background value to be subtracted before dilution correction.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.buffer_norm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buffer_norm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.buffer_norm" title="Link to this definition">#</a></dt>
+<dd><p>Background value to be subtracted before dilution correction.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.buffer_sd">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buffer_sd</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.buffer_sd" title="Link to this definition">#</a></dt>
+<dd><p>Get standard deviation of buffer_wells values.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.buffer_norm_sd">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buffer_norm_sd</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">float</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.buffer_norm_sd" title="Link to this definition">#</a></dt>
+<dd><p>Get standard deviation of normalized buffer_wells values.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.data_norm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_norm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.data_norm" title="Link to this definition">#</a></dt>
+<dd><p>Normalize data by number of flashes, integration time and gain.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.data_buffersubtracted">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_buffersubtracted</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.data_buffersubtracted" title="Link to this definition">#</a></dt>
+<dd><p>Buffer subtracted data.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.data_buffersubtracted_norm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_buffersubtracted_norm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.Labelblock.data_buffersubtracted_norm" title="Link to this definition">#</a></dt>
+<dd><p>Normalize buffer-subtracted data.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.Labelblock.__almost_eq__">
+<span class="sig-name descname"><span class="pre">__almost_eq__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Labelblock.__almost_eq__" title="Link to this definition">#</a></dt>
+<dd><p>Two labelblocks are almost equal when they could be merged after normalization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>other</strong> (<a class="reference internal" href="#clophfit.prtecan.Labelblock" title="clophfit.prtecan.prtecan.Labelblock"><em>Labelblock</em></a>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">LabelblocksGroup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">labelblocks</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">allequal</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup" title="Link to this definition">#</a></dt>
+<dd><p>Group labelblocks with compatible metadata.</p>
+<p><cite>data_norm</cite> always exist.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>labelblocks</strong> (<em>list</em><em>[</em><a class="reference internal" href="#clophfit.prtecan.Labelblock" title="clophfit.prtecan.Labelblock"><em>Labelblock</em></a><em>]</em>) – Labelblocks to be grouped.</p></li>
+<li><p><strong>allequal</strong> (<em>bool</em>) – True if labelblocks already tested equal.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>Exception</strong> – When labelblocks are neither equal nor almost equal.</p>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.labelblocks" title="clophfit.prtecan.LabelblocksGroup.labelblocks"><code class="xref py py-obj docutils literal notranslate"><span class="pre">labelblocks</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.allequal" title="clophfit.prtecan.LabelblocksGroup.allequal"><code class="xref py py-obj docutils literal notranslate"><span class="pre">allequal</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.metadata" title="clophfit.prtecan.LabelblocksGroup.metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metadata</span></code></a></p></td>
+<td><p>Metadata shared by all labelblocks.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.data" title="clophfit.prtecan.LabelblocksGroup.data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data</span></code></a></p></td>
+<td><p>Return None or data.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.data_norm" title="clophfit.prtecan.LabelblocksGroup.data_norm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_norm</span></code></a></p></td>
+<td><p>Normalize data by number of flashes, integration time and gain.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted" title="clophfit.prtecan.LabelblocksGroup.data_buffersubtracted"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_buffersubtracted</span></code></a></p></td>
+<td><p>Buffer subtracted data.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted_norm" title="clophfit.prtecan.LabelblocksGroup.data_buffersubtracted_norm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_buffersubtracted_norm</span></code></a></p></td>
+<td><p>Buffer subtracted data.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.labelblocks">
+<span class="sig-name descname"><span class="pre">labelblocks</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.Labelblock" title="clophfit.prtecan.prtecan.Labelblock"><code class="xref py py-class docutils literal notranslate"><span class="pre">Labelblock</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.labelblocks" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.allequal">
+<span class="sig-name descname"><span class="pre">allequal</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">False</span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.allequal" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.metadata" title="Link to this definition">#</a></dt>
+<dd><p>Metadata shared by all labelblocks.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.data">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.data" title="Link to this definition">#</a></dt>
+<dd><p>Return None or data.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.data_norm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_norm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.data_norm" title="Link to this definition">#</a></dt>
+<dd><p>Normalize data by number of flashes, integration time and gain.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.data_buffersubtracted">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_buffersubtracted</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted" title="Link to this definition">#</a></dt>
+<dd><p>Buffer subtracted data.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.LabelblocksGroup.data_buffersubtracted_norm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_buffersubtracted_norm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted_norm" title="Link to this definition">#</a></dt>
+<dd><p>Buffer subtracted data.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.Metadata">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">Metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">value</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">unit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Metadata" title="Link to this definition">#</a></dt>
+<dd><p>Represents the value of a metadata dictionary.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>value</strong> (<em>int</em><em> | </em><em>str</em><em> | </em><em>float</em><em> | </em><em>None</em>) – The value for the dictionary key.</p></li>
+<li><p><strong>unit</strong> (<em>Sequence</em><em>[</em><em>str</em><em> | </em><em>float</em><em> | </em><em>int</em><em>] </em><em>| </em><em>None</em><em>, </em><em>optional</em>) – The first element represents the unit, while the following elements are only listed.</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Metadata.value" title="clophfit.prtecan.Metadata.value"><code class="xref py py-obj docutils literal notranslate"><span class="pre">value</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Metadata.unit" title="clophfit.prtecan.Metadata.unit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">unit</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Metadata.value">
+<span class="sig-name descname"><span class="pre">value</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">UnionType</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code><span class="pre">,</span> <code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Metadata.value" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Metadata.unit">
+<span class="sig-name descname"><span class="pre">unit</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">Sequence</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code> <span class="pre">|</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code> <span class="pre">|</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code><span class="pre">]]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Metadata.unit" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.PlateScheme">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">PlateScheme</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">file</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.PlateScheme" title="Link to this definition">#</a></dt>
+<dd><p>Define buffer, ctrl and unk wells, and ctrl names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>file</strong> (<em>Path</em>) – File path to the scheme file [&lt;well Id, sample name&gt;].</p>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.PlateScheme.file" title="clophfit.prtecan.PlateScheme.file"><code class="xref py py-obj docutils literal notranslate"><span class="pre">file</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.PlateScheme.buffer" title="clophfit.prtecan.PlateScheme.buffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">buffer</span></code></a></p></td>
+<td><p>List of buffer wells.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.PlateScheme.ctrl" title="clophfit.prtecan.PlateScheme.ctrl"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ctrl</span></code></a></p></td>
+<td><p>List of CTR wells.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.PlateScheme.names" title="clophfit.prtecan.PlateScheme.names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">names</span></code></a></p></td>
+<td><p>A dictionary mapping sample names to their associated list of wells.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.PlateScheme.file">
+<span class="sig-name descname"><span class="pre">file</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.PlateScheme.file" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.PlateScheme.buffer">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">buffer</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.PlateScheme.buffer" title="Link to this definition">#</a></dt>
+<dd><p>List of buffer wells.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.PlateScheme.ctrl">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ctrl</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.PlateScheme.ctrl" title="Link to this definition">#</a></dt>
+<dd><p>List of CTR wells.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.PlateScheme.names">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">names</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">set</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.PlateScheme.names" title="Link to this definition">#</a></dt>
+<dd><p>A dictionary mapping sample names to their associated list of wells.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.Tecanfile">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">Tecanfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Tecanfile" title="Link to this definition">#</a></dt>
+<dd><p>Parse a Tecan .xls file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>path</strong> (<em>Path</em>) – Path to <cite>.xls</cite> file.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>FileNotFoundError</strong> – When path does not exist.</p></li>
+<li><p><strong>Exception</strong> – When no Labelblock is found.</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Tecanfile.path" title="clophfit.prtecan.Tecanfile.path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">path</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Tecanfile.metadata" title="clophfit.prtecan.Tecanfile.metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metadata</span></code></a></p></td>
+<td><p>General metadata for Tecanfile, like <cite>Date</cite> and <cite>Shaking Duration</cite>.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Tecanfile.labelblocks" title="clophfit.prtecan.Tecanfile.labelblocks"><code class="xref py py-obj docutils literal notranslate"><span class="pre">labelblocks</span></code></a></p></td>
+<td><p>All labelblocks contained in this file.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Tecanfile.path">
+<span class="sig-name descname"><span class="pre">path</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">Path</span></code></em><a class="headerlink" href="#clophfit.prtecan.Tecanfile.path" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Tecanfile.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Tecanfile.metadata" title="Link to this definition">#</a></dt>
+<dd><p>General metadata for Tecanfile, like <cite>Date</cite> and <cite>Shaking Duration</cite>.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Tecanfile.labelblocks">
+<span class="sig-name descname"><span class="pre">labelblocks</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.Labelblock" title="clophfit.prtecan.prtecan.Labelblock"><code class="xref py py-class docutils literal notranslate"><span class="pre">Labelblock</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Tecanfile.labelblocks" title="Link to this definition">#</a></dt>
+<dd><p>All labelblocks contained in this file.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.TecanfilesGroup">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">TecanfilesGroup</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tecanfiles</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TecanfilesGroup" title="Link to this definition">#</a></dt>
+<dd><p>Group of Tecanfiles containing at least one common Labelblock.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tecanfiles</strong> (<em>list</em><em>[</em><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.Tecanfile"><em>Tecanfile</em></a><em>]</em>) – List of Tecanfiles.</p>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>Exception</strong> – When all Labelblocks are not at least almost equal.</p>
+</dd>
+<dt class="field-odd">Warns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>Warning</strong> – The Tecanfiles listed in <cite>tecanfiles</cite> are expected to contain the
+“same” list (of length N) of Labelblocks. Normally, N labelblocksgroups
+will be created. However, if not all Tecanfiles contain the same number
+of Labelblocks that can be merged (‘equal’ mergeable) in the same order,
+then a warning will be raised. In this case, a number M &lt; N of groups
+can be built.</p>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TecanfilesGroup.tecanfiles" title="clophfit.prtecan.TecanfilesGroup.tecanfiles"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tecanfiles</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TecanfilesGroup.labelblocksgroups" title="clophfit.prtecan.TecanfilesGroup.labelblocksgroups"><code class="xref py py-obj docutils literal notranslate"><span class="pre">labelblocksgroups</span></code></a></p></td>
+<td><p>Each group contains its own data like a titration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TecanfilesGroup.metadata" title="clophfit.prtecan.TecanfilesGroup.metadata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">metadata</span></code></a></p></td>
+<td><p>Metadata shared by all tecanfiles.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TecanfilesGroup.tecanfiles">
+<span class="sig-name descname"><span class="pre">tecanfiles</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.prtecan.Tecanfile"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tecanfile</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.TecanfilesGroup.tecanfiles" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TecanfilesGroup.labelblocksgroups">
+<span class="sig-name descname"><span class="pre">labelblocksgroups</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup" title="clophfit.prtecan.prtecan.LabelblocksGroup"><code class="xref py py-class docutils literal notranslate"><span class="pre">LabelblocksGroup</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.TecanfilesGroup.labelblocksgroups" title="Link to this definition">#</a></dt>
+<dd><p>Each group contains its own data like a titration. ??</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TecanfilesGroup.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.TecanfilesGroup.metadata" title="Link to this definition">#</a></dt>
+<dd><p>Metadata shared by all tecanfiles.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">Titration</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tecanfiles</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">conc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_ph</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Titration" title="Link to this definition">#</a></dt>
+<dd><p>Build titrations from grouped Tecanfiles and corresponding concentrations or pH values.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>tecanfiles</strong> (<em>list</em><em>[</em><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.Tecanfile"><em>Tecanfile</em></a><em>]</em>) – Tecanfiles to be grouped.</p></li>
+<li><p><strong>conc</strong> (<em>ArrayF</em>) – Concentration or pH values.</p></li>
+<li><p><strong>is_ph</strong> (<em>bool</em>) – Indicate if x values represent pH (default is False).</p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.tecanfiles" title="clophfit.prtecan.Titration.tecanfiles"><code class="xref py py-obj docutils literal notranslate"><span class="pre">tecanfiles</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.conc" title="clophfit.prtecan.Titration.conc"><code class="xref py py-obj docutils literal notranslate"><span class="pre">conc</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.is_ph" title="clophfit.prtecan.Titration.is_ph"><code class="xref py py-obj docutils literal notranslate"><span class="pre">is_ph</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.additions" title="clophfit.prtecan.Titration.additions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">additions</span></code></a></p></td>
+<td><p>List of initial volume followed by additions.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.data" title="clophfit.prtecan.Titration.data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data</span></code></a></p></td>
+<td><p>Buffer subtracted and corrected for dilution data.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.data_nrm" title="clophfit.prtecan.Titration.data_nrm"><code class="xref py py-obj docutils literal notranslate"><span class="pre">data_nrm</span></code></a></p></td>
+<td><p>Buffer subtracted, corrected for dilution and normalized data.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.scheme" title="clophfit.prtecan.Titration.scheme"><code class="xref py py-obj docutils literal notranslate"><span class="pre">scheme</span></code></a></p></td>
+<td><p>Scheme for known samples like {'buffer', ['H12', 'H01'], 'ctrl'...}.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Methods:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.fromlistfile" title="clophfit.prtecan.Titration.fromlistfile"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fromlistfile</span></code></a>(list_file, is_ph)</p></td>
+<td><p>Build <cite>Titration</cite> from a list[.pH|.Cl] file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.load_additions" title="clophfit.prtecan.Titration.load_additions"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_additions</span></code></a>(additions_file)</p></td>
+<td><p>Load additions from file.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.load_scheme" title="clophfit.prtecan.Titration.load_scheme"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_scheme</span></code></a>(schemefile)</p></td>
+<td><p>Load scheme from file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.Titration.export_data" title="clophfit.prtecan.Titration.export_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_data</span></code></a>(out_folder)</p></td>
+<td><p>Export dat files [x,y1,..,yN] from labelblocksgroups.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.tecanfiles">
+<span class="sig-name descname"><span class="pre">tecanfiles</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.prtecan.Tecanfile"><code class="xref py py-class docutils literal notranslate"><span class="pre">Tecanfile</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.tecanfiles" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.conc">
+<span class="sig-name descname"><span class="pre">conc</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">ndarray</span></code><span class="pre">[</span><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code><span class="pre">,</span> <code class="xref py py-class docutils literal notranslate"><span class="pre">dtype</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">float64</span></code><span class="pre">]]</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.conc" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.is_ph">
+<span class="sig-name descname"><span class="pre">is_ph</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></em><a class="headerlink" href="#clophfit.prtecan.Titration.is_ph" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.fromlistfile">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fromlistfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">list_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_ph</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Titration.fromlistfile" title="Link to this definition">#</a></dt>
+<dd><p>Build <cite>Titration</cite> from a list[.pH|.Cl] file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>list_file</strong> (<em>Path</em><em> | </em><em>str</em>) – File path to the listfile ([fpath conc]).</p></li>
+<li><p><strong>is_ph</strong> (<em>bool</em>) – Indicate if x values represent pH.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#clophfit.prtecan.Titration" title="clophfit.prtecan.Titration">Titration</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.additions">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">additions</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.additions" title="Link to this definition">#</a></dt>
+<dd><p>List of initial volume followed by additions.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.load_additions">
+<span class="sig-name descname"><span class="pre">load_additions</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">additions_file</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Titration.load_additions" title="Link to this definition">#</a></dt>
+<dd><p>Load additions from file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>additions_file</strong> (<em>Path</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.data">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.data" title="Link to this definition">#</a></dt>
+<dd><p>Buffer subtracted and corrected for dilution data.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.data_nrm">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">data_nrm</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.data_nrm" title="Link to this definition">#</a></dt>
+<dd><p>Buffer subtracted, corrected for dilution and normalized data.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.scheme">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">scheme</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#clophfit.prtecan.PlateScheme" title="clophfit.prtecan.prtecan.PlateScheme"><span class="pre">PlateScheme</span></a></em><a class="headerlink" href="#clophfit.prtecan.Titration.scheme" title="Link to this definition">#</a></dt>
+<dd><p>Scheme for known samples like {‘buffer’, [‘H12’, ‘H01’], ‘ctrl’…}.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.load_scheme">
+<span class="sig-name descname"><span class="pre">load_scheme</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">schemefile</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Titration.load_scheme" title="Link to this definition">#</a></dt>
+<dd><p>Load scheme from file. Set buffer_wells.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>schemefile</strong> (<em>Path</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.export_data">
+<span class="sig-name descname"><span class="pre">export_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">out_folder</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.Titration.export_data" title="Link to this definition">#</a></dt>
+<dd><p>Export dat files [x,y1,..,yN] from labelblocksgroups.</p>
+<p>Remember that a Titration has at least 1 normalized Lbg dataset <cite>dat_nrm</cite>.</p>
+<p>dat:            [d1, None] | [d1, d2]
+dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
+dat_nrm:        [d1,d2]
+dat_bg_nrm:     [{}, {}] | [d1, d2]
+dat_bg_dil_nrm: [{}, {}] | [d1, d2]</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>out_folder</strong> (<em>Path</em>) – Path to output folder.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.labelblocksgroups">
+<span class="sig-name descname"><span class="pre">labelblocksgroups</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code><span class="pre">[</span><a class="reference internal" href="#clophfit.prtecan.LabelblocksGroup" title="clophfit.prtecan.prtecan.LabelblocksGroup"><code class="xref py py-class docutils literal notranslate"><span class="pre">LabelblocksGroup</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.labelblocksgroups" title="Link to this definition">#</a></dt>
+<dd><p>Each group contains its own data like a titration. ??</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.Titration.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code><span class="pre">,</span> <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a><span class="pre">]</span></em><a class="headerlink" href="#clophfit.prtecan.Titration.metadata" title="Link to this definition">#</a></dt>
+<dd><p>Metadata shared by all tecanfiles.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">TitrationAnalysis</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">tecanfiles</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">conc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_ph</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis" title="Link to this definition">#</a></dt>
+<dd><p>Perform analysis of a titration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>ValueError</strong> – For unexpected file format, e.g. header <cite>names</cite>.</p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>tecanfiles</strong> (<em>list</em><em>[</em><a class="reference internal" href="#clophfit.prtecan.Tecanfile" title="clophfit.prtecan.Tecanfile"><em>Tecanfile</em></a><em>]</em>) – </p></li>
+<li><p><strong>conc</strong> (<em>ArrayF</em>) – </p></li>
+<li><p><strong>is_ph</strong> (<em>bool</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+<p><strong>Classes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs" title="clophfit.prtecan.TitrationAnalysis.FitKwargs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FitKwargs</span></code></a>([ini, fin, weight])</p></td>
+<td><p>Represent arguments for fit method.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.keys_unk" title="clophfit.prtecan.TitrationAnalysis.keys_unk"><code class="xref py py-obj docutils literal notranslate"><span class="pre">keys_unk</span></code></a></p></td>
+<td><p>A list of wells containing samples that are neither buffer nor CTR samples.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.fitdata" title="clophfit.prtecan.TitrationAnalysis.fitdata"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fitdata</span></code></a></p></td>
+<td><p>Data used for fitting.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.fitdata_params" title="clophfit.prtecan.TitrationAnalysis.fitdata_params"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fitdata_params</span></code></a></p></td>
+<td><p>Get the datafit parameters.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.fitkws" title="clophfit.prtecan.TitrationAnalysis.fitkws"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fitkws</span></code></a></p></td>
+<td><p>Get the arguments for fitting.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.results" title="clophfit.prtecan.TitrationAnalysis.results"><code class="xref py py-obj docutils literal notranslate"><span class="pre">results</span></code></a></p></td>
+<td><p>Result dataframes.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.result_dfs" title="clophfit.prtecan.TitrationAnalysis.result_dfs"><code class="xref py py-obj docutils literal notranslate"><span class="pre">result_dfs</span></code></a></p></td>
+<td><p>Result dataframes.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Methods:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.fromlistfile" title="clophfit.prtecan.TitrationAnalysis.fromlistfile"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fromlistfile</span></code></a>(list_file, is_ph)</p></td>
+<td><p>Build <cite>TitrationAnalysis</cite> from a list[.pH|.Cl] file.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.fit" title="clophfit.prtecan.TitrationAnalysis.fit"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fit</span></code></a>()</p></td>
+<td><p>Fit titrations.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.plot_k" title="clophfit.prtecan.TitrationAnalysis.plot_k"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_k</span></code></a>(lb, hue_column[, xlim, title])</p></td>
+<td><p>Plot K values as stripplot.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.plot_all_wells" title="clophfit.prtecan.TitrationAnalysis.plot_all_wells"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_all_wells</span></code></a>(lb, path)</p></td>
+<td><p>Plot all wells into a pdf.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.plot_ebar" title="clophfit.prtecan.TitrationAnalysis.plot_ebar"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_ebar</span></code></a>(lb, y, yerr[, x, xerr, xmin, ...])</p></td>
+<td><p>Plot SA vs.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.print_fitting" title="clophfit.prtecan.TitrationAnalysis.print_fitting"><code class="xref py py-obj docutils literal notranslate"><span class="pre">print_fitting</span></code></a>(lb)</p></td>
+<td><p>Print fitting parameters for the whole plate.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.plot_buffer" title="clophfit.prtecan.TitrationAnalysis.plot_buffer"><code class="xref py py-obj docutils literal notranslate"><span class="pre">plot_buffer</span></code></a>([title])</p></td>
+<td><p>Plot buffers of all labelblocksgroups.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.export_png" title="clophfit.prtecan.TitrationAnalysis.export_png"><code class="xref py py-obj docutils literal notranslate"><span class="pre">export_png</span></code></a>(lb, path)</p></td>
+<td><p>Export png like lb1/ lb2/ lb1_lb2/.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.FitKwargs">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">FitKwargs</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ini</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">fin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">weight</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs" title="Link to this definition">#</a></dt>
+<dd><p>Represent arguments for fit method.</p>
+<p><strong>Attributes:</strong></p>
+<table class="autosummary longtable table autosummary">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.ini" title="clophfit.prtecan.TitrationAnalysis.FitKwargs.ini"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ini</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.fin" title="clophfit.prtecan.TitrationAnalysis.FitKwargs.fin"><code class="xref py py-obj docutils literal notranslate"><span class="pre">fin</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.weight" title="clophfit.prtecan.TitrationAnalysis.FitKwargs.weight"><code class="xref py py-obj docutils literal notranslate"><span class="pre">weight</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ini</strong> (<em>int</em>) – </p></li>
+<li><p><strong>fin</strong> (<em>int</em><em> | </em><em>None</em>) – </p></li>
+<li><p><strong>weight</strong> (<em>bool</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.FitKwargs.ini">
+<span class="sig-name descname"><span class="pre">ini</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.ini" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.FitKwargs.fin">
+<span class="sig-name descname"><span class="pre">fin</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code><span class="pre">[</span><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.fin" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.FitKwargs.weight">
+<span class="sig-name descname"><span class="pre">weight</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.weight" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.keys_unk">
+<span class="sig-name descname"><span class="pre">keys_unk</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list[str]</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.keys_unk" title="Link to this definition">#</a></dt>
+<dd><p>A list of wells containing samples that are neither buffer nor CTR samples.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.fromlistfile">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fromlistfile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">list_file</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">is_ph</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.fromlistfile" title="Link to this definition">#</a></dt>
+<dd><p>Build <cite>TitrationAnalysis</cite> from a list[.pH|.Cl] file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis" title="clophfit.prtecan.prtecan.TitrationAnalysis"><code class="xref py py-class docutils literal notranslate"><span class="pre">TitrationAnalysis</span></code></a></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>list_file</strong> (<em>Path</em><em> | </em><em>str</em>) – </p></li>
+<li><p><strong>is_ph</strong> (<em>bool</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.fitdata">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fitdata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">float</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.fitdata" title="Link to this definition">#</a></dt>
+<dd><p>Data used for fitting.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.fitdata_params">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fitdata_params</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.fitdata_params" title="Link to this definition">#</a></dt>
+<dd><p>Get the datafit parameters.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.tecanfiles">
+<span class="sig-name descname"><span class="pre">tecanfiles</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list[Tecanfile]</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.tecanfiles" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.conc">
+<span class="sig-name descname"><span class="pre">conc</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">ArrayF</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.conc" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.is_ph">
+<span class="sig-name descname"><span class="pre">is_ph</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">bool</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.is_ph" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.labelblocksgroups">
+<span class="sig-name descname"><span class="pre">labelblocksgroups</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list[LabelblocksGroup]</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.labelblocksgroups" title="Link to this definition">#</a></dt>
+<dd><p>Each group contains its own data like a titration. ??</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">dict[str,</span> <span class="pre">Metadata]</span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.metadata" title="Link to this definition">#</a></dt>
+<dd><p>Metadata shared by all tecanfiles.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.fitkws">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fitkws</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs" title="clophfit.prtecan.TitrationAnalysis.FitKwargs"><span class="pre">FitKwargs</span></a></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.fitkws" title="Link to this definition">#</a></dt>
+<dd><p>Get the arguments for fitting.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.results">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">results</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">FitResult</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.results" title="Link to this definition">#</a></dt>
+<dd><p>Result dataframes.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.result_dfs">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">result_dfs</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">list</span><span class="p"><span class="pre">[</span></span><span class="pre">DataFrame</span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.result_dfs" title="Link to this definition">#</a></dt>
+<dd><p>Result dataframes.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.fit">
+<span class="sig-name descname"><span class="pre">fit</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.fit" title="Link to this definition">#</a></dt>
+<dd><p>Fit titrations.</p>
+<p>The fitting process uses the initial point (<cite>ini</cite>), the final point (<cite>fin</cite>), and weighting (<cite>weight</cite>) parameters
+defined in the <cite>FitKwargs</cite> instance (accessible through <cite>self.fitkws</cite>).</p>
+<p>To perform a fit, you would first define the fit parameters and then call the fit method:
+titan.fitkws = TitrationAnalysis.FitKwargs(ini=0, fin=None, weight=True)</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>A list of dictionaries with fitting results.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list[dict[str, FitResult]]</p>
+</dd>
+</dl>
+<p class="rubric">Notes</p>
+<p>This method is less general and is designed for two label blocks.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.plot_k">
+<span class="sig-name descname"><span class="pre">plot_k</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hue_column</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xlim</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.plot_k" title="Link to this definition">#</a></dt>
+<dd><p>Plot K values as stripplot.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>lb</strong> (<em>int</em>) – Labelblock index.</p></li>
+<li><p><strong>hue_column</strong> (<em>str</em>) – Column in <cite>fitresults_df</cite> used for color-coding data points in the stripplot.</p></li>
+<li><p><strong>xlim</strong> (<em>tuple</em><em>[</em><em>float</em><em>, </em><em>float</em><em>]</em><em>, </em><em>optional</em>) – Range.</p></li>
+<li><p><strong>title</strong> (<em>str</em><em>, </em><em>optional</em>) – To name the plot.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The figure.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>plt.figure</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.plot_all_wells">
+<span class="sig-name descname"><span class="pre">plot_all_wells</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.plot_all_wells" title="Link to this definition">#</a></dt>
+<dd><p>Plot all wells into a pdf.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>lb</strong> (<em>int</em>) – </p></li>
+<li><p><strong>path</strong> (<em>str</em><em> | </em><em>Path</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.plot_ebar">
+<span class="sig-name descname"><span class="pre">plot_ebar</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">y</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">yerr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'K'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xerr</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'sK'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xmin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ymin</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">xmax</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.plot_ebar" title="Link to this definition">#</a></dt>
+<dd><p>Plot SA vs. K with errorbar for the whole plate.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Figure</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>lb</strong> (<em>int</em>) – </p></li>
+<li><p><strong>y</strong> (<em>str</em>) – </p></li>
+<li><p><strong>yerr</strong> (<em>str</em>) – </p></li>
+<li><p><strong>x</strong> (<em>str</em>) – </p></li>
+<li><p><strong>xerr</strong> (<em>str</em>) – </p></li>
+<li><p><strong>xmin</strong> (<em>float</em><em> | </em><em>None</em>) – </p></li>
+<li><p><strong>ymin</strong> (<em>float</em><em> | </em><em>None</em>) – </p></li>
+<li><p><strong>xmax</strong> (<em>float</em><em> | </em><em>None</em>) – </p></li>
+<li><p><strong>title</strong> (<em>str</em><em> | </em><em>None</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.print_fitting">
+<span class="sig-name descname"><span class="pre">print_fitting</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lb</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.print_fitting" title="Link to this definition">#</a></dt>
+<dd><p>Print fitting parameters for the whole plate.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>lb</strong> (<em>int</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.plot_buffer">
+<span class="sig-name descname"><span class="pre">plot_buffer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">title</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.plot_buffer" title="Link to this definition">#</a></dt>
+<dd><p>Plot buffers of all labelblocksgroups.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Figure</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>title</strong> (<em>str</em><em> | </em><em>None</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clophfit.prtecan.TitrationAnalysis.export_png">
+<span class="sig-name descname"><span class="pre">export_png</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.TitrationAnalysis.export_png" title="Link to this definition">#</a></dt>
+<dd><p>Export png like lb1/ lb2/ lb1_lb2/.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-obj docutils literal notranslate"><span class="pre">None</span></code></span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>lb</strong> (<em>int</em>) – </p></li>
+<li><p><strong>path</strong> (<em>str</em><em> | </em><em>Path</em>) – </p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.calculate_conc">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">calculate_conc</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">additions</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">conc_stock</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">conc_ini</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.calculate_conc" title="Link to this definition">#</a></dt>
+<dd><p>Calculate concentration values.</p>
+<p>additions[0]=vol_ini; Stock concentration is a parameter.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>additions</strong> (<em>Sequence</em><em>[</em><em>float</em><em>]</em>) – Initial volume and all subsequent additions.</p></li>
+<li><p><strong>conc_stock</strong> (<em>float</em>) – Concentration of the stock used for additions.</p></li>
+<li><p><strong>conc_ini</strong> (<em>float</em>) – Initial concentration (default=0).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Concentrations as vector.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ArrayF</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.dilution_correction">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">dilution_correction</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">additions</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.dilution_correction" title="Link to this definition">#</a></dt>
+<dd><p>Apply dilution correction.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>additions</strong> (<em>list</em><em>[</em><em>float</em><em>]</em>) – List of initial volume (index=0) followed by all additions.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dilution correction vector.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>ArrayF</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.extract_metadata">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">extract_metadata</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lines</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.extract_metadata" title="Link to this definition">#</a></dt>
+<dd><p>Extract metadata into both Tecanfile and Labelblock.</p>
+<p>From a list of stripped lines takes the first field as the <strong>key</strong> of the
+metadata dictionary, remaining fields goes into a list of values with the
+exception of Label ([str]) and Temperature ([float]).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>lines</strong> (<em>list_of_lines</em>) – Lines that are a list of fields, typically from a csv/xls file.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Metadata for Tecanfile or Labelblock.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>dict[str, str | list[str | int | float]]</p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;Shaking (Linear) Amplitude:&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;mm&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+<span class="go">{&#39;Shaking (Linear) Amplitude:&#39;: Metadata(value=2, unit=[&#39;mm&#39;])}</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;Temperature: 26 °C&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+<span class="go">{&#39;Temperature&#39;: Metadata(value=26.0, unit=[&#39;°C&#39;])}</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;Excitation Wavelength&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="mi">400</span><span class="p">,</span> <span class="s1">&#39;nm&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+<span class="go">{&#39;Excitation Wavelength&#39;: Metadata(value=400, unit=[&#39;nm&#39;])}</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;Label: Label1&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+<span class="go">{&#39;Label&#39;: Metadata(value=&#39;Label1&#39;, unit=None)}</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;Mode&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;Fluorescence Top Reading&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">extract_metadata</span><span class="p">(</span><span class="n">lines</span><span class="p">)[</span><span class="s1">&#39;Mode&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value</span>
+<span class="go">&#39;Fluorescence Top Reading&#39;</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.lookup_listoflines">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">lookup_listoflines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">csvl</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pattern</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'Label:</span> <span class="pre">Label'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">col</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.lookup_listoflines" title="Link to this definition">#</a></dt>
+<dd><p>Lookup line numbers (row index) where given pattern occurs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>csvl</strong> (<em>list_of_lines</em>) – Lines of a csv/xls file.</p></li>
+<li><p><strong>pattern</strong> (<em>str</em>) – Pattern to be searched (default=”Label: Label”).</p></li>
+<li><p><strong>col</strong> (<em>int</em>) – Column to search (default=0).</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Row/line index for all occurrences of pattern. Empty list for no occurrences.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list[int]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.merge_md">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">merge_md</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mds</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.merge_md" title="Link to this definition">#</a></dt>
+<dd><p>Merge a list of metadata dict if the key value is the same in the list.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><code class="xref py py-class docutils literal notranslate"><span class="pre">Metadata</span></code></a>]</span></p>
+</dd>
+<dt class="field-even">Parameters<span class="colon">:</span></dt>
+<dd class="field-even"><p><strong>mds</strong> (<em>list</em><em>[</em><em>dict</em><em>[</em><em>str</em><em>, </em><a class="reference internal" href="#clophfit.prtecan.Metadata" title="clophfit.prtecan.prtecan.Metadata"><em>Metadata</em></a><em>]</em><em>]</em>) – </p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.read_xls">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">read_xls</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.read_xls" title="Link to this definition">#</a></dt>
+<dd><p>Read first sheet of an xls file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>path</strong> (<em>Path</em>) – Path to <cite>.xls</cite> file.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Lines.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list_of_lines</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clophfit.prtecan.strip_lines">
+<span class="sig-prename descclassname"><span class="pre">clophfit.prtecan.</span></span><span class="sig-name descname"><span class="pre">strip_lines</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">lines</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clophfit.prtecan.strip_lines" title="Link to this definition">#</a></dt>
+<dd><p>Remove empty fields/cells from lines read from a csv file.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>lines</strong> (<em>list_of_lines</em>) – Lines that are a list of fields, typically from a csv/xls file.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Lines removed from blank cells.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>list_of_lines</p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">lines</span> <span class="o">=</span> <span class="p">[[</span><span class="s1">&#39;Shaking (Linear) Amplitude:&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;mm&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">]]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">strip_lines</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+<span class="go">[[&#39;Shaking (Linear) Amplitude:&#39;, 2, &#39;mm&#39;]]</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="binding.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">clophfit.binding</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="prenspire.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">clophfit.prenspire</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+  <div class="sidebar-secondary-item">
+
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock"><code class="docutils literal notranslate"><span class="pre">Labelblock</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.path"><code class="docutils literal notranslate"><span class="pre">Labelblock.path</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.metadata"><code class="docutils literal notranslate"><span class="pre">Labelblock.metadata</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.data"><code class="docutils literal notranslate"><span class="pre">Labelblock.data</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.buffer"><code class="docutils literal notranslate"><span class="pre">Labelblock.buffer</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.buffer_norm"><code class="docutils literal notranslate"><span class="pre">Labelblock.buffer_norm</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.buffer_sd"><code class="docutils literal notranslate"><span class="pre">Labelblock.buffer_sd</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.buffer_norm_sd"><code class="docutils literal notranslate"><span class="pre">Labelblock.buffer_norm_sd</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.data_norm"><code class="docutils literal notranslate"><span class="pre">Labelblock.data_norm</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.data_buffersubtracted"><code class="docutils literal notranslate"><span class="pre">Labelblock.data_buffersubtracted</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.data_buffersubtracted_norm"><code class="docutils literal notranslate"><span class="pre">Labelblock.data_buffersubtracted_norm</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Labelblock.__almost_eq__"><code class="docutils literal notranslate"><span class="pre">Labelblock.__almost_eq__()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.labelblocks"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.labelblocks</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.allequal"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.allequal</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.metadata"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.metadata</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.data"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.data</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.data_norm"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.data_norm</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.data_buffersubtracted</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.LabelblocksGroup.data_buffersubtracted_norm"><code class="docutils literal notranslate"><span class="pre">LabelblocksGroup.data_buffersubtracted_norm</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Metadata"><code class="docutils literal notranslate"><span class="pre">Metadata</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Metadata.value"><code class="docutils literal notranslate"><span class="pre">Metadata.value</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Metadata.unit"><code class="docutils literal notranslate"><span class="pre">Metadata.unit</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.PlateScheme"><code class="docutils literal notranslate"><span class="pre">PlateScheme</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.PlateScheme.file"><code class="docutils literal notranslate"><span class="pre">PlateScheme.file</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.PlateScheme.buffer"><code class="docutils literal notranslate"><span class="pre">PlateScheme.buffer</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.PlateScheme.ctrl"><code class="docutils literal notranslate"><span class="pre">PlateScheme.ctrl</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.PlateScheme.names"><code class="docutils literal notranslate"><span class="pre">PlateScheme.names</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Tecanfile"><code class="docutils literal notranslate"><span class="pre">Tecanfile</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Tecanfile.path"><code class="docutils literal notranslate"><span class="pre">Tecanfile.path</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Tecanfile.metadata"><code class="docutils literal notranslate"><span class="pre">Tecanfile.metadata</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Tecanfile.labelblocks"><code class="docutils literal notranslate"><span class="pre">Tecanfile.labelblocks</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TecanfilesGroup"><code class="docutils literal notranslate"><span class="pre">TecanfilesGroup</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TecanfilesGroup.tecanfiles"><code class="docutils literal notranslate"><span class="pre">TecanfilesGroup.tecanfiles</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TecanfilesGroup.labelblocksgroups"><code class="docutils literal notranslate"><span class="pre">TecanfilesGroup.labelblocksgroups</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TecanfilesGroup.metadata"><code class="docutils literal notranslate"><span class="pre">TecanfilesGroup.metadata</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration"><code class="docutils literal notranslate"><span class="pre">Titration</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.tecanfiles"><code class="docutils literal notranslate"><span class="pre">Titration.tecanfiles</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.conc"><code class="docutils literal notranslate"><span class="pre">Titration.conc</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.is_ph"><code class="docutils literal notranslate"><span class="pre">Titration.is_ph</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.fromlistfile"><code class="docutils literal notranslate"><span class="pre">Titration.fromlistfile()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.additions"><code class="docutils literal notranslate"><span class="pre">Titration.additions</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.load_additions"><code class="docutils literal notranslate"><span class="pre">Titration.load_additions()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.data"><code class="docutils literal notranslate"><span class="pre">Titration.data</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.data_nrm"><code class="docutils literal notranslate"><span class="pre">Titration.data_nrm</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.scheme"><code class="docutils literal notranslate"><span class="pre">Titration.scheme</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.load_scheme"><code class="docutils literal notranslate"><span class="pre">Titration.load_scheme()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.export_data"><code class="docutils literal notranslate"><span class="pre">Titration.export_data()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.labelblocksgroups"><code class="docutils literal notranslate"><span class="pre">Titration.labelblocksgroups</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.Titration.metadata"><code class="docutils literal notranslate"><span class="pre">Titration.metadata</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.FitKwargs</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.ini"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.FitKwargs.ini</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.fin"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.FitKwargs.fin</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.FitKwargs.weight"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.FitKwargs.weight</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.keys_unk"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.keys_unk</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.fromlistfile"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.fromlistfile()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.fitdata"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.fitdata</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.fitdata_params"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.fitdata_params</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.tecanfiles"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.tecanfiles</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.conc"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.conc</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.is_ph"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.is_ph</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.labelblocksgroups"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.labelblocksgroups</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.metadata"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.metadata</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.fitkws"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.fitkws</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.results"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.results</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.result_dfs"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.result_dfs</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.fit"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.fit()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.plot_k"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.plot_k()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.plot_all_wells"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.plot_all_wells()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.plot_ebar"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.plot_ebar()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.print_fitting"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.print_fitting()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.plot_buffer"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.plot_buffer()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.TitrationAnalysis.export_png"><code class="docutils literal notranslate"><span class="pre">TitrationAnalysis.export_png()</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.calculate_conc"><code class="docutils literal notranslate"><span class="pre">calculate_conc()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.dilution_correction"><code class="docutils literal notranslate"><span class="pre">dilution_correction()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.extract_metadata"><code class="docutils literal notranslate"><span class="pre">extract_metadata()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.lookup_listoflines"><code class="docutils literal notranslate"><span class="pre">lookup_listoflines()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.merge_md"><code class="docutils literal notranslate"><span class="pre">merge_md()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.read_xls"><code class="docutils literal notranslate"><span class="pre">read_xls()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#clophfit.prtecan.strip_lines"><code class="docutils literal notranslate"><span class="pre">strip_lines()</span></code></a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/api/prtecan.rst.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2023, Daniele Arosio.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.2.6.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.14.4.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>

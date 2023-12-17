@@ -1,0 +1,647 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Development &#8212; ClopHfit</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=5b4479735964841361fd" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd" />
+  <script src="../_static/vendor/fontawesome/6.1.2/js/all.min.js?digest=5b4479735964841361fd"></script>
+
+    <script src="../_static/documentation_options.js?v=da6fbbfd"></script>
+    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'references/development';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Contributing" href="contributing.html" />
+    <link rel="prev" title="Older Description" href="older.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>
+    Back to top
+  </button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__primary"
+          id="__primary"/>
+  <label class="overlay overlay-primary" for="__primary"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__secondary"
+          id="__secondary"/>
+  <label class="overlay overlay-secondary" for="__secondary"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+  
+    <nav class="bd-header navbar navbar-expand-lg bd-navbar">
+<div class="bd-header__inner bd-page-width">
+  <label class="sidebar-toggle primary-toggle" for="__primary">
+    <span class="fa-solid fa-bars"></span>
+  </label>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">ClopHfit</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../tutorials/tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../api/api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+    </div>
+  
+
+  
+    <label class="sidebar-toggle secondary-toggle" for="__secondary" tabindex="0">
+      <span class="fa-solid fa-outdent"></span>
+    </label>
+  
+</div>
+
+    </nav>
+  
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../tutorials/tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../api/api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="description.html">Descriptions</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" type="checkbox"/><label class="toctree-toggle" for="toctree-checkbox-1"><i class="fa-solid fa-chevron-down"></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="prenspire.html">prenspire</a></li>
+<li class="toctree-l2"><a class="reference internal" href="prtecan.html">prtecan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="older.html">Older Description</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+
+
+<nav aria-label="Breadcrumb">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="references.html" class="nav-link">Development references</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page">Development</li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article" role="main">
+                  
+  <section id="development">
+<span id="id1"></span><h1>Development<a class="headerlink" href="#development" title="Link to this heading">#</a></h1>
+<p>You need the following requirements:</p>
+<ul>
+<li><dl>
+<dt><code class="docutils literal notranslate"><span class="pre">hatch</span></code> for test automation and package dependency managements. If you don’t</dt><dd><p>have hatch, you can use <code class="docutils literal notranslate"><span class="pre">pipx</span> <span class="pre">run</span> <span class="pre">hatch</span></code> to run it without installing, or
+<code class="docutils literal notranslate"><span class="pre">pipx</span> <span class="pre">install</span> <span class="pre">hatch</span></code>. Dependencies and their versions are specified in the
+pyproject.toml file and updated in GitHub with Dependabot.</p>
+<p>You can run <code class="docutils literal notranslate"><span class="pre">hatch</span> <span class="pre">env</span> <span class="pre">show</span></code> to list available environments and scripts.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">env</span> <span class="n">create</span>
+<span class="n">hatch</span> <span class="n">run</span> <span class="n">init</span>  <span class="c1"># init repo with pre-commit hooks</span>
+
+<span class="n">hatch</span> <span class="n">run</span> <span class="n">lint</span>
+<span class="n">hatch</span> <span class="n">run</span> <span class="n">tests</span><span class="o">.</span><span class="n">py3</span><span class="mf">.11</span><span class="p">:</span><span class="nb">all</span>
+</pre></div>
+</div>
+<p>Hatch handles everything for you, including setting up an temporary
+virtual environment for each run.</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pre-commit</span></code> for all style and consistency checking. While you can
+run it with nox, this is such an important tool that it deserves to
+be installed on its own. If pre-commit fails during pushing upstream
+then stage changes, Commit Extend (into previous commit), and repeat
+pushing.</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">pip</span></code> and <code class="docutils literal notranslate"><span class="pre">hatch</span></code> are pinned in .github/workflows/constraints.txt for
+consistency with CI/CD.</p>
+<p>If you like install hatch and required deps in archlinux with:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pacman</span> <span class="o">-</span><span class="n">S</span> <span class="n">python</span><span class="o">-</span><span class="n">hatch</span> <span class="n">python</span><span class="o">-</span><span class="n">hyperlink</span> <span class="n">python</span><span class="o">-</span><span class="n">httpx</span>
+</pre></div>
+</div>
+<p>While <code class="docutils literal notranslate"><span class="pre">pre-commit</span></code> is listed as a ’dev’ dependency, you also have the option
+to install it globally using pipx. This can be done with the following command:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pipx</span> <span class="n">install</span> <span class="n">pre</span><span class="o">-</span><span class="n">commit</span>
+</pre></div>
+</div>
+<section id="setting-up-a-development-with-direnv">
+<h2>Setting up a development with direnv<a class="headerlink" href="#setting-up-a-development-with-direnv" title="Link to this heading">#</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">echo</span> <span class="s2">&quot;layout hatch&quot;</span> <span class="o">&gt;</span> <span class="o">.</span><span class="n">envrc</span>
+<span class="n">hatch</span> <span class="n">run</span> <span class="n">init</span>
+</pre></div>
+</div>
+</section>
+<section id="setting-up-a-development-environment-manually">
+<h2>Setting up a development environment manually<a class="headerlink" href="#setting-up-a-development-environment-manually" title="Link to this heading">#</a></h2>
+<p>You can set up a development environment by running:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python3</span> <span class="o">-</span><span class="n">m</span> <span class="n">venv</span> <span class="o">.</span><span class="n">venv</span>
+<span class="n">source</span> <span class="o">./.</span><span class="n">venv</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">activate</span>
+<span class="n">pip</span> <span class="n">install</span> <span class="o">-</span><span class="n">v</span> <span class="o">-</span><span class="n">e</span> <span class="o">.</span><span class="p">[</span><span class="n">dev</span><span class="p">,</span><span class="n">tests</span><span class="p">,</span><span class="n">docs</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>With direnv for using <a class="reference external" href="https://jupyter.org/">Jupyter</a> during
+development:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">jupiter</span> <span class="n">notebook</span>
+</pre></div>
+</div>
+<p>And only in case you need a system wide easy accessible kernel:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">python</span> <span class="o">-</span><span class="n">m</span> <span class="n">ipykernel</span> <span class="n">install</span> <span class="o">--</span><span class="n">user</span> <span class="o">--</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;clop&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="testing-and-coverage">
+<h2>Testing and coverage<a class="headerlink" href="#testing-and-coverage" title="Link to this heading">#</a></h2>
+<p>Use pytest to run the unit checks:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pytest</span>
+</pre></div>
+</div>
+<p>Use <code class="docutils literal notranslate"><span class="pre">coverage</span></code> to generate coverage reports:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">coverage</span> <span class="n">run</span> <span class="o">--</span><span class="n">branch</span> <span class="o">-</span><span class="n">p</span> <span class="o">-</span><span class="n">m</span> <span class="n">pytest</span>
+</pre></div>
+</div>
+<p>Or use hatch:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">run</span> <span class="n">tests</span><span class="p">:</span><span class="nb">all</span>
+<span class="p">(</span><span class="n">hatch</span> <span class="n">run</span> <span class="n">tests</span><span class="p">:</span><span class="n">cov</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="building-docs">
+<h2>Building docs<a class="headerlink" href="#building-docs" title="Link to this heading">#</a></h2>
+<p>You can build the docs using:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">run</span> <span class="n">docs</span>
+</pre></div>
+</div>
+<p>You can see a preview with:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">run</span> <span class="n">docserve</span>
+</pre></div>
+</div>
+<p>When needed (e.g. API updates):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sphinx</span><span class="o">-</span><span class="n">apidoc</span> <span class="o">-</span><span class="n">f</span> <span class="o">-</span><span class="n">o</span> <span class="n">docs</span><span class="o">/</span><span class="n">api</span><span class="o">/</span> <span class="n">src</span><span class="o">/</span><span class="n">clophfit</span><span class="o">/</span>
+</pre></div>
+</div>
+</section>
+<section id="bump-and-releasing">
+<h2>Bump and releasing<a class="headerlink" href="#bump-and-releasing" title="Link to this heading">#</a></h2>
+<p>To bump version and upload build to test.pypi using:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">run</span> <span class="n">bump</span>
+<span class="n">hatch</span> <span class="n">run</span> <span class="n">bump</span> <span class="s2">&quot;--increment PATCH&quot;</span> <span class="s2">&quot;--files-only&quot;</span> \
+    <span class="p">[</span><span class="s2">&quot;--no-verify&quot;</span> <span class="n">to</span> <span class="n">bypass</span> <span class="n">pre</span><span class="o">-</span><span class="n">commit</span> <span class="ow">and</span> <span class="n">commit</span><span class="o">-</span><span class="n">msg</span> <span class="n">hooks</span><span class="p">]</span>
+<span class="n">git</span> <span class="n">push</span>
+</pre></div>
+</div>
+<p>while to update only the CHANGELOG.md file:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">hatch</span> <span class="n">run</span> <span class="n">ch</span>
+</pre></div>
+</div>
+<p>Release will automatically occur after pushing.</p>
+<p>(Otherwise)</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pipx</span> <span class="n">run</span> <span class="o">--</span><span class="n">spec</span> <span class="n">commitizen</span> <span class="n">cz</span> <span class="n">bump</span> <span class="o">--</span><span class="n">changelog</span><span class="o">-</span><span class="n">to</span><span class="o">-</span><span class="n">stdout</span> <span class="o">--</span><span class="n">files</span><span class="o">-</span><span class="n">only</span> \
+    <span class="p">(</span><span class="o">--</span><span class="n">prerelease</span> <span class="n">alpha</span><span class="p">)</span> <span class="o">--</span><span class="n">increment</span> <span class="n">MINOR</span>
+</pre></div>
+</div>
+<p>To keep clean development history use branches and pr:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>gh pr create --fill
+gh pr merge --squash --delete-branch [-t “fix|ci|feat: msg”]
+</pre></div>
+</div>
+</section>
+<section id="configuration-files">
+<h2>Configuration files<a class="headerlink" href="#configuration-files" title="Link to this heading">#</a></h2>
+<p>Manually updated pinned dependencies for CI/CD:</p>
+<ul class="simple">
+<li><p>.github/workflows/constraints.txt (testing dependabot)</p></li>
+</ul>
+<p>Configuration files:</p>
+<ul class="simple">
+<li><p>pre-commit configured in .pre-commit-config.yaml;</p></li>
+<li><p>bandit (sys) configured in bandit.yml;</p></li>
+<li><p>pylint (sys) configured in pyproject.toml;</p></li>
+<li><p>isort (sys) configured in pyproject.toml;</p></li>
+<li><p>black configured in pyproject.toml (pinned in pre-commit);</p></li>
+<li><p>ruff configured in pyproject.toml (pinned in pre-commit);</p></li>
+<li><p>darglint configured in .darglint (pinned in pre-commit);</p></li>
+<li><p>codespell configured in .codespellrc (pinned in pre-commit);</p></li>
+<li><p>coverage configured in pyproject.toml (tests deps);</p></li>
+<li><p>mypy configured in pyproject.toml (tests deps);</p></li>
+<li><p>commitizen in pyproject.toml (dev deps and pinned in pre-commit).</p></li>
+</ul>
+<p>While the exact dependencies and their versions are specified in the
+pyproject.toml file and updated in GitHub with Dependabot, a complete list of
+all the required packages and their versions (including transitive dependencies)
+can be generated by pip-deepfreeze in the requirements-[dev,docs,tests].txt
+files. This makes it possible to maintain a clear and detailed record of the
+project’s dependency requirements, aiding in maintaining a stable and
+predictable environment across different setups.</p>
+<p>Other manual actions:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pylint</span> <span class="n">src</span><span class="o">/</span> <span class="n">tests</span><span class="o">/</span>
+<span class="n">bandit</span> <span class="o">-</span><span class="n">r</span> <span class="n">src</span><span class="o">/</span>
+</pre></div>
+</div>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="older.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Older Description</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="contributing.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Contributing</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+  <div class="sidebar-secondary-item">
+
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-a-development-with-direnv">Setting up a development with direnv</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#setting-up-a-development-environment-manually">Setting up a development environment manually</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#testing-and-coverage">Testing and coverage</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#building-docs">Building docs</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#bump-and-releasing">Bump and releasing</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#configuration-files">Configuration files</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/references/development.rst.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2023, Daniele Arosio.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.2.6.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.14.4.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>

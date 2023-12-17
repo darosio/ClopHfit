@@ -1,0 +1,1673 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>2. Getting started with prtecan &#8212; ClopHfit</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "light";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../_static/styles/theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/bootstrap.css?digest=5b4479735964841361fd" rel="stylesheet" />
+<link href="../_static/styles/pydata-sphinx-theme.css?digest=5b4479735964841361fd" rel="stylesheet" />
+
+  
+  <link href="../_static/vendor/fontawesome/6.1.2/css/all.min.css?digest=5b4479735964841361fd" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="../_static/vendor/fontawesome/6.1.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd" />
+<link rel="preload" as="script" href="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd" />
+  <script src="../_static/vendor/fontawesome/6.1.2/js/all.min.js?digest=5b4479735964841361fd"></script>
+
+    <script src="../_static/documentation_options.js?v=da6fbbfd"></script>
+    <script src="../_static/doctools.js?v=888ff710"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'tutorials/prtecan';</script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="3. Getting started with prenspire" href="prenspire.html" />
+    <link rel="prev" title="1. Levenberg Marquardt Fitting" href="LMfit.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>
+    Back to top
+  </button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__primary"
+          id="__primary"/>
+  <label class="overlay overlay-primary" for="__primary"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          name="__secondary"
+          id="__secondary"/>
+  <label class="overlay overlay-secondary" for="__secondary"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+  
+    <nav class="bd-header navbar navbar-expand-lg bd-navbar">
+<div class="bd-header__inner bd-page-width">
+  <label class="sidebar-toggle primary-toggle" for="__primary">
+    <span class="fa-solid fa-bars"></span>
+  </label>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+
+<a class="navbar-brand logo" href="../index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">ClopHfit</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../api/api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../references/references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+ <script>
+ document.write(`
+   <button class="btn navbar-btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script>
+    </div>
+  
+
+  
+    <label class="sidebar-toggle secondary-toggle" for="__secondary" tabindex="0">
+      <span class="fa-solid fa-outdent"></span>
+    </label>
+  
+</div>
+
+    </nav>
+  
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          <div class="navbar-item">
+<nav class="navbar-nav">
+  <p class="sidebar-header-items__title"
+     role="heading"
+     aria-level="1"
+     aria-label="Site Navigation">
+    Site Navigation
+  </p>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../click.html">
+                        Command-line tool
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item current active">
+                      <a class="nav-link nav-internal" href="tutorials.html">
+                        Tutorials
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../api/api.html">
+                        API references
+                      </a>
+                    </li>
+                
+
+                    <li class="nav-item">
+                      <a class="nav-link nav-internal" href="../references/references.html">
+                        Development references
+                      </a>
+                    </li>
+                
+  </ul>
+</nav></div>
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<script>
+document.write(`
+  <button class="btn btn-sm navbar-btn theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="theme-switch nav-link" data-mode="light"><i class="fa-solid fa-sun fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="dark"><i class="fa-solid fa-moon fa-lg"></i></span>
+    <span class="theme-switch nav-link" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg"></i></span>
+  </button>
+`);
+</script></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"><ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="LMfit.html">1. Levenberg Marquardt Fitting</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">2. Getting started with prtecan</a></li>
+<li class="toctree-l1"><a class="reference internal" href="prenspire.html">3. Getting started with prenspire</a></li>
+<li class="toctree-l1"><a class="reference internal" href="oldscripts.html">4. Old scripts</a></li>
+
+</ul>
+</div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+
+
+<nav aria-label="Breadcrumb">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="tutorials.html" class="nav-link">Tutorials</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span...</li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article" role="main">
+                  
+  <section id="Getting-started-with-prtecan">
+<h1><span class="section-number">2. </span>Getting started with prtecan<a class="headerlink" href="#Getting-started-with-prtecan" title="Link to this heading">#</a></h1>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[1]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+
+<span class="kn">import</span> <span class="nn">arviz</span> <span class="k">as</span> <span class="nn">az</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="k">as</span> <span class="nn">sb</span>
+<span class="kn">from</span> <span class="nn">clophfit</span> <span class="kn">import</span> <span class="n">prtecan</span>
+<span class="kn">from</span> <span class="nn">clophfit.binding</span> <span class="kn">import</span> <span class="n">fitting</span><span class="p">,</span> <span class="n">plotting</span>
+<span class="kn">from</span> <span class="nn">clophfit.prtecan</span> <span class="kn">import</span> <span class="n">Titration</span><span class="p">,</span> <span class="n">TitrationAnalysis</span>
+
+<span class="o">%</span><span class="k">load_ext</span> autoreload
+<span class="o">%</span><span class="k">autoreload</span> 2
+
+<span class="n">os</span><span class="o">.</span><span class="n">chdir</span><span class="p">(</span><span class="s2">&quot;../../tests/Tecan/140220/&quot;</span><span class="p">)</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;ignore&quot;</span><span class="p">,</span> <span class="n">category</span><span class="o">=</span><span class="ne">UserWarning</span><span class="p">,</span> <span class="n">module</span><span class="o">=</span><span class="s2">&quot;clophfit.prtecan&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<section id="Parsing-a-Single-Tecan-File">
+<h2><span class="section-number">2.1. </span>Parsing a Single Tecan File<a class="headerlink" href="#Parsing-a-Single-Tecan-File" title="Link to this heading">#</a></h2>
+<p>A Tecan file comprises of multiple label blocks, each with its unique metadata. This metadata provides critical details and context for the associated label block. In addition, the Tecan file itself also has its overarching metadata that describes its overall content.</p>
+<p>When the KEYS for label blocks are identical, it indicates that these label blocks are equivalent - meaning, they contain the same measurements. The equality of KEYS plays a significant role in parsing and analyzing Tecan files, as it assists in identifying and grouping similar measurement sets together. This understanding of label block equivalence based on KEY similarity is critical when working with Tecan files.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[2]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tf</span> <span class="o">=</span> <span class="n">prtecan</span><span class="o">.</span><span class="n">Tecanfile</span><span class="p">(</span><span class="s2">&quot;../290212_6.38.xls&quot;</span><span class="p">)</span>
+<span class="n">lb0</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">labelblocks</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">tf</span><span class="o">.</span><span class="n">metadata</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[2]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+{&#39;Device: infinite 200&#39;: Metadata(value=&#39;Serial number: 810002712&#39;, unit=[&#39;Serial number of connected stacker:&#39;]),
+ &#39;Firmware: V_2.11_04/08_InfiniTe (Apr  4 2008/14.37.11)&#39;: Metadata(value=&#39;MAI, V_2.11_04/08_InfiniTe (Apr  4 2008/14.37.11)&#39;, unit=None),
+ &#39;Date:&#39;: Metadata(value=&#39;29/02/2012&#39;, unit=None),
+ &#39;Time:&#39;: Metadata(value=&#39;15.57.05&#39;, unit=None),
+ &#39;System&#39;: Metadata(value=&#39;TECANROBOT&#39;, unit=None),
+ &#39;User&#39;: Metadata(value=&#39;TECANROBOT\\Administrator&#39;, unit=None),
+ &#39;Plate&#39;: Metadata(value=&#39;PE 96 Flat Bottom White   [PE.pdfx]&#39;, unit=None),
+ &#39;Plate-ID (Stacker)&#39;: Metadata(value=&#39;Plate-ID (Stacker)&#39;, unit=None),
+ &#39;Shaking (Linear) Duration:&#39;: Metadata(value=50, unit=[&#39;s&#39;]),
+ &#39;Shaking (Linear) Amplitude:&#39;: Metadata(value=2, unit=[&#39;mm&#39;])}
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[3]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Metadata:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">lb0</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Data:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">lb0</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Metadata:
+ {&#39;Label&#39;: Metadata(value=&#39;Label1&#39;, unit=None), &#39;Mode&#39;: Metadata(value=&#39;Fluorescence Top Reading&#39;, unit=None), &#39;Excitation Wavelength&#39;: Metadata(value=400, unit=[&#39;nm&#39;]), &#39;Emission Wavelength&#39;: Metadata(value=535, unit=[&#39;nm&#39;]), &#39;Excitation Bandwidth&#39;: Metadata(value=20, unit=[&#39;nm&#39;]), &#39;Emission Bandwidth&#39;: Metadata(value=25, unit=[&#39;nm&#39;]), &#39;Gain&#39;: Metadata(value=81, unit=[&#39;Manual&#39;]), &#39;Number of Flashes&#39;: Metadata(value=10, unit=None), &#39;Integration Time&#39;: Metadata(value=20, unit=[&#39;µs&#39;]), &#39;Lag Time&#39;: Metadata(value=&#39;µs&#39;, unit=None), &#39;Settle Time&#39;: Metadata(value=&#39;ms&#39;, unit=None), &#39;Start Time:&#39;: Metadata(value=&#39;29/02/2012 15.57.55&#39;, unit=None), &#39;Temperature&#39;: Metadata(value=26.0, unit=[&#39;°C&#39;]), &#39;End Time:&#39;: Metadata(value=&#39;29/02/2012 15.58.35&#39;, unit=None)}
+
+Data:
+ {&#39;A01&#39;: 30072.0, &#39;A02&#39;: 27276.0, &#39;A03&#39;: 22249.0, &#39;A04&#39;: 30916.0, &#39;A05&#39;: 27943.0, &#39;A06&#39;: 25130.0, &#39;A07&#39;: 26765.0, &#39;A08&#39;: 27836.0, &#39;A09&#39;: 23084.0, &#39;A10&#39;: 31370.0, &#39;A11&#39;: 16890.0, &#39;A12&#39;: 22136.0, &#39;B01&#39;: 22336.0, &#39;B02&#39;: 31327.0, &#39;B03&#39;: 24855.0, &#39;B04&#39;: 32426.0, &#39;B05&#39;: 30066.0, &#39;B06&#39;: 27018.0, &#39;B07&#39;: 28269.0, &#39;B08&#39;: 27570.0, &#39;B09&#39;: 31310.0, &#39;B10&#39;: 24358.0, &#39;B11&#39;: 22595.0, &#39;B12&#39;: 20355.0, &#39;C01&#39;: 23232.0, &#39;C02&#39;: 32241.0, &#39;C03&#39;: 28309.0, &#39;C04&#39;: 26642.0, &#39;C05&#39;: 28818.0, &#39;C06&#39;: 26638.0, &#39;C07&#39;: 26423.0, &#39;C08&#39;: 29441.0, &#39;C09&#39;: 28541.0, &#39;C10&#39;: 29656.0, &#39;C11&#39;: 29841.0, &#39;C12&#39;: 25738.0, &#39;D01&#39;: 26578.0, &#39;D02&#39;: 22280.0, &#39;D03&#39;: 36219.0, &#39;D04&#39;: 25735.0, &#39;D05&#39;: 35433.0, &#39;D06&#39;: 27376.0, &#39;D07&#39;: 22497.0, &#39;D08&#39;: 35681.0, &#39;D09&#39;: 26154.0, &#39;D10&#39;: 32311.0, &#39;D11&#39;: 27495.0, &#39;D12&#39;: 22459.0, &#39;E01&#39;: 27576.0, &#39;E02&#39;: 26058.0, &#39;E03&#39;: 28882.0, &#39;E04&#39;: 26188.0, &#39;E05&#39;: 27531.0, &#39;E06&#39;: 31269.0, &#39;E07&#39;: 26757.0, &#39;E08&#39;: 26427.0, &#39;E09&#39;: 27764.0, &#39;E10&#39;: 27184.0, &#39;E11&#39;: 26556.0, &#39;E12&#39;: 18494.0, &#39;F01&#39;: 22120.0, &#39;F02&#39;: 26642.0, &#39;F03&#39;: 25432.0, &#39;F04&#39;: 23801.0, &#39;F05&#39;: 23932.0, &#39;F06&#39;: 28471.0, &#39;F07&#39;: 27151.0, &#39;F08&#39;: 30243.0, &#39;F09&#39;: 29908.0, &#39;F10&#39;: 27429.0, &#39;F11&#39;: 23624.0, &#39;F12&#39;: 20150.0, &#39;G01&#39;: 18084.0, &#39;G02&#39;: 23496.0, &#39;G03&#39;: 25347.0, &#39;G04&#39;: 30926.0, &#39;G05&#39;: 32714.0, &#39;G06&#39;: 29026.0, &#39;G07&#39;: 33351.0, &#39;G08&#39;: 25353.0, &#39;G09&#39;: 29849.0, &#39;G10&#39;: 25687.0, &#39;G11&#39;: 20913.0, &#39;G12&#39;: 20991.0, &#39;H01&#39;: 25504.0, &#39;H02&#39;: 23601.0, &#39;H03&#39;: 24436.0, &#39;H04&#39;: 27613.0, &#39;H05&#39;: 28201.0, &#39;H06&#39;: 29740.0, &#39;H07&#39;: 26272.0, &#39;H08&#39;: 28696.0, &#39;H09&#39;: 29984.0, &#39;H10&#39;: 25136.0, &#39;H11&#39;: 22063.0, &#39;H12&#39;: 20888.0}
+</pre></div></div>
+</div>
+</section>
+<section id="Group-a-list-of-tecan-files-into-a-titration">
+<h2><span class="section-number">2.2. </span>Group a list of tecan files into a titration<a class="headerlink" href="#Group-a-list-of-tecan-files-into-a-titration" title="Link to this heading">#</a></h2>
+<p>The command Titration.fromlistfile(“../listfile”) reads a list of Tecan files, identifies unique measurements in each file, groups matching ones, and combines them into a titration set for further analysis.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span> <span class="o">=</span> <span class="n">Titration</span><span class="o">.</span><span class="n">fromlistfile</span><span class="p">(</span><span class="s2">&quot;./list.pH&quot;</span><span class="p">,</span> <span class="n">is_ph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">conc</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="n">lbg0</span> <span class="o">=</span> <span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">lbg1</span> <span class="o">=</span> <span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">lbg0</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">metadata</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[9.06 8.35 7.7  7.08 6.44 5.83 4.99]
+
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[4]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+({&#39;Label&#39;: Metadata(value=&#39;Label1&#39;, unit=None),
+  &#39;Mode&#39;: Metadata(value=&#39;Fluorescence Top Reading&#39;, unit=None),
+  &#39;Excitation Wavelength&#39;: Metadata(value=400, unit=[&#39;nm&#39;]),
+  &#39;Emission Wavelength&#39;: Metadata(value=535, unit=[&#39;nm&#39;]),
+  &#39;Excitation Bandwidth&#39;: Metadata(value=20, unit=[&#39;nm&#39;]),
+  &#39;Emission Bandwidth&#39;: Metadata(value=25, unit=[&#39;nm&#39;]),
+  &#39;Number of Flashes&#39;: Metadata(value=10, unit=None),
+  &#39;Integration Time&#39;: Metadata(value=20, unit=[&#39;µs&#39;]),
+  &#39;Lag Time&#39;: Metadata(value=&#39;µs&#39;, unit=None),
+  &#39;Settle Time&#39;: Metadata(value=&#39;ms&#39;, unit=None),
+  &#39;Gain&#39;: Metadata(value=93, unit=None)},
+ {&#39;Label&#39;: Metadata(value=&#39;Label2&#39;, unit=None),
+  &#39;Mode&#39;: Metadata(value=&#39;Fluorescence Top Reading&#39;, unit=None),
+  &#39;Excitation Wavelength&#39;: Metadata(value=485, unit=[&#39;nm&#39;]),
+  &#39;Emission Wavelength&#39;: Metadata(value=535, unit=[&#39;nm&#39;]),
+  &#39;Excitation Bandwidth&#39;: Metadata(value=25, unit=[&#39;nm&#39;]),
+  &#39;Emission Bandwidth&#39;: Metadata(value=25, unit=[&#39;nm&#39;]),
+  &#39;Number of Flashes&#39;: Metadata(value=10, unit=None),
+  &#39;Integration Time&#39;: Metadata(value=20, unit=[&#39;µs&#39;]),
+  &#39;Lag Time&#39;: Metadata(value=&#39;µs&#39;, unit=None),
+  &#39;Settle Time&#39;: Metadata(value=&#39;ms&#39;, unit=None),
+  &#39;Movement&#39;: Metadata(value=&#39;Move Plate Out&#39;, unit=None),
+  &#39;Gain&#39;: Metadata(value=56, unit=None)})
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[5]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lbg0</span><span class="o">.</span><span class="n">labelblocks</span><span class="p">[</span><span class="mi">5</span><span class="p">]</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;Temperature&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[5]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Metadata(value=25.3, unit=[&#39;°C&#39;])
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lbg0</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data</span><span class="p">[</span>
+    <span class="s2">&quot;H12&quot;</span>
+<span class="p">],</span> <span class="n">lbg0</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">,</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data_buffersubtracted</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[6]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+([15112.0, 16345.0, 19169.0, 21719.0, 22128.0, 23532.0, 21909.0],
+ [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0],
+ {},
+ {})
+</pre></div></div>
+</div>
+<p>Start with platescheme loading to set buffer wells (and consequently buffer values).</p>
+<p>Labelblocks group will be populated with data buffer subtracted with/out normalization.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[7]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span><span class="o">.</span><span class="n">load_scheme</span><span class="p">(</span><span class="s2">&quot;./scheme.txt&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Buffer wells : </span><span class="si">{</span><span class="n">tit</span><span class="o">.</span><span class="n">scheme</span><span class="o">.</span><span class="n">buffer</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ctrl wells   : </span><span class="si">{</span><span class="n">tit</span><span class="o">.</span><span class="n">scheme</span><span class="o">.</span><span class="n">ctrl</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CTR name:wells </span><span class="si">{</span><span class="n">tit</span><span class="o">.</span><span class="n">scheme</span><span class="o">.</span><span class="n">names</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Buffer wells : [&#39;D01&#39;, &#39;E01&#39;, &#39;D12&#39;, &#39;E12&#39;]
+Ctrl wells   : [&#39;F12&#39;, &#39;B01&#39;, &#39;C01&#39;, &#39;A12&#39;, &#39;C12&#39;, &#39;F01&#39;, &#39;A01&#39;, &#39;G12&#39;, &#39;H12&#39;, &#39;H01&#39;, &#39;G01&#39;, &#39;B12&#39;]
+CTR name:wells {&#39;G03&#39;: {&#39;H12&#39;, &#39;B12&#39;, &#39;A01&#39;}, &#39;NTT&#39;: {&#39;F12&#39;, &#39;C12&#39;, &#39;F01&#39;}, &#39;S202N&#39;: {&#39;G12&#39;, &#39;H01&#39;, &#39;C01&#39;}, &#39;V224Q&#39;: {&#39;G01&#39;, &#39;B01&#39;, &#39;A12&#39;}}
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lbg0</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg0</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span>
+    <span class="s2">&quot;H12&quot;</span>
+<span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[8]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+([15112.0, 16345.0, 19169.0, 21719.0, 22128.0, 23532.0, 21909.0],
+ [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0],
+ [4226.5, 5005.25, 7829.75, 10291.75, 10238.75, 11381.25, 9566.0],
+ [5319.25, 4143.25, 2336.75, 977.0, 486.25, 367.75, 310.5],
+ [])
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[9]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span><span class="o">.</span><span class="n">load_additions</span><span class="p">(</span><span class="s2">&quot;./additions.pH&quot;</span><span class="p">)</span>
+<span class="n">tit</span><span class="o">.</span><span class="n">additions</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[9]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[100, 2, 2, 2, 2, 2, 2]
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[10]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lbg0</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg0</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span>
+    <span class="s2">&quot;H12&quot;</span>
+<span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;H12&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[10]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+([15112.0, 16345.0, 19169.0, 21719.0, 22128.0, 23532.0, 21909.0],
+ [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0],
+ [4226.5, 5005.25, 7829.75, 10291.75, 10238.75, 11381.25, 9566.0],
+ [5319.25, 4143.25, 2336.75, 977.0, 486.25, 367.75, 310.5],
+ [4226.5,
+  5105.3550000000005,
+  8142.9400000000005,
+  10909.255000000001,
+  11057.85,
+  12519.375000000002,
+  10713.920000000002],
+ [5319.25,
+  4226.115,
+  2430.2200000000003,
+  1035.6200000000001,
+  525.1500000000001,
+  404.52500000000003,
+  347.76000000000005])
+</pre></div></div>
+</div>
+<p>The order in which you apply dilution correction and plate scheme can impact your intermediate results, even though the final results might be the same.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>Dilution correction adjusts the measured data to account for any dilutions made during sample preparation. This typically involves multiplying the measured values by the dilution factor to estimate the true concentration of the sample.
+
+A plate scheme describes the layout of the samples on a plate (common in laboratory experiments, such as those involving microtiter plates). The plate scheme may involve rearranging or grouping the data in some way based on the physical location of the samples on the plate.
+</pre></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[11]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span> <span class="o">=</span> <span class="n">Titration</span><span class="o">.</span><span class="n">fromlistfile</span><span class="p">(</span><span class="s2">&quot;./list.pH&quot;</span><span class="p">,</span> <span class="n">is_ph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">lbg0</span> <span class="o">=</span> <span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">lbg1</span> <span class="o">=</span> <span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">tit</span><span class="o">.</span><span class="n">load_additions</span><span class="p">(</span><span class="s2">&quot;./additions.pH&quot;</span><span class="p">)</span>
+<span class="n">lbg0</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data</span><span class="p">[</span>
+    <span class="s2">&quot;H12&quot;</span>
+<span class="p">],</span> <span class="n">lbg0</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">,</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">,</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[11]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+([15112.0, 16345.0, 19169.0, 21719.0, 22128.0, 23532.0, 21909.0],
+ [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0],
+ {},
+ {},
+ [None, None])
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[12]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span><span class="o">.</span><span class="n">load_scheme</span><span class="p">(</span><span class="s2">&quot;./scheme.txt&quot;</span><span class="p">)</span>
+<span class="n">lbg0</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">lbg0</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span>
+    <span class="s2">&quot;H12&quot;</span>
+<span class="p">],</span> <span class="n">lbg1</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;H12&quot;</span><span class="p">],</span> <span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;H12&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[12]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+([15112.0, 16345.0, 19169.0, 21719.0, 22128.0, 23532.0, 21909.0],
+ [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0],
+ [4226.5, 5005.25, 7829.75, 10291.75, 10238.75, 11381.25, 9566.0],
+ [5319.25, 4143.25, 2336.75, 977.0, 486.25, 367.75, 310.5],
+ [4226.5,
+  5105.3550000000005,
+  8142.9400000000005,
+  10909.255000000001,
+  11057.85,
+  12519.375000000002,
+  10713.920000000002],
+ [5319.25,
+  4226.115,
+  2430.2200000000003,
+  1035.6200000000001,
+  525.1500000000001,
+  404.52500000000003,
+  347.76000000000005])
+</pre></div></div>
+</div>
+<section id="Reassign-Buffer-Wells">
+<h3><span class="section-number">2.2.1. </span>Reassign Buffer Wells<a class="headerlink" href="#Reassign-Buffer-Wells" title="Link to this heading">#</a></h3>
+<p>You can reassess buffer wells, updating the data to account for any dilution (additions) and subtracting the updated buffer value. This is a handy feature that gives you more control over your analysis.</p>
+<p>For instance, consider the following data for a particular well:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[13]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[51.0, 52.0, 50.0, 51.0, 55.0, 58.0, 57.0]
+[-1.75, -0.75, -3.25, -3.0, -1.75, -1.25, -3.5]
+[-1.75, -0.765, -3.38, -3.18, -1.8900000000000001, -1.375, -3.9200000000000004]
+</pre></div></div>
+</div>
+<p>You can reassign buffer wells using the <code class="docutils literal notranslate"><span class="pre">buffer_wells</span></code> attribute:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[14]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tit</span><span class="o">.</span><span class="n">buffer_wells</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;D01&quot;</span><span class="p">,</span> <span class="s2">&quot;E01&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<p>This updates the data for the specified wells, correcting for dilution and subtracting the buffer value:</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[15]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">tit</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;D01&quot;</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[51.0, 52.0, 50.0, 51.0, 55.0, 58.0, 57.0]
+[1.0, 2.0, -1.5, -0.5, 1.5, 3.0, 1.5]
+[1.0, 2.04, -1.56, -0.53, 1.62, 3.3000000000000003, 1.6800000000000002]
+</pre></div></div>
+</div>
+<p>The data remains: - unchanged in <code class="docutils literal notranslate"><span class="pre">labelblocksgroups[].data</span></code> - adjusted buffer subtracted in <code class="docutils literal notranslate"><span class="pre">labelblocksgroups[].data_buffersubtracted</span></code> - adjusted buffer subtracted and dilution corrected in <code class="docutils literal notranslate"><span class="pre">data</span></code>.</p>
+</section>
+</section>
+<section id="Titration-Analysis">
+<h2><span class="section-number">2.3. </span>Titration Analysis<a class="headerlink" href="#Titration-Analysis" title="Link to this heading">#</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[16]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span> <span class="o">=</span> <span class="n">TitrationAnalysis</span><span class="o">.</span><span class="n">fromlistfile</span><span class="p">(</span><span class="s2">&quot;./list.pH&quot;</span><span class="p">,</span> <span class="n">is_ph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">load_scheme</span><span class="p">(</span><span class="s2">&quot;./scheme.txt&quot;</span><span class="p">)</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">load_additions</span><span class="p">(</span><span class="s2">&quot;additions.pH&quot;</span><span class="p">)</span>
+<span class="c1"># g = titan.plot_buffer()</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">datafit_params</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;bg&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;nrm&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;dil&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[17]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">df1</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">&quot;fit1.csv&quot;</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">merged_df</span> <span class="o">=</span> <span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">][[</span><span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;sK&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+    <span class="n">df1</span><span class="p">,</span> <span class="n">left_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="n">sb</span><span class="o">.</span><span class="n">jointplot</span><span class="p">(</span><span class="n">merged_df</span><span class="p">,</span> <span class="n">x</span><span class="o">=</span><span class="s2">&quot;K_y&quot;</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;K_x&quot;</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;reg&quot;</span><span class="p">,</span> <span class="n">ratio</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[17]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+&lt;seaborn.axisgrid.JointGrid at 0x7f5285073050&gt;
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_26_1.png" src="../_images/tutorials_prtecan_26_1.png" />
+</div>
+</div>
+<p>If a fit fails in a well, the well key will be anyway present in results list of dict.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[18]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;H02&quot;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span> <span class="o">-</span> <span class="n">titan</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;H02&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[34695.5, 49035.735, nan, nan, nan, nan, nan]
+set()
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[18]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+FitResult(figure=None, result=None, mini=None)
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[19]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">fitkws</span> <span class="o">=</span> <span class="n">TitrationAnalysis</span><span class="o">.</span><span class="n">FitKwargs</span><span class="p">(</span><span class="n">fin</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">weight</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="s2">&quot;H02&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">figure</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[19]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_29_0.png" src="../_images/tutorials_prtecan_29_0.png" />
+</div>
+</div>
+<p>And in the gloabl fit (i.e. fitting 2 labelblocks) dataset with insufficient data points are removed.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[20]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">well</span> <span class="o">=</span> <span class="s2">&quot;H02&quot;</span>
+<span class="n">y0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="n">well</span><span class="p">])</span>
+<span class="n">y1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">labelblocksgroups</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">data_buffersubtracted</span><span class="p">[</span><span class="n">well</span><span class="p">])</span>
+<span class="n">y1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">data</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="n">well</span><span class="p">])</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">titan</span><span class="o">.</span><span class="n">conc</span><span class="p">)</span>
+<span class="n">ds</span> <span class="o">=</span> <span class="n">fitting</span><span class="o">.</span><span class="n">Dataset</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;y0&quot;</span><span class="p">:</span> <span class="n">y0</span><span class="p">,</span> <span class="s2">&quot;y1&quot;</span><span class="p">:</span> <span class="n">y1</span><span class="p">},</span> <span class="n">is_ph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">rfit</span> <span class="o">=</span> <span class="n">fitting</span><span class="o">.</span><span class="n">fit_binding_glob</span><span class="p">(</span><span class="n">ds</span><span class="p">)</span>
+
+<span class="n">rfit</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">params</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+/tmp/ipykernel_64936/338912189.py:7: UserWarning: Marking dataset y0 for removal due to insufficient data points.
+  rfit = fitting.fit_binding_glob(ds)
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[20]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<table class="jp-toc-ignore"><caption>Parameters</caption><tr><th style='text-align:left'>name</th><th style='text-align:left'>value</th><th style='text-align:left'>standard error</th><th style='text-align:left'>relative error</th><th style='text-align:left'>initial value</th><th style='text-align:left'>min</th><th style='text-align:left'>max</th><th style='text-align:right'>vary</th></tr><tr><td style='text-align:left'>S0_y1</td><td style='text-align:left'> 43342.7539</td><td style='text-align:left'> 375.500142</td><td style='text-align:left'>(0.87%)</td><td style='text-align:left'>40564.25</td><td style='text-align:left'> 0.00000000</td><td style='text-align:left'>        inf</td><td style='text-align:right'>True</td></tr><tr><td style='text-align:left'>S1_y1</td><td style='text-align:left'> 2579.23144</td><td style='text-align:left'> 185.957402</td><td style='text-align:left'>(7.21%)</td><td style='text-align:left'>2451.1200000000003</td><td style='text-align:left'>       -inf</td><td style='text-align:left'>        inf</td><td style='text-align:right'>True</td></tr><tr><td style='text-align:left'>K</td><td style='text-align:left'> 7.89042258</td><td style='text-align:left'> 0.01696391</td><td style='text-align:left'>(0.21%)</td><td style='text-align:left'>7.7</td><td style='text-align:left'> 3.00000000</td><td style='text-align:left'> 11.0000000</td><td style='text-align:right'>True</td></tr></table></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[21]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[21]:
+</pre></div>
+</div>
+<div class="output_area rendered_html docutils container">
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>S0_default</th>
+      <th>sS0_default</th>
+      <th>S1_default</th>
+      <th>sS1_default</th>
+      <th>K</th>
+      <th>sK</th>
+      <th>ctrl</th>
+    </tr>
+    <tr>
+      <th>well</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>C02</th>
+      <td>2492.499767</td>
+      <td>28.618974</td>
+      <td>336.342151</td>
+      <td>28.305553</td>
+      <td>7.086751</td>
+      <td>0.034254</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>D06</th>
+      <td>3336.695733</td>
+      <td>32.976839</td>
+      <td>122.953459</td>
+      <td>24.269400</td>
+      <td>7.453487</td>
+      <td>0.022836</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>A05</th>
+      <td>7132.222048</td>
+      <td>105.367333</td>
+      <td>927.698177</td>
+      <td>115.880014</td>
+      <td>6.953428</td>
+      <td>0.046289</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>E03</th>
+      <td>2737.063083</td>
+      <td>16.342103</td>
+      <td>191.420276</td>
+      <td>7.510533</td>
+      <td>7.961705</td>
+      <td>0.011430</td>
+      <td>NaN</td>
+    </tr>
+    <tr>
+      <th>E08</th>
+      <td>3938.428099</td>
+      <td>63.615614</td>
+      <td>208.153910</td>
+      <td>25.983936</td>
+      <td>8.067620</td>
+      <td>0.028782</td>
+      <td>NaN</td>
+    </tr>
+  </tbody>
+</table>
+</div></div>
+</div>
+<p>You can decide how to pre-process data with datafit_params: - [bg] subtract background - [dil] apply correction for dilution (when e.g. during a titration you add titrant without protein) - [nrm] normalize for gain, number of flashes and integration time.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[22]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">datafit_params</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;bg&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;nrm&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;dil&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+<span class="n">titan</span><span class="o">.</span><span class="n">fitdata</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;E06&quot;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[22]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[9268.0, 7091.0, 3372.0, 1415.0, 793.0, 618.0, 345.0]
+</pre></div></div>
+</div>
+<section id="Posterior-analysis-with-emcee">
+<h3><span class="section-number">2.3.1. </span>Posterior analysis with emcee<a class="headerlink" href="#Posterior-analysis-with-emcee" title="Link to this heading">#</a></h3>
+<p>To explore the posterior of parameters you can use the Minimizer object returned in FitResult.</p>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[23]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">remcee</span> <span class="o">=</span> <span class="n">rfit</span><span class="o">.</span><span class="n">mini</span><span class="o">.</span><span class="n">emcee</span><span class="p">(</span><span class="n">burn</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">thin</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 500/500 [00:04&lt;00:00, 123.66it/s]
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+The chain is shorter than 50 times the integrated autocorrelation time for 3 parameter(s). Use this estimate with caution and run a longer chain!
+N/50 = 10;
+tau: [41.79101671 25.77808566 39.55477457]
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[24]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">f</span> <span class="o">=</span> <span class="n">plotting</span><span class="o">.</span><span class="n">plot_emcee</span><span class="p">(</span><span class="n">remcee</span><span class="o">.</span><span class="n">flatchain</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">remcee</span><span class="o">.</span><span class="n">flatchain</span><span class="o">.</span><span class="n">quantile</span><span class="p">([</span><span class="mf">0.03</span><span class="p">,</span> <span class="mf">0.97</span><span class="p">])[</span><span class="s2">&quot;K&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_list</span><span class="p">())</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[7.86, 7.91]
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_37_1.png" src="../_images/tutorials_prtecan_37_1.png" />
+</div>
+</div>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[25]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># titan.plot_all_wells(&quot;cl.pdf&quot;)</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[26]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">samples</span> <span class="o">=</span> <span class="n">remcee</span><span class="o">.</span><span class="n">flatchain</span><span class="p">[[</span><span class="s2">&quot;K&quot;</span><span class="p">]]</span>
+<span class="c1"># Convert the dictionary of flatchains to an ArviZ InferenceData object</span>
+<span class="n">samples_dict</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">samples</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+<span class="n">idata</span> <span class="o">=</span> <span class="n">az</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">posterior</span><span class="o">=</span><span class="n">samples_dict</span><span class="p">)</span>
+<span class="n">k_samples</span> <span class="o">=</span> <span class="n">idata</span><span class="o">.</span><span class="n">posterior</span><span class="p">[</span><span class="s2">&quot;K&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<span class="n">percentile_value</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">k_samples</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Value at which the probability of being higher is 99%: </span><span class="si">{</span><span class="n">percentile_value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">az</span><span class="o">.</span><span class="n">plot_forest</span><span class="p">(</span><span class="n">k_samples</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+Value at which the probability of being higher is 99%: 7.861435378874649
+</pre></div></div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[26]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+array([&lt;Axes: title={&#39;center&#39;: &#39;94.0% HDI&#39;}&gt;], dtype=object)
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_39_2.png" src="../_images/tutorials_prtecan_39_2.png" />
+</div>
+</div>
+</section>
+<section id="Cl-titration-analysis">
+<h3><span class="section-number">2.3.2. </span>Cl titration analysis<a class="headerlink" href="#Cl-titration-analysis" title="Link to this heading">#</a></h3>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[27]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">cl_an</span> <span class="o">=</span> <span class="n">prtecan</span><span class="o">.</span><span class="n">TitrationAnalysis</span><span class="o">.</span><span class="n">fromlistfile</span><span class="p">(</span><span class="s2">&quot;list.cl&quot;</span><span class="p">,</span> <span class="n">is_ph</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">cl_an</span><span class="o">.</span><span class="n">load_scheme</span><span class="p">(</span><span class="s2">&quot;scheme.txt&quot;</span><span class="p">)</span>
+<span class="n">cl_an</span><span class="o">.</span><span class="n">scheme</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[27]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+PlateScheme(file=&#39;scheme.txt&#39;, _buffer=[&#39;D01&#39;, &#39;E01&#39;, &#39;D12&#39;, &#39;E12&#39;], _ctrl=[&#39;F12&#39;, &#39;B01&#39;, &#39;C01&#39;, &#39;A12&#39;, &#39;C12&#39;, &#39;F01&#39;, &#39;A01&#39;, &#39;G12&#39;, &#39;H12&#39;, &#39;H01&#39;, &#39;G01&#39;, &#39;B12&#39;], _names={&#39;G03&#39;: {&#39;H12&#39;, &#39;B12&#39;, &#39;A01&#39;}, &#39;NTT&#39;: {&#39;F12&#39;, &#39;C12&#39;, &#39;F01&#39;}, &#39;S202N&#39;: {&#39;G12&#39;, &#39;H01&#39;, &#39;C01&#39;}, &#39;V224Q&#39;: {&#39;G01&#39;, &#39;B01&#39;, &#39;A12&#39;}})
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[28]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">cl_an</span><span class="o">.</span><span class="n">load_additions</span><span class="p">(</span><span class="s2">&quot;additions.cl&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">cl_an</span><span class="o">.</span><span class="n">conc</span><span class="p">)</span>
+<span class="n">cl_an</span><span class="o">.</span><span class="n">conc</span> <span class="o">=</span> <span class="n">prtecan</span><span class="o">.</span><span class="n">calculate_conc</span><span class="p">(</span><span class="n">cl_an</span><span class="o">.</span><span class="n">additions</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+<span class="n">cl_an</span><span class="o">.</span><span class="n">conc</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+[0 0 0 0 0 0 0 0 0]
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[28]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+array([  0.        ,  17.54385965,  34.48275862,  50.84745763,
+        66.66666667,  81.96721311,  96.77419355, 138.46153846,
+       164.17910448])
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[29]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fres</span> <span class="o">=</span> <span class="n">cl_an</span><span class="o">.</span><span class="n">results</span><span class="p">[</span><span class="mi">2</span><span class="p">][</span><span class="n">well</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">fres</span><span class="o">.</span><span class="n">is_valid</span><span class="p">(),</span> <span class="n">fres</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">bic</span><span class="p">,</span> <span class="n">fres</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">redchi</span><span class="p">)</span>
+<span class="n">fres</span><span class="o">.</span><span class="n">figure</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+True 21.971302661955743 2.24215671140986
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[29]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_43_1.png" src="../_images/tutorials_prtecan_43_1.png" />
+</div>
+</div>
+</section>
+<section id="Plotting">
+<h3><span class="section-number">2.3.3. </span>Plotting<a class="headerlink" href="#Plotting" title="Link to this heading">#</a></h3>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[30]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">f</span> <span class="o">=</span> <span class="n">titan</span><span class="o">.</span><span class="n">plot_k</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;2014-12-23&quot;</span><span class="p">,</span> <span class="n">hue_column</span><span class="o">=</span><span class="s2">&quot;S1_default&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_45_0.png" src="../_images/tutorials_prtecan_45_0.png" />
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[31]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">print_fitting</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+          K s      K   S0_y0 s  S0_y0   S1_y0 s  S1_y0   S0_y1 s  S0_y1   S1_y1 s  S1_y1
+ G03
+A01    7.94   0.019 1.47e+04 4.2e+02 2.25e+04 2.5e+02 5.06e+03      51     302      24
+H12    7.93   0.013 1.43e+04 5.1e+02 2.26e+04 3.1e+02 5.72e+03      39     377      19
+B12    7.99   0.036 1.43e+04 2.1e+02 1.88e+04 1.2e+02 2.83e+03      55     215      25
+ NTT
+F12    7.59   0.031 1.6e+04 4.9e+02 2.32e+04 3.6e+02 2.8e+03      35     404      23
+C12    7.58   0.034 1.54e+04 5.5e+02 2.17e+04 4.1e+02 2.53e+03      35     357      23
+F01    7.53   0.027 2.52e+04 1.9e+03 4.62e+04 1.5e+03 7.93e+03      86 1.04e+03      59
+ S202N
+C01    6.93   0.042 3.25e+04 1.8e+03 4.21e+04 1.9e+03 6.9e+03      92     916   1e+02
+G12    7.03   0.049 1.74e+04 9.1e+02 2.17e+04 9.3e+02 2.34e+03      38     328      39
+H01       7   0.027 2.6e+04 1.8e+03 3.4e+04 1.9e+03 5.13e+03      45     729      48
+ V224Q
+B01    7.91   0.015 2.47e+04 1.6e+03 3.93e+04 9.7e+02 1.52e+04 1.2e+02     503      58
+A12    8.12   0.057 1.89e+04 1.2e+03 2.85e+04 6.4e+02 1.11e+04 3.7e+02     379 1.4e+02
+G01    8.08   0.027 2.74e+04 5.4e+03   4e+04   3e+03 1.81e+04 2.9e+02     373 1.2e+02
+
+          K s      K   S0_y0 s  S0_y0   S1_y0 s  S1_y0   S0_y1 s  S0_y1   S1_y1 s  S1_y1
+  UNK
+H10    8.08   0.023 1.25e+04 6.1e+02 1.78e+04 3.4e+02 3.2e+03      41     201      16
+H08    8.06   0.017 2.98e+04 5.1e+03 6.13e+04 2.9e+03 2.64e+04 2.4e+02 1.44e+03   1e+02
+H07    8.07   0.023 1.76e+04 3.6e+03 2.92e+04   2e+03 1.02e+04 1.3e+02     487      54
+G11    8.05   0.017 1.09e+04 3.3e+02 1.41e+04 1.9e+02 1.56e+03      14     115       6
+E08    8.07   0.028 1.36e+04 1.1e+03 1.88e+04 6.3e+02 3.94e+03      61     209      25
+H09    8.05   0.018 1.73e+04 1.7e+03 3.08e+04 9.7e+02 1.03e+04 1.1e+02     547      44
+E10    8.03    0.01 1.38e+04 3.7e+02 1.77e+04 2.1e+02 2.2e+03      12     202     5.2
+H06    8.04   0.014 1.74e+04 2.3e+03 3.01e+04 1.3e+03 9.79e+03      73     541      31
+G10    8.06   0.026 1.13e+04 2.5e+02 1.32e+04 1.4e+02     903      13    82.3     5.3
+D11    8.04   0.018 1.25e+04 2.4e+02 1.62e+04 1.3e+02 2.36e+03      23     175     9.8
+H11    8.03   0.016 1.36e+04 1.2e+03 2.07e+04 6.7e+02 5.04e+03      43     279      18
+G09    8.04   0.023 1.26e+04 2.9e+02 1.5e+04 1.6e+02 1.14e+03      14     108       6
+G08    8.06   0.036 1.32e+04 1.3e+03 1.76e+04 7.3e+02 3.62e+03      73     166      30
+E11    8.03   0.017 1.21e+04   9e+02 1.71e+04 5.1e+02 3.6e+03      34     222      14
+D10    8.03   0.019 1.54e+04 9.4e+02 2.38e+04 5.4e+02 6.6e+03      69     356      30
+G07    8.05   0.028 1.23e+04 4.4e+02 1.55e+04 2.4e+02 1.9e+03      29     127      12
+D07    8.02   0.015 1.45e+04   6e+02 2.06e+04 3.4e+02 4.84e+03      40     271      17
+E06    8.05    0.03 1.79e+04 2.4e+03 2.9e+04 1.3e+03 1.02e+04 1.7e+02     469      71
+D08       8   0.011 1.27e+04 3.6e+02 1.68e+04 2.1e+02 2.94e+03      17     182     7.3
+E07    8.01   0.019 1.45e+04   1e+03 2.18e+04 5.9e+02 5.41e+03      57     298      25
+H04    7.99  0.0076 1.5e+04 6.6e+02 2.27e+04 3.9e+02 5.26e+03      21     339     9.5
+E09    8.02   0.024 1.26e+04   5e+02 1.51e+04 2.9e+02 2.05e+03      27     122      11
+E02    8.01    0.02 1.71e+04 1.9e+03 2.67e+04 1.1e+03 7.77e+03      86     405      38
+D09    7.99   0.013 1.3e+04 2.7e+02 1.78e+04 1.6e+02 3.21e+03      22     204     9.8
+H03    7.99    0.01 1.88e+04 2.1e+03 3.31e+04 1.2e+03 1.09e+04      59     606      27
+E04       8   0.022 1.88e+04 2.5e+03 3.05e+04 1.4e+03 1.04e+04 1.3e+02     476      55
+E05    7.99   0.016 1.42e+04 6.4e+02 1.96e+04 3.7e+02 3.97e+03      34     243      15
+H05    7.98   0.012 1.94e+04 2.4e+03 3.45e+04 1.4e+03 1.24e+04      78     693      35
+F05    7.96  0.0068 1.42e+04 4.2e+02 2.06e+04 2.5e+02 4.43e+03      16     279     7.3
+F03    7.96  0.0074 1.21e+04 2.7e+02 1.51e+04 1.6e+02 1.52e+03     5.8     133     2.7
+D05    7.98   0.015 1.85e+04 1.3e+03 2.93e+04 7.8e+02 9.45e+03      75     493      34
+D04    7.97   0.016 1.74e+04 1.4e+03 2.84e+04 8.2e+02 9.07e+03      78     483      35
+E03    7.96   0.011 1.34e+04 3.2e+02 1.8e+04 1.9e+02 2.74e+03      16     191     7.1
+G06    7.98   0.025 1.27e+04 3.2e+02 1.59e+04 1.9e+02 2.03e+03      27     136      12
+F08    7.97   0.019 1.44e+04 9.4e+02 1.9e+04 5.6e+02 3.54e+03      36     262      16
+D03    7.93  0.0089 2.11e+04 1.6e+03 3.82e+04 9.9e+02 1.4e+04      65     781      31
+F04    7.92    0.01 1.67e+04 1.1e+03 2.5e+04   7e+02   7e+03      36     411      17
+F02    7.91  0.0074 1.7e+04 1.3e+03 2.5e+04 8.1e+02 7.61e+03      29     387      14
+H02    7.92   0.014     nan     nan     nan     nan 4.35e+04 3.1e+02 2.4e+03 1.5e+02
+G03    7.98   0.047 1.77e+04 3.7e+03 2.14e+04 2.2e+03 7.18e+03 1.9e+02     194      83
+F06    7.92   0.016 1.49e+04   3e+02 1.97e+04 1.8e+02 3.45e+03      29     253      14
+F09     7.9   0.014 1.34e+04   4e+02 1.95e+04 2.4e+02 3.98e+03      28     287      14
+G02    7.92   0.024 1.55e+04 1.4e+03 2.08e+04 8.8e+02 5.35e+03      66     268      32
+G05    7.94   0.038 1.57e+04 2.1e+03 2.01e+04 1.3e+03 5.68e+03 1.2e+02     222      54
+F07    7.88  0.0095 1.41e+04 2.1e+02 2.05e+04 1.3e+02 4.07e+03      19     296     9.7
+F11    7.88   0.017 1.25e+04 3.6e+02 1.67e+04 2.2e+02 2.71e+03      23     195      12
+G04    7.89   0.027 1.71e+04   2e+03 2.26e+04 1.2e+03 6.06e+03      84     307      42
+D06    7.45   0.023 1.66e+04 1.7e+03 1.67e+04 1.4e+03 3.34e+03      34     123      25
+F10    7.41   0.068 1.37e+04 4.1e+02 1.56e+04 3.4e+02 2.41e+03      67     180      51
+A09     7.3   0.042 2.47e+04 9.5e+02 3.13e+04 8.4e+02 5.37e+03      84     672      70
+A08    7.31   0.052 2.94e+04 2.5e+03 3.47e+04 2.2e+03 6.86e+03 1.4e+02     582 1.2e+02
+A06    7.54    0.19 4.51e+04 1.8e+03 6.15e+04 1.9e+03 1.38e+04 1.2e+03 2.83e+03 8.5e+02
+B08    7.25   0.099 1.6e+04 6.2e+02 2.51e+04 5.5e+02 2.36e+03      84     494      74
+A07    7.16   0.057 2.75e+04 1.3e+03 3.59e+04 1.2e+03 6.23e+03 1.3e+02     691 1.2e+02
+C06    7.11   0.035 2.05e+04 5.3e+02 2.45e+04 5.2e+02 3.46e+03      42     398      40
+B05    7.17   0.065 2.45e+04 1.2e+03 3.03e+04 1.2e+03 5.02e+03 1.2e+02     565 1.1e+02
+A02    7.13   0.059 2.28e+04 4.8e+02 2.93e+04 4.7e+02 3.9e+03      82     430      79
+C02    7.09   0.039 1.75e+04 5.3e+02 2.07e+04 5.3e+02 2.5e+03      33     339      32
+A03    7.06   0.042 3.81e+04 1.4e+03 5.39e+04 1.4e+03   1e+04 1.4e+02 1.36e+03 1.4e+02
+B07    7.11   0.068 4.25e+04 2.1e+03 5.87e+04   2e+03 1.22e+04 2.9e+02 1.48e+03 2.8e+02
+B02    7.16   0.096 1.96e+04 6.5e+02 3.15e+04 6.1e+02 3.37e+03 1.2e+02     760 1.1e+02
+C08    7.02   0.033 3.43e+04   1e+03 4.7e+04   1e+03 8.71e+03      95 1.13e+03      98
+A11    7.07   0.057 2.46e+04 1.2e+03 3.2e+04 1.2e+03 5.03e+03      97     655      97
+C04    7.15     0.1 2.24e+04   1e+03 3.8e+04   1e+03 4.37e+03 1.6e+02     906 1.5e+02
+A10    7.04   0.048 3.16e+04 1.3e+03 4.47e+04 1.3e+03 7.04e+03 1.1e+02 1.13e+03 1.1e+02
+D02    7.02   0.046 2.45e+04 7.7e+02 3.07e+04   8e+02 4.6e+03      68     684      71
+C10    7.02   0.048 2.04e+04 7.9e+02 2.73e+04 8.2e+02 3.43e+03      53     523      56
+C07    6.97   0.027 2.47e+04 9.4e+02 3.19e+04 9.9e+02 4.55e+03      39     601      43
+B11       7   0.044 2.45e+04 7.8e+02 3.22e+04 8.2e+02 4.62e+03      64     761      68
+C09    6.95   0.027 3.6e+04 1.5e+03 4.31e+04 1.6e+03 7.98e+03      71     847      78
+B04    6.95   0.033 3.29e+04 1.3e+03 4.4e+04 1.4e+03 8.22e+03      86 1.08e+03      95
+C05    6.96   0.041 3.61e+04 1.4e+03 4.67e+04 1.5e+03 8.25e+03 1.1e+02 1.05e+03 1.2e+02
+B06    6.94   0.038 3.17e+04 1.2e+03 4.31e+04 1.3e+03 7.06e+03      85     989      95
+A05    6.96    0.05 3.31e+04 1.5e+03 4.42e+04 1.6e+03 7.14e+03 1.1e+02     940 1.3e+02
+B09     6.9   0.034 2.48e+04 7.9e+02 3.34e+04 8.7e+02 4.61e+03      47     773      54
+C11    6.89   0.034 1.85e+04 3.7e+02 2.4e+04 4.1e+02 2.64e+03      26     494      30
+C03    6.88   0.033 2.95e+04 7.9e+02 3.97e+04 8.8e+02 6.15e+03      61 1.03e+03      71
+B03    6.91   0.047 2.83e+04   9e+02 3.71e+04 9.9e+02 5.89e+03      86     874      98
+B10    6.91   0.063 2.77e+04 1.3e+03 3.63e+04 1.4e+03 5.65e+03 1.1e+02     873 1.2e+02
+A04    6.93   0.083 2.11e+04 7.7e+02 2.82e+04 8.4e+02 3.23e+03      83     529      93
+</pre></div></div>
+</div>
+</section>
+<section id="selection">
+<h3><span class="section-number">2.3.4. </span>selection<a class="headerlink" href="#selection" title="Link to this heading">#</a></h3>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[32]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[32]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+TitrationAnalysis(&#39;Titration(files=[&#34;pH9.1_200214.xls&#34;, &#34;pH8.3_200214.xls&#34;, ...], conc=array([9.06, 8.35, 7.7 , 7.08, 6.44, 5.83, 4.99]), data_size=2)&#39;
+       (kwargs)    fitkws        =TitrationAnalysis.FitKwargs(ini=0, fin=-1, weight=False)
+   (preprocess)    fitdata_params={}
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[33]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">fitdata_params</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;dil&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;nrm&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+<span class="n">titan</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[33]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+TitrationAnalysis(&#39;Titration(files=[&#34;pH9.1_200214.xls&#34;, &#34;pH8.3_200214.xls&#34;, ...], conc=array([9.06, 8.35, 7.7 , 7.08, 6.44, 5.83, 4.99]), data_size=2)&#39;
+       (kwargs)    fitkws        =TitrationAnalysis.FitKwargs(ini=0, fin=-1, weight=False)
+   (preprocess)    fitdata_params={&#39;dil&#39;: 1, &#39;nrm&#39;: 1}
+</pre></div></div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[34]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">f</span> <span class="o">=</span> <span class="n">titan</span><span class="o">.</span><span class="n">plot_ebar</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;S1_default&quot;</span><span class="p">,</span> <span class="n">yerr</span><span class="o">=</span><span class="s2">&quot;sS1_default&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_50_0.png" src="../_images/tutorials_prtecan_50_0.png" />
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[35]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">f</span> <span class="o">=</span> <span class="n">titan</span><span class="o">.</span><span class="n">plot_ebar</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="s2">&quot;S1_y1&quot;</span><span class="p">,</span> <span class="n">yerr</span><span class="o">=</span><span class="s2">&quot;sS1_y1&quot;</span><span class="p">,</span> <span class="n">xmin</span><span class="o">=</span><span class="mf">7.7</span><span class="p">,</span> <span class="n">ymin</span><span class="o">=</span><span class="mi">25</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_51_0.png" src="../_images/tutorials_prtecan_51_0.png" />
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[36]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;ctrl&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">(),</span> <span class="s2">&quot;ctrl&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;U&quot;</span>
+
+<span class="n">sb</span><span class="o">.</span><span class="n">set_style</span><span class="p">(</span><span class="s2">&quot;whitegrid&quot;</span><span class="p">)</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">sb</span><span class="o">.</span><span class="n">PairGrid</span><span class="p">(</span>
+    <span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+    <span class="n">x_vars</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;S1_default&quot;</span><span class="p">,</span> <span class="s2">&quot;S0_default&quot;</span><span class="p">],</span>
+    <span class="n">y_vars</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;S1_default&quot;</span><span class="p">,</span> <span class="s2">&quot;S0_default&quot;</span><span class="p">],</span>
+    <span class="n">hue</span><span class="o">=</span><span class="s2">&quot;ctrl&quot;</span><span class="p">,</span>
+    <span class="n">palette</span><span class="o">=</span><span class="s2">&quot;Set1&quot;</span><span class="p">,</span>
+    <span class="n">diag_sharey</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">g</span><span class="o">.</span><span class="n">map_lower</span><span class="p">(</span><span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">)</span>
+<span class="n">g</span><span class="o">.</span><span class="n">map_upper</span><span class="p">(</span><span class="n">sb</span><span class="o">.</span><span class="n">kdeplot</span><span class="p">,</span> <span class="n">fill</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">g</span><span class="o">.</span><span class="n">map_diag</span><span class="p">(</span><span class="n">sb</span><span class="o">.</span><span class="n">kdeplot</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[36]:
+</pre></div>
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+&lt;seaborn.axisgrid.PairGrid at 0x7f5289924290&gt;
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_52_1.png" src="../_images/tutorials_prtecan_52_1.png" />
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[37]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">sb</span><span class="o">.</span><span class="n">axes_style</span><span class="p">(</span><span class="s2">&quot;darkgrid&quot;</span><span class="p">):</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">sb</span><span class="o">.</span><span class="n">pairplot</span><span class="p">(</span>
+        <span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">2</span><span class="p">][[</span><span class="s2">&quot;S1_y0&quot;</span><span class="p">,</span> <span class="s2">&quot;S0_y0&quot;</span><span class="p">,</span> <span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;S1_y1&quot;</span><span class="p">,</span> <span class="s2">&quot;S0_y1&quot;</span><span class="p">]],</span>
+        <span class="n">hue</span><span class="o">=</span><span class="s2">&quot;S1_y0&quot;</span><span class="p">,</span>
+        <span class="n">palette</span><span class="o">=</span><span class="s2">&quot;Reds&quot;</span><span class="p">,</span>
+        <span class="n">corner</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">diag_kind</span><span class="o">=</span><span class="s2">&quot;kde&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area stderr docutils container">
+<div class="highlight"><pre>
+/home/dan/workspace/ClopHfit/.hatch/clophfit/lib/python3.11/site-packages/seaborn/axisgrid.py:118: UserWarning: The figure layout has changed to tight
+  self._figure.tight_layout(*args, **kwargs)
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_53_1.png" src="../_images/tutorials_prtecan_53_1.png" />
+</div>
+</div>
+</section>
+<section id="combining">
+<h3><span class="section-number">2.3.5. </span>combining<a class="headerlink" href="#combining" title="Link to this heading">#</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[38]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">res_unk</span> <span class="o">=</span> <span class="n">titan</span><span class="o">.</span><span class="n">result_dfs</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">titan</span><span class="o">.</span><span class="n">keys_unk</span><span class="p">]</span><span class="o">.</span><span class="n">sort_index</span><span class="p">()</span>
+<span class="n">res_unk</span><span class="p">[</span><span class="s2">&quot;well&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">res_unk</span><span class="o">.</span><span class="n">index</span>
+</pre></div>
+</div>
+</div>
+<div class="nbinput docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[39]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">f</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">24</span><span class="p">,</span> <span class="mi">14</span><span class="p">))</span>
+<span class="c1"># Make the PairGrid</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">sb</span><span class="o">.</span><span class="n">PairGrid</span><span class="p">(</span>
+    <span class="n">res_unk</span><span class="p">,</span>
+    <span class="n">x_vars</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;S1_default&quot;</span><span class="p">,</span> <span class="s2">&quot;S0_default&quot;</span><span class="p">],</span>
+    <span class="n">y_vars</span><span class="o">=</span><span class="s2">&quot;well&quot;</span><span class="p">,</span>
+    <span class="n">height</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+    <span class="n">aspect</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="c1"># Draw a dot plot using the stripplot function</span>
+<span class="n">g</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">sb</span><span class="o">.</span><span class="n">stripplot</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">orient</span><span class="o">=</span><span class="s2">&quot;h&quot;</span><span class="p">,</span> <span class="n">palette</span><span class="o">=</span><span class="s2">&quot;Set2&quot;</span><span class="p">,</span> <span class="n">edgecolor</span><span class="o">=</span><span class="s2">&quot;gray&quot;</span><span class="p">)</span>
+
+<span class="c1"># Use the same x axis limits on all columns and add better labels</span>
+<span class="c1"># g.set(xlim=(0, 25), xlabel=&quot;Crashes&quot;, ylabel=&quot;&quot;)</span>
+
+<span class="c1"># Use semantically meaningful titles for the columns</span>
+<span class="n">titles</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;$pK_a$&quot;</span><span class="p">,</span> <span class="s2">&quot;B$_</span><span class="si">{neutral}</span><span class="s2">$&quot;</span><span class="p">,</span> <span class="s2">&quot;B$_</span><span class="si">{anionic}</span><span class="s2">$&quot;</span><span class="p">]</span>
+
+<span class="k">for</span> <span class="n">ax</span><span class="p">,</span> <span class="n">title</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">axes</span><span class="o">.</span><span class="n">flat</span><span class="p">,</span> <span class="n">titles</span><span class="p">):</span>
+    <span class="c1"># Set a different title for each axes</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="n">title</span><span class="p">)</span>
+
+    <span class="c1"># Make the grid horizontal instead of vertical</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">xaxis</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">yaxis</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">sb</span><span class="o">.</span><span class="n">despine</span><span class="p">(</span><span class="n">left</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">bottom</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="nboutput docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<div class="highlight"><pre>
+&lt;Figure size 2400x1400 with 0 Axes&gt;
+</pre></div></div>
+</div>
+<div class="nboutput nblast docutils container">
+<div class="prompt empty docutils container">
+</div>
+<div class="output_area docutils container">
+<img alt="../_images/tutorials_prtecan_56_1.png" src="../_images/tutorials_prtecan_56_1.png" />
+</div>
+</div>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="LMfit.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title"><span class="section-number">1. </span>Levenberg Marquardt Fitting</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="prenspire.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title"><span class="section-number">3. </span>Getting started with prenspire</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+  <div class="sidebar-secondary-item">
+
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#Parsing-a-Single-Tecan-File">2.1. Parsing a Single Tecan File</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#Group-a-list-of-tecan-files-into-a-titration">2.2. Group a list of tecan files into a titration</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#Reassign-Buffer-Wells">2.2.1. Reassign Buffer Wells</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#Titration-Analysis">2.3. Titration Analysis</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#Posterior-analysis-with-emcee">2.3.1. Posterior analysis with emcee</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#Cl-titration-analysis">2.3.2. Cl titration analysis</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#Plotting">2.3.3. Plotting</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#selection">2.3.4. selection</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#combining">2.3.5. combining</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../_sources/tutorials/prtecan.ipynb.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="../_static/scripts/bootstrap.js?digest=5b4479735964841361fd"></script>
+<script src="../_static/scripts/pydata-sphinx-theme.js?digest=5b4479735964841361fd"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2023, Daniele Arosio.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 7.2.6.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.14.4.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
