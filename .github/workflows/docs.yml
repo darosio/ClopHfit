@@ -12,6 +12,8 @@ concurrency:
 
 env:
   STABLE_PYTHON_VERSION: "3.11"
+permissions:
+  contents: write
 
 jobs:
   build:
