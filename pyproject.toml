@@ -71,7 +71,7 @@ docs = [
   "sphinxcontrib-plantuml <= 0.27"
 ]
 tests = [
-  "coverage[toml] <= 7.4.0",
+  "coverage[toml] <= 7.4.1",
   "mypy <= 1.8.0",
   "pandas-stubs <= 2.1.4.231227",
   "Pygments <= 2.17.2",
