@@ -1,4 +1,5 @@
 """Parses EnSpire data files."""
+
 from __future__ import annotations
 
 import collections
