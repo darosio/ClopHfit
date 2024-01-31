@@ -94,7 +94,7 @@ jobs:
           coverage report
           coverage xml
       - name: Upload coverage report
-        uses: codecov/codecov-action@v3.1.5
+        uses: codecov/codecov-action@v3.1.6
 
   testpypi:
     needs: [pre-commit, checks, tests]
