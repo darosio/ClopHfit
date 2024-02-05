@@ -1,4 +1,5 @@
 """Fit Cl binding and pH titration."""
+
 from __future__ import annotations
 
 import copy
@@ -219,15 +220,13 @@ class Dataset(dict[str, DataArrays]):
 @typing.overload
 def binding_1site(
     x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> float:
-    ...
+) -> float: ...
 
 
 @typing.overload
 def binding_1site(
     x: ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> ArrayF:
-    ...
+) -> ArrayF: ...
 
 
 def binding_1site(

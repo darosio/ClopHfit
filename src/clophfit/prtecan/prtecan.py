@@ -1,4 +1,5 @@
 """prtecan/prtecan.py."""
+
 from __future__ import annotations
 
 import hashlib
@@ -56,15 +57,13 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
 
 
 @typing.overload
-def lookup_listoflines(csvl: list[list[str]], pattern: str, col: int) -> list[int]:
-    ...
+def lookup_listoflines(csvl: list[list[str]], pattern: str, col: int) -> list[int]: ...
 
 
 @typing.overload
 def lookup_listoflines(
     csvl: list[list[str | int | float]], pattern: str = "Label: Label", col: int = 0
-) -> list[int]:
-    ...
+) -> list[int]: ...
 
 
 def lookup_listoflines(
@@ -943,12 +942,14 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         """Buffer subtracted and corrected for dilution data."""
         if not self._data and self.additions:
             self._data = [
-                {
-                    k: (np.array(v) * self._dil_corr).tolist()
-                    for k, v in lbg.data_buffersubtracted.items()
-                }
-                if lbg.data_buffersubtracted
-                else None
+                (
+                    {
+                        k: (np.array(v) * self._dil_corr).tolist()
+                        for k, v in lbg.data_buffersubtracted.items()
+                    }
+                    if lbg.data_buffersubtracted
+                    else None
+                )
                 for lbg in self.labelblocksgroups
             ]
         return self._data
