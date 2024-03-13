@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.2.2
+    rev: v0.3.2
     hooks:
       - id: ruff
         # args: [--exclude, "src/clophfit/prenspire/*"]
@@ -77,7 +77,7 @@ repos:
       - id: rst-inline-touching-normal
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.7
+    rev: 1.7.8
     hooks:
       - id: bandit
         args: ["-c", "bandit.yml"]
@@ -101,7 +101,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v3.15.0
+    rev: v3.18.3
     hooks:
       - id: commitizen
       - id: commitizen-branch
