@@ -92,7 +92,7 @@ def lookup_listoflines(
     for i, line in enumerate(csvl):
         if isinstance(line, list) and col < len(line):
             element = line[col]
-            if isinstance(element, (str, int, float)) and pattern in str(element):
+            if isinstance(element, str | int | float) and pattern in str(element):
                 indexes.append(i)
     return indexes
 
@@ -466,7 +466,7 @@ class Labelblock(BufferWellsMixin):
                 norm = 1000.0
                 for k in Labelblock._NORM_KEYS:
                     val = self.metadata[k].value
-                    if isinstance(val, (float, int)):
+                    if isinstance(val, float | int):
                         norm /= val
             except TypeError:
                 warnings.warn(
@@ -1399,7 +1399,7 @@ class TitrationAnalysis(Titration):
             fit_df = fit_df[~np.isnan(fit_df[x])]
             fit_df = fit_df[~np.isnan(fit_df[y])]
             for idx, xv, yv, l in zip(  # noqa: E741
-                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"]
+                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"], strict=False
             ):
                 # x or y do not exist.# try:
                 if isinstance(l, str):

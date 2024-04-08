@@ -179,7 +179,7 @@ def plot_pca(ax: Axes, v: ArrayF, conc: ArrayF, pp: PlotParameters) -> None:
     ax.set_ylabel("First Principal Component", color=COLOR_MAP(0))
     ax.set_xlabel("Second Principal Component", color=COLOR_MAP(1))
     # Add labels.
-    for x, y, w in zip(v[1], v[0], conc):
+    for x, y, w in zip(v[1], v[0], conc, strict=False):
         ax.text(x, y, w)
 
 
@@ -220,7 +220,7 @@ def plot_spectra_distributed(
     color_map = cm.get_cmap(pp.palette)
     normalize = colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
     axl = distribute_axes(fig, len(titration))
-    for (j, ax), (lbl, spec) in zip(enumerate(axl), titration.items()):
+    for (j, ax), (lbl, spec) in zip(enumerate(axl), titration.items(), strict=False):
         # Calculate the average spectrum
         avg_spec = spec.mean(axis=1)
         for i in range(len(spec.columns)):
@@ -271,7 +271,7 @@ def print_emcee(result_emcee: MinimizerResult) -> None:
     # Store the parameter names
     param_names = list(result_emcee.params.keys())
     # Construct a dictionary mapping parameter names to MLE solutions
-    mle_dict = dict(zip(param_names, mle_soln))
+    mle_dict = dict(zip(param_names, mle_soln, strict=False))
     header = "\nMaximum Likelihood Estimation from emcee"
     line = "-------------------------------------------------"
     format_string = "{:<5s} {:>11s} {:>11s} {:>11s}"
