@@ -541,7 +541,7 @@ def plot_fit(
     yfit = _binding_1site_models(result.params, xfit, ds.is_ph)
     # Create a color cycle
     colors = [COLOR_MAP(i) for i in range(len(ds))]
-    for (lbl, da), clr in zip(ds.items(), colors):
+    for (lbl, da), clr in zip(ds.items(), colors, strict=False):
         # Make sure a label will be displayed.
         label = lbl if (da.w is None and nboot == 0) else None
         # Plot data.

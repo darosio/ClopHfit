@@ -2,6 +2,70 @@
 build-backend = "hatchling.build"
 requires = ["hatchling>=1.12.2"]
 
+[lint]
+ignore = [
+  "ANN101",
+  "ANN102",
+  "ANN201",
+  "E501"
+]
+select = [
+  "A",  # builtins
+  "ANN",  # typing annotation
+  "ARG",  # unused arguments
+  "B",  # bugbear
+  "C",
+  "C4",  # comprehensions
+  "C90",  # mccabe
+  "D",  # pydocstyle
+  "DTZ",  # dates
+  "E",  # pycodestyle
+  "TRY",  # exceptions
+  "EM",  # exceptions
+  "ERA",  # eradicate
+  "F",  # pyflakes
+  # "FBT",    # boolean-trap
+  "I",  # isort
+  "ICN",  # import conventions (opinionated)
+  "ISC",  # implicit-str-concat
+  "N",  # pep8-naming
+  "PD",  # pandas-vet
+  # "PGH",  # pygrep WAIT
+  "PL",  # pylint see PLR2004...
+  "PT",  # pytest-style
+  "PTH",  # use-pathlib
+  "Q",  # quotes
+  "RUF",  # Ruff
+  "S",  # bandit XXX
+  "SIM",  # simplify
+  "TID",  # tidy-imports
+  "UP",  # pyupgrade
+  "YTT",  # 2020
+  "W"  # pycodestyle
+]
+
+[lint.isort]
+combine-as-imports = true
+force-single-line = false
+known-first-party = ["clophfit"]
+split-on-trailing-comma = true
+
+[lint.mccabe]
+max-complexity = 12
+
+[lint.per-file-ignores]
+"__init__.py" = ["I002"]  # don't need annotations
+"src/clophfit/__main__.py" = [
+  "ANN001"  # params are annotated using click
+]
+"tests/*" = [
+  "PLR2004",
+  "S101"
+]
+
+[lint.pydocstyle]
+convention = "numpy"
+
 [project]
 authors = [
   {name = "daniele arosio", email = "daniele.arosio@cnr.it"}
@@ -313,66 +377,4 @@ testpaths = [
 [tool.ruff]
 extend-exclude = ["src/clophfit/old/"]
 force-exclude = true
-ignore = [
-  "ANN101",
-  "ANN102",
-  "ANN201",
-  "E501"
-]
 line-length = 88
-select = [
-  "A",  # builtins
-  "ANN",  # typing annotation
-  "ARG",  # unused arguments
-  "B",  # bugbear
-  "C",
-  "C4",  # comprehensions
-  "C90",  # mccabe
-  "D",  # pydocstyle
-  "DTZ",  # dates
-  "E",  # pycodestyle
-  "TRY",  # exceptions
-  "EM",  # exceptions
-  "ERA",  # eradicate
-  "F",  # pyflakes
-  # "FBT",    # boolean-trap
-  "I",  # isort
-  "ICN",  # import conventions (opinionated)
-  "ISC",  # implicit-str-concat
-  "N",  # pep8-naming
-  "PD",  # pandas-vet
-  # "PGH",  # pygrep WAIT
-  "PL",  # pylint see PLR2004...
-  "PT",  # pytest-style
-  "PTH",  # use-pathlib
-  "Q",  # quotes
-  "RUF",  # Ruff
-  "S",  # bandit XXX
-  "SIM",  # simplify
-  "TID",  # tidy-imports
-  "UP",  # pyupgrade
-  "YTT",  # 2020
-  "W"  # pycodestyle
-]
-
-[tool.ruff.isort]
-combine-as-imports = true
-force-single-line = false
-known-first-party = ["clophfit"]
-split-on-trailing-comma = true
-
-[tool.ruff.mccabe]
-max-complexity = 12
-
-[tool.ruff.per-file-ignores]
-"__init__.py" = ["I002"]  # don't need annotations
-"src/clophfit/__main__.py" = [
-  "ANN001"  # params are annotated using click
-]
-"tests/*" = [
-  "PLR2004",
-  "S101"
-]
-
-[tool.ruff.pydocstyle]
-convention = "numpy"
