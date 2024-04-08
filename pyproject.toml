@@ -10,9 +10,9 @@ classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Programming Language :: Unix Shell",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
@@ -46,7 +46,7 @@ license = "BSD-3-Clause"
 license-files = {paths = ["LICENSE.txt"]}
 name = "clophfit"
 readme = "README.md"
-requires-python = ">=3.9, <3.12"
+requires-python = ">=3.10"
 version = "0.10.6"
 
 [project.optional-dependencies]
@@ -62,7 +62,6 @@ dev = [
 ]
 docs = [
   "autodocsumm <= 0.2.12",
-  # "myst-parser == 1.0.0",
   "nbsphinx <= 0.9.3",
   "pydata-sphinx-theme <= 0.15.2",
   "Sphinx <= 7.2.6",
@@ -214,7 +213,7 @@ features = ["tests"]
 template = "tests"
 
 [[tool.hatch.envs.tests.matrix]]
-python = ["3.11", "3.10", "3.9"]  # reverse order to ensure the presence in older python of module included in newer versions
+python = ["3.12", "3.11", "3.10"]  # reverse order to ensure the presence in older python of module included in newer versions
 
 [tool.hatch.envs.tests.scripts]
 all = ["test", "type", "xdoc", "cov"]
