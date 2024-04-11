@@ -217,6 +217,7 @@ class Dataset(dict[str, DataArrays]):
                 del self[key]
 
 
+# fmt: off
 @typing.overload
 def binding_1site(
     x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
@@ -228,10 +229,10 @@ def binding_1site(
     x: ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
 ) -> ArrayF: ...
 
-
+# fmt: on
 def binding_1site(
     x: float | ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> float | ArrayF:
+) -> float | ArrayF:  # fmt: skip
     """Single site binding model function.
 
     Parameters

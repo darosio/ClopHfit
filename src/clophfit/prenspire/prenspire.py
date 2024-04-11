@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import collections
 import csv
-import datetime
 import typing
 import warnings
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -62,7 +62,7 @@ class EnspireFile:
     >>> from clophfit.prenspire import EnspireFile
     >>> from pathlib import Path
     >>> ef = EnspireFile(Path("tests/EnSpire/h148g-spettroC.csv"), verbose=0)
-    >>> ef.measurements['A']['lambda'][2]
+    >>> ef.measurements["A"]["lambda"][2]
     274.0
     """
 
@@ -100,9 +100,7 @@ class EnspireFile:
             dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
             basename = f"{self.file.stem}_{m}"
             if (out_dir / f"{basename}.csv").exists():
-                timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
-                    "%Y%m%d%H%M%S"
-                )  # e.g. '20230518093055'
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # noqa: UP017 [for py3.10]
                 basename = f"{self.file.stem}_{m}_{timestamp}"
             csv_file = out_dir / f"{basename}.csv"
             md_file = out_dir / f"{basename}.json"
@@ -311,7 +309,7 @@ class EnspireFile:
 
         def line(keyword: str) -> pyparsing.ParserElement:
             EOL = pyparsing.LineEnd().suppress()  # type: ignore # noqa: N806
-            w = pyparsing.Word(pyparsing.alphanums + ".\u00B0%")  # . | deg | %
+            w = pyparsing.Word(pyparsing.alphanums + ".\u00b0%")  # . | deg | %
             return (
                 pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
                 + pyparsing.Keyword(keyword)("name")
@@ -454,7 +452,7 @@ class Note:
                                             group3["Cl"].to_list()
                                         )
                                     meas_dict[label] = value_df
-                                titrations[name0][name1][
-                                    f"{grouping}_{name2}"
-                                ] = meas_dict
+                                titrations[name0][name1][f"{grouping}_{name2}"] = (
+                                    meas_dict
+                                )
         self.titrations = titrations

@@ -112,7 +112,9 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 
     Examples
     --------
-    >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
+    >>> lines = [
+    ...     ["Shaking (Linear) Amplitude:", "", "", "", 2, "mm", "", "", "", "", ""]
+    ... ]
     >>> strip_lines(lines)
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
 
@@ -160,24 +162,26 @@ def extract_metadata(
 
     Examples
     --------
-    >>> lines = [['Shaking (Linear) Amplitude:', '', '', '', 2, 'mm', '', '', '', '', '']]
+    >>> lines = [
+    ...     ["Shaking (Linear) Amplitude:", "", "", "", 2, "mm", "", "", "", "", ""]
+    ... ]
     >>> extract_metadata(lines)
     {'Shaking (Linear) Amplitude:': Metadata(value=2, unit=['mm'])}
 
-    >>> lines = [['', 'Temperature: 26 °C', '', '', '', '', '', '', '', '', '']]
+    >>> lines = [["", "Temperature: 26 °C", "", "", "", "", "", "", "", "", ""]]
     >>> extract_metadata(lines)
     {'Temperature': Metadata(value=26.0, unit=['°C'])}
 
-    >>> lines = [['Excitation Wavelength', '', '', '', 400, 'nm', '', '', '', '', '']]
+    >>> lines = [["Excitation Wavelength", "", "", "", 400, "nm", "", "", "", "", ""]]
     >>> extract_metadata(lines)
     {'Excitation Wavelength': Metadata(value=400, unit=['nm'])}
 
-    >>> lines = [['Label: Label1', '', '', '', '', '', '', '', '', '', '', '', '']]
+    >>> lines = [["Label: Label1", "", "", "", "", "", "", "", "", "", "", "", ""]]
     >>> extract_metadata(lines)
     {'Label': Metadata(value='Label1', unit=None)}
 
-    >>> lines = [['Mode', '', '', '', 'Fluorescence Top Reading', '', '', '', '', '']]
-    >>> extract_metadata(lines)['Mode'].value
+    >>> lines = [["Mode", "", "", "", "Fluorescence Top Reading", "", "", "", "", ""]]
+    >>> extract_metadata(lines)["Mode"].value
     'Fluorescence Top Reading'
 
     """
