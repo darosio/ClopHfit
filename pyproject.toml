@@ -93,22 +93,14 @@ Documentation = "https://clophfit.readthedocs.io"
 "Github releases" = "https://github.com/darosio/ClopHfit/releases"
 Homepage = "https://github.com/darosio/ClopHfit"
 
-[tool.black]
-exclude = '''
-/(
-    \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
-line-length = 88
-skip-string-normalization = false
+[tool.bandit]
+# skips = ["B101", "B603"]
+exclude_dirs = ["*/test_*.py"]
+
+[tool.codespell]
+count = ''
+ignore-words-list = "whis,nd"
+quiet-level = 3
 
 [tool.commitizen]
 name = "cz_customize"

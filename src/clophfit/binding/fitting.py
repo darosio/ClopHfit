@@ -53,7 +53,30 @@ class DataArrays:
 
 
 class Dataset(dict[str, DataArrays]):
-    """A dataset containing pairs of matching x and y data arrays, indexed by a string key."""
+    """A dataset containing pairs of matching x and y data arrays, indexed by a string key.
+
+    Initialization will remove any NaN values from the x and y arrays.
+
+    Parameters
+    ----------
+    x : ArrayF | ArrayDict
+        The x values of the dataset(s), either as a single ArrayF or as an ArrayDict
+        if multiple datasets are provided.
+    y : ArrayF | ArrayDict
+        The y values of the dataset(s), either as a single ArrayF or as an ArrayDict
+        if multiple datasets are provided.
+    is_ph : bool
+        Indicate if x values represent pH (default is False).
+    w : ArrayF | ArrayDict | None
+        The w values (weights) of the dataset(s), either as a single ArrayF or an ArrayDict
+        if multiple datasets are provided.
+
+    Raises
+    ------
+    ValueError
+        If x and y are both ArrayDict and their keys don't match.
+
+    """
 
     is_ph: bool
 
@@ -64,30 +87,6 @@ class Dataset(dict[str, DataArrays]):
         is_ph: bool = False,
         w: ArrayF | ArrayDict | None = None,
     ) -> None:
-        """
-        Initialize the Dataset object.
-
-        Here we will remove any NaN values from the x and y arrays.
-
-        Parameters
-        ----------
-        x : ArrayF | ArrayDict
-            The x values of the dataset(s), either as a single ArrayF or as an ArrayDict
-            if multiple datasets are provided.
-        y : ArrayF | ArrayDict
-            The y values of the dataset(s), either as a single ArrayF or as an ArrayDict
-            if multiple datasets are provided.
-        is_ph : bool
-            Indicate if x values represent pH (default is False).
-        w : ArrayF | ArrayDict, optional
-            The w values (weights) of the dataset(s), either as a single ArrayF or an ArrayDict
-            if multiple datasets are provided.
-
-        Raises
-        ------
-        ValueError
-            If x and y are both ArrayDict and their keys don't match.
-        """
         self.is_ph = is_ph
         if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
             mask = ~np.isnan(y)
@@ -177,7 +176,7 @@ class Dataset(dict[str, DataArrays]):
 
         Parameters
         ----------
-        keys : list, optional
+        keys : set[str] | None, optional
             List of keys to include in the copied dataset. If None (default), copies all data.
 
         Returns
@@ -237,7 +236,7 @@ def binding_1site(
 
     Parameters
     ----------
-    x : float | np.ndarray
+    x : float | ArrayF
         Concentration values.
     K : float
         Dissociation constant.
@@ -245,16 +244,17 @@ def binding_1site(
         Plateau value for the unbound state.
     S1 : float
         Plateau value for the bound state.
-    is_ph : bool
+    is_ph : bool, optional
         If True, use the pH model for binding. Default is False.
 
     Returns
     -------
-    float | np.ndarray
+    float | ArrayF
         Modeled binding values.
 
-    Note:
-        The parameters K, S0 and S1 are in uppercase by convention as used in lmfit library.
+    Notes
+    -----
+    The parameters K, S0 and S1 are in uppercase by convention as used in lmfit library.
     """
     if is_ph:
         return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
@@ -302,12 +302,12 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
         Dissociation constant at pH <= 5.0 (fully protonated).
     pka : float
         Acid dissociation constant.
-    ph : Xtype
+    ph : ArrayF | float
         pH value(s).
 
     Returns
     -------
-    Xtype
+    ArrayF | float
         Predicted Kd value(s).
 
     Examples
@@ -399,7 +399,7 @@ def analyze_spectra(
         The DataFrame containing spectra (one spectrum for each column).
     is_ph : bool
         Whether the x values should be interpreted as pH values rather than concentrations.
-    band : Tuple[int, int] | None
+    band : tuple[int, int] | None
         The band to integrate over. If None (default), performs Singular Value Decomposition (SVD).
 
     Returns
