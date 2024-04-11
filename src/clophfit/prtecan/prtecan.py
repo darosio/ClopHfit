@@ -45,8 +45,8 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
 
     Returns
     -------
-    list_of_lines
-        Lines.
+    list[list[str | int | float]]
+        Lines as list_of_lines.
 
     """
     sheet = pd.read_excel(path)
@@ -75,8 +75,8 @@ def lookup_listoflines(
 
     Parameters
     ----------
-    csvl : list_of_lines
-        Lines of a csv/xls file.
+    csvl : list[list[str | int | float]] | list[list[str]]
+        Lines (list_of_lines) of a csv/xls file.
     pattern : str
         Pattern to be searched (default="Label: Label").
     col : int
@@ -102,13 +102,13 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
 
     Parameters
     ----------
-    lines : list_of_lines
-        Lines that are a list of fields, typically from a csv/xls file.
+    lines : list[list[str | int | float]]
+        Lines (list_of_lines) that are a list of fields, typically from a csv/xls file.
 
     Returns
     -------
-    list_of_lines
-        Lines removed from blank cells.
+    list[list[str | int | float]]
+        Lines (list_of_lines) removed from blank cells.
 
     Examples
     --------
@@ -152,12 +152,12 @@ def extract_metadata(
 
     Parameters
     ----------
-    lines : list_of_lines
-        Lines that are a list of fields, typically from a csv/xls file.
+    lines : list[list[str | int | float]]
+        Lines (list_of_lines) that are a list of fields, typically from a csv/xls file.
 
     Returns
     -------
-    dict[str, str | list[str | int | float]]
+    dict[str, Metadata]
         Metadata for Tecanfile or Labelblock.
 
     Examples
@@ -374,8 +374,8 @@ class Labelblock(BufferWellsMixin):
 
         Parameters
         ----------
-        lines : list_of_lines
-            xls file read into lines.
+        lines : list[list[str | int | float]]
+            xls file read into lines (list_of_lines).
 
         Returns
         -------
@@ -887,7 +887,10 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
 
         Returns
         -------
-        tecanfiles and conc.
+        tecanfiles: list[Tecanfile]
+            List of tecanfiles.
+        conc: ArrayF
+            Concentration array.
 
         Raises
         ------
@@ -1253,14 +1256,14 @@ class TitrationAnalysis(Titration):
             Labelblock index.
         hue_column: str
             Column in `fitresults_df` used for color-coding data points in the stripplot.
-        xlim : tuple[float, float], optional
+        xlim : tuple[float, float] | None, optional
             Range.
-        title : str, optional
+        title : str | None, optional
             To name the plot.
 
         Returns
         -------
-        plt.figure
+        figure.Figure
             The figure.
         """
         sb.set(style="whitegrid")

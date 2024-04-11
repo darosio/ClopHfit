@@ -96,7 +96,7 @@ def distribute_axes(fig: Figure, num_axes: int) -> list[Axes]:
 
     Returns
     -------
-    list[mpl.axes.Axes]
+    list[Axes]
         A list of positioned Axes objects.
     """
     axs: list[Axes] = []
@@ -141,7 +141,7 @@ def plot_autovectors(ax: Axes, wl: pd.Index[int], u: ArrayF) -> None:
     ----------
     ax : Axes
         The mpl.axes.Axes object to which the plot should be added.
-    wl : pd.Index
+    wl : pd.Index[int]
         The index of spectra data frame.
     u : ArrayF
         The left singular vectors obtained from SVD.
