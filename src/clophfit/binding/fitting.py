@@ -618,6 +618,8 @@ def _plot_spectra_glob_emcee(
     tit_filtered = {k: spec for k, spec in titration.items() if k in ds}
     plot_spectra_distributed(fig, tit_filtered, pparams, dbands)
     plot_fit(ax4, ds, f_res.result, nboot=N_BOOT, pp=pparams)
-    result_emcee = f_res.mini.emcee(steps=EMCEE_STEPS, workers=8)  # type: ignore
+    result_emcee = f_res.mini.emcee(
+        steps=EMCEE_STEPS * 3, workers=8, burn=100, nwalkers=30, progress=False
+    )  # type: ignore
     plot_emcee_k_on_ax(ax5, result_emcee)
     return fig
