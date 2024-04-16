@@ -3,6 +3,51 @@
 
 # Changelog
 
+## v0.10.7 (2024-04-16)
+
+### Fix
+
+- **ci**: Use token to upload to TestPyPI
+- The spectra glob emcee progress to False
+
+### Docs
+
+- Correct tutorials using pymc with cov_matrix
+- Fix prenspire tutorial
+- Fix prtecan tutorial
+- Fix LMfit tutorial
+- Fix LMfit tutorial
+
+### Build
+
+- update ruff requirement from <=0.3.6 to <=0.3.7 (#544)
+- update commitizen requirement from <=3.21.3 to <=3.22.0 (#543)
+- update ruff requirement from <=0.3.5 to <=0.3.6 (#542)
+- update pandas requirement from <=2.2.1 to <=2.2.2 (#541)
+- update sphinx-autodoc-typehints requirement from <=2.0.0 to <=2.0.1 (#540)
+- **docs**: Update to the official upload-artifact action
+- **style**: Fix few ruff linting errors
+- Drop python 3.9; add 3.12
+- update scipy requirement from <=1.12.0 to <=1.13.0
+- update arviz requirement from <=0.17.1 to <=0.18.0 (#537)
+- update lmfit requirement from <=1.2.2 to <=1.3.0 (#536)
+- update matplotlib requirement from <=3.8.3 to <=3.8.4 (#535)
+- bump codecov/codecov-action from 4.1.1 to 4.2.0 (#534)
+- update ruff requirement from <=0.3.4 to <=0.3.5 (#532)
+- update commitizen requirement from <=3.20.0 to <=3.21.3 (#530)
+- bump actions/configure-pages from 4 to 5 (#529)
+
+### Refactor
+
+- **build**: Adopt pydoclint and drop darglint
+- **build**: From black to ruff format; tutorials
+
+### chore
+
+- update pre-commit hooks (#545)
+- update pre-commit hooks (#538)
+- update pre-commit hooks (#531)
+
 ## v0.10.6 (2024-03-28)
 
 ### Fix
