@@ -52,7 +52,7 @@ repos:
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        types_or: [yaml, markdown, html, css, scss, javascript, json]
+        files: \.(yaml|yml|md|html|css|scss|js|json)$
         args: [--prose-wrap=preserve]
 
   - repo: https://github.com/pre-commit/pygrep-hooks
