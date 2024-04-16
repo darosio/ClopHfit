@@ -8,7 +8,7 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-added-large-files
-        exclude: "^tests/EnSpire/|^docs/tutorials/LMfit.ipynb"
+        exclude: "^tests/EnSpire/"
       - id: check-case-conflict
       - id: check-docstring-first
       - id: check-executables-have-shebangs
@@ -16,10 +16,10 @@ repos:
       - id: check-merge-conflict
       - id: check-symlinks
       - id: destroyed-symlinks
-      - id: check-yaml # hyper
-      - id: check-toml # hyper
+      - id: check-yaml
+      - id: check-toml
       - id: debug-statements
-      - id: end-of-file-fixer # hyper
+      - id: end-of-file-fixer
         exclude: "^tests/EnSpire/"
       - id: mixed-line-ending
         exclude: "^tests/EnSpire/"
@@ -27,7 +27,7 @@ repos:
         args: [--pytest-test-first]
       - id: requirements-txt-fixer
       - id: detect-private-key
-      - id: trailing-whitespace # hyper
+      - id: trailing-whitespace
         exclude: "^tests/EnSpire/|^tests/data/tmp/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
@@ -42,7 +42,6 @@ repos:
     rev: v0.3.7
     hooks:
       - id: ruff
-        # args: [--exclude, "src/clophfit/prenspire/*"]
         types_or: [python, pyi, jupyter]
         args: [--fix]
       # Run the formatter.
