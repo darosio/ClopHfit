@@ -71,7 +71,7 @@ docs = [
   "graphviz"
 ]
 tests = [
-  "coverage[toml] <= 7.4.4",
+  "coverage[toml] <= 7.5.0",
   "mypy <= 1.9.0",
   "pandas-stubs <= 2.2.1.240316",
   "Pygments <= 2.17.2",
