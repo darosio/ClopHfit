@@ -1,6 +1,6 @@
 exclude: ^src/clophfit/old/.
 ci:
-  autoupdate_commit_msg: "chore: update pre-commit hooks"
+  autoupdate_commit_msg: "build(pre-commit): update hooks"
   autofix_commit_msg: "style: pre-commit fixes"
 
 repos:
