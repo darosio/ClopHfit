@@ -54,7 +54,7 @@ dev = [
   "ipykernel",
   "jupyter",
   "jupyterlab",
-  "ruff <= 0.4.1",
+  "ruff <= 0.4.2",
   "pre-commit <= 3.7.0",
   "pylsp-mypy",
   "ruff-lsp"
