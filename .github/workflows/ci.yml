@@ -1,4 +1,6 @@
-# Run lint, mypy and xdoctest, and pytest with coverage
+# CI Workflow
+# This workflow runs linting, type checking, and testing (pytest with coverage),
+# builds documentation, and deploys it to GitHub Pages.
 name: CI
 
 on:
@@ -9,7 +11,6 @@ on:
       - "*.md"
   push:
     paths-ignore:
-      - "docs/**"
       - "*.md"
 
 concurrency:
@@ -26,91 +27,107 @@ jobs:
     name: Lint
     runs-on: "ubuntu-latest"
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python-${{ env.STABLE_PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.STABLE_PYTHON_VERSION }}
+
+      - name: Cache pip
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}|pip|${{ env.STABLE_PYTHON_VERSION }}|${{ hashFiles('**/constraints.txt', '**/pyproject.toml') }}
+          enableCrossOsArchive: true
+
       - name: Install pip and hatch
-        run: |
-          python -m pip install --constraint=.github/workflows/constraints.txt pip
-          pip install --constraint=.github/workflows/constraints.txt hatch
-          pip --version
-          hatch --version
-      - name: Run
+        run: python -m pip install --constraint=.github/workflows/constraints.txt pip hatch
+
+      - name: Cache pre-commit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit/
+          key: pre-commit|${{ env.STABLE_PYTHON_VERSION }}|${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run lint
         run: hatch run lint
 
-  checks:
-    name: Mypy and xdoctest ${{ matrix.python }} on ${{ startsWith(matrix.os,
-      'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' ||
-      'Linux' }}
+  tests:
+    name: ${{ matrix.tests }} py-${{ matrix.python }} on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.12", "3.11", "3.10"]
+        tests: [pytest, mypy, xdoc]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python }}
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python-${{ matrix.python }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Install pip and hatch
-        run: |
-          python -m pip install --constraint=.github/workflows/constraints.txt pip
-          pip install --constraint=.github/workflows/constraints.txt hatch
-          pip --version
-          hatch --version
-      - name: Run
-        run: |
-          hatch run tests.py${{ matrix.python }}:type
-          hatch run tests.py${{ matrix.python }}:xdoc
 
-  tests:
-    name: Tests Python-${{ matrix.python }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.10", "3.11", "3.12"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # TODO: check
+      - name: Setup pip cache directory
+        run: mkdir -p ~/.cache/pip
+        if: runner.os == 'macOS'
+
+      - name: Cache pip
+        id: cache-pip
+        uses: actions/cache@v4
         with:
-          python-version: ${{ matrix.python }}
-      - name: Install pip
-        run: |
-          python -m pip install --constraint=.github/workflows/constraints.txt pip
-          pip --version
-      - name: Install
-        run: |
-          pip install .[tests]
-      - name: Run test
-        run: |
-          coverage run -p -m pytest
-          coverage combine
-          coverage report
-          coverage xml
+          path: ~/.cache/pip
+          key: ${{ runner.os }}|pip|${{ matrix.python }}|${{ hashFiles('**/constraints.txt', '**/pyproject.toml') }}
+          restore-keys: ${{ runner.os }}|pip|${{ matrix.python }}|
+          enableCrossOsArchive: true
+          fail-on-cache-miss: false
+
+      - name: Install pip and hatch
+        run: python -m pip install --constraint=.github/workflows/constraints.txt pip hatch
+
+      - name: Run pytest and coverage
+        if: matrix.tests == 'pytest'
+        run: hatch run tests.py${{ matrix.python }}:test
+
+      - name: Run coverage
+        if: matrix.tests == 'pytest'
+        run: hatch run tests.py${{ matrix.python }}:cov
+
       - name: Upload coverage report
+        if: matrix.tests == 'pytest'
         uses: codecov/codecov-action@v4.3.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+      - name: Run mypy
+        if: matrix.tests == 'mypy'
+        run: hatch run tests.py${{ matrix.python }}:type
+
+      - name: Run xdoctest
+        if: matrix.tests == 'xdoc'
+        run: hatch run tests.py${{ matrix.python }}:xdoc
+
   testpypi:
-    needs: [pre-commit, checks, tests]
+    needs: [pre-commit, tests]
     runs-on: ubuntu-latest
     if: "startsWith(github.event.head_commit.message, 'bump:')"
     outputs:
       version: ${{ steps.version.outputs.ver }}
     steps:
-      - name: Check out the repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
+
+      - name: Set up Python-${{ env.STABLE_PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.STABLE_PYTHON_VERSION }}
+
       - name: Get version
         id: version
         run: |
@@ -118,7 +135,19 @@ jobs:
           ver=`echo ${{ github.event.head_commit.message }} | awk '{ print $NF }'`
           echo "ver=${ver}" >> $GITHUB_OUTPUT
           echo "ver=${ver}" >> $GITHUB_ENV
-      - name: Run ppr
+
+      - name: Cache pip
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}|pip|${{ env.STABLE_PYTHON_VERSION }}|${{ hashFiles('**/constraints.txt', '**/pyproject.toml') }}
+          enableCrossOsArchive: true
+
+      - name: Install pip
+        run: python -m pip install --constraint=.github/workflows/constraints.txt pip
+
+      - name: Run CLI
         run: |
           python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit==${{ env.ver }}
           ppr --version
@@ -126,12 +155,13 @@ jobs:
           cat out2/pH/metadata-labels.txt
 
   release:
-    name: Release to github
+    name: Release to GitHub
     needs: testpypi
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Create Release
         uses: ncipollo/release-action@v1
         with:
@@ -145,11 +175,97 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
+
       - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.STABLE_PYTHON_VERSION }}
+
       - name: Build and publish
         run: |
           pipx run hatch build
           pipx run hatch publish --user=__token__ --auth=${{ secrets.PYPI_TOKEN }}
+
+  docs_build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.STABLE_PYTHON_VERSION }}
+
+      - name: Install binaries for docs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+          sudo apt-get install -y plantuml
+          sudo apt-get install -y libopenblas-dev
+
+      - name: Cache pip
+        id: cache-pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}|pip|${{ env.STABLE_PYTHON_VERSION }}|-${{ hashFiles('**/constraints.txt', '**/pyproject.toml') }}
+          enableCrossOsArchive: true
+
+      - name: Install pip and hatch
+        run: python -m pip install --constraint=.github/workflows/constraints.txt pip hatch
+
+      - name: Run hatch
+        run: hatch run docs
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          name: github-pages
+          path: "./docs/_build"
+
+  docs_deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [docs_build]
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  auto_merge_deps:
+    name: Auto Merge dependencies labeled PRs
+    needs: [pre-commit, tests, docs_build]
+    # Run only on pull_request labeled dependencies (e.g. by dependabot) or
+    # with the pre-commit ci commit message.
+    if: >
+      startsWith(github.event.pull_request.title, 'build(pre-commit): update hooks') ||
+      contains(github.event.pull_request.labels.*.name, 'dependencies')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Merge PR
+        uses: pascalgn/automerge-action@v0.16.3
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          MERGE_LABELS: ""
+          MERGE_METHOD: squash
+          DELETE_BRANCH_AFTER_MERGE: true
+          LOG: "TRACE" # or DEBUG

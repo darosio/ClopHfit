@@ -1,6 +1,6 @@
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatchling>=1.12.2"]
+requires = ["hatchling"]
 
 [project]
 authors = [
@@ -89,7 +89,7 @@ tests = [
 [project.urls]
 "Bug Tracker" = "https://github.com/darosio/ClopHfit/issues"
 Changelog = "https://github.com/darosio/ClopHfit/blob/main/CHANGELOG.md"
-Discussions = "https://github.com/darosio/ClopHfit/discussions"
+# Discussions = "https://github.com/darosio/ClopHfit/discussions"
 Documentation = "https://clophfit.readthedocs.io"
 "Github releases" = "https://github.com/darosio/ClopHfit/releases"
 Homepage = "https://github.com/darosio/ClopHfit"
