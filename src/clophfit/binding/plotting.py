@@ -195,7 +195,7 @@ def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     pp : PlotParameters
         The PlotParameters object containing plot parameters.
     """
-    color_map = cm.get_cmap(pp.palette)
+    color_map = colormaps[pp.palette]
     normalize = colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
     for i in range(len(spectra.columns)):
         ax.plot(
@@ -217,7 +217,7 @@ def plot_spectra_distributed(
     dbands: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """Plot spectra from titration distributing on the top of the figure top."""
-    color_map = cm.get_cmap(pp.palette)
+    color_map = colormaps[pp.palette]
     normalize = colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
     axl = distribute_axes(fig, len(titration))
     for (j, ax), (lbl, spec) in zip(enumerate(axl), titration.items(), strict=False):
