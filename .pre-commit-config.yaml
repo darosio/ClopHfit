@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.5
+    rev: v0.4.7
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -71,7 +71,7 @@ repos:
         additional_dependencies: ["bandit[toml]"]
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.4.1
+    rev: 0.4.2
     hooks:
       - id: pydoclint
 
