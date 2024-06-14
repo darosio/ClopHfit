@@ -422,7 +422,7 @@ def analyze_spectra(
     fig, (ax1, ax2, ax3, ax4, ax5) = _create_spectra_canvas()
     plot_spectra(ax1, spectra, PlotParameters(is_ph))
     if band is None:  # SVD
-        threshold = len(spectra) * 0.5
+        threshold = int(len(spectra) * 0.5)
         spectra = spectra.dropna(axis=1, thresh=threshold)
         spectra = spectra.dropna(axis=0)
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
