@@ -185,7 +185,7 @@ features = ["dev", "tests", "docs"]
 bump = [
   "cz bump --major-version-zero -ch {args}",  # e.g. "--increment PATCH"
   "hatch build",
-  "hatch publish -r test -u __token__"
+  "export TEST_PYPI_TOKEN=$(pass show cloud/test_pypi | head -n 1) && hatch publish -r test -u __token__ -a $TEST_PYPI_TOKEN"
 ]
 ch = "cz ch --incremental --unreleased-version HEAD"
 clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
