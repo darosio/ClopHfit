@@ -3,6 +3,101 @@
 
 # Changelog
 
+## v0.10.8 (2024-06-25)
+
+### Fix
+
+- hatch bump script
+- missing int conversion `svd fit with NaN value`
+- svd fit with NaN value
+- numpy plugin for mypy
+
+### Build
+
+- **pre-commit**: update hooks (#617)
+- **deps**: update mypy requirement from <=1.10.0 to <=1.10.1 (#619)
+- **deps**: update scipy requirement from <=1.13.1 to <=1.14.0 (#618)
+- **deps**: update sphinx-autodoc-typehints requirement (#616)
+- **deps**: update coverage[toml] requirement from <=7.5.3 to <=7.5.4 (#615)
+- **deps**: bump pip from 24.0 to 24.1 in /.github/workflows (#614)
+- **deps**: update ruff requirement from <=0.4.9 to <=0.4.10 (#613)
+- **deps**: update sphinx-autodoc-typehints requirement (#612)
+- **pre-commit**: update hooks (#611)
+- **deps**: update ruff requirement from <=0.4.8 to <=0.4.9 (#610)
+- **deps**: update numpy requirement from <=1.26.4 to <=2.0.0 (#609)
+- **deps**: bump codecov/codecov-action from 4.4.1 to 4.5.0 (#608)
+- **deps**: update openpyxl requirement from <=3.1.3 to <=3.1.4 (#607)
+- **pre-commit**: update hooks (#606)
+- **deps**: update xdoctest requirement from <=1.1.4 to <=1.1.5 (#605)
+- **deps**: update ruff requirement from <=0.4.7 to <=0.4.8 (#604)
+- **deps**: update pytest requirement from <=8.2.1 to <=8.2.2 (#603)
+- **deps**: update sphinx-autodoc-typehints requirement (#602)
+- **deps**: update pandas-stubs requirement (#601)
+- **pre-commit**: update hooks (#600)
+- **deps**: update xdoctest requirement from <=1.1.3 to <=1.1.4 (#599)
+- **deps**: update ruff requirement from <=0.4.6 to <=0.4.7 (#598)
+- **deps**: update openpyxl requirement from <=3.1.2 to <=3.1.3 (#597)
+- **deps**: update sympy requirement from <=1.12 to <=1.12.1 (#596)
+- **deps**: bump hatch from 1.11.1 to 1.12.0 in /.github/workflows (#595)
+- **deps**: update pydata-sphinx-theme requirement (#594)
+- **deps**: update ruff requirement from <=0.4.5 to <=0.4.6 (#593)
+- **deps**: update coverage[toml] requirement from <=7.5.2 to <=7.5.3 (#592)
+- **pre-commit**: update hooks (#591)
+- **deps**: update coverage[toml] requirement from <=7.5.1 to <=7.5.2 (#590)
+- **deps**: bump hatch from 1.11.0 to 1.11.1 in /.github/workflows (#589)
+- **deps**: update sphinxcontrib-plantuml requirement (#588)
+- **deps**: update ruff requirement from <=0.4.4 to <=0.4.5 (#587)
+- **deps**: update scipy requirement from <=1.13.0 to <=1.13.1 (#586)
+- **pre-commit**: update hooks (#583)
+- update pytest requirement from <=8.2.0 to <=8.2.1 (#582)
+- update commitizen requirement from <=3.25.0 to <=3.26.0 (#581)
+- update matplotlib requirement from <=3.8.4 to <=3.9.0 (#580)
+- update sphinx-click requirement from <=5.2.2 to <=6.0.0 (#579)
+- bump codecov/codecov-action from 4.3.1 to 4.4.0 (#578)
+- bump hatch from 1.10.0 to 1.11.0 in /.github/workflows (#577)
+- update pandas-stubs requirement (#576)
+- update sphinx-click requirement from <=5.1.0 to <=5.2.2 (#575)
+- **pre-commit**: update hooks (#574)
+- update pre-commit requirement from <=3.7.0 to <=3.7.1 (#573)
+- update ruff requirement from <=0.4.3 to <=0.4.4 (#572)
+- update nbsphinx requirement from <=0.9.3 to <=0.9.4 (#571)
+- **pre-commit**: update hooks (#570)
+- update pygments requirement from <=2.17.2 to <=2.18.0 (#569)
+- update ruff requirement from <=0.4.2 to <=0.4.3 (#568)
+- update coverage[toml] requirement from <=7.5.0 to <=7.5.1 (#567)
+- bump hatch from 1.9.7 to 1.10.0 in /.github/workflows (#566)
+- update tqdm requirement from <=4.66.2 to <=4.66.4 (#565)
+- bump codecov/codecov-action from 4.3.0 to 4.3.1 (#564)
+- update commitizen requirement from <=3.24.0 to <=3.25.0 (#563)
+- **pre-commit**: update hooks (#562)
+- update pytest requirement from <=8.1.1 to <=8.2.0 (#561)
+- update ruff requirement from <=0.4.1 to <=0.4.2 (#560)
+- bump hatch from 1.9.4 to 1.9.7 in /.github/workflows (#559)
+- update mypy requirement from <=1.9.0 to <=1.10.0 (#558)
+- update coverage[toml] requirement from <=7.4.4 to <=7.5.0 (#557)
+- update emcee requirement from <=3.1.5 to <=3.1.6 (#555)
+- update ruff requirement from <=0.4.0 to <=0.4.1 (#554)
+- update lmfit requirement from <=1.3.0 to <=1.3.1 (#553)
+- update sphinx requirement from <=7.3.6 to <=7.3.7 (#552)
+- update commitizen requirement from <=3.22.0 to <=3.24.0 (#551)
+- update ruff requirement from <=0.3.7 to <=0.4.0 (#550)
+- update sphinx-autodoc-typehints requirement (#549)
+- update sphinx requirement from <=7.3.4 to <=7.3.6 (#548)
+- update sphinx requirement from <=7.2.6 to <=7.3.4 (#547)
+- update emcee requirement from <=3.1.4 to <=3.1.5 (#546)
+- bump codecov/codecov-action from 4.2.0 to 4.3.0 (#539)
+- **fix**: prettier in pre-commit
+
+### CI/CD
+
+- Merge docs into ci.yml
+
+### chore
+
+- Modify pre-commit update message
+- update pre-commit hooks (#556)
+- **build**: Adjust pre-commit config
+
 ## v0.10.7 (2024-04-16)
 
 ### Fix
