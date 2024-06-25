@@ -241,6 +241,9 @@ strict = true
 warn_unreachable = true
 warn_unused_configs = true
 
+[tool.pydoclint]
+check-class-attributes = false
+
 [tool.pylint]
 
 [tool.pylint.master]
