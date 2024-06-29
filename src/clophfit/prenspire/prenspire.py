@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import collections
 import csv
-import typing
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,13 +20,14 @@ from clophfit.prtecan import lookup_listoflines
 
 # MAYBE: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import BuiltinFunctionType
 
-def verbose_print(verbose: int) -> typing.Callable[..., typing.Any]:
+
+def verbose_print(verbose: int) -> BuiltinFunctionType | Callable[..., None]:
     """Return print function when verbose output is True."""
-    if verbose:
-        return print
-    else:
-        return lambda *_, **__: None
+    return print if verbose else lambda *_, **__: None
 
 
 class ManyLinesFoundError(Exception):
@@ -71,7 +72,7 @@ class EnspireFile:
     #: General metadata.
     metadata: dict[str, str | list[str]] = field(default_factory=dict, init=False)
     #: Spectra and metadata for each label, such as "MeasB".
-    measurements: dict[str, typing.Any] = field(default_factory=dict, init=False)
+    measurements: dict[str, Any] = field(default_factory=dict, init=False)
     #: List of exported wells.
     wells: list[str] = field(default_factory=list, init=False)
 
@@ -115,7 +116,7 @@ class EnspireFile:
 
     # Helpers
     def _read_csv_file(
-        self, file: Path, verboseprint: typing.Callable[..., typing.Any]
+        self, file: Path, verboseprint: Callable[..., Any]
     ) -> list[list[str]]:
         """Read EnSpire exported file into csvl."""
         csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
@@ -123,14 +124,14 @@ class EnspireFile:
         return csvl
 
     def _find_data_indices(
-        self, csvl: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
+        self, csvl: list[list[str]], verboseprint: Callable[..., Any]
     ) -> tuple[int, int]:
         """Find the indices of the data blocks in the input file."""
         inil = lookup_listoflines(csvl, pattern="Well", col=0)
         if len(inil) == 0:
             msg = f"No line starting with ['Well', ...] found in {csvl[:9]}"
             raise CsvLineError(msg)
-        elif len(inil) == 1:
+        if len(inil) == 1:
             ini = 1 + inil[0]
         else:
             msg = f"Multiple lines starting with ['Well', ...] in {csvl[:9]}"
@@ -146,7 +147,7 @@ class EnspireFile:
         csvl: list[list[str]],
         ini: int,
         fin: int,
-        verboseprint: typing.Callable[..., typing.Any],
+        verboseprint: Callable[..., Any],
     ) -> None:
         """Check csv format around ini and fin."""
         if not (csvl[ini - 3] == csvl[ini - 2] == []):
@@ -158,7 +159,7 @@ class EnspireFile:
         verboseprint("checked csv format around ini and fin")
 
     def _extract_platemap(
-        self, post: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
+        self, post: list[list[str]], verboseprint: Callable[..., Any]
     ) -> tuple[list[str], list[list[str]]]:
         """Extract well list and Platemap from _metadata_post.
 
@@ -166,7 +167,7 @@ class EnspireFile:
         ----------
         post: list[list[str]]
             List of lines of metadata post containing plate map.
-        verboseprint : typing.Callable[..., typing.Any]
+        verboseprint : Callable[..., Any]
             Function to print verbose information.
 
         Returns
@@ -221,8 +222,8 @@ class EnspireFile:
         self,
         csvl_data: list[list[str]],
         csvl_post: list[list[str]],
-        verboseprint: typing.Callable[..., typing.Any],
-    ) -> tuple[list[str], dict[str, typing.Any]]:
+        verboseprint: Callable[..., Any],
+    ) -> tuple[list[str], dict[str, Any]]:
         """Extract the measurements dictionary.
 
         For each measurement label extracts metadata, lambda and for each well the spectrum.
@@ -233,12 +234,12 @@ class EnspireFile:
             Lines of csvl containing data.
         csvl_post : list[list[str]]
             Lines of csvl containing metadata after data.
-        verboseprint : typing.Callable[..., typing.Any]
+        verboseprint : Callable[..., Any]
             Function to print verbose information.
 
         Returns
         -------
-        tuple[list[str], dict[str, typing.Any]]
+        tuple[list[str], dict[str, Any]]
             A tuple containing a list of wells and the measurements dictionary.
 
         Raises
@@ -302,8 +303,8 @@ class EnspireFile:
         return wells, measurements
 
     def _parse_measurements_metadata(
-        self, csvl_post: list[list[str]], verboseprint: typing.Callable[..., typing.Any]
-    ) -> dict[str, typing.Any]:
+        self, csvl_post: list[list[str]], verboseprint: Callable[..., Any]
+    ) -> dict[str, Any]:
         """Initialize measurements with metadata for each label."""
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
@@ -319,7 +320,7 @@ class EnspireFile:
                 + EOL
             )
 
-        measurements: dict[str, typing.Any] = {}
+        measurements: dict[str, Any] = {}
         temp = [0.0]
         meas_key = [""]
 
@@ -361,8 +362,8 @@ class EnspireFile:
     def _check_header_measurements_keys(
         self,
         headerdata: list[str],
-        measurements: dict[str, typing.Any],
-        verboseprint: typing.Callable[..., typing.Any],
+        measurements: dict[str, Any],
+        verboseprint: Callable[..., Any],
     ) -> bool:
         """Check header and measurements.keys()."""
         counter_constant = 3  # Not sure, maybe for md with units. <Exc, Ems, F>
@@ -402,14 +403,14 @@ class Note:
     # A list of lines extracted from the note file.
     _note: pd.DataFrame = field(init=False, default_factory=pd.DataFrame)
     #: A list of titrations extracted from the note file.
-    titrations: dict[typing.Any, typing.Any] = field(init=False, default_factory=dict)
+    titrations: dict[Any, Any] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         """Complete the initialization generating wells and _note_list."""
         verboseprint = verbose_print(self.verbose)
         with Path(self.fpath).open("r", newline="") as file:
             sample_data = file.read(1024)  # Read a sample of the CSV data
-        dialect = typing.cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
+        dialect = cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
         self._note = pd.read_csv(self.fpath, dialect=dialect)
         self.wells: list[str] = np.array(self._note)[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
@@ -421,7 +422,7 @@ class Note:
         df_no_buffer = self._note.query('Name != "buffer"')
         threshold = 3
         grouped0 = df_no_buffer.groupby("Name")
-        titrations: dict[typing.Any, typing.Any] = {}
+        titrations: dict[Any, Any] = {}
         for name0, group0 in grouped0:
             grouped1 = group0.groupby("Temp")
             titrations[name0] = {}

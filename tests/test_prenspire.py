@@ -14,15 +14,13 @@ esff = data_files_dir.joinpath
 @pytest.fixture(scope="module")
 def ef1() -> EnspireFile:
     """Read in file."""
-    ef = EnspireFile(esff("h148g-spettroC.csv"))
-    return ef
+    return EnspireFile(esff("h148g-spettroC.csv"))
 
 
 @pytest.fixture(scope="module")
 def ef2() -> EnspireFile:
     """Read in file without 'Samples' column."""
-    ef = EnspireFile(esff("e2-T-without_sample_column.csv"))
-    return ef
+    return EnspireFile(esff("e2-T-without_sample_column.csv"))
 
 
 class TestEnspireFile:

@@ -439,7 +439,7 @@ class Labelblock(BufferWellsMixin):
     @buffer.setter
     def buffer(self, value: float) -> None:
         if self._buffer == value:
-            return None
+            return
         self._data_buffersubtracted = None
         self._buffer = value
 
@@ -451,7 +451,7 @@ class Labelblock(BufferWellsMixin):
     @buffer_norm.setter
     def buffer_norm(self, value: float) -> None:
         if self._buffer_norm == value:
-            return None
+            return
         self._data_buffersubtracted_norm = None
         self._buffer_norm = value
 

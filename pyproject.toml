@@ -347,7 +347,7 @@ select = [
   "PT",  # pytest-style
   "PTH",  # use-pathlib
   "Q",  # quotes
-  # "RET",  # Return
+  "RET",  # Return
   "RSE",  # Raise
   "RUF",  # Ruff
   "S",  # bandit XXX
