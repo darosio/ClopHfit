@@ -29,17 +29,20 @@ Classes:
 from __future__ import annotations
 
 from dataclasses import InitVar, dataclass, field
+from typing import TYPE_CHECKING
 
 import arviz as az
 import corner  # type: ignore
 import numpy as np
-import pandas as pd
-from lmfit.minimizer import MinimizerResult  # type: ignore
 from matplotlib import cm, colormaps, colors
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from clophfit.types import ArrayF
+if TYPE_CHECKING:
+    import pandas as pd
+    from lmfit.minimizer import MinimizerResult  # type: ignore
+    from matplotlib.axes import Axes
+
+    from clophfit.types import ArrayF
 
 COLOR_MAP = colormaps["Paired"]  # To color PCA components and LM fit.
 N_AUTOVALS = 4

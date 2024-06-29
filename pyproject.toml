@@ -354,7 +354,7 @@ select = [
   "SIM",  # simplify
   # "SLF",  # private self
   "SLOT",  # __slot__
-  # "TCH",  # TYPE_CHECKING
+  "TCH",  # TYPE_CHECKING
   # "TD",  # TODOs
   # "FIX",  # no fixme
   "TID",  # tidy-imports

@@ -28,7 +28,9 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-from clophfit.types import ArrayDict, ArrayF
+
+if typing.TYPE_CHECKING:
+    from clophfit.types import ArrayDict, ArrayF
 
 N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800

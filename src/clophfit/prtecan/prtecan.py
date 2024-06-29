@@ -6,7 +6,6 @@ import hashlib
 import itertools
 import typing
 import warnings
-from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
@@ -21,7 +20,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 from uncertainties import ufloat  # type: ignore
 
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
-from clophfit.types import ArrayF
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from clophfit.types import ArrayF
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
