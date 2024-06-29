@@ -568,12 +568,13 @@ def plot_fit(
         if nboot:
             # Calculate uncertainty using Monte Carlo method.
             y_samples = np.empty((nboot, len(xfit[lbl])))
+            rng = np.random.default_rng()
             for i in range(nboot):
                 p_sample = result.params.copy()
                 for param in p_sample.values():
                     # Especially stderr can be None in case of critical fitting
                     if param.value and param.stderr:
-                        param.value = np.random.normal(param.value, param.stderr)
+                        param.value = rng.normal(param.value, param.stderr)
                 y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
             dy = y_samples.std(axis=0)
             # Plot uncertainty.

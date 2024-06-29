@@ -215,7 +215,7 @@ cov = [
   "coverage report",
   "coverage xml"
 ]
-test = "coverage run -p -m pytest"
+test = "coverage run -p -m pytest -v"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
 
@@ -318,37 +318,50 @@ docstring-code-format = true
 ignore = ["ANN101", "ANN102", "ANN201", "E501", "ISC001"]
 select = [
   "A",  # builtins
+  "AIR",  # airflow
   "ANN",  # typing annotation
   "ARG",  # unused arguments
   "B",  # bugbear
+  "BLE",  # blind-except
   "C",
   "C4",  # comprehensions
   "C90",  # mccabe
   "D",  # pydocstyle
   "DTZ",  # dates
   "E",  # pycodestyle
-  "TRY",  # exceptions
   "EM",  # exceptions
   "ERA",  # eradicate
   "F",  # pyflakes
-  # "FBT",    # boolean-trap
+  # "FBT",  # boolean-trap
+  "FLY",  # flyntp
+  "FURB",  # refurbishing and modernizing
   "I",  # isort
   "ICN",  # import conventions (opinionated)
   "ISC",  # implicit-str-concat
   "N",  # pep8-naming
+  "NPY",
   "PD",  # pandas-vet
+  "PERF",  # performance anti pattern
   # "PGH",  # pygrep WAIT
   "PL",  # pylint see PLR2004...
   "PT",  # pytest-style
   "PTH",  # use-pathlib
   "Q",  # quotes
+  # "RET",  # Return
+  "RSE",  # Raise
   "RUF",  # Ruff
   "S",  # bandit XXX
   "SIM",  # simplify
+  # "SLF",  # private self
+  "SLOT",  # __slot__
+  # "TCH",  # TYPE_CHECKING
+  # "TD",  # TODOs
+  # "FIX",  # no fixme
   "TID",  # tidy-imports
+  "TRY",  # exceptions
   "UP",  # pyupgrade
-  "YTT",  # 2020
-  "W"  # pycodestyle
+  "W",  # pycodestyle
+  "YTT"  # 2020
 ]
 isort.combine-as-imports = true
 isort.force-single-line = false

@@ -555,11 +555,12 @@ class Tecanfile:
             msg = "No Labelblock found."
             raise ValueError(msg)
         self.metadata = extract_metadata(csvl[: idxs[0]])
-        labelblocks = []
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
-        for i in range(n_labelblocks):
-            labelblocks.append(Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path))
+        labelblocks = [
+            Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path)
+            for i in range(n_labelblocks)
+        ]
         if any(
             labelblocks[i] == labelblocks[j]
             for i, j in itertools.combinations(range(n_labelblocks), 2)

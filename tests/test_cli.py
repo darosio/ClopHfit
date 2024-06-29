@@ -58,9 +58,7 @@ def test_custom_output(runner: CliRunner) -> None:
     with tempfile.NamedTemporaryFile(
         delete=False, mode="w+", suffix=".csv"
     ) as output_file:
-        output_file.write(
-            ",".join(["Well", "pH", "Cl", "Name", "Temp", "Labels"]) + "\n"
-        )
+        output_file.write("Well,pH,Cl,Name,Temp,Labels" + "\n")
         output_file.seek(0)  # Important to rewind the file to the beginning
         result = runner.invoke(
             note2csv,
