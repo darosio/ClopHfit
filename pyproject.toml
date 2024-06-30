@@ -71,12 +71,13 @@ docs = [
   "graphviz"
 ]
 tests = [
+  "Pygments <= 2.18.0",
   "coverage[toml] <= 7.5.4",
   "mypy <= 1.10.1",
   "pandas-stubs <= 2.2.2.240603",
-  "Pygments <= 2.18.0",
   "pytest <= 8.2.2",
   "types-click <= 7.1.8",
+  "types-setuptools <= 70.1.0.20240627",
   "xdoctest <= 1.1.5"
 ]
 
@@ -229,8 +230,7 @@ multi_line_output = 3
 profile = "black"
 
 [tool.mypy]
-# enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
-enable_error_code = ["redundant-expr", "truthy-bool"]
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 exclude = "src/clophfit/old"
 plugins = ["numpy.typing.mypy_plugin"]
 pretty = true
@@ -342,7 +342,7 @@ select = [
   "NPY",
   "PD",  # pandas-vet
   "PERF",  # performance anti pattern
-  # "PGH",  # pygrep WAIT
+  "PGH",  # pygrep WAIT
   "PL",  # pylint see PLR2004...
   "PT",  # pytest-style
   "PTH",  # use-pathlib

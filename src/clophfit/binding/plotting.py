@@ -32,14 +32,14 @@ from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
 import arviz as az
-import corner  # type: ignore
+import corner  # type: ignore[import-untyped]
 import numpy as np
 from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 
 if TYPE_CHECKING:
     import pandas as pd
-    from lmfit.minimizer import MinimizerResult  # type: ignore
+    from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
 
     from clophfit.types import ArrayF
@@ -210,7 +210,8 @@ def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     # Add a colorbar for reference
     sm = cm.ScalarMappable(cmap=color_map, norm=normalize)
     sm.set_array([])
-    ax.figure.colorbar(sm, ax=ax, label=pp.kind)  # type: ignore
+    if ax.figure:
+        ax.figure.colorbar(sm, ax=ax, label=pp.kind)
 
 
 def plot_spectra_distributed(
@@ -262,7 +263,7 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
-    az.plot_posterior(idata.posterior[p_name], ax=ax)  # type: ignore
+    az.plot_posterior(idata.posterior[p_name], ax=ax)  # type: ignore[no-untyped-call]
 
 
 # TODO: Complete print emcee

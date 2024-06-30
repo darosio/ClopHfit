@@ -572,21 +572,21 @@ class TestPlateScheme:
         ps.buffer = ["A1", "A2"]
         assert ps.buffer == ["A1", "A2"]
         with pytest.raises(TypeError):
-            ps.buffer = [1, 2]  # type: ignore
+            ps.buffer = [1, 2]  # type: ignore[list-item]
 
     def test_ctrl(self, ps: PlateScheme) -> None:
         """Set ctrl and test raise error."""
         ps.ctrl = ["B1", "B2"]
         assert ps.ctrl == ["B1", "B2"]
         with pytest.raises(TypeError):
-            ps.ctrl = [1, 2]  # type: ignore
+            ps.ctrl = [1, 2]  # type: ignore[list-item]
 
     def test_names(self, ps: PlateScheme) -> None:
         """Set names and test raise error."""
         ps.names = {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
         assert ps.names == {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
         with pytest.raises(TypeError):
-            ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore
+            ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore[dict-item]
 
     def test_invalid_file(self) -> None:
         """Test providing an incorrect file."""

@@ -10,14 +10,14 @@ from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
-import lmfit  # type: ignore
+import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sb  # type: ignore  # noqa: ICN001
+import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import colormaps, figure
 from matplotlib.backends.backend_pdf import PdfPages
-from uncertainties import ufloat  # type: ignore
+from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
 
@@ -1270,13 +1270,13 @@ class TitrationAnalysis(Titration):
         figure.Figure
             The figure.
         """
-        sb.set(style="whitegrid")
+        sns.set(style="whitegrid")
         f = plt.figure(figsize=(12, 16))
         # Ctrl
         ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
         if len(self.scheme.ctrl) > 0:
             res_ctrl = self.result_dfs[lb].loc[self.scheme.ctrl].sort_values("ctrl")
-            sb.stripplot(
+            sns.stripplot(
                 x=res_ctrl["K"],
                 y=res_ctrl.index,
                 size=8,
@@ -1301,7 +1301,7 @@ class TitrationAnalysis(Titration):
         # Sort the DataFrame by this computed value in descending order
         res_unk = res_unk.sort_values(by="sort_val", ascending=True)
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        sb.stripplot(
+        sns.stripplot(
             x=res_unk["K"],
             y=res_unk.index,
             size=12,
@@ -1344,7 +1344,7 @@ class TitrationAnalysis(Titration):
     def plot_all_wells(self, lb: int, path: str | Path) -> None:
         """Plot all wells into a pdf."""
         # Create a PdfPages object
-        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore
+        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
         """# TODO: Order
         "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
         #     out.savefig(self.plot_well(str(k)))
@@ -1366,9 +1366,9 @@ class TitrationAnalysis(Titration):
                 text_ax.text(0.0, 0.0, text, fontsize=14)
                 text_ax.axis("off")  # Hide the axes for the text
                 # Save the figure into the PDF
-                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore
+                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore[no-untyped-call]
         # Close the PdfPages object
-        pdf_pages.close()  # type: ignore
+        pdf_pages.close()  # type: ignore[no-untyped-call]
         # Close all the figures
         plt.close("all")
 

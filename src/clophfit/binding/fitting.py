@@ -8,13 +8,13 @@ import warnings
 from dataclasses import dataclass, field
 from sys import float_info
 
-import lmfit  # type: ignore
+import lmfit  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
-from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore
+from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
-from uncertainties import ufloat  # type: ignore
+from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.plotting import (
     COLOR_MAP,
@@ -624,8 +624,9 @@ def _plot_spectra_glob_emcee(
     tit_filtered = {k: spec for k, spec in titration.items() if k in ds}
     plot_spectra_distributed(fig, tit_filtered, pparams, dbands)
     plot_fit(ax4, ds, f_res.result, nboot=N_BOOT, pp=pparams)
-    result_emcee = f_res.mini.emcee(  # type: ignore
-        steps=EMCEE_STEPS * 3, workers=8, burn=100, nwalkers=30, progress=False
-    )
-    plot_emcee_k_on_ax(ax5, result_emcee)
+    if f_res.mini:
+        result_emcee = f_res.mini.emcee(
+            steps=EMCEE_STEPS * 3, workers=8, burn=100, nwalkers=30, progress=False
+        )
+        plot_emcee_k_on_ax(ax5, result_emcee)
     return fig

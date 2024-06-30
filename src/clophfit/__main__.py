@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import click
-import lmfit  # type: ignore
+import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -125,8 +125,8 @@ def tecan(  # noqa: PLR0913
             titan.load_additions(Path(dil))
             bg = True  # should not be needed but influence decimals of
             # exported values; however ``dil imply bg```
-            if not is_ph:  # XXX cl conc must be elsewhere
-                titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)  # type: ignore
+            if not is_ph and titan.additions:  # XXX cl conc must be elsewhere
+                titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)
     titan.export_data(out_fp)
 
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
@@ -271,7 +271,8 @@ def enspire(ctx: Context, csv_f: str, note_f: str | None, bands: tuple[Any]) -> 
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
 
 
-def fit_enspire(
+# TODO(dan): Simplify this function
+def fit_enspire(  # noqa: C901,PLR0912
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
@@ -297,11 +298,12 @@ def fit_enspire(
                 for label, data in d_tit.items():
                     band = dbands.get(label)
                     fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
-                    if fit_result.is_valid():
-                        x_combined[label] = fit_result.mini.userargs[0]["default"].x  # type: ignore
-                        y_combined[label] = fit_result.mini.userargs[0]["default"].y  # type: ignore
+                    if fit_result.is_valid() and fit_result.mini:
+                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
+                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
                         pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
-                        fit_result.figure.savefig(pdf_file)  # type: ignore
+                        if fit_result.figure:
+                            fit_result.figure.savefig(pdf_file)
                     _print_result(fit_result, pdf_file, str(band))
                 # Global spectra analysis with more than 1 label.
                 if (
@@ -314,18 +316,21 @@ def fit_enspire(
                     )
                     if spectra_gres.svd and spectra_gres.svd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
-                        spectra_gres.svd.figure.savefig(pdf_file)  # type: ignore
+                        if spectra_gres.svd.figure:
+                            spectra_gres.svd.figure.savefig(pdf_file)
                         _print_result(spectra_gres.svd, pdf_file, "")
                     if spectra_gres.gsvd and spectra_gres.gsvd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_g_{tit}_SVD.pdf"
-                        spectra_gres.gsvd.figure.savefig(pdf_file)  # type: ignore
+                        if spectra_gres.gsvd.figure:
+                            spectra_gres.gsvd.figure.savefig(pdf_file)
                         _print_result(spectra_gres.gsvd, pdf_file, "")
                     if spectra_gres.bands and spectra_gres.bands.is_valid():
                         keys = dbands.keys() & d_tit.keys()
                         lname = [f"{k}({dbands[k][0]},{dbands[k][1]})" for k in keys]
                         bands_str = "".join(lname)
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_{bands_str}.pdf"
-                        spectra_gres.bands.figure.savefig(pdf_file)  # type: ignore
+                        if spectra_gres.bands.figure:
+                            spectra_gres.bands.figure.savefig(pdf_file)
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
@@ -427,9 +432,9 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     )
     lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
     figure.savefig(Path(file).with_suffix(".png"))
-    if boot:
+    if boot and f_res.mini:
         # Emcee
-        samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain  # type: ignore
+        samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain
         fig = binding.plotting.plot_emcee(samples)
         fig.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emcee"))
         hdi = samples.quantile([0.025, 0.975])["K"].to_list()
