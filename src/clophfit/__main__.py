@@ -32,7 +32,7 @@ def clop() -> None:  # pragma: no cover
 @click.argument("pka", type=float)
 @click.argument("ph", type=float)
 def eq1(kd1: float, pka: float, ph: float) -> None:
-    """pH-deps for Kd."""
+    """Model Kd dependence on pH."""
     click.echo(binding.kd(kd1=kd1, pka=pka, ph=ph))
 
 

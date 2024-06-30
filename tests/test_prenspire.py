@@ -142,7 +142,6 @@ class TestEnspireFile:
         *-incomplete.csv: 5 wells (G1-G5) are missing. (They are present in
         Platemap because they were present during acquisition and then not
         exported).
-
         """
         esf = (data_files_dir / "warnings").joinpath
 
@@ -184,7 +183,7 @@ class TestNote:
         assert n1._note.iloc[64, 1] == 8.2
 
     def test_wells(self, n1: Note, ef1: EnspireFile, n1err: Note) -> None:
-        """Check wells from Note vs. EnspireFile."""
+        """Check wells from Note vs EnspireFile."""
         assert n1.wells == ef1.wells
         assert (n1err.wells == ef1.wells) is False
 

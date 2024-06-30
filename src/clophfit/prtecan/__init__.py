@@ -7,7 +7,6 @@ The command-line interface 'prtecan' is used to construct 96 distinct titrations
 In cases where two label blocks exist in the Tecan files, the module performs a 'global fitting' operation. Global fitting is a method used in data analysis to best fit a model to multiple data sets simultaneously, under the assumption that some underlying parameters are shared between the data sets.
 
 Please consult the documentation for each function in this module for more detailed information on their operation and use.
-
 """
 
 from clophfit.prtecan.prtecan import (

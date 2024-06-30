@@ -181,7 +181,6 @@ class EnspireFile:
         ------
         CsvLineError
             If the column '01' is not present 3 lines below ['Platemap:'].
-
         """
         idx = lookup_listoflines(post, pattern="Platemap:", col=0)[0]
         if "01" not in post[idx + 3]:

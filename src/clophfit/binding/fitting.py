@@ -77,7 +77,6 @@ class Dataset(dict[str, DataArrays]):
     ------
     ValueError
         If x and y are both ArrayDict and their keys don't match.
-
     """
 
     is_ph: bool
@@ -319,7 +318,6 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     >>> import numpy as np
     >>> kd(10, 8.4, np.array([7.4, 8.4]))
     array([11., 20.])
-
     """
     return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)
 

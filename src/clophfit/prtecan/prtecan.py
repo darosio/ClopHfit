@@ -1,4 +1,4 @@
-"""prtecan/prtecan.py."""
+"""Prtecan/prtecan.py."""
 
 from __future__ import annotations
 
@@ -50,7 +50,6 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
     -------
     list[list[str | int | float]]
         Lines as list_of_lines.
-
     """
     sheet = pd.read_excel(path)
     n0 = pd.DataFrame([[np.nan] * len(sheet.columns)], columns=sheet.columns)
@@ -89,7 +88,6 @@ def lookup_listoflines(
     -------
     list[int]
         Row/line index for all occurrences of pattern. Empty list for no occurrences.
-
     """
     indexes = []
     for i, line in enumerate(csvl):
@@ -120,7 +118,6 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     ... ]
     >>> strip_lines(lines)
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
-
     """
     return [[e for e in line if e] for line in lines]
 
@@ -186,7 +183,6 @@ def extract_metadata(
     >>> lines = [["Mode", "", "", "", "Fluorescence Top Reading", "", "", "", "", ""]]
     >>> extract_metadata(lines)["Mode"].value
     'Fluorescence Top Reading'
-
     """
     md: dict[str, Metadata] = {}
 
@@ -251,7 +247,6 @@ def calculate_conc(
     -------
     ArrayF
         Concentrations as vector.
-
     """
     vol_tot = np.cumsum(additions)
     concs = np.ones(len(additions))
@@ -393,7 +388,6 @@ class Labelblock(BufferWellsMixin):
         Warns
         -----
             When a cell contains saturated signal (converted into np.nan).
-
         """
         rownames = tuple("ABCDEFGH")
         data = {}
@@ -643,7 +637,6 @@ class LabelblocksGroup(BufferWellsMixin):
         ----------
         value: list[str]
             The new value of 'buffer_wells'
-
         """
         for lb in self.labelblocks:
             lb.buffer_wells = value
@@ -941,7 +934,6 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         ----------
         value: list[str]
             The new value of 'buffer_wells'
-
         """
         for lbg in self.labelblocksgroups:
             lbg.buffer_wells = value
@@ -1004,7 +996,6 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         ----------
         out_folder : Path
             Path to output folder.
-
         """
         out_folder.mkdir(parents=True, exist_ok=True)
 
@@ -1345,7 +1336,8 @@ class TitrationAnalysis(Titration):
         """Plot all wells into a pdf."""
         # Create a PdfPages object
         pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
-        """# TODO: Order
+        """# TODO: Order.
+
         "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
         #     out.savefig(self.plot_well(str(k)))
         # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
@@ -1384,7 +1376,10 @@ class TitrationAnalysis(Titration):
         xmax: float | None = None,
         title: str | None = None,
     ) -> figure.Figure:
-        """Plot SA vs. K with errorbar for the whole plate."""
+        """Plot SA vs.
+
+        K with errorbar for the whole plate.
+        """
         fit_df = self.result_dfs[lb]
         with plt.style.context("fivethirtyeight"):
             f = plt.figure(figsize=(10, 10))

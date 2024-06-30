@@ -70,6 +70,11 @@ repos:
         args: ["-c", "pyproject.toml"]
         additional_dependencies: ["bandit[toml]"]
 
+  - repo: https://github.com/DanielNoord/pydocstringformatter
+    rev: v0.7.3
+    hooks:
+      - id: pydocstringformatter
+
   - repo: https://github.com/jsh9/pydoclint
     rev: 0.5.1
     hooks:
