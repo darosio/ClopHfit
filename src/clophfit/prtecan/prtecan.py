@@ -134,7 +134,8 @@ class Metadata:
     value : int | str | float | None
         The value for the dictionary key.
     unit : Sequence[str | float | int] | None, optional
-        The first element represents the unit, while the following elements are only listed.
+        The first element represents the unit, while the following elements are
+        only listed.
     """
 
     value: int | str | float | None
@@ -153,7 +154,8 @@ def extract_metadata(
     Parameters
     ----------
     lines : list[list[str | int | float]]
-        Lines (list_of_lines) that are a list of fields, typically from a csv/xls file.
+        Lines (list_of_lines) that are a list of fields, typically from a
+        csv/xls file.
 
     Returns
     -------
@@ -298,7 +300,6 @@ class BufferWellsMixin:
 
     def _on_buffer_wells_set(self, value: list[str]) -> None:
         """Provide a hook for subclasses to add behavior when buffer_wells is set."""
-        pass
 
 
 @dataclass
@@ -471,7 +472,8 @@ class Labelblock(BufferWellsMixin):
                         norm /= val
             except TypeError:
                 warnings.warn(
-                    "Could not normalize for non numerical Gain, Number of Flashes or Integration time.",
+                    "Could not normalize for non numerical Gain, "
+                    "Number of Flashes or Integration time.",
                     stacklevel=2,
                 )  # pragma: no cover
             self._data_norm = {k: v * norm for k, v in self.data.items()}
@@ -513,7 +515,7 @@ class Labelblock(BufferWellsMixin):
         return eq
 
     def __almost_eq__(self, other: Labelblock) -> bool:
-        """Two labelblocks are almost equal when they could be merged after normalization."""
+        """Labelblocks are almost equal if they could be merged after normalization."""
         eq: bool = True
         # Integration Time, Number of Flashes and Gain can differ.
         for k in Labelblock._KEYS[:5]:
@@ -820,7 +822,7 @@ class PlateScheme:
 
 @dataclass
 class Titration(TecanfilesGroup, BufferWellsMixin):
-    """Build titrations from grouped Tecanfiles and corresponding concentrations or pH values.
+    """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
     Parameters
     ----------
@@ -843,16 +845,16 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
     _dil_corr: ArrayF | None = field(init=False, default=None)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # pylint: disable=W0246
         """Set up the initial values for the properties."""
         super().__post_init__()
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
         return (
-            f'Titration(files=["{self.tecanfiles[0].path}", "{self.tecanfiles[1].path}", ...], '
-            f"conc={self.conc!r}, "
-            f"data_size={len(self.data) if self.data else 0})"
+            f'Titration(files=["{self.tecanfiles[0].path}", '
+            f'"{self.tecanfiles[1].path}", ...], '
+            f"conc={self.conc!r}, data_size={len(self.data) if self.data else 0})"
         )
 
     @classmethod
@@ -1079,7 +1081,7 @@ class TitrationAnalysis(Titration):
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # pylint: disable=W0246
         """Set up the initial values of inherited class properties."""
         super().__post_init__()
 
@@ -1106,8 +1108,9 @@ class TitrationAnalysis(Titration):
             dil = self.fitdata_params.get("dil", False)
             bg = self.fitdata_params.get("bg", False)
             if dil:
-                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e in [{}, {}]]) i.e.
-                # DDD if nrm and self.data_nrm and any(self.data_nrm):
+                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e
+                # in [{}, {}]]) i.e. DDD if nrm and self.data_nrm and
+                # any(self.data_nrm):
                 if nrm and self.data_nrm:
                     self._fitdata = self.data_nrm
                 elif self.data:
@@ -1190,11 +1193,13 @@ class TitrationAnalysis(Titration):
     def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
-        The fitting process uses the initial point (`ini`), the final point (`fin`), and weighting (`weight`) parameters
-        defined in the `FitKwargs` instance (accessible through `self.fitkws`).
+        The fitting process uses the initial point (`ini`), the final point
+        (`fin`), and weighting (`weight`) parameters defined in the `FitKwargs`
+        instance (accessible through `self.fitkws`).
 
-        To perform a fit, you would first define the fit parameters and then call the fit method:
-        titan.fitkws = TitrationAnalysis.FitKwargs(ini=0, fin=None, weight=True)
+        To perform a fit, you would first define the fit parameters and then
+        call the fit method: titan.fitkws = TitrationAnalysis.FitKwargs(ini=0,
+        fin=None, weight=True)
 
         Returns
         -------
@@ -1250,7 +1255,8 @@ class TitrationAnalysis(Titration):
         lb: int
             Labelblock index.
         hue_column: str
-            Column in `fitresults_df` used for color-coding data points in the stripplot.
+            Column in `fitresults_df` used for color-coding data points in the
+            stripplot.
         xlim : tuple[float, float] | None, optional
             Range.
         title : str | None, optional
@@ -1336,12 +1342,12 @@ class TitrationAnalysis(Titration):
         """Plot all wells into a pdf."""
         # Create a PdfPages object
         pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
-        """# TODO: Order.
-
-        "# for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-        #     out.savefig(self.plot_well(str(k)))
-        # for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
-        #     out.savefig(self.plot_well(str(k)))
+        # TODO: Order.
+        """
+        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
+            out.savefig(self.plot_well(str(k)))
+        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
+            out.savefig(self.plot_well(str(k)))
         """
         for lbl, fr in self.results[lb].items():
             fig = fr.figure
@@ -1463,7 +1469,8 @@ class TitrationAnalysis(Titration):
         res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
         # Sort the DataFrame by this computed value in descending order
         res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
-        # in case: del res_unk["sort_val"]  # if you want to remove the temporary sorting column
+        # # TODO: in case: del res_unk["sort_val"] # if you want to remove the
+        # # temporary sorting column
         print("\n" + header)
         print("  UNK")
         # for i, r in res_unk.sort_index().iterrows():

@@ -94,23 +94,27 @@ class EnspireFile:
     def export_measurements(self, out_dir: Path = Path(__enspire_out_dir__)) -> None:
         """Save measurements, metadata and plots into out_dir."""
         out_dir.mkdir(parents=True, exist_ok=True)
-        for m in self.measurements:
+        for measurement_name, measurement_data in self.measurements.items():
             # Prepare data dictionary and construct DataFrame
-            data_dict = {"lambda": self.measurements[m]["lambda"]}
-            data_dict.update({w: self.measurements[m][w] for w in self.wells})
+            data_dict = {"lambda": measurement_data["lambda"]}
+            data_dict.update({well: measurement_data[well] for well in self.wells})
+
             dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
-            basename = f"{self.file.stem}_{m}"
-            if (out_dir / f"{basename}.csv").exists():
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # noqa: UP017 [for py3.10]
-                basename = f"{self.file.stem}_{m}_{timestamp}"
+            basename = f"{self.file.stem}_{measurement_name}"
+            # Check for existing file and append timestamp if necessary
             csv_file = out_dir / f"{basename}.csv"
+            if csv_file.exists():
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # noqa: UP017 [for py3.10]
+                basename = f"{self.file.stem}_{measurement_name}_{timestamp}"
+                csv_file = out_dir / f"{basename}.csv"
             md_file = out_dir / f"{basename}.json"
             png_file = out_dir / f"{basename}.png"
+            # Export data and metadata
             dfdata.to_csv(csv_file)
-            pd.DataFrame([self.measurements[m]["metadata"]]).to_json(md_file, indent=4)
+            pd.DataFrame([measurement_data["metadata"]]).to_json(md_file, indent=4)
             # Create and save plot
             fig, ax = plt.subplots()
-            dfdata.plot(title=m, legend=False, ax=ax)
+            dfdata.plot(title=measurement_name, legend=False, ax=ax)
             plt.savefig(png_file)
             plt.close(fig)
 
@@ -150,7 +154,7 @@ class EnspireFile:
         verboseprint: Callable[..., Any],
     ) -> None:
         """Check csv format around ini and fin."""
-        if not (csvl[ini - 3] == csvl[ini - 2] == []):
+        if not csvl[ini - 3] == csvl[ini - 2] == []:
             msg = "Expecting two empty lines before _ini"
             raise CsvLineError(msg)
         if csvl[fin] != []:
@@ -225,7 +229,8 @@ class EnspireFile:
     ) -> tuple[list[str], dict[str, Any]]:
         """Extract the measurements dictionary.
 
-        For each measurement label extracts metadata, lambda and for each well the spectrum.
+        For each measurement label extracts metadata, lambda and for each well
+        the spectrum.
 
         Parameters
         ----------
@@ -256,9 +261,13 @@ class EnspireFile:
         w = dfdata.drop_duplicates(["Well"])
         wells = w.Well.tolist()
         if wells != self._wells_platemap:
-            msg = "well_list from data_list and platemap differ. It might be that you did not export data for all acquired wells"
-            warnings.warn(msg, stacklevel=2)
-
+            warnings.warn(
+                (
+                    "well_list from data_list and platemap differ. It might be that "
+                    "you did not export data for all acquired wells"
+                ),
+                stacklevel=2,
+            )
         # Monochromator is expected to be either Exc or Ems
         for k, measurement in measurements.items():
             label = f"Meas{k}"
@@ -293,7 +302,8 @@ class EnspireFile:
                     float(r) for r in dfdata[head.em][dfdata.Well == wells[0]] if r
                 ]
             else:
-                msg = f'Unknown "Monochromator": {measurement["metadata"]["Monochromator"]} in {label}'
+                monochromator = measurement["metadata"]["Monochromator"]
+                msg = f'Unknown "Monochromator": {monochromator} in {label}'
                 raise CsvLineError(msg)
             for w in wells:
                 measurement[w] = [
@@ -407,7 +417,7 @@ class Note:
     def __post_init__(self) -> None:
         """Complete the initialization generating wells and _note_list."""
         verboseprint = verbose_print(self.verbose)
-        with Path(self.fpath).open("r", newline="") as file:
+        with Path(self.fpath).open("r", newline="", encoding="utf-8") as file:
             sample_data = file.read(1024)  # Read a sample of the CSV data
         dialect = cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
         self._note = pd.read_csv(self.fpath, dialect=dialect)
@@ -427,7 +437,7 @@ class Note:
             titrations[name0] = {}
             for name1, group1 in grouped1:
                 titrations[name0][name1] = {}
-                # Group by 'pH' and 'Cl' and keep only groups with more than 'threshold' rows.
+                # Group by 'pH' and 'Cl' and keep only groups with n rows > 'threshold'.
                 for grouping in ["pH", "Cl"]:
                     grouped2 = group1.groupby(grouping)
                     for name2, group2 in grouped2:

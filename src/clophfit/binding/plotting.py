@@ -2,12 +2,14 @@
 
 Primary functions encompassed are:
 
-    plot_spectra: Develops a plot for spectral data. Each line is colored based on a designated colormap.
+    plot_spectra: Develops a plot for spectral data. Each line is colored based
+    on a designated colormap.
     plot_autovectors: Plots the autovectors.
     plot_autovalues: Plots the singular values from SVD.
     plot_fit: Plots residuals for each dataset with uncertainty.
     plot_pca: Plots the first two principal components.
-    plot_spectra_distributed: Plots spectra from titration distributing on the figure top.
+    plot_spectra_distributed: Plots spectra from titration distributing on the
+    figure top.
     plot_emcee: Plots emcee result.
     plot_emcee_k_on_ax: Plots emcee result for a specific parameter on an axis.
     distribute_axes: Positions axes evenly along the horizontal axis of the figure.
@@ -129,8 +131,8 @@ def plot_autovalues(ax: Axes, s: ArrayF) -> None:
         The singular values from the SVD.
     """
     index = range(1, N_AUTOVALS + 1)
-    colors = [COLOR_MAP(i - 1) for i in index]  # using direct indexing
-    ax.scatter(index, s[:N_AUTOVALS], c=colors, s=99)
+    colors_autovalues = [COLOR_MAP(i - 1) for i in index]  # using direct indexing
+    ax.scatter(index, s[:N_AUTOVALS], c=colors_autovalues, s=99)
     ax.axhline(y=s[-2], color="gray", linestyle="--")  # horizontal line at y=s[-2]
     _apply_common_plot_style(ax, "Singular Values from SVD", "Index", "Singular Value")
     ax.set(yscale="log")
@@ -150,7 +152,7 @@ def plot_autovectors(ax: Axes, wl: pd.Index[int], u: ArrayF) -> None:
         The left singular vectors obtained from SVD.
     """
     for i in range(N_AUTOVALS):
-        ax.plot(wl, u[:, i], color=COLOR_MAP(i), lw=3 / (i + 1), alpha=(1 - 0.2 * i))
+        ax.plot(wl, u[:, i], color=COLOR_MAP(i), lw=3 / (i + 1), alpha=1 - 0.2 * i)
     _apply_common_plot_style(ax, "Autovectors", "Wavelength", "Magnitude")
 
 
@@ -200,12 +202,8 @@ def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     """
     color_map = colormaps[pp.palette]
     normalize = colors.Normalize(vmin=pp.hue_norm[0], vmax=pp.hue_norm[1])
-    for i in range(len(spectra.columns)):
-        ax.plot(
-            spectra.index,
-            spectra.iloc[:, i],
-            color=color_map(normalize(spectra.columns[i])),
-        )
+    for i, col in enumerate(spectra.columns):
+        ax.plot(spectra.index, spectra.iloc[:, i], color=color_map(normalize(col)))
     _apply_common_plot_style(ax, "Spectra", "Wavelength", "Fluorescence")
     # Add a colorbar for reference
     sm = cm.ScalarMappable(cmap=color_map, norm=normalize)
@@ -227,14 +225,14 @@ def plot_spectra_distributed(
     for (j, ax), (lbl, spec) in zip(enumerate(axl), titration.items(), strict=False):
         # Calculate the average spectrum
         avg_spec = spec.mean(axis=1)
-        for i in range(len(spec.columns)):
+        for i, col in enumerate(spec.columns):
             if dbands is None:
-                # Calculate the difference between the current spectrum and the average spectrum
+                # Difference between current spectrum and the average spectrum
                 diff = spec.iloc[:, i] - avg_spec
-                ax.plot(spec.index, diff, color=color_map(normalize(spec.columns[i])))
+                ax.plot(spec.index, diff, color=color_map(normalize(col)))
             elif lbl in dbands:
                 sp = spec.iloc[:, i]
-                ax.plot(spec.index, sp, color=color_map(normalize(spec.columns[i])))
+                ax.plot(spec.index, sp, color=color_map(normalize(col)))
                 xmin, xmax = dbands[lbl]
                 ax.axvspan(xmin, xmax, color=COLOR_MAP(j), alpha=0.02)
         if j == 0:
@@ -263,7 +261,8 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
-    az.plot_posterior(idata.posterior[p_name], ax=ax)  # type: ignore[no-untyped-call]
+    parameter_posterior = idata.posterior[p_name]  # pylint: disable=E1101
+    az.plot_posterior(parameter_posterior, ax=ax)  # type: ignore[no-untyped-call]
 
 
 # TODO: Complete print emcee

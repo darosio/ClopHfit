@@ -55,7 +55,7 @@ class DataArrays:
 
 
 class Dataset(dict[str, DataArrays]):
-    """A dataset containing pairs of matching x and y data arrays, indexed by a string key.
+    """Contain pairs of matching x and y data arrays, indexed by a string key.
 
     Initialization will remove any NaN values from the x and y arrays.
 
@@ -70,8 +70,8 @@ class Dataset(dict[str, DataArrays]):
     is_ph : bool
         Indicate if x values represent pH (default is False).
     w : ArrayF | ArrayDict | None
-        The w values (weights) of the dataset(s), either as a single ArrayF or an ArrayDict
-        if multiple datasets are provided.
+        The w values (weights) of the dataset(s), either as a single ArrayF or
+        as an ArrayDict if multiple datasets are provided.
 
     Raises
     ------
@@ -157,7 +157,8 @@ class Dataset(dict[str, DataArrays]):
         Raises
         ------
         ValueError
-            If a key in the weights dictionary does not match any key in the current Dataset object.
+            If a key in the weights dictionary does not match any key in the
+            current Dataset object.
         """
         if isinstance(w, np.ndarray):
             for da in self.values():
@@ -167,7 +168,7 @@ class Dataset(dict[str, DataArrays]):
                 if k in self:
                     self[k].w = weights
                 else:
-                    msg = f"No matching dataset found for key '{k}' in the current Dataset object."
+                    msg = f"No matching found for key '{k}' in the current Dataset."
                     raise ValueError(msg)
 
     def copy(self, keys: set[str] | None = None) -> Dataset:
@@ -178,7 +179,8 @@ class Dataset(dict[str, DataArrays]):
         Parameters
         ----------
         keys : set[str] | None, optional
-            List of keys to include in the copied dataset. If None (default), copies all data.
+            List of keys to include in the copied dataset. If None (default),
+            copies all data.
 
         Returns
         -------
@@ -210,8 +212,8 @@ class Dataset(dict[str, DataArrays]):
         ):  # list() is used to avoid modifying dict during iteration
             if n_params > len(self[key].y):
                 warnings.warn(
-                    f"Removing key '{key}' from Dataset: number of parameters ({n_params}) "
-                    f"exceeds number of data points ({len(self[key].y)}).",
+                    f"Removing key '{key}' from Dataset: number of parameters "
+                    f"({n_params}) exceeds number of data points ({len(self[key].y)}).",
                     stacklevel=2,
                 )
                 del self[key]
@@ -358,7 +360,7 @@ class FitResult:
     mini: Minimizer | None = None
 
     def is_valid(self) -> bool:
-        """Check if the fitting process was successful based on the existence of figure, result, and minimizer."""
+        """Whether figure, result, and minimizer exist."""
         return (
             self.figure is not None
             and self.result is not None
@@ -373,11 +375,14 @@ class SpectraGlobResults:
     Attributes
     ----------
     svd : FitResult | None
-        The `FitResult` object representing the outcome of the concatenated svd fit, or `None` if the svd fit was not performed.
+        The `FitResult` object representing the outcome of the concatenated svd
+        fit, or `None` if the svd fit was not performed.
     gsvd : FitResult | None
-        The `FitResult` object representing the outcome of the svd fit, or `None` if the svd fit was not performed.
+        The `FitResult` object representing the outcome of the svd fit, or
+        `None` if the svd fit was not performed.
     bands : FitResult | None
-        The `FitResult` object representing the outcome of the bands fit, or `None` if the bands fit was not performed.
+        The `FitResult` object representing the outcome of the bands fit, or
+        `None` if the bands fit was not performed.
     """
 
     svd: FitResult | None = field(default=None)
@@ -390,17 +395,20 @@ def analyze_spectra(
 ) -> FitResult:
     """Analyze spectra titration, create and plot fit results.
 
-    This function performs either Singular Value Decomposition (SVD) or integrates
-    the spectral data over a specified band and fits the integrated data to a binding model.
+    This function performs either Singular Value Decomposition (SVD) or
+    integrates the spectral data over a specified band and fits the integrated
+    data to a binding model.
 
     Parameters
     ----------
     spectra : pd.DataFrame
         The DataFrame containing spectra (one spectrum for each column).
     is_ph : bool
-        Whether the x values should be interpreted as pH values rather than concentrations.
+        Whether the x values should be interpreted as pH values rather than
+        concentrations.
     band : tuple[int, int] | None
-        The band to integrate over. If None (default), performs Singular Value Decomposition (SVD).
+        The band to integrate over. If None (default), performs Singular Value
+        Decomposition (SVD).
 
     Returns
     -------
@@ -410,12 +418,14 @@ def analyze_spectra(
     Raises
     ------
     ValueError
-        If the band parameters are not in the spectra's index when the band method is used.
+        If the band parameters are not in the spectra's index when the band
+        method is used.
 
     Notes
     -----
-    Creates plots of spectra, principal component vectors, singular values, fit of the first
-    principal component and PCA for SVD; only of spectra and fit for Band method.
+    Creates plots of spectra, principal component vectors, singular values, fit
+    of the first principal component and PCA for SVD; only of spectra and fit
+    for Band method.
     """
     y_offset = 1.0
     x = spectra.columns.to_numpy()
@@ -466,10 +476,10 @@ def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
             y = {label: da.y}
             d = Dataset(x, y, ds.is_ph)
             params = _build_params_1site(d)
-            # Mark for removal and skip minimization when parameters exceed data points in y
+            # Mark for removal and skip minimization when n pars exceed data points in y
             if len(params) > len(da.y):
                 warnings.warn(
-                    f"Marking dataset {label} for removal due to insufficient data points.",
+                    f"Marking dataset {label} for removal: insufficient data points.",
                     stacklevel=2,
                 )
                 labels_to_remove.append(label)

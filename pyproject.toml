@@ -244,49 +244,29 @@ warn_unused_configs = true
 [tool.pydoclint]
 check-class-attributes = false
 
-[tool.pylint]
+[tool.pylint.format]
+ignore-long-lines = "^\\s*(# )?<?https?://\\S+>?$|# type: ignore|# noqa:"
+max-line-length = 88
+max-module-lines = 1600
 
-[tool.pylint.master]
-ignore-paths = ["src/clophfit/_version.py", "src/clophfit/old"]
+[tool.pylint.main]
+ignore-paths = ["src/clophfit/old"]
+jobs = 0
 py-version = "3.12"
 
 [tool.pylint.messages_control]
 disable = [
   "invalid-name",
   "design",
-  "line-too-long",
-  "too-many-lines",
-  "inconsistent-return-statements",
-  "import-error",
-  "fixme",
-  # "consider-using-f-string",
-  # "unnecessary-pass",
-  # "unspecified-encoding",
-  # "unused-argument",
-  # "raise-missing-from",
-  # "use-a-generator",
-  # "consider-using-generator",
-  # "no-else-raise",
-  # "protected-access",
-  # "unidiomatic-typecheck",
-  # "attribute-defined-outside-init",
-  # # "all",
-  # # https://pylint.pycqa.org/en/latest/user_guide/checkers/features.html
-  # # for tests
-  # "pointless-string-statement",
-  # "consider-using-with",
-  # "comparison-with-itself",
-  # "comparison-of-constants",
-  # "consider-using-with",
-  # "use-maxsplit-arg",
-  "unnecessary-dunder-call"
+  "fixme"
 ]
+
+[tool.pylint.refactoring]
+# Maximum number of nested blocks for function / method body
+max-nested-blocks = 8  # default 5
 
 [tool.pylint.reports]
 output-format = "colorized"
-
-[tool.pylint.similarities]
-ignore-imports = "yes"
 
 [tool.pylsp-mypy]
 dmypy = false

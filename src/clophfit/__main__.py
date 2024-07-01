@@ -101,7 +101,8 @@ def tecan(  # noqa: PLR0913
 
     LIST_FILE : List of Tecan files and concentration values.
 
-    Saves titrations as .dat files and fits all wells using 2 labels. The function produces:
+    Saves titrations as .dat files and fits all wells using 2 labels. The
+    function produces:
 
     - K plot
 
@@ -381,17 +382,17 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
     out = Path(ctx.obj.get("OUT", "."))
 
     note_df = pd.read_csv(note_f, sep="\t")
-    csv = pd.read_csv(csv_f)
+    csv_df = pd.read_csv(csv_f)
     # Ignore buffer wells! SVD will use differences between spectra.
     note_df = note_df[note_df["mutant"] != "buffer"]
     Notes = namedtuple("Notes", ["wells", "conc"])
     titration_type = "pH" if is_ph else "Cl"
     note = Notes(list(note_df["well"]), list(note_df[titration_type]))
-    spectra = csv[note.wells]
-    spectra.index = csv["lambda"]
+    spectra = csv_df[note.wells]
+    spectra.index = csv_df["lambda"]
     spectra.columns = np.array(note.conc)
     if verbose:
-        print(csv)
+        print(csv_df)
         click.echo(note_f)
         print(note)
         print("DataFrame\n", spectra)
@@ -451,9 +452,8 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
             fig_ratio.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emc-ratios"))
             for lbl in ds:
                 hdi = samples_ratios.quantile([0.025, 0.5, 0.975])[lbl].to_list()
-                print(
-                    f"HDI (94%) for plateau ratio in dataset {lbl}: {[f'{q:.3g}' for q in hdi]}"
-                )
+                formatted_hdi = [f"{q:.3g}" for q in hdi]
+                print(f"HDI (94%) for plateau ratio in dataset {lbl}: {formatted_hdi}")
 
 
 ########################################
@@ -472,14 +472,14 @@ def note2csv(note: str, output: str, labels: str, temp: str) -> None:
     output_path = Path(output) if output else input_path.with_suffix(".csv")
 
     if not output_path.exists():
-        output_path.write_text(",".join(headers) + "\n")
+        output_path.write_text(",".join(headers) + "\n", encoding="utf-8")
 
     # read data from note file, append to output file
-    with input_path.open("r") as datafile:
+    with input_path.open("r", encoding="utf-8") as datafile:
         reader = csv.reader(datafile, delimiter="\t")  # assuming tab-separated values
         next(reader)  # skip the header row
 
-        with output_path.open("a") as f:
+        with output_path.open("a", encoding="utf-8") as f:
             writer = csv.writer(f, lineterminator="\n")
             for row in reader:
                 new_row = row[:4] + [temp, labels]
