@@ -11,14 +11,14 @@ data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath
 
 
-@pytest.fixture(scope="module")
-def ef1() -> EnspireFile:
+@pytest.fixture(scope="module", name="ef1")
+def ef1_setup() -> EnspireFile:
     """Read in file."""
     return EnspireFile(esff("h148g-spettroC.csv"))
 
 
-@pytest.fixture(scope="module")
-def ef2() -> EnspireFile:
+@pytest.fixture(scope="module", name="ef2")
+def ef2_setupt() -> EnspireFile:
     """Read in file without 'Samples' column."""
     return EnspireFile(esff("e2-T-without_sample_column.csv"))
 
@@ -62,13 +62,13 @@ class TestEnspireFile:
 
     def test_get_data_ini(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test get_data_ini."""
-        assert ef1._ini == 12
-        assert ef2._ini == 9
+        assert ef1._ini == 12  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef2._ini == 9  # noqa: SLF001 # pylint: disable-msg=W0212
 
     def test_fin(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test _fin (line_index())."""
-        assert ef1._fin == 14897
-        assert ef2._fin == 856
+        assert ef1._fin == 14897  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef2._fin == 856  # noqa: SLF001 # pylint: disable-msg=W0212
 
     """
     # def test_metadata_post(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
@@ -96,8 +96,8 @@ class TestEnspireFile:
 
     def test_get_list_from_platemap(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test list from platemap."""
-        assert ef1._wells_platemap[2] == "A03"
-        assert ef2._wells_platemap[1] == "F02"
+        assert ef1._wells_platemap[2] == "A03"  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef2._wells_platemap[1] == "F02"  # noqa: SLF001 # pylint: disable-msg=W0212
 
     def test_metadata(self, ef1: EnspireFile) -> None:
         """Test metadata dictionary."""
@@ -158,14 +158,14 @@ class TestEnspireFile:
     # placemark    self.assertEqual(self.s.get_maxx(self.s.ex, self.s.y), 272)
 
 
-@pytest.fixture(scope="module")
-def n1() -> Note:
+@pytest.fixture(scope="module", name="n1")
+def n1_setup() -> Note:
     """Read note file."""
     return Note(esff("h148g-spettroC-nota.csv"))
 
 
-@pytest.fixture(scope="module")
-def n1err() -> Note:
+@pytest.fixture(scope="module", name="n1err")
+def n1err_setup() -> Note:
     """Read note file with missing wells."""
     return Note(esff("h148g-spettroC-nota-Err.csv"))
 
@@ -179,8 +179,8 @@ class TestNote:
 
     def test__note_list(self, n1: Note) -> None:
         """Test well_list from note."""
-        assert n1._note.loc[2, "Well"] == "A03"
-        assert n1._note.iloc[64, 1] == 8.2
+        assert n1._note.loc[2, "Well"] == "A03"  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert n1._note.iloc[64, 1] == 8.2  # noqa: SLF001 # pylint: disable-msg=W0212
 
     def test_wells(self, n1: Note, ef1: EnspireFile, n1err: Note) -> None:
         """Check wells from Note vs EnspireFile."""

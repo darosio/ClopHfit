@@ -132,9 +132,9 @@ def test_dataset_clean_data() -> None:
         warnings.simplefilter("always")  # Always record warnings
         ds.clean_data(4)
         assert len(w) == 1  # Check that one warning was issued
-        assert (
-            str(w[0].message)
-            == "Removing key 'y0' from Dataset: number of parameters (4) exceeds number of data points (3)."
+        assert str(w[0].message) == (
+            "Removing key 'y0' from Dataset: number of parameters (4) exceeds "
+            "number of data points (3)."
         )
     # Check keys after clean_data
     assert "y0" not in ds

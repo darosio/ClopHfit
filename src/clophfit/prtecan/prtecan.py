@@ -506,7 +506,8 @@ class Labelblock(BufferWellsMixin):
     def __eq__(self, other: object) -> bool:
         """Two labelblocks are equal when metadata KEYS are identical."""
         if not isinstance(other, Labelblock):
-            return NotImplemented
+            msg = f"Cannot compare Labelblock object with {type(other).__name__}"
+            raise TypeError(msg)
         eq: bool = True
         for k in Labelblock._KEYS:
             eq &= self.metadata[k] == other.metadata[k]
@@ -1096,8 +1097,8 @@ class TitrationAnalysis(Titration):
     @classmethod
     def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> TitrationAnalysis:
         """Build `TitrationAnalysis` from a list[.pH|.Cl] file."""
-        tecanfiles, conc = Titration._listfile(Path(list_file))
-        return cls(tecanfiles, conc, is_ph)
+        titration = super().fromlistfile(list_file, is_ph)
+        return cls(titration.tecanfiles, titration.conc, titration.is_ph)
 
     @property
     def fitdata(self) -> Sequence[dict[str, list[float]] | None]:

@@ -143,7 +143,7 @@ class TestLabelblock:
     def test_data_buffersubtracted(
         self, labelblocks: tuple[Labelblock, Labelblock]
     ) -> None:
-        """Calculate buffer value from average of buffer wells and subtract from data."""
+        """Calculate buffer value from average of buffer wells and subtract."""
         lb0, lb1 = labelblocks
         assert lb0.buffer == 11889.25
         assert lb1.buffer == 56.75
@@ -160,7 +160,7 @@ class TestLabelblock:
     def test_data_buffersubtracted_norm(
         self, labelblocks: tuple[Labelblock, Labelblock]
     ) -> None:
-        """Calculate normalized buffer value from average of buffer wells and subtract from data."""
+        """Calculate normalized buffer from average of buffer wells and subtract."""
         lb0, lb1 = labelblocks
         assert lb0.buffer_norm == pytest.approx(639.20699)
         assert lb1.buffer_norm == pytest.approx(5.06696)
@@ -175,13 +175,12 @@ class TestLabelblock:
         assert lb1.data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
 
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """Check if a Labelblock is equal to itself and not equal to a different Labelblock."""
+        """A Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        assert lb0 == lb0, "Labelblock is not equal to itself"  # noqa: PLR0124
-        assert lb0 != lb1, "Different Labelblocks are incorrectly reported as equal"
-        assert (
-            lb0.__eq__(1) == NotImplemented
-        ), "Equality check against non-Labelblock object did not return NotImplemented"
+        assert lb0 == lb0  # noqa: PLR0124 # pylint: disable-msg=R0124
+        assert lb0 is not lb1
+        with pytest.raises(TypeError):
+            assert lb0 == 1
 
     def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """Test the __almost_eq__ method of the Labelblock class."""
@@ -261,14 +260,14 @@ class TestTecanfile:
         assert self.tf.labelblocks[1].data["H12"] == 4196
 
     def test_eq(self) -> None:
-        """Check if a Tecanfile is equal to itself and not equal to a different Tecanfile."""
+        """A Tecanfile is equal to itself and not equal to a different Tecanfile."""
         tf1 = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
         assert self.tf == tf1, "Tecanfile is not equal to itself"
         tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
         assert self.tf != tf2, "Different Tecanfiles are incorrectly reported as equal"
 
     def test_warn(self) -> None:
-        """It warns when labelblocks are repeated in a Tf as it might compromise grouping."""
+        """Warn if labelblocks are repeated in a Tf as it might compromise grouping."""
         with pytest.warns(UserWarning, match="Repeated labelblocks"):
             prtecan.Tecanfile(data_tests / "exceptions/290212_7.67_repeated_lb.xls")
 
@@ -692,22 +691,22 @@ class TestTitrationAnalysis:
         assert fres[0]["H02"] == FitResult(None, None, None)
         # Check that the second fit result for 'H02' is not None
         assert fres[1]["H02"].is_valid()
-        # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result
+        # Check 'K' and std error for 'H02' in the second fit result
         assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0170, abs=1e-4)
-        # Check the value and standard error of the 'K' parameter for 'H02' in the third fit result
+        # Check 'K' and std error for 'H02' in the third fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0169, abs=1e-4)
-        # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result
+        # Check 'K' and std error for 'E02' in the second fit result
         assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
         assert k_e02.stderr == pytest.approx(0.0243, abs=1e-4)
-        # Check the value and standard error of the 'K' parameter for 'E02' in the third fit result
+        # Check 'K' and std error for 'E02' in the third fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
@@ -720,12 +719,14 @@ class TestTitrationAnalysis:
             fres = titan.results
         # Check that the first fit result for 'H02' is still None
         assert fres[0]["H02"] == FitResult(None, None, None)
-        # Check the value and standard error of the 'K' parameter for 'H02' in the second fit result, after fitting up to the second-last data point
+        # Check 'K' and std error for 'H02' in the second fit result, fitting
+        # ends at the second-last data point
         assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8942, abs=1e-4)
         assert k_h02.stderr == pytest.approx(0.0195, abs=1e-4)
-        # Check the value and standard error of the 'K' parameter for 'E02' in the second fit result, after fitting up to the second-last data point
+        # Check 'K' and std error for 'E02' in the second fit result, fitting
+        # ends at the second-last data point
         assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9837, abs=1e-4)

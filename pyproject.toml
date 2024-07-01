@@ -332,7 +332,7 @@ select = [
   "RUF",  # Ruff
   "S",  # bandit XXX
   "SIM",  # simplify
-  # "SLF",  # private self
+  "SLF",  # private self
   "SLOT",  # __slot__
   "TCH",  # TYPE_CHECKING
   # "TD",  # TODOs
@@ -364,7 +364,8 @@ mccabe.max-complexity = 12
   "ICN001",
   "PD901",
   "PLR0913",
-  "PLR2004"
+  "PLR2004",
+  "SLF001"
 ]
 "__init__.py" = ["I002"]  # don't need annotations
 "src/clophfit/__main__.py" = [

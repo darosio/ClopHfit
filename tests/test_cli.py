@@ -19,31 +19,30 @@ from clophfit.__main__ import clop, fit_titration, note2csv, ppr
 tpath = Path(__file__).parent
 
 
-@pytest.fixture()
-def runner() -> CliRunner:
+@pytest.fixture(name="runner")
+def runner_setup() -> CliRunner:
     """Fixture for invoking command-line interfaces."""
     return CliRunner()
 
 
 def create_temp_tsv_file(content: str) -> IO[str]:
     """Create a temporary TSV file and populate it with content."""
-    temp_file = tempfile.NamedTemporaryFile(delete=False, mode="w+", suffix=".tsv")
-    temp_file.write(content)
-    temp_file.seek(0)
-    return cast(IO[str], temp_file)
+    with tempfile.NamedTemporaryFile(
+        delete=False, mode="w+", suffix=".tsv"
+    ) as temp_file:
+        temp_file.write(content)
+        temp_file.seek(0)
+        return cast(IO[str], temp_file)
 
 
 def test_default_case(runner: CliRunner) -> None:
     """Test default case for note2csv function."""
     temp_file = create_temp_tsv_file("Well\tpH\tCl\tName\nD01\t9.15\t0\tNTT-G10\n")
-
     result = runner.invoke(note2csv, [temp_file.name])
-
     assert result.exit_code == 0
-
     # Read the output CSV and check its contents
     output_path = Path(temp_file.name).with_suffix(".csv")
-    with output_path.open("r") as f:
+    with output_path.open("r", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
         assert header == ["Well", "pH", "Cl", "Name", "Temp", "Labels"]
@@ -69,7 +68,7 @@ def test_custom_output(runner: CliRunner) -> None:
 
     # Read the output CSV and check its contents
     output_path = Path(output_file.name)
-    with output_path.open("r") as f:
+    with output_path.open("r", encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
         assert header == ["Well", "pH", "Cl", "Name", "Temp", "Labels"]
@@ -185,7 +184,7 @@ def test_fit_titration(
     ],
 )
 def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> None:
-    """Fit result for K is correct and png are generated as with old ``fit_titration_global.py`` script."""
+    """Fit K correctly, generate png files as the old ``fit_titration_global.py``."""
     dat_fp = tpath / "glob" / dat_f
     base_args = ["-v", ph_opt, "glob", str(dat_fp)]
     if opts:
