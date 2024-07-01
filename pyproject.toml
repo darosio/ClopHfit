@@ -274,17 +274,6 @@ enabled = true
 live_mode = true
 strict = true
 
-[tool.pytest.ini_options]
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-# xfail_strict = true
-# filterwarnings = ["ignore::DeprecationWarning", "ignore:OVER"]
-filterwarnings = ["ignore::DeprecationWarning"]
-log_cli_level = "INFO"
-minversion = "6.0"
-testpaths = [
-  "tests"
-]
-
 [tool.ruff]
 extend-exclude = ["src/clophfit/old/"]
 force-exclude = true
