@@ -1482,6 +1482,8 @@ class TitrationAnalysis(Titration):
         """Plot buffers of all labelblocksgroups."""
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(9, 9))
+        if not isinstance(ax, np.ndarray):
+            ax = np.array([ax])
         for i, lbg in enumerate(self.labelblocksgroups):
             if lbg.data_buffersubtracted:
                 bg = []
