@@ -31,7 +31,7 @@ repos:
         exclude: "^tests/EnSpire/|^tests/data/tmp/"
 
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.13.0
+    rev: v2.14.0
     hooks:
       - id: pretty-format-ini
         args: [--autofix]
@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.1
+    rev: v0.5.2
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -76,7 +76,7 @@ repos:
       - id: pydocstringformatter
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.5.3
+    rev: 0.5.4
     hooks:
       - id: pydoclint
 
