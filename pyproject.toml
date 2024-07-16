@@ -46,7 +46,7 @@ license = "BSD-3-Clause"
 name = "clophfit"
 readme = "README.md"
 requires-python = ">=3.10"
-version = "0.10.8"
+version = "0.10.9"
 
 [project.optional-dependencies]
 dev = [
@@ -107,7 +107,7 @@ quiet-level = 3
 [tool.commitizen]
 name = "cz_customize"
 tag_format = "v$version"
-version = "0.10.8"
+version = "0.10.9"
 version_files = [
   "pyproject.toml:version",
   "docs/conf.py:release",

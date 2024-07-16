@@ -3,6 +3,38 @@
 
 # Changelog
 
+## v0.10.9 (2024-07-16)
+
+### Build
+
+- **deps**: update sphinx requirement from <=7.3.7 to <=7.4.4 (#635)
+- **pre-commit**: update hooks (#634)
+- **deps**: update ruff requirement from <=0.5.1 to <=0.5.2 (#633)
+- **deps**: update coverage[toml] requirement from <=7.5.4 to <=7.6.0 (#632)
+- **deps**: update types-setuptools requirement (#631)
+- **deps**: update sympy requirement from <=1.12.1 to <=1.13.0 (#630)
+- **pre-commit**: update hooks (#629)
+- **deps**: update ruff requirement from <=0.5.0 to <=0.5.1 (#628)
+- **deps**: bump pip from 24.1.1 to 24.1.2 in /.github/workflows (#627)
+- **deps**: update matplotlib requirement from <=3.9.0 to <=3.9.1 (#626)
+- **deps**: update types-setuptools requirement (#625)
+- **pre-commit**: update hooks (#624)
+- **deps**: update openpyxl requirement from <=3.1.4 to <=3.1.5 (#623)
+- Add pydocstringformatter lint to pre-commit
+- **deps**: update ruff requirement from <=0.4.10 to <=0.5.0 (#622)
+- **deps**: bump pip from 24.1 to 24.1.1 in /.github/workflows (#621)
+- **deps**: update pydata-sphinx-theme requirement (#620)
+
+### Refactor
+
+- Drop pkg_resources in favor of importlib.metadata
+- lint SLF
+- After pylint
+- lint PGH and enforce mypy type ignore code
+- RET lint
+- import only for type checking
+- npy lint et al.
+
 ## v0.10.8 (2024-06-25)
 
 ### Fix
