@@ -28,9 +28,7 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-
-if typing.TYPE_CHECKING:
-    from clophfit.types import ArrayDict, ArrayF
+from clophfit.types import ArrayDict, ArrayF
 
 N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800
@@ -88,63 +86,38 @@ class Dataset(dict[str, DataArrays]):
         is_ph: bool = False,
         w: ArrayF | ArrayDict | None = None,
     ) -> None:
-        self.is_ph = is_ph
-        if isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            mask = ~np.isnan(y)
-            x, y = x[mask], y[mask]
-            weights = w[mask] if isinstance(w, np.ndarray) else None
-            super().__init__({"default": DataArrays(x, y, weights)})
-        elif isinstance(x, np.ndarray) and isinstance(y, dict):
-            if isinstance(w, dict):
-                super().__init__(
-                    {
-                        k: DataArrays(
-                            x[~np.isnan(v)],
-                            v[~np.isnan(v)],
-                            w[k][~np.isnan(v)] if k in w else None,
-                        )
-                        for k, v in y.items()
-                    }
-                )
-            else:
-                # this cover w is None or ArrayF
-                super().__init__(
-                    {
-                        k: DataArrays(
-                            x[~np.isnan(v)],
-                            v[~np.isnan(v)],
-                            w[~np.isnan(v)] if w else None,
-                        )
-                        for k, v in y.items()
-                    }
-                )
+        def filter_nan(arr: ArrayF, reference: ArrayF) -> ArrayF:
+            return typing.cast(ArrayF, arr[~np.isnan(reference)])
 
+        def create_data(x: ArrayF, y: ArrayF, w: ArrayF | None) -> DataArrays:
+            x, y = filter_nan(x, y), filter_nan(y, y)
+            w = filter_nan(w, y) if w else None
+            return DataArrays(x, y, w)
+
+        # x:array, y:array
+        if (
+            isinstance(x, np.ndarray)
+            and isinstance(y, np.ndarray)
+            and not isinstance(w, dict)
+        ):
+            data = {"default": create_data(x, y, w)}
+        # x:array, y:dict_of_arrays
+        elif isinstance(x, np.ndarray) and isinstance(y, dict):
+            data = {
+                k: create_data(x, v, w[k] if isinstance(w, dict) else w)
+                for k, v in y.items()
+            }
+        # x:dict_of_arrays, y:dict_of_arrays
         elif isinstance(x, dict) and isinstance(y, dict):
             if x.keys() != y.keys() or (isinstance(w, dict) and x.keys() != w.keys()):
                 msg = "Keys of 'x', 'y', and 'w' (if w is a dict) must match."
                 raise ValueError(msg)
-            if isinstance(w, dict):
-                super().__init__(
-                    {
-                        k: DataArrays(
-                            x[k][~np.isnan(y[k])],
-                            y[k][~np.isnan(y[k])],
-                            w[k][~np.isnan(y[k])] if k in w else None,
-                        )
-                        for k in x
-                    }
-                )
-            else:
-                super().__init__(
-                    {
-                        k: DataArrays(
-                            x[k][~np.isnan(y[k])],
-                            y[k][~np.isnan(y[k])],
-                            w[~np.isnan(y[k])] if w else None,
-                        )
-                        for k in x
-                    }
-                )
+            data = {
+                k: create_data(x[k], y[k], w[k] if isinstance(w, dict) else w)
+                for k in x
+            }
+        super().__init__(data)
+        self.is_ph = is_ph
 
     def add_weights(self, w: ArrayF | ArrayDict) -> None:
         """Add weights to the dataset.
