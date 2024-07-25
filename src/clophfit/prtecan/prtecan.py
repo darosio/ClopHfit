@@ -668,7 +668,8 @@ class LabelblocksGroup(BufferWellsMixin):
         )
         # Adjust negative values.
         for key, y_values in subtracted_data.items():
-            if np.min(y_values) < 0.05 * np.max(y_values):
+            # tolerance threshold =  max_val / 50
+            if np.min(y_values) < 0.02 * np.max(y_values):
                 msg = f"..Buffer for '{key}:{self.metadata['Label'].value}' needed adjustment."
                 new_values = [
                     (
