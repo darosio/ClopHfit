@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import logging
 import typing
 import warnings
 from contextlib import suppress
@@ -25,6 +26,10 @@ if typing.TYPE_CHECKING:
     from collections.abc import Sequence
 
     from clophfit.types import ArrayF
+
+# Set up logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -646,33 +651,67 @@ class LabelblocksGroup(BufferWellsMixin):
         self._data_buffersubtracted = None
         self._data_buffersubtracted_norm = None
 
+    def _calculate_subtracted_data(self, norm: bool = False) -> dict[str, list[float]]:
+        """Calculate buffer subtracted data avoiding negative values."""
+        subtracted_data = (
+            {
+                key: [
+                    lb.data_buffersubtracted_norm[key]
+                    if norm
+                    else lb.data_buffersubtracted[key]
+                    for lb in self.labelblocks
+                ]
+                for key in self.labelblocks[0].data
+            }
+            if self.buffer_wells
+            else {}
+        )
+        # Adjust negative values.
+        for key, y_values in subtracted_data.items():
+            if np.min(y_values) < 0.05 * np.max(y_values):
+                msg = f"..Buffer for '{key}:{self.metadata['Label'].value}' needed adjustment."
+                new_values = [
+                    (
+                        lb.data_norm[key]
+                        - (lb.buffer_norm or 0)
+                        + (lb.buffer_norm_sd or 0)
+                        if norm
+                        else lb.data[key] - (lb.buffer or 0) + (lb.buffer_sd or 0)
+                    )
+                    for lb in self.labelblocks
+                ]
+                logger.warning(msg)
+                if np.min(new_values) < 0:
+                    new_values = [
+                        (
+                            lb.data_norm[key]
+                            - (lb.buffer_norm or 0)
+                            + 3.0 * (lb.buffer_norm_sd or 0)
+                            if norm
+                            else lb.data[key]
+                            - (lb.buffer or 0)
+                            + 3.0 * (lb.buffer_sd or 0)
+                        )
+                        for lb in self.labelblocks
+                    ]
+                    logger.warning(msg.rstrip(".") + " again.")
+                subtracted_data[key] = new_values
+        return subtracted_data
+
     @property
     def data_buffersubtracted(self) -> dict[str, list[float]] | None:
         """Buffer subtracted data."""
-        if self.data is None:
-            return None
-        if self._data_buffersubtracted is None:
-            self._data_buffersubtracted = (
-                {
-                    key: [lb.data_buffersubtracted[key] for lb in self.labelblocks]
-                    for key in self.labelblocks[0].data
-                }
-                if self.buffer_wells
-                else {}
-            )
+        if self.data is None or self._data_buffersubtracted is not None:
+            return self._data_buffersubtracted
+        self._data_buffersubtracted = self._calculate_subtracted_data()
         return self._data_buffersubtracted
 
     @property
     def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
-        """Buffer subtracted data."""
+        """Buffer subtracted normalized data."""
         if self._data_buffersubtracted_norm is None:
-            self._data_buffersubtracted_norm = (
-                {
-                    key: [lb.data_buffersubtracted_norm[key] for lb in self.labelblocks]
-                    for key in self.labelblocks[0].data
-                }
-                if self.buffer_wells
-                else {}
+            self._data_buffersubtracted_norm = self._calculate_subtracted_data(
+                norm=True
             )
         return self._data_buffersubtracted_norm
 
