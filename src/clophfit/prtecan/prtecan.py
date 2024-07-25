@@ -1229,17 +1229,19 @@ class TitrationAnalysis(Titration):
                     fitting[k] = fit_binding_glob(ds, True)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
-        fitting = {}
-        for k in keys_fit:
-            # Actually y or y2 can be None (because it was possible to build only 1 Lbg)
-            y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
-            y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
-            ds = Dataset(x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph)
-            if self.fitkws.weight:
-                fitting[k] = fit_binding_glob(ds, True)
-            else:
-                fitting[k] = fit_binding_glob(ds, False)
-        fittings.append(fitting)
+        if self.fitdata[0] and self.fitdata[1]:
+            fitting = {}
+            for k in keys_fit:
+                y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
+                y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
+                ds = Dataset(
+                    x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph
+                )
+                if self.fitkws.weight:
+                    fitting[k] = fit_binding_glob(ds, True)
+                else:
+                    fitting[k] = fit_binding_glob(ds, False)
+            fittings.append(fitting)
         return fittings
 
     def plot_k(
