@@ -666,37 +666,37 @@ class LabelblocksGroup(BufferWellsMixin):
             if self.buffer_wells
             else {}
         )
+
+        # Adjust negative values.
+        def _new_values(
+            key: str, norm: bool, labelblocks: list[Labelblock], factor: float
+        ) -> list[float]:
+            return [
+                (
+                    lb.data_norm[key]
+                    - (lb.buffer_norm or 0)
+                    + factor * (lb.buffer_norm_sd or 0)
+                    if norm
+                    else lb.data[key] - (lb.buffer or 0) + factor * (lb.buffer_sd or 0)
+                )
+                for lb in labelblocks
+            ]
+
         # Adjust negative values.
         for key, y_values in subtracted_data.items():
             # tolerance threshold =  max_val / 50
             if np.min(y_values) < 0.02 * np.max(y_values):
                 label_str = self.metadata["Label"].value
-                msg = f" Buffer for '{key}:{label_str}' was adjusted."
-                new_values = [
-                    (
-                        lb.data_norm[key]
-                        - (lb.buffer_norm or 0)
-                        + (lb.buffer_norm_sd or 0)
-                        if norm
-                        else lb.data[key] - (lb.buffer or 0) + (lb.buffer_sd or 0)
-                    )
-                    for lb in self.labelblocks
-                ]
+                msg = f"Buffer for '{key}:{label_str}' was adjusted."
+                factor = 1.0
+                new_values = _new_values(key, norm, self.labelblocks, factor)
                 logger.warning(msg)
-                if np.min(new_values) < 0:
-                    new_values = [
-                        (
-                            lb.data_norm[key]
-                            - (lb.buffer_norm or 0)
-                            + 3.0 * (lb.buffer_norm_sd or 0)
-                            if norm
-                            else lb.data[key]
-                            - (lb.buffer or 0)
-                            + 3.0 * (lb.buffer_sd or 0)
-                        )
-                        for lb in self.labelblocks
-                    ]
-                    logger.warning(msg.rstrip(".") + " again.")
+                while np.min(new_values) < 0:
+                    factor *= 1.1  # Increase the factor
+                    new_values = _new_values(key, norm, self.labelblocks, factor)
+                    logger.warning(
+                        msg.rstrip(".") + f" with factor increased to {factor:.2f}."
+                    )
                 subtracted_data[key] = new_values
         return subtracted_data
 
