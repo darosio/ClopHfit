@@ -39,7 +39,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.4
+    rev: v0.5.5
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
