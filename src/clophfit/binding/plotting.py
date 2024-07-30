@@ -46,7 +46,7 @@ if TYPE_CHECKING:
 
     from clophfit.types import ArrayF
 
-COLOR_MAP = colormaps["Paired"]  # To color PCA components and LM fit.
+COLOR_MAP = colormaps["Set1"]  # To color PCA components and LM fit.
 N_AUTOVALS = 4
 
 
