@@ -9,11 +9,13 @@ from dataclasses import dataclass, field
 from sys import float_info
 
 import lmfit  # type: ignore[import-untyped]
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
+from scipy import odr  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.plotting import (
@@ -538,7 +540,7 @@ def plot_fit(
                 da.y,
                 c=list(da.x),
                 s=99,
-                edgecolors="k",
+                edgecolors=clr,
                 label=label,
                 vmin=pp.hue_norm[0],
                 vmax=pp.hue_norm[1],
@@ -591,6 +593,86 @@ def plot_fit(
     _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
 
 
+def plot_fit2(
+    ds: Dataset,
+    xerr: ArrayF,
+    params: Parameters,
+    nboot: int = 0,
+    pp: PlotParameters | None = None,
+) -> figure.Figure:
+    """Plot residuals for each dataset with uncertainty."""
+    _stretch = 0.05
+    xfit = {
+        k: np.linspace(da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100)
+        for k, da in ds.items()
+    }
+    yfit = _binding_1site_models(params, xfit, ds.is_ph)
+    fig, ax = plt.subplots(1, 1, figsize=(7, 7))
+    # Create a color cycle
+    colors = [COLOR_MAP(i) for i in range(len(ds))]
+    ylim = (np.inf, -np.inf)
+    for (lbl, da), clr in zip(ds.items(), colors, strict=False):
+        # Plot data.
+        if pp:
+            ax.scatter(
+                da.x,
+                da.y,
+                c=list(da.x),
+                s=69,
+                edgecolors=clr,
+                label=lbl,
+                vmin=pp.hue_norm[0],
+                vmax=pp.hue_norm[1],
+                cmap=pp.palette,
+            )
+        else:
+            ax.plot(da.x, da.y, "o", color=clr, label=lbl)
+        # Plot fitting.
+        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
+        if da.w is not None:
+            ye = 1 / da.w
+            ax.errorbar(
+                da.x,
+                da.y,
+                yerr=ye,
+                xerr=xerr,
+                fmt="none",
+                color="k",
+                alpha=0.2,
+                capsize=3,
+            )
+        current_ylim = ax.get_ylim()
+        ylim = (min(current_ylim[0], ylim[0]), max(current_ylim[1], ylim[1]))
+        if nboot:
+            # Calculate uncertainty using Monte Carlo method.
+            y_samples = np.empty((nboot, len(xfit[lbl])))
+            rng = np.random.default_rng()
+            for i in range(nboot):
+                p_sample = params.copy()
+                for param in p_sample.values():
+                    # Especially stderr can be None in case of critical fitting
+                    if param.value and param.stderr:
+                        param.value = rng.normal(param.value, param.stderr)
+                y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
+            dy = y_samples.std(axis=0)
+            # Plot uncertainty.
+            # Display label in fill_between plot.
+            ax.fill_between(
+                xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, alpha=0.4, color=clr
+            )
+    ax.set_ylim(ylim)
+    ax.legend()
+    if params["K"].stderr:  # Can be None in case of critical fitting
+        k = ufloat(params["K"].value, params["K"].stderr)
+    else:
+        k = f'{params["K"].value:.3g}' if params["K"].value else None
+    title = "=".join(["K", str(k).replace("+/-", "±")])
+    xlabel = "pH" if ds.is_ph else "Cl"
+    _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
+    plt.close()
+    return fig
+
+
 def _plot_spectra_glob_emcee(
     titration: dict[str, pd.DataFrame],
     ds: Dataset,
@@ -611,3 +693,81 @@ def _plot_spectra_glob_emcee(
         )
         plot_emcee_k_on_ax(ax5, result_emcee)
     return fig
+
+
+# ODR ########################################################################
+def format_estimate(
+    value: float, error: float, significant_digit_limit: int = 5
+) -> str:
+    """Format the value and its associated error into "{value} ± {error}" string."""
+    large_number = np.exp(significant_digit_limit)
+    small_number = np.exp(-significant_digit_limit)
+    significant_digits = max(0, -int(np.floor(np.log10(abs(error)))))
+    use_scientific = (
+        significant_digits > significant_digit_limit
+        or abs(value) > large_number
+        or abs(value) < small_number
+    )
+    formatted_value = (
+        f"{value:.{significant_digits + 1}e}"
+        if use_scientific
+        else f"{value:.{significant_digits + 1}f}"
+    )
+    formatted_error = (
+        f"{error:.{significant_digits + 1}e}"
+        if use_scientific
+        else f"{error:.{significant_digits + 1}f}"
+    )
+    return f"{formatted_value} ± {formatted_error}"
+
+
+@dataclass
+class _ODRResult:
+    parameters: Parameters
+    output: odr.Output
+
+
+def odr_fitting(
+    x: ArrayF,
+    x_err: ArrayF,
+    y_list: list[ArrayF],
+    y_err_list: list[ArrayF],
+    pars: Parameters,
+) -> _ODRResult:
+    """Fit ODR model on two datasets."""
+    # Combine y1 and y2 data and errors
+    n_dataset = len(y_list)
+    y_data = np.concatenate(y_list)
+    y_err = np.concatenate(y_err_list)
+    x_data_combined = np.tile(x, n_dataset)
+    x_err_combined = np.tile(x_err, n_dataset)
+
+    data = odr.RealData(x_data_combined, y_data, sx=x_err_combined, sy=y_err)
+
+    def model_function(pars: list[float], x: ArrayF) -> ArrayF:
+        K, S0, S1 = pars  # noqa: N806
+        return binding_1site(x, K, S0, S1, is_ph=True)
+
+    def combined_model(pars: list[float], x: ArrayF) -> ArrayF:
+        K, S0_1, S1_1, S0_2, S1_2 = pars  # noqa: N806
+        y1_model = model_function([K, S0_1, S1_1], x[: len(x) // 2])
+        y2_model = model_function([K, S0_2, S1_2], x[len(x) // 2 :])
+        return np.concatenate((y1_model, y2_model))
+
+    combined_model_odr = odr.Model(combined_model)
+    # combined_model_odr = odr.Model(model_function)  # noqa: ERA001
+
+    keys = ["K", "S0_y1", "S1_y1", "S0_y2", "S1_y2"]
+    # keys = ["K", "S0_default", "S1_default"]  # noqa: ERA001
+    initial_params = [pars[key].value for key in keys]
+
+    # Create ODR objects
+    odr_obj = odr.ODR(data, combined_model_odr, beta0=initial_params)
+    # Run the fitting
+    output = odr_obj.run()
+
+    params = Parameters()
+    for name, value, error in zip(keys, output.beta, output.sd_beta, strict=True):
+        params.add(name, value=value)
+        params[name].stderr = error
+    return _ODRResult(params, output)

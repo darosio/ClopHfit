@@ -12,13 +12,12 @@ from clophfit.binding.fitting import DataArrays, Dataset, fit_binding_glob
 
 def test_kd() -> None:
     """It returns int float np.ndarray[float]."""
-    assert binding.kd(10, 7, 6.0) == 11
-    assert binding.kd(10, 7, 7) == 20
-    assert binding.kd(10, 7, 8) == 110.0
-    np.testing.assert_allclose(
-        binding.kd(10.0, 7.0, np.array([6.0, 8.0])), [11.0, 110.0]
-    )
-    np.testing.assert_allclose(binding.kd(10, 7, np.array([7, 6, 8.0])), [20, 11, 110])
+    kd = binding.fitting.kd
+    assert kd(10, 7, 6.0) == 11
+    assert kd(10, 7, 7) == 20
+    assert kd(10, 7, 8) == 110.0
+    np.testing.assert_allclose(kd(10.0, 7.0, np.array([6.0, 8.0])), [11.0, 110.0])
+    np.testing.assert_allclose(kd(10, 7, np.array([7, 6, 8.0])), [20, 11, 110])
 
 
 class TestFitBinding:
