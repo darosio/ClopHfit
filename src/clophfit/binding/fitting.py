@@ -93,7 +93,7 @@ class Dataset(dict[str, DataArrays]):
 
         def create_data(x: ArrayF, y: ArrayF, w: ArrayF | None) -> DataArrays:
             x, y = filter_nan(x, y), filter_nan(y, y)
-            w = filter_nan(w, y) if w else None
+            w = filter_nan(w, y) if w is not None else None
             return DataArrays(x, y, w)
 
         # x:array, y:array
