@@ -425,7 +425,9 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
         click.echo(file_df)
     yc = {lbl: file_df[lbl].to_numpy() for lbl in file_df.columns[1:]}
     ds = binding.fitting.Dataset(file_df["x"].to_numpy(), yc, is_ph)
-    f_res = binding.fitting.fit_binding_glob(ds, weight)
+    if weight:
+        binding.fitting.weight_multi_ds_titration(ds)
+    f_res = binding.fitting.fit_binding_glob(ds)
     # Figure
     figure, ax = plt.subplots()
     binding.fitting.plot_fit(

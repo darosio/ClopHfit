@@ -20,7 +20,13 @@ from matplotlib import colormaps, figure
 from matplotlib.backends.backend_pdf import PdfPages
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit.binding.fitting import Dataset, FitResult, fit_binding_glob
+from clophfit.binding.fitting import (
+    Dataset,
+    FitResult,
+    InsufficientDataError,
+    fit_binding_glob,
+)
+from clophfit.binding.plotting import PlotParameters
 
 if typing.TYPE_CHECKING:
     from collections.abc import Sequence
