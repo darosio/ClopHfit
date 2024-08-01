@@ -432,49 +432,57 @@ def analyze_spectra(
         ds = Dataset(x, y, is_ph)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
-    fit_result = fit_binding_glob(ds, True)
+    weight_multi_ds_titration(ds)
+    fit_result = fit_binding_glob(ds)
     result = fit_result.result
     plot_fit(ax4, ds, result, nboot=N_BOOT, pp=PlotParameters(is_ph))
     ax4.set_ylabel(ylabel, color=ylabel_color)
     return FitResult(fig, result, fit_result.mini)
 
 
-def fit_binding_glob(ds: Dataset, weighting: bool = True) -> FitResult:
-    """Analyze multi-label binding datasets and visualize the results."""
-    # MAYBE: return weights in FitResult
-    if weighting:
-        wc: ArrayDict = {}
-        labels_to_remove = []
-        # Calculate standard deviations of residuals
-        for label, da in ds.items():
-            x = {label: da.x}
-            y = {label: da.y}
-            d = Dataset(x, y, ds.is_ph)
-            params = _build_params_1site(d)
-            # Mark for removal and skip minimization when n pars exceed data points in y
-            if len(params) > len(da.y):
-                warnings.warn(
-                    f"Marking dataset {label} for removal: insufficient data points.",
-                    stacklevel=2,
-                )
-                labels_to_remove.append(label)
-                continue
-            res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
-            wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
-        # Remove marked datasets
-        for label in labels_to_remove:
-            del ds[label]
-        if not ds:  # check if ds is now empty
-            warnings.warn("No datasets left after cleaning. Exiting.", stacklevel=2)
-            return FitResult(None, None, None)
-        ds.add_weights(wc)
+class InsufficientDataError(Exception):
+    """Raised to prevent fitting failure for too few data points."""
+
+
+def fit_binding_glob(ds: Dataset) -> FitResult:
+    """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
+    if len(params) > len(np.concatenate([da.y for da in ds.values()])):
+        raise InsufficientDataError
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
     result = mini.minimize()
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, result, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     return FitResult(fig, result, mini)
+
+
+def weight_multi_ds_titration(ds: Dataset) -> None:
+    """Assign weights to each label based on individual label fitting."""
+    wc: ArrayDict = {}
+    labels_to_remove = []
+    # Calculate standard deviations of residuals
+    for label, da in ds.items():
+        x = {label: da.x}
+        y = {label: da.y}
+        d = Dataset(x, y, ds.is_ph)
+        params = _build_params_1site(d)
+        # Mark for removal and skip minimization when n pars exceed data points in y
+        if len(params) > len(da.y):
+            warnings.warn(
+                f"Marking dataset {label} for removal: insufficient data points.",
+                stacklevel=2,
+            )
+            labels_to_remove.append(label)
+            continue
+        res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
+        wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
+    # Remove marked datasets
+    for label in labels_to_remove:
+        del ds[label]
+    if not ds:  # check if ds is now empty
+        warnings.warn("No datasets left after cleaning. Exiting.", stacklevel=2)
+    ds.add_weights(wc)
 
 
 def analyze_spectra_glob(
@@ -499,14 +507,16 @@ def analyze_spectra_glob(
         spectra_merged = pd.concat(adjusted_list)
         svd = analyze_spectra(spectra_merged, ds.is_ph)
         ds_svd = ds.copy(labels_svd)
-        f_res = fit_binding_glob(ds_svd, True)
+        weight_multi_ds_titration(ds)
+        f_res = fit_binding_glob(ds_svd)
         fig = _plot_spectra_glob_emcee(titration, ds_svd, f_res)
         gsvd = FitResult(fig, f_res.result, f_res.mini)
     else:
         svd, gsvd = None, None
     if len(labels_bands) > 1:
         ds_bands = ds.copy(labels_bands)
-        f_res = fit_binding_glob(ds_bands, True)
+        weight_multi_ds_titration(ds)
+        f_res = fit_binding_glob(ds_bands)
         fig = _plot_spectra_glob_emcee(titration, ds_bands, f_res, dbands)
         bands = FitResult(fig, f_res.result, f_res.mini)
     else:
