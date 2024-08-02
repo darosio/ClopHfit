@@ -680,7 +680,6 @@ class TestTitrationAnalysis:
 
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
-        titan.fitdata_params = {"bg": True, "nrm": True, "dil": True}
         with warnings.catch_warnings():
             # Suppress the UserWarning related to dataset removal
             warnings.simplefilter("ignore", category=UserWarning)

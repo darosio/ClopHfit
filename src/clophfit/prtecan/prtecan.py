@@ -1103,6 +1103,16 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
 
 
 @dataclass
+class FitdataParams:
+    """Parameters defining the fitting data."""
+
+    nrm: bool = True
+    bg: bool = True
+    dil: bool = True
+
+
+# TODO: Substitute warning with logging
+@dataclass
 class TitrationAnalysis(Titration):
     """Perform analysis of a titration.
 
@@ -1112,23 +1122,16 @@ class TitrationAnalysis(Titration):
         For unexpected file format, e.g. header `names`.
     """
 
-    @dataclass
-    class FitKwargs:
-        """Represent arguments for fit method."""
-
-        ini: int = 0
-        fin: int | None = None
-        weight: bool = True
-
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
     _fitdata: Sequence[dict[str, list[float]] | None] = field(
         init=False, default_factory=list
     )
-    _fitdata_params: dict[str, bool] = field(init=False, default_factory=dict)
-    _fitkws: FitKwargs = field(init=False, default_factory=FitKwargs)
+    _fitdata_params: FitdataParams = field(init=False, default_factory=FitdataParams)
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _buffers: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _buffers_norm: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:  # pylint: disable=W0246
         """Set up the initial values of inherited class properties."""
@@ -1152,14 +1155,11 @@ class TitrationAnalysis(Titration):
         """Data used for fitting."""
         if not self._fitdata:
             self._results = []
-            nrm = self.fitdata_params.get("nrm", False)
-            dil = self.fitdata_params.get("dil", False)
-            bg = self.fitdata_params.get("bg", False)
-            if dil:
+            if self.fitdata_params.dil:
                 # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e
                 # in [{}, {}]]) i.e. DDD if nrm and self.data_nrm and
                 # any(self.data_nrm):
-                if nrm and self.data_nrm:
+                if self.fitdata_params.nrm and self.data_nrm:
                     self._fitdata = self.data_nrm
                 elif self.data:
                     self._fitdata = self.data
@@ -1169,8 +1169,8 @@ class TitrationAnalysis(Titration):
                         stacklevel=2,
                     )
                     self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
-            elif bg:
-                if nrm:
+            elif self.fitdata_params.bg:
+                if self.fitdata_params.nrm:
                     self._fitdata = [
                         lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
                     ]
@@ -1178,34 +1178,22 @@ class TitrationAnalysis(Titration):
                     self._fitdata = [
                         lbg.data_buffersubtracted for lbg in self.labelblocksgroups
                     ]
-            elif nrm:
+            elif self.fitdata_params.nrm:
                 self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
             else:
                 self._fitdata = [lbg.data for lbg in self.labelblocksgroups]
         return self._fitdata
 
     @property
-    def fitdata_params(self) -> dict[str, bool]:
+    def fitdata_params(self) -> FitdataParams:
         """Get the datafit parameters."""
         return self._fitdata_params
 
     @fitdata_params.setter
-    def fitdata_params(self, params: dict[str, bool]) -> None:
+    def fitdata_params(self, fitdata_params: FitdataParams) -> None:
         """Set the datafit parameters."""
-        self._fitdata_params = params
+        self._fitdata_params = fitdata_params
         self._fitdata = []
-        self._results = []
-        self._result_dfs = []
-
-    @property
-    def fitkws(self) -> FitKwargs:
-        """Get the arguments for fitting."""
-        return self._fitkws
-
-    @fitkws.setter
-    def fitkws(self, params: FitKwargs) -> None:
-        """Set the datafit parameters."""
-        self._fitkws = params
         self._results = []
         self._result_dfs = []
 
