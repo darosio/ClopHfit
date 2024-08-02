@@ -1226,6 +1226,34 @@ class TitrationAnalysis(Titration):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
+    @property
+    def buffers(self) -> list[pd.DataFrame]:
+        """Buffer dataframe list."""
+        if not self._buffers and self.buffer_wells:
+            self._buffers = [
+                pd.DataFrame(
+                    {
+                        k: lbg.data[k]
+                        for k in self.buffer_wells
+                        if isinstance(lbg.data, dict)
+                        and k in lbg.data
+                        and lbg.data[k] is not None
+                    }
+                )
+                for lbg in self.labelblocksgroups
+            ]
+        return self._buffers
+
+    @property
+    def buffers_norm(self) -> list[pd.DataFrame]:
+        """Buffer dataframe list."""
+        if not self._buffers_norm and self.buffer_wells:
+            self._buffers_norm = [
+                pd.DataFrame({k: lbg.data_norm[k] for k in self.buffer_wells})
+                for lbg in self.labelblocksgroups
+            ]
+        return self._buffers_norm
+
     def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
 
@@ -1259,6 +1287,7 @@ class TitrationAnalysis(Titration):
                     y = dat[k]
                     ys = np.array(y)
                     ds = Dataset(x, ys, is_ph=self.is_ph)
+                    weight_multi_ds_titration(ds)  # TODO: can be useful for emcee run
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
@@ -1529,7 +1558,67 @@ class TitrationAnalysis(Titration):
         for i, r in res_unk_sorted.iterrows():
             print(format_row(str(i), r, out_keys))
 
-    def plot_buffer(self, title: str | None = None) -> figure.Figure:
+    # NEXT: Complete new plot buffer
+    def plot_buffer(self, title: str | None = None) -> sns.FacetGrid:
+        """Plot buffers of all labelblocksgroups."""
+        pp = PlotParameters(is_ph=self.is_ph)
+        # Process titan.buffers[0] and make a copy
+        buffer_0_copy = self.buffers_norm[0].copy()
+        buffer_0_copy[pp.kind] = self.conc
+        buffer_0_copy["Label"] = "1"
+        bm0 = buffer_0_copy.melt(
+            id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
+        )
+        # Process titan.buffers[1] and make a copy
+        buffer_1_copy = self.buffers_norm[1].copy()
+        buffer_1_copy[pp.kind] = self.conc
+        buffer_1_copy["Label"] = "2"
+        bm1 = buffer_1_copy.melt(
+            id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
+        )
+
+        # Combine data from both buffers
+        bm = pd.concat([bm0, bm1], ignore_index=True)
+
+        hue_order = bm["well"].unique()
+
+        # Create the catplot for separate panels with separate y-axes
+        g = sns.catplot(
+            data=bm,
+            x=pp.kind,
+            y="F",
+            hue="well",
+            row="Label",
+            kind="strip",
+            sharey=False,
+            height=4,
+            aspect=2,
+            s=100,
+            palette="Paired",
+            hue_order=hue_order,
+        )
+        # Add boxenplot to each facet
+        for ax in g.axes.flatten():
+            sns.boxenplot(
+                data=bm[bm["Label"] == ax.get_title().split(" = ")[1]],
+                x=pp.kind,
+                y="F",
+                hue=pp.kind,
+                palette=pp.palette,
+                ax=ax,
+                alpha=0.6,
+                showfliers=False,
+                legend=False,
+            )
+
+        # Show plot with tight layout
+        g.tight_layout()
+        if title:
+            plt.suptitle(title, fontsize=16)
+        plt.close()
+        return g
+
+    def plot_buffer_old(self, title: str | None = None) -> figure.Figure:
         """Plot buffers of all labelblocksgroups."""
         x = self.conc
         f, ax = plt.subplots(2, 1, figsize=(9, 9))
