@@ -25,6 +25,7 @@ from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
     fit_binding_glob,
+    weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
 
@@ -1137,7 +1138,6 @@ class TitrationAnalysis(Titration):
         """Return a string representation of the instance."""
         return (
             f"TitrationAnalysis({super().__repr__()!r}\n"
-            f"       (kwargs)    fitkws        ={self.fitkws!r}\n"
             f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
         )
 
@@ -1258,36 +1258,50 @@ class TitrationAnalysis(Titration):
         -----
         This method is less general and is designed for two label blocks.
         """
-        ini, fin = self.fitkws.ini, self.fitkws.fin
-        x = np.array(self.conc)[ini:fin]
+        x = np.array(self.conc)  # # TODO: remove array here
         fittings = []
         # Any Lbg at least contains normalized data.
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        for dat in self.fitdata:
+        for label_n, dat in enumerate(self.fitdata, start=1):
             fitting = {}
             if dat:
                 for k in keys_fit:
                     y = dat[k]
-                    y = y[ini:fin]
                     ys = np.array(y)
                     ds = Dataset(x, ys, is_ph=self.is_ph)
-                    fitting[k] = fit_binding_glob(ds, True)
+                    try:
+                        fitting[k] = fit_binding_glob(ds)
+                    except InsufficientDataError:
+                        print(f"Skip {k} for Label{label_n}.")
+                        fitting[k] = FitResult(None, None, None)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
         if self.fitdata[0] and self.fitdata[1]:
             fitting = {}
             for k in keys_fit:
-                y0 = self.fitdata[0][k][ini:fin] if self.fitdata[0] else None
-                y1 = self.fitdata[1][k][ini:fin] if self.fitdata[1] else None
+                y0 = self.fitdata[0][k]
+                y1 = self.fitdata[1][k]
                 ds = Dataset(
                     x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph
                 )
-                if self.fitkws.weight:
-                    fitting[k] = fit_binding_glob(ds, True)
+                # weight multi_ds_titration
+                # NEXT: same for subtracted multiply by corr dilution
+                empirical_factor = 3.3
+                # dilution corr must be masked where y is NaN
+                if self.fitdata_params.nrm:
+                    w1 = 1 / self.buffers_norm[0].sem(axis=1).mean() * empirical_factor
+                    w2 = 1 / self.buffers_norm[1].sem(axis=1).mean()
                 else:
-                    fitting[k] = fit_binding_glob(ds, False)
+                    w1 = 1 / self.buffers[0].sem(axis=1).mean()
+                    w2 = 1 / self.buffers[1].sem(axis=1).mean()
+                ds.add_weights({"y0": np.array(w1), "y1": np.array(w2)})
+                try:
+                    fitting[k] = fit_binding_glob(ds)
+                except InsufficientDataError:
+                    print(f"Skip {k} for global fit.")
+                    fitting[k] = FitResult(None, None, None)
             fittings.append(fitting)
         return fittings
 

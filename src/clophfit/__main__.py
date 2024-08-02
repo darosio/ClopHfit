@@ -272,7 +272,7 @@ def enspire(ctx: Context, csv_f: str, note_f: str | None, bands: tuple[Any]) -> 
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
 
 
-# TODO(dan): Simplify this function
+# TODO: Simplify this function
 def fit_enspire(  # noqa: C901,PLR0912
     ef: EnspireFile,
     note_fp: Path,

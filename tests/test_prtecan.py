@@ -710,24 +710,9 @@ class TestTitrationAnalysis:
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0235, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.023, abs=1e-4)
         # Fit up to the second-last data point
-        titan.fitkws = TitrationAnalysis.FitKwargs(fin=-1)
         with warnings.catch_warnings():
             # Suppress the UserWarning related to dataset removal
             warnings.simplefilter("ignore", category=UserWarning)
             fres = titan.results
-        # Check that the first fit result for 'H02' is still None
-        assert fres[0]["H02"] == FitResult(None, None, None)
-        # Check 'K' and std error for 'H02' in the second fit result, fitting
-        # ends at the second-last data point
-        assert fres[1]["H02"].result is not None
-        k_h02 = fres[1]["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.8942, abs=1e-4)
-        assert k_h02.stderr == pytest.approx(0.0195, abs=1e-4)
-        # Check 'K' and std error for 'E02' in the second fit result, fitting
-        # ends at the second-last data point
-        assert fres[1]["E02"].result is not None
-        k_e02 = fres[1]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.9837, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0267, abs=1e-4)
