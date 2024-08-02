@@ -1305,6 +1305,7 @@ class TitrationAnalysis(Titration):
                 )
                 # weight multi_ds_titration
                 # NEXT: same for subtracted multiply by corr dilution
+                # NEXT: list.pH with xerr
                 empirical_factor = 3.3
                 # dilution corr must be masked where y is NaN
                 if self.fitdata_params.nrm:
@@ -1558,63 +1559,52 @@ class TitrationAnalysis(Titration):
         for i, r in res_unk_sorted.iterrows():
             print(format_row(str(i), r, out_keys))
 
-    # NEXT: Complete new plot buffer
-    def plot_buffer(self, title: str | None = None) -> sns.FacetGrid:
+    # TODO: plot also temp
+    # TODO: use fitted buffer values
+    def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
+        buffers = self.buffers_norm.copy() if nrm else self.buffers.copy()
+        if not buffers:
+            return sns.catplot()
         pp = PlotParameters(is_ph=self.is_ph)
-        # Process titan.buffers[0] and make a copy
-        buffer_0_copy = self.buffers_norm[0].copy()
-        buffer_0_copy[pp.kind] = self.conc
-        buffer_0_copy["Label"] = "1"
-        bm0 = buffer_0_copy.melt(
-            id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
-        )
-        # Process titan.buffers[1] and make a copy
-        buffer_1_copy = self.buffers_norm[1].copy()
-        buffer_1_copy[pp.kind] = self.conc
-        buffer_1_copy["Label"] = "2"
-        bm1 = buffer_1_copy.melt(
-            id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
-        )
-
+        melted_buffers = []
+        for label_n, buf in enumerate(buffers, start=1):
+            if not buf.empty:
+                buffers[label_n - 1][pp.kind] = self.conc
+                buffers[label_n - 1]["Label"] = label_n
+                melted_buffers.append(
+                    buffers[label_n - 1].melt(
+                        id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
+                    )
+                )
         # Combine data from both buffers
-        bm = pd.concat([bm0, bm1], ignore_index=True)
-
-        hue_order = bm["well"].unique()
-
-        # Create the catplot for separate panels with separate y-axes
-        g = sns.catplot(
-            data=bm,
-            x=pp.kind,
+        data = pd.concat(melted_buffers, ignore_index=True)
+        g = sns.lmplot(
+            data=data,
             y="F",
-            hue="well",
-            row="Label",
-            kind="strip",
-            sharey=False,
+            x=pp.kind,
+            ci=67,
             height=4,
-            aspect=2,
-            s=100,
-            palette="Paired",
-            hue_order=hue_order,
+            aspect=1.75,
+            row="Label",
+            x_estimator=np.median,
+            markers="x",
+            scatter=1,
+            scatter_kws={"alpha": 0.4},
+            facet_kws={"sharey": False},
         )
-        # Add boxenplot to each facet
-        for ax in g.axes.flatten():
-            sns.boxenplot(
-                data=bm[bm["Label"] == ax.get_title().split(" = ")[1]],
-                x=pp.kind,
+        num_labels = np.sum([not b_df.empty for b_df in buffers])
+        for label_n in range(1, num_labels + 1):
+            sns.scatterplot(
+                data=data[data.Label == label_n],
                 y="F",
-                hue=pp.kind,
-                palette=pp.palette,
-                ax=ax,
-                alpha=0.6,
-                showfliers=False,
-                legend=False,
+                x=pp.kind,
+                hue="well",
+                ax=g.axes_dict[label_n],
+                legend=label_n == num_labels,
             )
-
-        # Show plot with tight layout
-        g.tight_layout()
         if title:
-            plt.suptitle(title, fontsize=16)
+            plt.suptitle(title, fontsize=14, x=0.96, ha="right")
         plt.close()
         return g
 
