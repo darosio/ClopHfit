@@ -78,7 +78,7 @@ tests = [
   "pytest <= 8.3.2",
   "types-click <= 7.1.8",
   "types-setuptools <= 71.1.0.20240726",
-  "xdoctest <= 1.1.5"
+  "xdoctest <= 1.1.6"
 ]
 
 [project.scripts]
