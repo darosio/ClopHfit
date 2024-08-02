@@ -457,6 +457,7 @@ def fit_binding_glob(ds: Dataset) -> FitResult:
     return FitResult(fig, result, mini)
 
 
+# TODO: remove the print statements use logging
 def weight_individual_ds(ds: Dataset) -> None:
     """Assign weights to each label based on individual label fitting."""
     if len(ds.keys()) != 1:

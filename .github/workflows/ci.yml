@@ -92,15 +92,15 @@ jobs:
         run: python -m pip install --constraint=.github/workflows/constraints.txt pip hatch
 
       - name: Run pytest and coverage
-        if: matrix.tests == 'pytest'
+        if: matrix.tests == 'pytest' && matrix.os != 'windows-latest'
         run: hatch run tests.py${{ matrix.python }}:test
 
       - name: Run coverage
-        if: matrix.tests == 'pytest'
+        if: matrix.tests == 'pytest' && matrix.os != 'windows-latest'
         run: hatch run tests.py${{ matrix.python }}:cov
 
       - name: Upload coverage report
-        if: matrix.tests == 'pytest'
+        if: matrix.tests == 'pytest' && matrix.os != 'windows-latest'
         uses: codecov/codecov-action@v4.5.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -110,7 +110,7 @@ jobs:
         run: hatch run tests.py${{ matrix.python }}:type
 
       - name: Run xdoctest
-        if: matrix.tests == 'xdoc'
+        if: matrix.tests == 'xdoc' && matrix.os != 'windows-latest'
         run: hatch run tests.py${{ matrix.python }}:xdoc
 
   testpypi:

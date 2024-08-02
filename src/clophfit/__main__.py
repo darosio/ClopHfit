@@ -132,6 +132,8 @@ def tecan(  # noqa: PLR0913
     if scheme:
         f = titan.plot_buffer(title=title)
         f.savefig(out_fp / "buffer.png")
+        f = titan.plot_buffer(nrm=True, title=title)
+        f.savefig(out_fp / "buffer_norm.png")
 
     if fit:
         if bg and not scheme:

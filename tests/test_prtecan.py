@@ -10,6 +10,7 @@ from typing import Any, ClassVar
 import numpy as np
 import pandas as pd
 import pytest
+import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -593,18 +594,32 @@ class TestPlateScheme:
             PlateScheme(file=Path("incorrect_file.csv"))
 
 
+# some:  @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
 @pytest.mark.filterwarnings("ignore:OVER")
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
     @pytest.fixture(autouse=True, scope="class")
     def titan(self) -> TitrationAnalysis:
-        """Set up the TitrationAnalysis."""
-        titan = prtecan.TitrationAnalysis.fromlistfile(
+        """Set up TitrationAnalysis."""
+        titan = TitrationAnalysis.fromlistfile(
             data_tests / "140220/list.pH", is_ph=True
         )
         titan.load_additions(data_tests / "140220/additions.pH")
         titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    @pytest.fixture(autouse=True, scope="class")
+    def titan_no_scheme(self) -> TitrationAnalysis:
+        """Set up TitrationAnalysis without scheme."""
+        return TitrationAnalysis.fromlistfile(data_tests / "140220/list.pH", is_ph=True)
+
+    @pytest.fixture(autouse=True, scope="class")
+    def titan_1lbg(self) -> TitrationAnalysis:
+        """Set up TitrationAnalysis with only 1 lbg before normalization."""
+        titan = TitrationAnalysis.fromlistfile(data_tests / "L1/list.pH", is_ph=True)
+        titan.load_additions(data_tests / "L1/additions.pH")
+        titan.load_scheme(data_tests / "L1/scheme.txt")
         return titan
 
     def test_scheme(self, titan: TitrationAnalysis) -> None:
@@ -674,10 +689,6 @@ class TestTitrationAnalysis:
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
         assert set(titan.scheme.ctrl) - {"A01", "A12"} == x
 
-    """
-    @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
-    """
-
     def test_fit(self, titan: TitrationAnalysis) -> None:
         """It fits each label separately."""
         with warnings.catch_warnings():
@@ -715,3 +726,35 @@ class TestTitrationAnalysis:
             # Suppress the UserWarning related to dataset removal
             warnings.simplefilter("ignore", category=UserWarning)
             fres = titan.results
+
+    def test_plot_buffer_with_title(self, titan: TitrationAnalysis) -> None:
+        """It plots buffers for 2 lbg with title."""
+        g = titan.plot_buffer(title="Test Title")
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 2
+        assert g.fig._suptitle.get_text() == "Test Title"  # noqa: SLF001
+
+    def test_plot_buffer_normalized(self, titan: TitrationAnalysis) -> None:
+        """It plots buffers_norm for 2 lbg."""
+        g = titan.plot_buffer(nrm=True)
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 2
+
+    def test_plot_buffer_empty_buffers(
+        self, titan_no_scheme: TitrationAnalysis
+    ) -> None:
+        """It handles empty buffers (before assignment of buffer_wells)."""
+        g = titan_no_scheme.plot_buffer()
+        assert isinstance(g, sns.FacetGrid)
+
+    def test_plot_buffer_1lbg(self, titan_1lbg: TitrationAnalysis) -> None:
+        """It plots buffers_norm in the case of 1 mergeable lbg."""
+        g = titan_1lbg.plot_buffer()
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 1
+
+    def test_plot_buffer_1lbg_normalized(self, titan_1lbg: TitrationAnalysis) -> None:
+        """It plots buffers_norm in the case of 1 mergeable lbg."""
+        g = titan_1lbg.plot_buffer(nrm=True)
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 2
