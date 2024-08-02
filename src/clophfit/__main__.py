@@ -60,9 +60,6 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
 @click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
 @click.option(
-    "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
-)
-@click.option(
     "--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH."
 )
 @click.option(
@@ -87,7 +84,6 @@ def tecan(  # noqa: PLR0913
     dil: str | None,
     bg: bool,
     norm: bool,
-    weight: bool,
     is_ph: bool,
     fit: bool,
     fit_all: bool,
@@ -154,7 +150,6 @@ def tecan(  # noqa: PLR0913
                 out_fit.mkdir(parents=True, exist_ok=True)
                 fit_tecan(
                     titan,
-                    weight,
                     bool(n),
                     bool(b),
                     bool(d),
@@ -169,7 +164,6 @@ def tecan(  # noqa: PLR0913
         else:
             fit_tecan(
                 titan,
-                weight,
                 norm,
                 bg,
                 bool(dil),
@@ -185,7 +179,6 @@ def tecan(  # noqa: PLR0913
 
 def fit_tecan(  # noqa: PLR0913
     titan: TitrationAnalysis,
-    weight: bool,
     norm: bool,
     bg: bool,
     dil: bool,

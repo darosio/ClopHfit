@@ -79,7 +79,7 @@ class Dataset(dict[str, DataArrays]):
         If x and y are both ArrayDict and their keys don't match.
     """
 
-    is_ph: bool
+    is_ph: bool = False
 
     def __init__(
         self,
@@ -146,14 +146,14 @@ class Dataset(dict[str, DataArrays]):
                     msg = f"No matching found for key '{k}' in the current Dataset."
                     raise ValueError(msg)
 
-    def copy(self, keys: set[str] | None = None) -> Dataset:
+    def copy(self, keys: list[str] | set[str] | None = None) -> Dataset:
         """Return a copy of the Dataset.
 
         If keys are provided, only data associated with those keys are copied.
 
         Parameters
         ----------
-        keys : set[str] | None, optional
+        keys : list[str] | set[str] | None, optional
             List of keys to include in the copied dataset. If None (default),
             copies all data.
 
@@ -262,7 +262,7 @@ def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bo
 
 
 def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
-    """Compute concatenated residuals (array) for multiple datasets; weight = 1/std."""
+    """Compute concatenated residuals (array) for multiple datasets [weight = 1/sigma]."""
     x, y, w, is_ph = _init_from_dataset(ds)
     models = _binding_1site_models(params, x, is_ph)
     residuals: ArrayF = np.concatenate([(w[lbl] * (y[lbl] - models[lbl])) for lbl in x])
@@ -457,32 +457,41 @@ def fit_binding_glob(ds: Dataset) -> FitResult:
     return FitResult(fig, result, mini)
 
 
+def weight_individual_ds(ds: Dataset) -> None:
+    """Assign weights to each label based on individual label fitting."""
+    if len(ds.keys()) != 1:
+        print("Expect single label dataset.")
+        return
+    params = _build_params_1site(ds)
+    da = next(iter(ds.values()))
+    if len(params) > len(da.y):
+        print("failed")
+        w = 1.0 * np.ones_like(da.x)
+    else:
+        res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
+        # Calculate residuals SEM
+        sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
+        w = 1 / sem * np.ones_like(da.x)
+    ds.add_weights(w)
+
+
 def weight_multi_ds_titration(ds: Dataset) -> None:
     """Assign weights to each label based on individual label fitting."""
-    wc: ArrayDict = {}
-    labels_to_remove = []
-    # Calculate standard deviations of residuals
-    for label, da in ds.items():
-        x = {label: da.x}
-        y = {label: da.y}
-        d = Dataset(x, y, ds.is_ph)
-        params = _build_params_1site(d)
-        # Mark for removal and skip minimization when n pars exceed data points in y
-        if len(params) > len(da.y):
-            warnings.warn(
-                f"Marking dataset {label} for removal: insufficient data points.",
-                stacklevel=2,
-            )
-            labels_to_remove.append(label)
-            continue
-        res = lmfit.minimize(_binding_1site_residuals, params, args=(d,))
-        wc[label] = 1 / np.std(res.residual) * np.ones_like(da.x)
-    # Remove marked datasets
-    for label in labels_to_remove:
-        del ds[label]
-    if not ds:  # check if ds is now empty
-        warnings.warn("No datasets left after cleaning. Exiting.", stacklevel=2)
-    ds.add_weights(wc)
+    w_d: ArrayDict = {}
+    failed_fit_labels = []
+    for lbl in ds:
+        d = ds.copy(keys=[lbl])
+        weight_individual_ds(d)
+        w_d[lbl] = next(iter(d.values())).w  # type: ignore[assignment]
+        if np.all(w_d[lbl] == 1.0):
+            failed_fit_labels.append(lbl)
+    if failed_fit_labels:
+        minimum_weight = np.inf
+        for lbl in ds.keys() - set(failed_fit_labels):
+            minimum_weight = min(np.min(w_d[lbl]), minimum_weight)  # type: ignore[assignment]
+        for lbl in failed_fit_labels:
+            w_d[lbl] *= minimum_weight / 10
+    ds.add_weights(w_d)
 
 
 def analyze_spectra_glob(
