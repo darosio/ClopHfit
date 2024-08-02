@@ -18,7 +18,7 @@ from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
-from clophfit.prtecan import TitrationAnalysis
+from clophfit.prtecan import FitdataParams, TitrationAnalysis
 
 
 @click.group()
@@ -198,8 +198,7 @@ def fit_tecan(  # noqa: PLR0913
     pdf: bool,
 ) -> None:
     """Help main."""
-    titan.fitdata_params = {"bg": bg, "nrm": norm, "dil": dil}
-    titan.fitkws = TitrationAnalysis.FitKwargs(weight=weight)
+    titan.fitdata_params = FitdataParams(nrm=norm, bg=bg, dil=dil)
     # lb = 0, 1, 2(for glob)
     for i, fit in enumerate(titan.result_dfs):
         if verbose:

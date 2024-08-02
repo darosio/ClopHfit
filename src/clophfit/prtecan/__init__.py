@@ -17,6 +17,7 @@ detailed information on their operation and use.
 """
 
 from clophfit.prtecan.prtecan import (
+    FitdataParams,
     Labelblock,
     LabelblocksGroup,
     Metadata,
@@ -35,6 +36,7 @@ from clophfit.prtecan.prtecan import (
 )
 
 __all__ = [
+    "FitdataParams",
     "Labelblock",
     "LabelblocksGroup",
     "Metadata",
