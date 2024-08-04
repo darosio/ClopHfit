@@ -25,6 +25,7 @@ from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
     fit_binding_glob,
+    format_estimate,
     weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
@@ -1559,7 +1560,54 @@ class TitrationAnalysis(Titration):
         for i, r in res_unk_sorted.iterrows():
             print(format_row(str(i), r, out_keys))
 
-    # TODO: plot also temp
+    def plot_temperature(self, title: str = "") -> figure.Figure:
+        """Plot temperatures of all labelblocksgroups."""
+        temperatures = {}
+        for label_n, lbg in enumerate(self.labelblocksgroups, start=1):
+            temperatures[label_n] = [
+                lb.metadata["Temperature"].value for lb in lbg.labelblocks
+            ]
+        pp = PlotParameters(is_ph=self.is_ph)
+        print(type(pp.kind))
+        temperatures[pp.kind] = self.conc
+        data = pd.DataFrame(temperatures)
+        data = data.melt(id_vars=pp.kind, var_name="Label", value_name="Temperature")
+        g = sns.lineplot(
+            data=data,
+            x="pH",
+            y="Temperature",
+            hue="Label",
+            palette="Set1",
+            alpha=0.75,
+            lw=3,
+        )
+        sns.scatterplot(
+            data=data,
+            x="pH",
+            y="Temperature",
+            hue="Label",
+            palette="Set1",
+            alpha=0.6,
+            legend=False,
+            s=150,
+        )
+        ave = data["Temperature"].mean()
+        std = data["Temperature"].std()
+        lower, upper = ave - std, ave + std
+        g.set_ylim(23, 27)
+        g.axhline(ave, ls="--", lw=3)
+        g.axhline(lower, ls="--", c="grey")
+        g.axhline(upper, ls="--", c="grey")
+        # Add titles and labels
+        plt.title(f"Temperature = {format_estimate(ave, std)} °C {title}", fontsize=14)
+        plt.xlabel(f"{pp.kind}", fontsize=14)
+        plt.ylabel("Temperature (°C)", fontsize=14)
+        plt.grid(True)
+        # Add a legend
+        plt.legend(title="Group")
+        plt.close()
+        return g.get_figure()
+
     # TODO: use fitted buffer values
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
