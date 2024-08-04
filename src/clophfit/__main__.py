@@ -129,6 +129,8 @@ def tecan(  # noqa: PLR0913
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in titan.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
+    f = titan.plot_temperature(title=title)
+    f.savefig(out_fp / "temperatures.png")
     if scheme:
         f = titan.plot_buffer(title=title)
         f.savefig(out_fp / "buffer.png")
