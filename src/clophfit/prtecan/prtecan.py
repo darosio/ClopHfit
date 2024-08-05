@@ -1562,19 +1562,19 @@ class TitrationAnalysis(Titration):
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""
-        temperatures = {}
+        temperatures: dict[str | int, list[float | int | str | None]] = {}
         for label_n, lbg in enumerate(self.labelblocksgroups, start=1):
             temperatures[label_n] = [
                 lb.metadata["Temperature"].value for lb in lbg.labelblocks
             ]
         pp = PlotParameters(is_ph=self.is_ph)
         print(type(pp.kind))
-        temperatures[pp.kind] = self.conc
+        temperatures[pp.kind] = self.conc.tolist()
         data = pd.DataFrame(temperatures)
         data = data.melt(id_vars=pp.kind, var_name="Label", value_name="Temperature")
         g = sns.lineplot(
             data=data,
-            x="pH",
+            x=pp.kind,
             y="Temperature",
             hue="Label",
             palette="Set1",
@@ -1583,7 +1583,7 @@ class TitrationAnalysis(Titration):
         )
         sns.scatterplot(
             data=data,
-            x="pH",
+            x=pp.kind,
             y="Temperature",
             hue="Label",
             palette="Set1",
@@ -1606,7 +1606,7 @@ class TitrationAnalysis(Titration):
         # Add a legend
         plt.legend(title="Group")
         plt.close()
-        return g.get_figure()
+        return typing.cast(figure.Figure, g.get_figure())
 
     # TODO: use fitted buffer values
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
