@@ -18,6 +18,7 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import colormaps, figure
 from matplotlib.backends.backend_pdf import PdfPages
+from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.fitting import (
@@ -1602,13 +1603,81 @@ class TitrationAnalysis(Titration):
         plt.title(f"Temperature = {format_estimate(ave, std)} °C {title}", fontsize=14)
         plt.xlabel(f"{pp.kind}", fontsize=14)
         plt.ylabel("Temperature (°C)", fontsize=14)
-        plt.grid(True)
+        plt.grid(lw=0.33)
         # Add a legend
-        plt.legend(title="Group")
+        plt.legend(title="Label")
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
 
     # TODO: use fitted buffer values
+    def fit_buffer(self, nrm: bool = False) -> list[figure.Figure]:
+        """Fit buffers of all labelblocksgroups."""
+        buffers = self.buffers_norm.copy() if nrm else self.buffers.copy()
+
+        # Define the linear model function
+        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
+            return pars[0] * x + pars[1]
+
+        # Function to calculate the standard error of the fit
+        def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
+            jacobian = np.array([x, 1])
+            fit_variance: ArrayF = np.dot(jacobian.T, np.dot(cov_matrix, jacobian))
+            return np.sqrt(fit_variance)  # Standard error
+
+        figs = []
+        for bdf in buffers:
+            fig = plt.figure(figsize=(10, 6))
+            if bdf.empty:
+                figs.append(fig)
+            else:
+                mean = bdf.mean(axis=1).to_numpy()
+                sem = bdf.sem(axis=1).to_numpy()
+                data = RealData(self.conc, mean, sy=sem)
+                model = Model(linear_model)
+                odr = ODR(
+                    data, model, beta0=[0.0, mean.mean()]
+                )  # Initial guess for slope and intercept
+                output = odr.run()
+                # Extract the best-fit parameters and their standard errors
+                m_best, b_best = output.beta
+                m_err, b_err = output.sd_beta
+                cov_matrix = output.cov_beta
+
+                print(
+                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
+                )
+
+                # Calculate the fit values and their uncertainties
+                x_fit = np.linspace(min(self.conc), max(self.conc), 100)
+                y_fit = m_best * x_fit + b_best
+
+                y_fit_err = np.array([fit_error(xi, cov_matrix) for xi in x_fit])
+
+                # Plot the data and the best-fit line
+                plt.errorbar(
+                    self.conc,
+                    mean,
+                    yerr=sem,
+                    fmt="o",
+                    color="black",
+                    label="Mean ± SEM",
+                    capsize=5,
+                )
+                plt.plot(x_fit, y_fit, label="Best fit line", color="red")
+                plt.fill_between(
+                    x_fit,
+                    y_fit - y_fit_err,
+                    y_fit + y_fit_err,
+                    color="red",
+                    alpha=0.2,
+                    label="Fit uncertainty",
+                )
+                plt.xlabel("x")
+                plt.ylabel("y")
+                plt.legend()
+                figs.append(fig)
+        return figs
+
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
         buffers = self.buffers_norm.copy() if nrm else self.buffers.copy()
