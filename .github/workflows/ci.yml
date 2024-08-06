@@ -195,7 +195,7 @@ jobs:
       - name: Set up Python ${{ env.STABLE_PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.STABLE_PYTHON_VERSION }}
+          python-version: 3.11 # TODO: Restore 3.12 when pytensor support numpy-2
 
       - name: Install binaries for docs
         run: |
