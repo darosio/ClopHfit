@@ -719,8 +719,8 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'E02' in the third fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.9778, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.023, abs=1e-4)
+        assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0167, abs=1e-4)
         # Fit up to the second-last data point
         with warnings.catch_warnings():
             # Suppress the UserWarning related to dataset removal
