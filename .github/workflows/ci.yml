@@ -110,7 +110,7 @@ jobs:
         run: hatch run tests.py${{ matrix.python }}:type
 
       - name: Run xdoctest
-        if: matrix.tests == 'xdoc' && matrix.os != 'windows-latest'
+        if: matrix.tests == 'xdoc'
         run: hatch run tests.py${{ matrix.python }}:xdoc
 
   testpypi:
