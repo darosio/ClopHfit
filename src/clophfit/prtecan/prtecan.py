@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
-from matplotlib import colormaps, figure
+from matplotlib import figure
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
@@ -27,7 +27,6 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     fit_binding_glob,
     format_estimate,
-    weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
 
@@ -1230,7 +1229,7 @@ class TitrationAnalysis(Titration):
 
     @property
     def buffers(self) -> list[pd.DataFrame]:
-        """Buffer dataframe list."""
+        """Buffer dataframes with fit."""
         if not self._buffers and self.buffer_wells:
             self._buffers = [
                 pd.DataFrame(
@@ -1244,17 +1243,54 @@ class TitrationAnalysis(Titration):
                 )
                 for lbg in self.labelblocksgroups
             ]
+            self._fit_buffer(self._buffers)  # fit
         return self._buffers
 
     @property
     def buffers_norm(self) -> list[pd.DataFrame]:
-        """Buffer dataframe list."""
+        """Buffer normalized dataframes with fit."""
         if not self._buffers_norm and self.buffer_wells:
             self._buffers_norm = [
                 pd.DataFrame({k: lbg.data_norm[k] for k in self.buffer_wells})
                 for lbg in self.labelblocksgroups
             ]
+            self._fit_buffer(self._buffers_norm)  # fit
         return self._buffers_norm
+
+    def _fit_buffer(self, buffer_dfs: list[pd.DataFrame]) -> None:
+        """Fit buffers of all labelblocksgroups."""
+
+        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
+            """Define linear model function."""
+            return pars[0] * x + pars[1]
+
+        def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
+            x = x[:, np.newaxis]  # Ensure x is a 2D array
+            jacobian = np.concatenate((x, np.ones((x.shape[0], 1))), axis=1)
+            fit_variance: ArrayF = np.einsum(
+                "ij,jk,ik->i", jacobian, cov_matrix, jacobian
+            )
+            return np.sqrt(fit_variance)  # Standard error
+
+        for lbl_n, buf_df in enumerate(buffer_dfs, start=1):
+            if not buf_df.empty:
+                mean = buf_df.mean(axis=1).to_numpy()
+                sem = buf_df.sem(axis=1).to_numpy()
+                data = RealData(self.conc, mean, sy=sem)
+                model = Model(linear_model)
+                # Initial guess for slope and intercept
+                odr = ODR(data, model, beta0=[0.0, mean.mean()])
+                output = odr.run()
+                # Extract the best-fit parameters and their standard errors
+                m_best, b_best = output.beta
+                m_err, b_err = output.sd_beta
+                cov_matrix = output.cov_beta
+                print(
+                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
+                )
+                buf_df["Label"] = lbl_n
+                buf_df["fit"] = m_best * self.conc + b_best
+                buf_df["fit_err"] = fit_error(self.conc, cov_matrix)
 
     def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
@@ -1282,41 +1318,35 @@ class TitrationAnalysis(Titration):
         keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        for label_n, dat in enumerate(self.fitdata, start=1):
+        buffer_dfs = self.buffers_norm if self.fitdata_params.nrm else self.buffers
+        weights = [1 / np.array(buf_df["fit_err"].mean()) for buf_df in buffer_dfs]
+        print(weights)
+        for lbl_n, dat in enumerate(self.fitdata, start=1):
             fitting = {}
             if dat:
                 for k in keys_fit:
-                    y = dat[k]
-                    ys = np.array(y)
-                    ds = Dataset(x, ys, is_ph=self.is_ph)
-                    weight_multi_ds_titration(ds)  # TODO: can be useful for emcee run
+                    ds = Dataset(x, np.array(dat[k]), is_ph=self.is_ph)
+                    ds.add_weights(np.array(weights[lbl_n - 1]))
+                    # Alternatively weight_multi_ds_titration(ds)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
-                        print(f"Skip {k} for Label{label_n}.")
+                        print(f"Skip {k} for Label{lbl_n}.")
                         fitting[k] = FitResult(None, None, None)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
         if self.fitdata[0] and self.fitdata[1]:
             fitting = {}
             for k in keys_fit:
-                y0 = self.fitdata[0][k]
-                y1 = self.fitdata[1][k]
-                ds = Dataset(
-                    x, {"y0": np.array(y0), "y1": np.array(y1)}, is_ph=self.is_ph
-                )
-                # weight multi_ds_titration
-                # NEXT: same for subtracted multiply by corr dilution
+                y0 = np.array(self.fitdata[0][k])
+                y1 = np.array(self.fitdata[1][k])
+                ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
+                # Alternatively weight_multi_ds_titration(ds)
+                # NEXT: use correction for dilution imply masked weights
                 # NEXT: list.pH with xerr
-                empirical_factor = 3.3
-                # dilution corr must be masked where y is NaN
-                if self.fitdata_params.nrm:
-                    w1 = 1 / self.buffers_norm[0].sem(axis=1).mean() * empirical_factor
-                    w2 = 1 / self.buffers_norm[1].sem(axis=1).mean()
-                else:
-                    w1 = 1 / self.buffers[0].sem(axis=1).mean()
-                    w2 = 1 / self.buffers[1].sem(axis=1).mean()
-                ds.add_weights({"y0": np.array(w1), "y1": np.array(w2)})
+                # TODO: dilution corr must be masked where y is NaN
+                # for the moment use np broadcasting from 1D array of len=1
+                ds.add_weights({"y0": np.array(weights[0]), "y1": np.array(weights[1])})
                 try:
                     fitting[k] = fit_binding_glob(ds)
                 except InsufficientDataError:
@@ -1609,88 +1639,22 @@ class TitrationAnalysis(Titration):
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
 
-    # TODO: use fitted buffer values
-    def fit_buffer(self, nrm: bool = False) -> list[figure.Figure]:
-        """Fit buffers of all labelblocksgroups."""
-        buffers = self.buffers_norm.copy() if nrm else self.buffers.copy()
-
-        # Define the linear model function
-        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
-            return pars[0] * x + pars[1]
-
-        # Function to calculate the standard error of the fit
-        def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
-            jacobian = np.array([x, 1])
-            fit_variance: ArrayF = np.dot(jacobian.T, np.dot(cov_matrix, jacobian))
-            return np.sqrt(fit_variance)  # Standard error
-
-        figs = []
-        for bdf in buffers:
-            fig = plt.figure(figsize=(10, 6))
-            if bdf.empty:
-                figs.append(fig)
-            else:
-                mean = bdf.mean(axis=1).to_numpy()
-                sem = bdf.sem(axis=1).to_numpy()
-                data = RealData(self.conc, mean, sy=sem)
-                model = Model(linear_model)
-                odr = ODR(
-                    data, model, beta0=[0.0, mean.mean()]
-                )  # Initial guess for slope and intercept
-                output = odr.run()
-                # Extract the best-fit parameters and their standard errors
-                m_best, b_best = output.beta
-                m_err, b_err = output.sd_beta
-                cov_matrix = output.cov_beta
-
-                print(
-                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
-                )
-
-                # Calculate the fit values and their uncertainties
-                x_fit = np.linspace(min(self.conc), max(self.conc), 100)
-                y_fit = m_best * x_fit + b_best
-
-                y_fit_err = np.array([fit_error(xi, cov_matrix) for xi in x_fit])
-
-                # Plot the data and the best-fit line
-                plt.errorbar(
-                    self.conc,
-                    mean,
-                    yerr=sem,
-                    fmt="o",
-                    color="black",
-                    label="Mean ± SEM",
-                    capsize=5,
-                )
-                plt.plot(x_fit, y_fit, label="Best fit line", color="red")
-                plt.fill_between(
-                    x_fit,
-                    y_fit - y_fit_err,
-                    y_fit + y_fit_err,
-                    color="red",
-                    alpha=0.2,
-                    label="Fit uncertainty",
-                )
-                plt.xlabel("x")
-                plt.ylabel("y")
-                plt.legend()
-                figs.append(fig)
-        return figs
-
+    # NEXT: use fitted buffer values datafit
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
-        buffers = self.buffers_norm.copy() if nrm else self.buffers.copy()
-        if not buffers:
+        buffer_dfs = self.buffers_norm if nrm else self.buffers
+        if not buffer_dfs or not self.buffer_wells:
             return sns.catplot()
         pp = PlotParameters(is_ph=self.is_ph)
         melted_buffers = []
-        for label_n, buf in enumerate(buffers, start=1):
-            if not buf.empty:
-                buffers[label_n - 1][pp.kind] = self.conc
-                buffers[label_n - 1]["Label"] = label_n
+        wells_lbl = self.buffer_wells.copy()
+        wells_lbl.extend(["Label"])
+        for buf_df in buffer_dfs:
+            if not buf_df.empty:
+                buffer = buf_df[wells_lbl].copy()
+                buffer[pp.kind] = self.conc
                 melted_buffers.append(
-                    buffers[label_n - 1].melt(
+                    buffer.melt(
                         id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
                     )
                 )
@@ -1700,17 +1664,17 @@ class TitrationAnalysis(Titration):
             data=data,
             y="F",
             x=pp.kind,
-            ci=67,
+            ci=68,
             height=4,
             aspect=1.75,
             row="Label",
             x_estimator=np.median,
             markers="x",
             scatter=1,
-            scatter_kws={"alpha": 0.4},
+            scatter_kws={"alpha": 0.33},
             facet_kws={"sharey": False},
         )
-        num_labels = np.sum([not b_df.empty for b_df in buffers])
+        num_labels = np.sum([not b_df.empty for b_df in buffer_dfs])
         for label_n in range(1, num_labels + 1):
             sns.scatterplot(
                 data=data[data.Label == label_n],
@@ -1720,78 +1684,20 @@ class TitrationAnalysis(Titration):
                 ax=g.axes_dict[label_n],
                 legend=label_n == num_labels,
             )
+            g.axes_dict[label_n].errorbar(
+                x=self.conc,
+                y=buffer_dfs[label_n - 1]["fit"],
+                yerr=buffer_dfs[label_n - 1]["fit_err"],
+                xerr=0.1,
+                fmt="",
+                color="r",
+                linewidth=2,
+                capsize=6,
+            )
         if title:
             plt.suptitle(title, fontsize=14, x=0.96, ha="right")
         plt.close()
         return g
-
-    def plot_buffer_old(self, title: str | None = None) -> figure.Figure:
-        """Plot buffers of all labelblocksgroups."""
-        x = self.conc
-        f, ax = plt.subplots(2, 1, figsize=(9, 9))
-        if not isinstance(ax, np.ndarray):
-            ax = np.array([ax])
-        for i, lbg in enumerate(self.labelblocksgroups):
-            if lbg.data_buffersubtracted:
-                bg = []
-                bg_sd = []
-                for lb in lbg.labelblocks:
-                    bg.append(lb.buffer)
-                    bg_sd.append(lb.buffer_sd)
-            rowlabel = ["Temp"]
-            lines = [
-                [
-                    f"{x:6.1f}"
-                    for x in [
-                        lb.metadata["Temperature"].value for lb in lbg.labelblocks
-                    ]
-                ]
-            ]
-            buf = {key: lbg.data[key] for key in self.scheme.buffer if lbg.data}
-            # Create a colormap object, for example, 'Set3'
-            cmap = colormaps["Set3"]
-            # Define the number of colors you want to generate
-            num_colors = len(buf) + 1
-            # Generate an array of evenly spaced values between 0 and 1
-            values = np.linspace(0, 1, num_colors)
-            # Use the colormap to map the values to colors
-            colors = cmap(values)
-            for j, (k, v) in enumerate(buf.items(), start=1):
-                rowlabel.append(k)
-                lines.append([f"{x:6.1f}" for x in v])
-                ax[i].plot(x, v, "o-", alpha=0.8, lw=2, markersize=3, color=colors[j])
-            ax[i].errorbar(
-                x,
-                bg,
-                yerr=bg_sd,
-                fmt="o-.",
-                markersize=12,
-                lw=1,
-                elinewidth=3,
-                alpha=0.8,
-                color="grey",
-                label="label" + str(i),
-            )
-            plt.subplots_adjust(hspace=0.0)
-            ax[i].legend(fontsize=16)
-            if x[0] > x[-1]:  # reverse
-                for line in lines:
-                    line.reverse()
-            ax[i].table(
-                cellText=lines,
-                rowLabels=rowlabel,
-                loc="top",
-                rowColours=colors,
-                alpha=0.4,
-            )
-            ax[i].set_xlim(min(x) * 0.96, max(x) * 1.02)
-            ax[i].set_yticks(ax[i].get_yticks()[:-1])
-        ax[0].set_yticks(ax[0].get_yticks()[1:])
-        ax[0].set_xticklabels("")
-        if title:
-            f.suptitle(title, fontsize=16)
-        f.tight_layout()
-        return f
 
     def export_png(self, lb: int, path: str | Path) -> None:
         """Export png like lb1/ lb2/ lb1_lb2/."""
