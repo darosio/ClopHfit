@@ -36,7 +36,7 @@ if typing.TYPE_CHECKING:
     from clophfit.types import ArrayF
 
 # Set up logging
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # list_of_lines
@@ -49,6 +49,7 @@ DAT_BG_DIL = "dat_bg_dil"
 DAT_BG_DIL_NRM = "dat_bg_dil_nrm"
 STD_MD_LINE_LENGTH = 2
 NUM_ROWS_96WELL = 8
+NUM_COLS_96WELL = 12
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -316,15 +317,13 @@ class BufferWellsMixin:
 
 
 @dataclass
-class Labelblock(BufferWellsMixin):
+class Labelblock:
     """Parse a label block.
 
     Parameters
     ----------
     _lines : list[list[str | int | float]]
         Lines to create this Labelblock.
-    path : Path, optional
-        Path to the containing file, if it exists.
 
     Raises
     ------
@@ -338,11 +337,14 @@ class Labelblock(BufferWellsMixin):
     """
 
     _lines: InitVar[list[list[str | int | float]]]
-    path: Path | None = None
+    #: Path of the corresponding Tecan file.
+    filename: str = ""
     #: Metadata specific for this Labelblock.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    #: The 96 data values as {'well_name', value}.
+    #: Plate data values as {'well_name', value}.
     data: dict[str, float] = field(init=False, repr=True)
+    #: Plate data values normalized as {'well_name', value}.
+    data_nrm: dict[str, float] = field(init=False, repr=True)
     _KEYS: typing.ClassVar[list[str]] = [
         "Emission Bandwidth",
         "Emission Wavelength",
@@ -359,21 +361,17 @@ class Labelblock(BufferWellsMixin):
     ]
 
     def __post_init__(self, lines: list[list[str | int | float]]) -> None:
-        """Create metadata and data; initialize labelblock's properties."""
-        self._buffer_wells: list[str] | None = None
-        self._buffer: float | None = None
-        self._buffer_norm: float | None = None
-        self._buffer_sd: float | None = None
-        self._buffer_norm_sd: float | None = None
-        self._data_norm: dict[str, float] | None = None
-        self._data_buffersubtracted: dict[str, float] | None = None
-        self._data_buffersubtracted_norm: dict[str, float] | None = None
-        if lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13:
-            stripped = strip_lines(lines)
-            stripped[14:23] = []
-            self.metadata: dict[str, Metadata] = extract_metadata(stripped)
-            self.data: dict[str, float] = self._extract_data(lines[15:23])
-        else:
+        """Create metadata and data."""
+        self._validate_lines(lines)
+        stripped = strip_lines(lines)
+        stripped[14:23] = []
+        self.metadata: dict[str, Metadata] = extract_metadata(stripped)
+        self.data: dict[str, float] = self._extract_data(lines[15:23])
+        self._normalize_data()
+
+    def _validate_lines(self, lines: list[list[str | int | float]]) -> None:
+        """Validate if input lines correspond to a 96-well plate."""
+        if not (lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13):
             msg = "Cannot build Labelblock: not 96 wells?"
             raise ValueError(msg)
 
@@ -394,147 +392,74 @@ class Labelblock(BufferWellsMixin):
         dict[str, float]
             Data from a label block.
 
-        Raises
-        ------
-        ValueError
-            When something went wrong. Possibly because not 96-well.
-
         Warns
         -----
             When a cell contains saturated signal (converted into np.nan).
         """
         rownames = tuple("ABCDEFGH")
         data = {}
-        try:
-            assert len(lines) == NUM_ROWS_96WELL  # noqa: S101 # nosec B101
-            for i, row in enumerate(rownames):
-                assert lines[i][0] == row  # nosec B101 # noqa: S101 # e.g. "A" == "A"
-                for col in range(1, 13):
-                    try:
-                        data[row + f"{col:0>2}"] = float(lines[i][col])
-                    except ValueError:
-                        data[row + f"{col:0>2}"] = np.nan
-                        warnings.warn(
-                            f"OVER\n Overvalue in {self.metadata['Label'].value}:"
-                            f"{row}{col:0>2} of tecanfile {self.path}",
-                            stacklevel=2,
-                        )
-        except AssertionError as exc:
-            msg = "Cannot extract data in Labelblock: not 96 wells?"
-            raise ValueError(msg) from exc
+        # Raises
+        # ------
+        # ValueError
+        #     When something went wrong. Possibly because not 96-well.
+        self._validate_96_well_format(lines, rownames)
+        for i, row in enumerate(rownames):
+            for col in range(1, NUM_COLS_96WELL + 1):
+                well = f"{row}{col:0>2}"
+                try:
+                    data[well] = float(lines[i][col])
+                except ValueError:
+                    data[well] = np.nan
+                    # TODO: fix the ignore
+                    logger.warning(
+                        "OVER\n Overvalue in %s: %s of tecanfile %s",
+                        self.metadata.get("Label", "Unknown").value,  # type: ignore[union-attr]
+                        well,
+                        self.filename,
+                    )
         return data
 
-    def _on_buffer_wells_set(self, value: list[str]) -> None:
-        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
+    def _validate_96_well_format(
+        self, lines: list[list[str | int | float]], rownames: tuple[str, ...]
+    ) -> None:
+        """Validate 96-well plate data format."""
+        msg = "Cannot extract data in Labelblock: not 96 wells?"
+        if len(lines) != NUM_ROWS_96WELL:
+            raise ValueError(msg)
+        for i, row in enumerate(rownames):
+            if lines[i][0] != row:
+                raise ValueError(msg)
+        # TODO: f"Row {i} label mismatch: expected {row}, got {lines[i][0]}"
 
-        Parameters
-        ----------
-        value: list[str]
-            The new value of 'buffer_wells'
-        """
-        self._buffer = float(np.average([self.data[k] for k in value]))
-        self._buffer_sd = float(np.std([self.data[k] for k in value]))
-        self._buffer_norm = float(np.average([self.data_norm[k] for k in value]))
-        self._buffer_norm_sd = float(np.std([self.data_norm[k] for k in value]))
-        self._data_buffersubtracted = None
-        self._data_buffersubtracted_norm = None
-
-    @property
-    def buffer(self) -> float | None:
-        """Background value to be subtracted before dilution correction."""
-        return self._buffer
-
-    @buffer.setter
-    def buffer(self, value: float) -> None:
-        if self._buffer == value:
-            return
-        self._data_buffersubtracted = None
-        self._buffer = value
-
-    @property
-    def buffer_norm(self) -> float | None:
-        """Background value to be subtracted before dilution correction."""
-        return self._buffer_norm
-
-    @buffer_norm.setter
-    def buffer_norm(self, value: float) -> None:
-        if self._buffer_norm == value:
-            return
-        self._data_buffersubtracted_norm = None
-        self._buffer_norm = value
-
-    @property
-    def buffer_sd(self) -> float | None:
-        """Get standard deviation of buffer_wells values."""
-        return self._buffer_sd
-
-    @property
-    def buffer_norm_sd(self) -> float | None:
-        """Get standard deviation of normalized buffer_wells values."""
-        return self._buffer_norm_sd
-
-    @property
-    def data_norm(self) -> dict[str, float]:
-        """Normalize data by number of flashes, integration time and gain."""
-        if self._data_norm is None:
-            try:
-                norm = 1000.0
-                for k in Labelblock._NORM_KEYS:
-                    val = self.metadata[k].value
-                    if isinstance(val, float | int):
-                        norm /= val
-            except TypeError:
-                warnings.warn(
-                    "Could not normalize for non numerical Gain, "
-                    "Number of Flashes or Integration time.",
-                    stacklevel=2,
-                )  # pragma: no cover
-            self._data_norm = {k: v * norm for k, v in self.data.items()}
-        return self._data_norm
-
-    @property
-    def data_buffersubtracted(self) -> dict[str, float]:
-        """Buffer subtracted data."""
-        if self._data_buffersubtracted is None:
-            if self.buffer:
-                self._data_buffersubtracted = {
-                    k: v - self.buffer for k, v in self.data.items()
-                }
-            else:
-                self._data_buffersubtracted = {}
-        return self._data_buffersubtracted
-
-    @property
-    def data_buffersubtracted_norm(self) -> dict[str, float]:
-        """Normalize buffer-subtracted data."""
-        if self._data_buffersubtracted_norm is None:
-            if self.buffer_norm:
-                self._data_buffersubtracted_norm = {
-                    k: v - self.buffer_norm for k, v in self.data_norm.items()
-                }
-            else:
-                self._data_buffersubtracted_norm = {}
-        return self._data_buffersubtracted_norm
+    def _normalize_data(self) -> None:
+        """Normalize the data against specific metadata."""
+        try:
+            norm = 1000.0
+            for k in Labelblock._NORM_KEYS:
+                val = self.metadata[k].value
+                if isinstance(val, float | int):
+                    norm /= val
+        except TypeError:
+            warnings.warn(
+                "Could not normalize for non numerical Gain, "
+                "Number of Flashes or Integration time.",
+                stacklevel=2,
+            )
+        self.data_nrm = {k: v * norm for k, v in self.data.items()}
 
     def __eq__(self, other: object) -> bool:
-        """Two labelblocks are equal when metadata KEYS are identical."""
+        """Check if two Labelblocks are equal (same key metadata)."""
         if not isinstance(other, Labelblock):
             msg = f"Cannot compare Labelblock object with {type(other).__name__}"
             raise TypeError(msg)
-        eq: bool = True
-        for k in Labelblock._KEYS:
-            eq &= self.metadata[k] == other.metadata[k]
-        # 'Gain': [81.0, 'Manual'] = 'Gain': [81.0, 'Optimal'] They are equal
-        eq &= self.metadata["Gain"].value == other.metadata["Gain"].value
-        return eq
+        return (
+            all(self.metadata[k] == other.metadata[k] for k in Labelblock._KEYS)
+            and self.metadata["Gain"].value == other.metadata["Gain"].value
+        )
 
     def __almost_eq__(self, other: Labelblock) -> bool:
-        """Labelblocks are almost equal if they could be merged after normalization."""
-        eq: bool = True
-        # Integration Time, Number of Flashes and Gain can differ.
-        for k in Labelblock._KEYS[:5]:
-            eq &= self.metadata[k] == other.metadata[k]
-        return eq
+        """Check if two Labelblocks are almost equal (same excitation and emission)."""
+        return all(self.metadata[k] == other.metadata[k] for k in Labelblock._KEYS[:5])
 
 
 @dataclass
@@ -571,7 +496,7 @@ class Tecanfile:
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
         labelblocks = [
-            Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path)
+            Labelblock(csvl[idxs[i] : idxs[i + 1]], self.path.name)
             for i in range(n_labelblocks)
         ]
         if any(
@@ -583,7 +508,7 @@ class Tecanfile:
 
 
 @dataclass
-class LabelblocksGroup(BufferWellsMixin):
+class LabelblocksGroup:
     """Group labelblocks with compatible metadata.
 
     `data_norm` always exist.
@@ -610,11 +535,8 @@ class LabelblocksGroup(BufferWellsMixin):
         """Create common metadata and data."""
         labelblocks = self.labelblocks
         allequal = self.allequal
-        self._buffer_wells: list[str] | None = None
         self._data: dict[str, list[float]] | None = None
-        self._data_norm: dict[str, list[float]] | None = None
-        self._data_buffersubtracted: dict[str, list[float]] | None = None
-        self._data_buffersubtracted_norm: dict[str, list[float]] | None = None
+        self._data_nrm: dict[str, list[float]] | None = None
         if not allequal:
             allequal = all(labelblocks[0] == lb for lb in labelblocks[1:])
         if allequal:
@@ -623,9 +545,9 @@ class LabelblocksGroup(BufferWellsMixin):
                 self._data[key] = [lb.data[key] for lb in labelblocks]
         # labelblocks that can be merged only after normalization
         elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
-            self._data_norm = {}
+            self._data_nrm = {}
             for key in labelblocks[0].data:
-                self._data_norm[key] = [lb.data_norm[key] for lb in labelblocks]
+                self._data_nrm[key] = [lb.data_nrm[key] for lb in labelblocks]
         else:
             msg = "Creation of labelblock group failed."
             raise ValueError(msg)
@@ -638,92 +560,13 @@ class LabelblocksGroup(BufferWellsMixin):
         return self._data
 
     @property
-    def data_norm(self) -> dict[str, list[float]]:
+    def data_nrm(self) -> dict[str, list[float]]:
         """Normalize data by number of flashes, integration time and gain."""
-        if self._data_norm is None:
-            self._data_norm = {}
+        if self._data_nrm is None:
+            self._data_nrm = {}
             for key in self.labelblocks[0].data:
-                self._data_norm[key] = [lb.data_norm[key] for lb in self.labelblocks]
-        return self._data_norm
-
-    def _on_buffer_wells_set(self, value: list[str]) -> None:
-        """Update related attributes upon setting 'buffer_wells' in Labelblock class.
-
-        Parameters
-        ----------
-        value: list[str]
-            The new value of 'buffer_wells'
-        """
-        for lb in self.labelblocks:
-            lb.buffer_wells = value
-        self._data_buffersubtracted = None
-        self._data_buffersubtracted_norm = None
-
-    def _calculate_subtracted_data(self, norm: bool = False) -> dict[str, list[float]]:
-        """Calculate buffer subtracted data avoiding negative values."""
-        subtracted_data = (
-            {
-                key: [
-                    lb.data_buffersubtracted_norm[key]
-                    if norm
-                    else lb.data_buffersubtracted[key]
-                    for lb in self.labelblocks
-                ]
-                for key in self.labelblocks[0].data
-            }
-            if self.buffer_wells
-            else {}
-        )
-
-        # Adjust negative values.
-        def _new_values(
-            key: str, norm: bool, labelblocks: list[Labelblock], factor: float
-        ) -> list[float]:
-            return [
-                (
-                    lb.data_norm[key]
-                    - (lb.buffer_norm or 0)
-                    + factor * (lb.buffer_norm_sd or 0)
-                    if norm
-                    else lb.data[key] - (lb.buffer or 0) + factor * (lb.buffer_sd or 0)
-                )
-                for lb in labelblocks
-            ]
-
-        # Adjust negative values.
-        for key, y_values in subtracted_data.items():
-            # tolerance threshold =  max_val / 50
-            if np.min(y_values) < 0.02 * np.max(y_values):
-                label_str = self.metadata["Label"].value
-                msg = f"Buffer for '{key}:{label_str}' was adjusted."
-                factor = 1.0
-                new_values = _new_values(key, norm, self.labelblocks, factor)
-                logger.warning(msg)
-                while np.min(new_values) < 0:
-                    factor *= 1.1  # Increase the factor
-                    new_values = _new_values(key, norm, self.labelblocks, factor)
-                    logger.warning(
-                        msg.rstrip(".") + f" with factor increased to {factor:.2f}."
-                    )
-                subtracted_data[key] = new_values
-        return subtracted_data
-
-    @property
-    def data_buffersubtracted(self) -> dict[str, list[float]] | None:
-        """Buffer subtracted data."""
-        if self.data is None or self._data_buffersubtracted is not None:
-            return self._data_buffersubtracted
-        self._data_buffersubtracted = self._calculate_subtracted_data()
-        return self._data_buffersubtracted
-
-    @property
-    def data_buffersubtracted_norm(self) -> dict[str, list[float]]:
-        """Buffer subtracted normalized data."""
-        if self._data_buffersubtracted_norm is None:
-            self._data_buffersubtracted_norm = self._calculate_subtracted_data(
-                norm=True
-            )
-        return self._data_buffersubtracted_norm
+                self._data_nrm[key] = [lb.data_nrm[key] for lb in self.labelblocks]
+        return self._data_nrm
 
 
 @dataclass
@@ -871,20 +714,34 @@ class PlateScheme:
 
 
 @dataclass
-class Titration(TecanfilesGroup, BufferWellsMixin):
+class FitdataParams:
+    """Parameters defining the fitting data."""
+
+    nrm: bool = True
+    bg: bool = True
+    dil: bool = True
+
+
+@dataclass
+class Titration(BufferWellsMixin):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
     Parameters
     ----------
-    tecanfiles : list[Tecanfile]
-        Tecanfiles to be grouped.
+    tecanfiles_group : TecanfilesGroup
+        A group of Tecanfiles.
     conc : ArrayF
         Concentration or pH values.
     is_ph : bool
         Indicate if x values represent pH (default is False).
+
+    Raises
+    ------
+    ValueError
+        For unexpected file format, e.g. header `names`.
     """
 
-    tecanfiles: list[Tecanfile]
+    tecanfiles_group: TecanfilesGroup
     conc: ArrayF
     is_ph: bool
 
@@ -895,16 +752,25 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
     _dil_corr: ArrayF | None = field(init=False, default=None)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
-    def __post_init__(self) -> None:  # pylint: disable=W0246
-        """Set up the initial values for the properties."""
-        super().__post_init__()
+    #: A list of wells containing samples that are neither buffer nor CTR samples.
+    keys_unk: list[str] = field(init=False, default_factory=list)
+    _fitdata: Sequence[dict[str, list[float]] | None] = field(
+        init=False, default_factory=list
+    )
+    _fitdata_params: FitdataParams = field(init=False, default_factory=FitdataParams)
+    _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
+    _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _buffers: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _buffers_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
         return (
-            f'Titration(files=["{self.tecanfiles[0].path}", '
-            f'"{self.tecanfiles[1].path}", ...], '
+            f'Titration(files=["{self.tecanfiles_group.tecanfiles[0].path}", '
+            f'"{self.tecanfiles_group.tecanfiles[1].path}", ...], '
             f"conc={self.conc!r}, data_size={len(self.data) if self.data else 0})"
+            f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
+            f"conc={self.conc!r}"
         )
 
     @classmethod
@@ -923,7 +789,8 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         Titration
         """
         tecanfiles, conc = Titration._listfile(Path(list_file))
-        return cls(tecanfiles, conc, is_ph)
+        tfg = TecanfilesGroup(tecanfiles)
+        return cls(tfg, conc, is_ph)
 
     @staticmethod
     def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
@@ -961,6 +828,59 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
         return tecanfiles, conc
 
+    """
+    def _subtract_bg_lbg_data(
+        self, lbg: LabelblocksGroup, norm: bool = False
+    ) -> dict[str, list[float]]:
+        "Calculate buffer subtracted data avoiding negative values."
+        subtracted_data = (
+            {
+                key: [
+                    lb.data_buffersubtracted_norm[key]
+                    if norm
+                    else lb.data_buffersubtracted[key]
+                    for lb in self.tecanfiles_group.labelblocks
+                ]
+                for key in self.tecanfiles_group.labelblocks[0].data
+            }
+            if self.buffer_wells
+            else {}
+        )
+
+        # Adjust negative values.
+        def _new_values(
+            key: str, norm: bool, labelblocks: list[Labelblock], factor: float
+        ) -> list[float]:
+            return [
+                (
+                    lb.data_norm[key]
+                    - (lb.buffer_norm or 0)
+                    + factor * (lb.buffer_norm_sd or 0)
+                    if norm
+                    else lb.data[key] - (lb.buffer or 0) + factor * (lb.buffer_sd or 0)
+                )
+                for lb in labelblocks
+            ]
+
+        # Adjust negative values.
+        for key, y_values in subtracted_data.items():
+            # tolerance threshold =  max_val / 50
+            if np.min(y_values) < 0.02 * np.max(y_values):
+                label_str = self.metadata["Label"].value
+                msg = f"Buffer for '{key}:{label_str}' was adjusted."
+                factor = 1.0
+                new_values = _new_values(key, norm, self.labelblocks, factor)
+                logger.warning(msg)
+                while np.min(new_values) < 0:
+                    factor *= 1.1  # Increase the factor
+                    new_values = _new_values(key, norm, self.labelblocks, factor)
+                    logger.warning(
+                        msg.rstrip(".") + f" with factor increased to {factor:.2f}."
+                    )
+                subtracted_data[key] = new_values
+        return subtracted_data
+        """
+
     @property
     def additions(self) -> list[float] | None:
         """List of initial volume followed by additions."""
@@ -987,38 +907,52 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
         value: list[str]
             The new value of 'buffer_wells'
         """
-        for lbg in self.labelblocksgroups:
-            lbg.buffer_wells = value
+        print(value)
         self._data = []
         self._data_nrm = []
 
     @property
     def data(self) -> list[dict[str, list[float]] | None] | None:
         """Buffer subtracted and corrected for dilution data."""
-        if not self._data and self.additions:
+        if not self._data and self.additions and self.buffer_wells:
             self._data = [
                 (
                     {
-                        k: (np.array(v) * self._dil_corr).tolist()
-                        for k, v in lbg.data_buffersubtracted.items()
+                        k: (
+                            (
+                                np.array(v)
+                                - bdf[self.buffer_wells].mean(axis=1).to_numpy()
+                            )
+                            * self._dil_corr
+                        ).tolist()
+                        for k, v in lbg.data.items()
                     }
-                    if lbg.data_buffersubtracted
+                    if lbg.data
                     else None
                 )
-                for lbg in self.labelblocksgroups
+                for lbg, bdf in zip(
+                    self.tecanfiles_group.labelblocksgroups, self.buffers, strict=True
+                )
             ]
         return self._data
 
     @property
     def data_nrm(self) -> list[dict[str, list[float]]] | None:
         """Buffer subtracted, corrected for dilution and normalized data."""
-        if not self._data_nrm and self.additions:
+        if not self._data_nrm and self.additions and self.buffer_wells:
             self._data_nrm = [
                 {
-                    k: (np.array(v) * self._dil_corr).tolist()
-                    for k, v in lbg.data_buffersubtracted_norm.items()
+                    k: (
+                        (np.array(v) - bdf[self.buffer_wells].mean(axis=1).to_numpy())
+                        * self._dil_corr
+                    ).tolist()
+                    for k, v in lbg.data_nrm.items()
                 }
-                for lbg in self.labelblocksgroups
+                for lbg, bdf in zip(
+                    self.tecanfiles_group.labelblocksgroups,
+                    self.buffers_nrm,
+                    strict=True,
+                )
             ]
         return self._data_nrm
 
@@ -1067,27 +1001,13 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
 
         write(
             self.conc,
-            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
+            [lbg.data for lbg in self.tecanfiles_group.labelblocksgroups if lbg.data],
             out_folder / DAT,
         )
         write(
             self.conc,
-            [lbg.data_norm for lbg in self.labelblocksgroups],
+            [lbg.data_nrm for lbg in self.tecanfiles_group.labelblocksgroups],
             out_folder / DAT_NRM,
-        )
-        write(
-            self.conc,
-            [
-                lbg.data_buffersubtracted
-                for lbg in self.labelblocksgroups
-                if lbg.data_buffersubtracted
-            ],
-            out_folder / DAT_BG,
-        )
-        write(
-            self.conc,
-            [lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups],
-            out_folder / DAT_BG_NRM,
         )
         if self.data:
             write(
@@ -1102,54 +1022,7 @@ class Titration(TecanfilesGroup, BufferWellsMixin):
                 out_folder / DAT_BG_DIL_NRM,
             )
 
-
-@dataclass
-class FitdataParams:
-    """Parameters defining the fitting data."""
-
-    nrm: bool = True
-    bg: bool = True
-    dil: bool = True
-
-
-# TODO: Substitute warning with logging
-@dataclass
-class TitrationAnalysis(Titration):
-    """Perform analysis of a titration.
-
-    Raises
-    ------
-    ValueError
-        For unexpected file format, e.g. header `names`.
-    """
-
-    #: A list of wells containing samples that are neither buffer nor CTR samples.
-    keys_unk: list[str] = field(init=False, default_factory=list)
-    _fitdata: Sequence[dict[str, list[float]] | None] = field(
-        init=False, default_factory=list
-    )
-    _fitdata_params: FitdataParams = field(init=False, default_factory=FitdataParams)
-    _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
-    _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _buffers: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _buffers_norm: list[pd.DataFrame] = field(init=False, default_factory=list)
-
-    def __post_init__(self) -> None:  # pylint: disable=W0246
-        """Set up the initial values of inherited class properties."""
-        super().__post_init__()
-
-    def __repr__(self) -> str:
-        """Return a string representation of the instance."""
-        return (
-            f"TitrationAnalysis({super().__repr__()!r}\n"
-            f"   (preprocess)    fitdata_params={self.fitdata_params!r}\n"
-        )
-
-    @classmethod
-    def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> TitrationAnalysis:
-        """Build `TitrationAnalysis` from a list[.pH|.Cl] file."""
-        titration = super().fromlistfile(list_file, is_ph)
-        return cls(titration.tecanfiles, titration.conc, titration.is_ph)
+    # TODO: Substitute warning with logging
 
     @property
     def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
@@ -1164,12 +1037,14 @@ class TitrationAnalysis(Titration):
                     self._fitdata = self.data_nrm
                 elif self.data:
                     self._fitdata = self.data
+                # TODO: FIX
+                """
                 else:  # back up to dat_nrm
                     warnings.warn(
                         "No dilution corrected data found; use normalized data.",
                         stacklevel=2,
                     )
-                    self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
+                    self._fitdata = [lbg.data_nrm for lbg in self.labelblocksgroups]
             elif self.fitdata_params.bg:
                 if self.fitdata_params.nrm:
                     self._fitdata = [
@@ -1180,9 +1055,10 @@ class TitrationAnalysis(Titration):
                         lbg.data_buffersubtracted for lbg in self.labelblocksgroups
                     ]
             elif self.fitdata_params.nrm:
-                self._fitdata = [lbg.data_norm for lbg in self.labelblocksgroups]
+                self._fitdata = [lbg.data_nrm for lbg in self.labelblocksgroups]
             else:
                 self._fitdata = [lbg.data for lbg in self.labelblocksgroups]
+                """
         return self._fitdata
 
     @property
@@ -1241,21 +1117,21 @@ class TitrationAnalysis(Titration):
                         and lbg.data[k] is not None
                     }
                 )
-                for lbg in self.labelblocksgroups
+                for lbg in self.tecanfiles_group.labelblocksgroups
             ]
             self._fit_buffer(self._buffers)  # fit
         return self._buffers
 
     @property
-    def buffers_norm(self) -> list[pd.DataFrame]:
+    def buffers_nrm(self) -> list[pd.DataFrame]:
         """Buffer normalized dataframes with fit."""
-        if not self._buffers_norm and self.buffer_wells:
-            self._buffers_norm = [
-                pd.DataFrame({k: lbg.data_norm[k] for k in self.buffer_wells})
-                for lbg in self.labelblocksgroups
+        if not self._buffers_nrm and self.buffer_wells:
+            self._buffers_nrm = [
+                pd.DataFrame({k: lbg.data_nrm[k] for k in self.buffer_wells})
+                for lbg in self.tecanfiles_group.labelblocksgroups
             ]
-            self._fit_buffer(self._buffers_norm)  # fit
-        return self._buffers_norm
+            self._fit_buffer(self._buffers_nrm)  # fit
+        return self._buffers_nrm
 
     def _fit_buffer(self, buffer_dfs: list[pd.DataFrame]) -> None:
         """Fit buffers of all labelblocksgroups."""
@@ -1315,10 +1191,12 @@ class TitrationAnalysis(Titration):
         x = np.array(self.conc)  # # TODO: remove array here
         fittings = []
         # Any Lbg at least contains normalized data.
-        keys_fit = self.labelblocksgroups[0].data_norm.keys() - set(self.scheme.buffer)
+        keys_fit = self.tecanfiles_group.labelblocksgroups[0].data_nrm.keys() - set(
+            self.scheme.buffer
+        )
         self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
 
-        buffer_dfs = self.buffers_norm if self.fitdata_params.nrm else self.buffers
+        buffer_dfs = self.buffers_nrm if self.fitdata_params.nrm else self.buffers
         weights = [1 / np.array(buf_df["fit_err"].mean()) for buf_df in buffer_dfs]
         print(weights)
         for lbl_n, dat in enumerate(self.fitdata, start=1):
@@ -1594,7 +1472,7 @@ class TitrationAnalysis(Titration):
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""
         temperatures: dict[str | int, list[float | int | str | None]] = {}
-        for label_n, lbg in enumerate(self.labelblocksgroups, start=1):
+        for label_n, lbg in enumerate(self.tecanfiles_group.labelblocksgroups, start=1):
             temperatures[label_n] = [
                 lb.metadata["Temperature"].value for lb in lbg.labelblocks
             ]
@@ -1642,7 +1520,7 @@ class TitrationAnalysis(Titration):
     # NEXT: use fitted buffer values datafit
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
-        buffer_dfs = self.buffers_norm if nrm else self.buffers
+        buffer_dfs = self.buffers_nrm if nrm else self.buffers
         if not buffer_dfs or not self.buffer_wells:
             return sns.catplot()
         pp = PlotParameters(is_ph=self.is_ph)
@@ -1707,3 +1585,9 @@ class TitrationAnalysis(Titration):
         for k, v in self.results[lb].items():
             if v.figure:
                 v.figure.savefig(folder / f"{k}.png")
+
+
+class TitrationAnalysis(Titration):
+    """Perform analysis of a titration."""
+
+    pass
