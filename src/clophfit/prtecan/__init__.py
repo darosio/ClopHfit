@@ -17,7 +17,6 @@ detailed information on their operation and use.
 """
 
 from clophfit.prtecan.prtecan import (
-    FitdataParams,
     Labelblock,
     LabelblocksGroup,
     Metadata,
@@ -26,6 +25,7 @@ from clophfit.prtecan.prtecan import (
     TecanfilesGroup,
     Titration,
     TitrationAnalysis,
+    TitrationConfig,
     calculate_conc,
     dilution_correction,
     extract_metadata,

@@ -18,7 +18,7 @@ from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
-from clophfit.prtecan import FitdataParams, TitrationAnalysis
+from clophfit.prtecan import Titration, TitrationConfig
 
 
 @click.group()
@@ -114,7 +114,7 @@ def tecan(  # noqa: PLR0913
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
     list_fp = Path(list_file)
-    titan = TitrationAnalysis.fromlistfile(list_fp, is_ph)
+    titan = Titration.fromlistfile(list_fp, is_ph)
 
     if scheme:
         titan.load_scheme(Path(scheme))
@@ -182,7 +182,7 @@ def tecan(  # noqa: PLR0913
 
 
 def fit_tecan(  # noqa: PLR0913
-    titan: TitrationAnalysis,
+    titan: Titration,
     norm: bool,
     bg: bool,
     dil: bool,
@@ -195,7 +195,7 @@ def fit_tecan(  # noqa: PLR0913
     pdf: bool,
 ) -> None:
     """Help main."""
-    titan.fitdata_params = FitdataParams(nrm=norm, bg=bg, dil=dil)
+    titan.params = TitrationConfig(nrm=norm, bg=bg, dil=dil)
     # lb = 0, 1, 2(for glob)
     for i, fit in enumerate(titan.result_dfs):
         if verbose:
