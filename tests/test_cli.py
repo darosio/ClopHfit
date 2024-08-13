@@ -5,7 +5,6 @@ import filecmp
 import logging
 import re
 import tempfile
-import warnings
 from pathlib import Path
 from typing import IO, cast
 
@@ -110,7 +109,7 @@ def test_prenspire(tmp_path: Path) -> None:
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
-def test_prtecan(tmp_path: Path, caplog) -> None:
+def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH")
     scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
@@ -131,13 +130,14 @@ def test_prtecan(tmp_path: Path, caplog) -> None:
     print(result.output)
     print(result.exception)
 
+    # TODO: capture logged warning properly
     # with warnings.catch_warnings():
     #     # Suppress the UserWarnings related to insufficient data points and cleaning
-    #     warnings.simplefilter("ignore", category=UserWarning)
-    #     result = runner.invoke(
+    #     warnings.simplefilter("ignore", category=UserWarning)# noqa: ERA001
+    #   #same  result = runner.invoke(
     #         ppr,
-    #         ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
-    #     )
+    #         ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],# noqa: ERA001
+
     assert result.exit_code == 0
 
 
