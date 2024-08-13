@@ -2,6 +2,7 @@
 
 import csv
 import filecmp
+import logging
 import re
 import tempfile
 import warnings
@@ -109,20 +110,34 @@ def test_prenspire(tmp_path: Path) -> None:
 
 
 @pytest.mark.filterwarnings("ignore:OVER")
-def test_prtecan(tmp_path: Path) -> None:
+def test_prtecan(tmp_path: Path, caplog) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH")
     scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
     out = tmp_path / "out3"
     out.mkdir()
     runner = CliRunner()
-    with warnings.catch_warnings():
-        # Suppress the UserWarnings related to insufficient data points and cleaning
-        warnings.simplefilter("ignore", category=UserWarning)
+    # Ensure we're capturing warnings at the appropriate level
+    with caplog.at_level(logging.WARNING):
         result = runner.invoke(
             ppr,
             ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
         )
+        # Check captured log messages
+        for record in caplog.records:
+            assert "OVER" in record.message
+
+    # Temporarily print the result to debug the issue
+    print(result.output)
+    print(result.exception)
+
+    # with warnings.catch_warnings():
+    #     # Suppress the UserWarnings related to insufficient data points and cleaning
+    #     warnings.simplefilter("ignore", category=UserWarning)
+    #     result = runner.invoke(
+    #         ppr,
+    #         ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
+    #     )
     assert result.exit_code == 0
 
 

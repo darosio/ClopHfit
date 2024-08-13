@@ -209,8 +209,8 @@ class TestLabelblock:
         for log in caplog.records:
             print(log.message)
         expected_messages = [
-            "OVER\n Overvalue in Label1: A06 of tecanfile ",
-            "OVER\n Overvalue in Label1: H02 of tecanfile ",
+            " OVER value in Label1: A06 of tecanfile ",
+            " OVER value in Label1: H02 of tecanfile ",
         ]
         for expected_message in expected_messages:
             assert any(
@@ -328,7 +328,7 @@ class TestLabelblocksGroup:
         assert lbgs[0].data is not None
         assert lbgs[0].data["A01"] == [18713, 17088]
         assert lbgs[0].data["H12"] == [28596, 25771]
-        assert lbgs[1].data is None
+        assert lbgs[1].data == {}
 
     def test_data_normalized(
         self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
@@ -445,7 +445,7 @@ class TestTecanfilesGroup:
             # metadata
             assert lbg1.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata.get("Gain") is None
-            assert lbg1.data is None
+            assert lbg1.data == {}
             # data_normalized
             assert_almost_equal(lbg1.data_nrm["A01"], [401.9387755, 446.9897959, 450.0])
             assert_almost_equal(
@@ -525,8 +525,8 @@ class TestTitration:
 
     def test_labelblocksgroups(self) -> None:
         """It reads labelblocksgroups data and metadata."""
-        lbg0 = self.tit_ph.tecanfiles_group.labelblocksgroups[0]
-        lbg1 = self.tit_ph.tecanfiles_group.labelblocksgroups[1]
+        lbg0 = self.tit_ph.labelblocksgroups[0]
+        lbg1 = self.tit_ph.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"].value == 10.0
         # pH9.3 is 93 Optimal not Manual
@@ -541,7 +541,7 @@ class TestTitration:
 
     def test_labelblocksgroups_cl(self) -> None:
         """It reads labelblocksgroups data for Cl too."""
-        lbg = self.tit_cl.tecanfiles_group.labelblocksgroups[0]
+        lbg = self.tit_cl.labelblocksgroups[0]
         assert lbg.data is not None
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]
@@ -648,8 +648,8 @@ class TestTitrationAnalysis:
 
     def test_subtract_bg(self, titan: Titration) -> None:
         """It subtracts buffer average values."""
-        lbg0 = titan.tecanfiles_group.labelblocksgroups[0]
-        lbg1 = titan.tecanfiles_group.labelblocksgroups[1]
+        lbg0 = titan.labelblocksgroups[0]
+        lbg1 = titan.labelblocksgroups[1]
         assert_almost_equal(
             lbg0.data_nrm["E01"][::2], [601.72, 641.505, 674.355, 706.774], 3
         )
