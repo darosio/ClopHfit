@@ -10,7 +10,6 @@ import warnings
 from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
-from typing import Any
 
 import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
@@ -572,6 +571,8 @@ class TecanfilesGroup:
     labelblocksgroups: list[LabelblocksGroup] = field(init=False, default_factory=list)
     #: Metadata shared by all tecanfiles.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
+    #: Number of merged Labelblocks groups.
+    n_labels: int = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
         """Create metadata and labelblocksgroups."""
@@ -606,6 +607,7 @@ class TecanfilesGroup:
                 f"Different LabelblocksGroup among filenames: {files}.", stacklevel=2
             )
         self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
+        self.n_labels = len(self.labelblocksgroups)
 
 
 @dataclass
@@ -692,7 +694,7 @@ class TitrationConfig:
     nrm: bool = True
     bg: bool = True
     dil: bool = True
-    bg_method: str = "fit"
+    bg_method: str = "mean"
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -741,15 +743,11 @@ class Titration(TecanfilesGroup):
     _buffer_wells: list[str] = field(init=False, default_factory=list)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
-    _data_nrm: list[dict[str, list[float]]] = field(init=False, default_factory=list)
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
-    _fitdata: Sequence[dict[str, list[float]] | None] = field(
-        init=False, default_factory=list
-    )
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
     _buffers: list[pd.DataFrame] = field(init=False, default_factory=list)
@@ -764,7 +762,6 @@ class Titration(TecanfilesGroup):
         self._data = []
         self._results = []
         self._result_dfs = []
-        self._fitdata = []
 
     @property
     def buffer_wells(self) -> list[str] | None:
@@ -775,10 +772,29 @@ class Titration(TecanfilesGroup):
     def buffer_wells(self, value: list[str]) -> None:
         self._buffer_wells = value
         self._reset_data()
+        self._bg = []
 
     @property
     def bg(self) -> list[ArrayF]:
         """List of buffer wells."""
+        if not self._bg:
+            if self.buffers:
+                buffers = self.buffers_nrm if self.params.nrm else self.buffers
+                if self.params.bg_method == "fit":
+                    self._bg = [
+                        bdf["fit"].to_numpy() if not bdf.empty else np.array([])
+                        for bdf in buffers
+                    ]
+                elif self.params.bg_method == "mean":
+                    self._bg = [
+                        bdf["mean"].to_numpy() if not bdf.empty else np.array([])
+                        for bdf in buffers
+                    ]
+                else:
+                    msg = f"Unknown bg_method: {self.params.bg_method}"
+                    raise ValueError(msg)
+            else:
+                self._bg = [np.zeros_like(self.conc)] * len(self.labelblocksgroups)
         return self._bg
 
     @bg.setter
@@ -786,24 +802,12 @@ class Titration(TecanfilesGroup):
         self._bg = value
         self._reset_data()
 
-    def set_bg(self) -> None:
-        """Set bg based on buffers and bg_method."""
-        if self.params.bg_method == "fit":
-            self.bg = [
-                buf["fit"].to_numpy() if not buf.empty else np.array([])
-                for buf in self.buffers
-            ]
-        else:
-            raise ValueError(f"Unknown bg_method: {self.config.bg_method}")
-
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
         return (
-            f'Titration(files=["{self.tecanfiles[0].path}", '
-            f'"{self.tecanfiles[1].path}", ...], '
-            f"conc={self.conc!r}, data_size={len(self.data) if self.data else 0})"
-            f"   (preprocess)    fitdata_params={self.params!r}\n"
-            f"conc={self.conc!r}"
+            f'Titration(files=["{self.tecanfiles[0].path}", ...], '
+            f"conc={self.conc!r}, number of labels={self.n_labels})"
+            f"   (preprocess)    params={self.params!r}"
         )
 
     @classmethod
@@ -860,7 +864,7 @@ class Titration(TecanfilesGroup):
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
         return tecanfiles, conc
 
-    """
+    """# TODO:
     def _subtract_bg_lbg_data(
         self, lbg: LabelblocksGroup, norm: bool = False
     ) -> dict[str, list[float]]:
@@ -924,7 +928,6 @@ class Titration(TecanfilesGroup):
         self._additions = additions
         self._dil_corr = dilution_correction(additions)
         self._data = []
-        self._data_nrm = []
 
     def load_additions(self, additions_file: Path) -> None:
         """Load additions from file."""
@@ -934,38 +937,25 @@ class Titration(TecanfilesGroup):
     @property
     def data(self) -> list[dict[str, ArrayF]]:
         """Buffer subtracted and corrected for dilution data."""
-        # if not self._data and self.additions and self.buffer_wells:
-        #     self._data = [
-        #         (
-        #             {
-        #                 k: (
-        #                     (
-        #                         np.array(v)
-        #                         - bdf[self.buffer_wells].mean(axis=1).to_numpy()
-        #                     )
-        #                     * self._dil_corr
-        #                 ).tolist()
-        #                 for k, v in lbg.data.items()
-        #             }
-        #             if lbg.data
-        #             else None
-        #         )
-        #         for lbg, bdf in zip(self.labelblocksgroups, self.buffers, strict=True)
-        #     ]
-        # return self._data
         if not self._data:
+            # nrm
             if self.params.nrm:
                 lbs_data = [lbg.data_nrm for lbg in self.labelblocksgroups]
             else:
                 lbs_data = [
                     lbg.data if lbg.data else {} for lbg in self.labelblocksgroups
                 ]
+            # Transform into arrays
             data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
+            # bg
             if self.params.bg:
-                pass
+                print("self.bg")
+                data = [
+                    {k: v - bg for k, v in dd.items()}
+                    for dd, bg in zip(data, self.bg, strict=True)
+                ]
+            # dil
             if self.params.dil and self.additions:
-                # for i in range(2):
-                #     data[i] = {k: v * self._dil_corr for k, v in data[i].items()}
                 data = [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
             self._data = data
         return self._data
@@ -1000,7 +990,9 @@ class Titration(TecanfilesGroup):
         out_folder.mkdir(parents=True, exist_ok=True)
 
         def write(
-            conc: ArrayF, data: list[dict[str, list[float]]], out_folder: Path
+            conc: ArrayF,
+            data: list[dict[str, list[float]] | dict[str, ArrayF]],
+            out_folder: Path,
         ) -> None:
             """Write data."""
             if any(data):
@@ -1029,64 +1021,18 @@ class Titration(TecanfilesGroup):
                 [e for e in self.data if e],
                 out_folder / DAT_BG_DIL,
             )
-        # if self.data_nrm:
+        # if self.data_nrm:# TODO: complete for bg all methods and dil
         #     write(
         #         self.conc,
         #         self.data_nrm,
         #         out_folder / DAT_BG_DIL_NRM,
-        #     )
 
     # TODO: Substitute warning with logging
-
-    @property
-    def fitdata(self) -> Sequence[dict[str, list[float]] | None]:
-        """Data used for fitting."""
-        if not self._fitdata:
-            self._results = []
-            if self.params.dil:
-                # maybe need also bool(any([{}, {}])) or np.sum([bool(e) for e
-                # in [{}, {}]]) i.e. DDD if nrm and self.data_nrm and
-                # any(self.data_nrm):
-                # if self.fitdata_params.nrm and self.data_nrm:
-                #     self._fitdata = self.data_nrm
-                if self.data:
-                    self._fitdata = self.data
-                # TODO: FIX
-                """
-                else:  # back up to dat_nrm
-                    warnings.warn(
-                        "No dilution corrected data found; use normalized data.",
-                        stacklevel=2,
-                    )
-                    self._fitdata = [lbg.data_nrm for lbg in self.labelblocksgroups]
-            elif self.fitdata_params.bg:
-                if self.fitdata_params.nrm:
-                    self._fitdata = [
-                        lbg.data_buffersubtracted_norm for lbg in self.labelblocksgroups
-                    ]
-                else:
-                    self._fitdata = [
-                        lbg.data_buffersubtracted for lbg in self.labelblocksgroups
-                    ]
-            elif self.fitdata_params.nrm:
-                self._fitdata = [lbg.data_nrm for lbg in self.labelblocksgroups]
-            else:
-                self._fitdata = [lbg.data for lbg in self.labelblocksgroups]
-                """
-        return self._fitdata
 
     @property
     def params(self) -> TitrationConfig:
         """Get the datafit parameters."""
         return self._params
-
-    # @params.setter
-    # def params(self, value: TitrationConfig) -> None:
-    #     self._params = value
-    #     self._data = []
-    #     self._results = []
-    #     self._result_dfs = []
-    #     self._fitdata = []
 
     @property
     def results(self) -> list[dict[str, FitResult]]:
@@ -1126,7 +1072,7 @@ class Titration(TecanfilesGroup):
                     {
                         k: lbg.data[k]
                         for k in self.buffer_wells
-                        if lbg.data and k in lbg.data and lbg.data[k] is not None
+                        if lbg.data and k in lbg.data
                     }
                 )
                 for lbg in self.labelblocksgroups
@@ -1164,6 +1110,7 @@ class Titration(TecanfilesGroup):
             if not buf_df.empty:
                 mean = buf_df.mean(axis=1).to_numpy()
                 sem = buf_df.sem(axis=1).to_numpy()
+                std = buf_df.std(axis=1, ddof=0).to_numpy()
                 data = RealData(self.conc, mean, sy=sem)
                 model = Model(linear_model)
                 # Initial guess for slope and intercept
@@ -1179,6 +1126,8 @@ class Titration(TecanfilesGroup):
                 buf_df["Label"] = lbl_n
                 buf_df["fit"] = m_best * self.conc + b_best
                 buf_df["fit_err"] = fit_error(self.conc, cov_matrix)
+                buf_df["mean"] = mean
+                buf_df["std"] = std  # # TODO: Use sem
 
     def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
@@ -1209,7 +1158,7 @@ class Titration(TecanfilesGroup):
         buffer_dfs = self.buffers_nrm if self.params.nrm else self.buffers
         weights = [1 / np.array(buf_df["fit_err"].mean()) for buf_df in buffer_dfs]
         print(weights)
-        for lbl_n, dat in enumerate(self.fitdata, start=1):
+        for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
             if dat:
                 for k in keys_fit:
@@ -1223,11 +1172,11 @@ class Titration(TecanfilesGroup):
                         fitting[k] = FitResult(None, None, None)
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
-        if self.fitdata[0] and self.fitdata[1]:
+        if self.data[0] and self.data[1]:
             fitting = {}
             for k in keys_fit:
-                y0 = np.array(self.fitdata[0][k])
-                y1 = np.array(self.fitdata[1][k])
+                y0 = np.array(self.data[0][k])
+                y1 = np.array(self.data[1][k])
                 ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
                 # Alternatively weight_multi_ds_titration(ds)
                 # NEXT: use correction for dilution imply masked weights

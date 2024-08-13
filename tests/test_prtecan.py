@@ -140,42 +140,6 @@ class TestLabelblock:
         assert lb0.data_nrm["F06"] == pytest.approx(1051.1290323)
         assert lb1.data_nrm["H12"] == pytest.approx(48.4821429)
 
-    """
-    # def test_data_buffersubtracted(
-    #     self, labelblocks: tuple[Labelblock, Labelblock]
-    # ) -> None:
-    #     "Calculate buffer value from average of buffer wells and subtract."
-    #     lb0, lb1 = labelblocks
-    #     assert lb0.buffer == 11889.25
-    #     assert lb1.buffer == 56.75
-    #     assert lb0.buffer_sd == pytest.approx(450.2490)
-    #     assert lb1.buffer_sd == pytest.approx(4.43706)
-    #     assert lb0.data_buffersubtracted["F06"] == pytest.approx(7661.75)
-    #     assert lb1.data_buffersubtracted["H12"] == pytest.approx(486.25)
-    #     # Can also assign a buffer value.
-    #     lb0.buffer = 1
-    #     lb1.buffer = 2.9
-    #     assert lb0.data_buffersubtracted["F06"] == 19550
-    #     assert lb1.data_buffersubtracted["H12"] == 540.1
-
-    # def test_data_buffersubtracted_norm(
-    #     self, labelblocks: tuple[Labelblock, Labelblock]
-    # ) -> None:
-    #     "Calculate normalized buffer from average of buffer wells and subtract."
-    #     lb0, lb1 = labelblocks
-    #     assert lb0.buffer_norm == pytest.approx(639.20699)
-    #     assert lb1.buffer_norm == pytest.approx(5.06696)
-    #     assert lb0.buffer_norm_sd == pytest.approx(24.20694)
-    #     assert lb1.buffer_norm_sd == pytest.approx(0.396166)
-    #     assert lb0.data_buffersubtracted_norm["F06"] == pytest.approx(411.922)
-    #     assert lb1.data_buffersubtracted_norm["H12"] == pytest.approx(43.4152)
-    #     # Can also assign a buffer_norm value.
-    #     lb0.buffer_norm = 1
-    #     lb1.buffer_norm = 0.4821
-    #     assert lb0.data_buffersubtracted_norm["F06"] == pytest.approx(1050.13)
-    #     assert lb1.data_buffersubtracted_norm["H12"] == pytest.approx(48.0)
-    """
-
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """A Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
@@ -337,7 +301,7 @@ class TestLabelblocksGroup:
         assert_almost_equal(lbgs[1].data_nrm["H12"], [693.980, 714.495], 3)
         assert_almost_equal(lbgs[0].data_nrm["A01"], [995.372, 908.936], 3)
 
-    """
+    """# TODO:
     # def test_data_buffersubtracted(
     #     self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
     # ) -> None:
@@ -516,6 +480,12 @@ class TestTitration:
     tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
     tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
 
+    @pytest.fixture()
+    def tit1(self) -> Titration:
+        """Set up a titration with a single Tecan file."""
+        tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+        return prtecan.Titration([tf], conc=np.array([6.5]), is_ph=True)
+
     @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
         """It reads pH values."""
@@ -566,6 +536,41 @@ class TestTitration:
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
             prtecan.Titration.fromlistfile(data_tests / "list.pH2", True)
 
+    def test_data_bg_and_nrm(self, tit1: Titration) -> None:
+        """Calculate buffer value from average of buffer wells and subtract."""
+        tit1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        tit1.params.nrm = False
+        tit1.params.dil = False
+        tit1.params.bg = False
+        tit1.bg = [np.array([11889.25]), np.array([56.75])]
+        assert tit1.buffers[0]["std"][0] == pytest.approx(450.2490)
+        assert tit1.buffers[1]["std"][0] == pytest.approx(4.43706)
+        tit1.params.bg = True
+        assert tit1.data[0]["F06"][0] == pytest.approx(7661.75)
+        assert tit1.data[1]["H12"][0] == pytest.approx(486.25)
+        # Can also assign a buffer value.
+        tit1.bg = [np.array([1.0]), np.array([2.9])]
+        assert tit1.data[0]["F06"][0] == 19550
+        assert tit1.data[1]["H12"][0] == 540.1
+        # nrm
+        assert tit1.buffers_nrm[0]["fit"][0] == pytest.approx(639.20699)
+        assert tit1.buffers_nrm[0]["mean"][0] == pytest.approx(639.20699)
+        assert tit1.buffers_nrm[1]["fit"][0] == pytest.approx(5.06696)
+        assert tit1.buffers_nrm[0]["std"][0] == pytest.approx(24.20694)
+        assert tit1.buffers_nrm[1]["std"][0] == pytest.approx(0.396166)
+        # also bg duplicates data in buffers_nrm
+        tit1.params.nrm = True
+        tit1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        assert tit1.bg[0][0] == pytest.approx(639.20699)
+        assert tit1.bg[1] == pytest.approx(5.06696)
+        # nrm data
+        assert tit1.data[0]["F06"] == pytest.approx(411.922)
+        assert tit1.data[1]["H12"] == pytest.approx(43.4152)
+        # Can also assign a buffer_norm value.
+        tit1.bg = [np.array([1.0]), np.array([0.4821])]
+        assert tit1.data[0]["F06"] == pytest.approx(1050.13)
+        assert tit1.data[1]["H12"] == pytest.approx(48.0)
+
 
 class TestPlateScheme:
     """Test PlateScheme."""
@@ -607,7 +612,7 @@ class TestPlateScheme:
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
-    @pytest.fixture(autouse=True, scope="class")
+    @pytest.fixture(autouse=True)  # # TODO: Mind that we are not , scope="class"
     def titan(self) -> Titration:
         """Set up TitrationAnalysis."""
         titan = Titration.fromlistfile(data_tests / "140220/list.pH", is_ph=True)
@@ -671,6 +676,7 @@ class TestTitrationAnalysis:
         """It applies dilution correction read from file listing additions."""
         assert titan.additions is not None
         assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
+        titan.params.nrm = False
         assert titan.data is not None
         assert titan.data[1] is not None
         assert_almost_equal(
@@ -680,14 +686,17 @@ class TestTitrationAnalysis:
 
     def test_data_nrm(self, titan: Titration) -> None:
         """It normalizes data."""
-        assert titan.data_nrm is not None
+        titan.params.nrm = True
+        titan.params.bg = True
+        titan.params.dil = True
+
         assert_almost_equal(
-            titan.data_nrm[0]["A12"][::2],
+            titan.data[0]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         assert_almost_equal(
-            titan.data_nrm[1]["A12"][::2],
+            titan.data[1]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
