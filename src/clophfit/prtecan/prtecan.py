@@ -6,7 +6,6 @@ import hashlib
 import itertools
 import logging
 import typing
-import warnings
 from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
@@ -305,10 +304,14 @@ class Labelblock:
     ------
     Exception
         When data do not correspond to a complete 96-well plate.
+    ValueError
+        When something went wrong. Possibly because not 96-well.
+    TypeError
+        When normalization parameters are not numerical.
 
-    Warns
-    -----
-    Warning
+    Logging
+    -------
+    Logs a warning
         When it replaces "OVER" with ``np.nan`` for saturated values.
     """
 
@@ -374,10 +377,6 @@ class Labelblock:
         """
         rownames = tuple("ABCDEFGH")
         data = {}
-        # Raises
-        # ------
-        # ValueError
-        #     When something went wrong. Possibly because not 96-well.
         self._validate_96_well_format(lines, rownames)
         for i, row in enumerate(rownames):
             for col in range(1, NUM_COLS_96WELL + 1):
@@ -415,12 +414,9 @@ class Labelblock:
                 val = self.metadata[k].value
                 if isinstance(val, float | int):
                     norm /= val
-        except TypeError:
-            warnings.warn(
-                "Could not normalize for non numerical Gain, "
-                "Number of Flashes or Integration time.",
-                stacklevel=2,
-            )
+        except TypeError as err:
+            msg = "Could not normalize for non numerical Gain, Number of Flashes or Integration time."
+            raise TypeError(msg) from err
         self.data_nrm = {k: v * norm for k, v in self.data.items()}
 
     def __eq__(self, other: object) -> bool:
@@ -465,7 +461,7 @@ class Tecanfile:
         """Initialize."""
         csvl = read_xls(self.path)
         idxs = lookup_listoflines(csvl, pattern="Label: Label", col=0)
-        if len(idxs) == 0:
+        if not idxs:
             msg = "No Labelblock found."
             raise ValueError(msg)
         self.metadata = extract_metadata(csvl[: idxs[0]])
@@ -475,12 +471,17 @@ class Tecanfile:
             Labelblock(csvl[idxs[i] : idxs[i + 1]], str(self.path))
             for i in range(n_labelblocks)
         ]
-        if any(
-            labelblocks[i] == labelblocks[j]
-            for i, j in itertools.combinations(range(n_labelblocks), 2)
-        ):
-            warnings.warn("Repeated labelblocks", stacklevel=2)
         self.labelblocks = labelblocks
+        if self._has_repeated_labelblocks():
+            logger.warning("Repeated labelblocks")
+
+    def _has_repeated_labelblocks(self) -> bool:
+        """Check for repeated labelblocks."""
+        n_labelblocks = len(self.labelblocks)
+        return any(
+            self.labelblocks[i] == self.labelblocks[j]
+            for i, j in itertools.combinations(range(n_labelblocks), 2)
+        )
 
 
 @dataclass
@@ -551,18 +552,15 @@ class TecanfilesGroup:
 
     Raises
     ------
-    Exception
-        When all Labelblocks are not at least almost equal.
+    ValueError
+        When no common Labelblock is found across all Tecanfiles.
 
-    Warns
-    -----
-    Warning
-        The Tecanfiles listed in `tecanfiles` are expected to contain the
-        "same" list (of length N) of Labelblocks. Normally, N labelblocksgroups
-        will be created. However, if not all Tecanfiles contain the same number
-        of Labelblocks that can be merged ('equal' mergeable) in the same order,
-        then a warning will be raised. In this case, a number M < N of groups
-        can be built.
+    Logging
+    -------
+    Logs a warning
+        If the Tecanfiles do not contain the same number of Labelblocks that
+        can be merged in the same order, a warning is logged. In such cases,
+        fewer LabelblocksGroup may be created.
     """
 
     tecanfiles: list[Tecanfile]
@@ -575,39 +573,48 @@ class TecanfilesGroup:
     n_labels: int = field(init=False, repr=True)
 
     def __post_init__(self) -> None:
-        """Create metadata and labelblocksgroups."""
-        n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
-        tf0 = self.tecanfiles[0]
-        if all(tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:]):
-            # Same number and order of labelblocks
-            for i, _lb in enumerate(tf0.labelblocks):
-                self.labelblocksgroups.append(
-                    LabelblocksGroup(
-                        [tf.labelblocks[i] for tf in self.tecanfiles], allequal=True
-                    )
-                )
+        """Initialize metadata and labelblocksgroups."""
+        if self._all_labelblocks_equal():
+            self._create_equal_groups()
         else:
-            # Create as many as possible groups of labelblocks
-            rngs = tuple(range(n) for n in n_labelblocks)
-            for idx in itertools.product(*rngs):
-                try:
-                    gr = LabelblocksGroup(
-                        [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
-                    )
-                except ValueError:
-                    continue
-                # if labelblocks are all 'equal'
-                else:
-                    self.labelblocksgroups.append(gr)
-            files = [tf.path for tf in self.tecanfiles]
-            if len(self.labelblocksgroups) == 0:  # == []
-                msg = f"No common labelblock in filenames: {files}."
-                raise ValueError(msg)
-            warnings.warn(
-                f"Different LabelblocksGroup among filenames: {files}.", stacklevel=2
-            )
+            self._create_almostequal_groups()
         self.metadata = merge_md([tf.metadata for tf in self.tecanfiles])
         self.n_labels = len(self.labelblocksgroups)
+
+    def _all_labelblocks_equal(self) -> bool:
+        """Check if all Tecanfiles have the same Labelblocks."""
+        tf0 = self.tecanfiles[0]
+        return all(tf0.labelblocks == tf.labelblocks for tf in self.tecanfiles[1:])
+
+    def _create_equal_groups(self) -> None:
+        """Create LabelblocksGroup when all Labelblocks are equal."""
+        tf0 = self.tecanfiles[0]
+        self.labelblocksgroups = [
+            LabelblocksGroup(
+                [tf.labelblocks[i] for tf in self.tecanfiles], allequal=True
+            )
+            for i in range(len(tf0.labelblocks))
+        ]
+
+    def _create_almostequal_groups(self) -> None:
+        """Create as many LabelblocksGroups as possible when not all Labelblocks are equal."""
+        n_labelblocks = [len(tf.labelblocks) for tf in self.tecanfiles]
+        rngs = tuple(range(n) for n in n_labelblocks)
+        for idx in itertools.product(*rngs):
+            try:
+                gr = LabelblocksGroup(
+                    [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
+                )
+            except ValueError:
+                continue
+            else:
+                self.labelblocksgroups.append(gr)
+        if not self.labelblocksgroups:
+            msg = f"No common labelblocks in files: {[tf.path.name for tf in self.tecanfiles]}."
+            raise ValueError(msg)
+        logger.warning(
+            f"Different LabelblocksGroup across files: {[tf.path.name for tf in self.tecanfiles]}."
+        )
 
 
 @dataclass
@@ -747,6 +754,7 @@ class Titration(TecanfilesGroup):
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
     _buffer_wells: list[str] = field(init=False, default_factory=list)
+    _fit_keys: set[str] = field(init=False, default_factory=set)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
@@ -782,8 +790,13 @@ class Titration(TecanfilesGroup):
     @buffer_wells.setter
     def buffer_wells(self, value: list[str]) -> None:
         self._buffer_wells = value
-        self.fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(value)
+        self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(value)
         self._reset_data_results_and_buffers()
+
+    @property
+    def fit_keys(self) -> set[str]:
+        """List data wells that are not currently assigned to a buffer."""
+        return self._fit_keys
 
     @property
     def bg_sd(self) -> list[ArrayF]:

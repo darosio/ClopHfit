@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import warnings
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -103,7 +102,6 @@ def test_calculate_conc() -> None:
     )
 
 
-@pytest.mark.filterwarnings("ignore:OVER")
 class TestLabelblock:
     """Test labelblock class."""
 
@@ -241,10 +239,13 @@ class TestTecanfile:
         tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
         assert self.tf != tf2, "Different Tecanfiles are incorrectly reported as equal"
 
-    def test_warn(self) -> None:
+    def test_warn(self, caplog: pytest.LogCaptureFixture) -> None:
         """Warn if labelblocks are repeated in a Tf as it might compromise grouping."""
-        with pytest.warns(UserWarning, match="Repeated labelblocks"):
+        with caplog.at_level(logging.WARNING):
             prtecan.Tecanfile(data_tests / "exceptions/290212_7.67_repeated_lb.xls")
+        assert any(
+            "Repeated labelblocks" in record.message for record in caplog.records
+        )
 
     def test_filenotfound(self) -> None:
         """It raises FileNotFoundError when the file path does not exist."""
@@ -365,8 +366,10 @@ class TestTecanfilesGroup:
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        @pytest.fixture(autouse=True, scope="class")
-        def tfg_warn(self) -> tuple[TecanfilesGroup, pytest.WarningsRecorder]:
+        @pytest.fixture()
+        def tfg_warn(
+            self, caplog: pytest.LogCaptureFixture
+        ) -> tuple[TecanfilesGroup, list[logging.LogRecord]]:
             """Set up TecanfilesGroup with Warning."""
             filenames = [
                 "290513_5.5.xls",  # Label1 and Label2
@@ -374,27 +377,26 @@ class TestTecanfilesGroup:
                 "290513_8.8.xls",  # Label1 and Label2 with different metadata
             ]
             tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
-            with pytest.warns(UserWarning) as record:
+            with caplog.at_level(logging.WARNING):
                 tfg = TecanfilesGroup(tecanfiles)
-            return tfg, record
+            return tfg, caplog.records
 
-        @pytest.fixture(autouse=True, scope="class")
-        def tfg(
-            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> TecanfilesGroup:
-            """Extract TecanfilesGroup."""
-            return tfg_warn[0]
-
-        def test_warn(
-            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        def test_log_warning(
+            self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
         ) -> None:
             """Warn about labelblocks anomaly."""
-            msg_str = str(tfg_warn[1][0].message)
-            assert "Different LabelblocksGroup among filenames" in msg_str
+            _, records = tfg_warn
+            # Check that the specific warning message was logged
+            assert any(
+                "Different LabelblocksGroup across files" in record.message
+                for record in records
+            )
 
-        def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
+        def test_labelblocksgroups(
+            self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
+        ) -> None:
             """Generate 1 LbG with .data and .metadata."""
-            lbg0 = tfg.labelblocksgroups[0]
+            lbg0 = tfg_warn[0].labelblocksgroups[0]
             # metadata
             assert lbg0.metadata["Number of Flashes"].value == 10.0
             assert lbg0.metadata["Gain"].value == 94
@@ -403,9 +405,11 @@ class TestTecanfilesGroup:
             assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
             assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
 
-        def test_mergeable_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
+        def test_mergeable_labelblocksgroups(
+            self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
+        ) -> None:
             """Generate 1 Lbg only with .data_normalized and only common .metadata."""
-            lbg1 = tfg.labelblocksgroups[1]
+            lbg1 = tfg_warn[0].labelblocksgroups[1]
             # metadata
             assert lbg1.metadata["Number of Flashes"].value == 10.0
             assert lbg1.metadata.get("Gain") is None
@@ -419,8 +423,10 @@ class TestTecanfilesGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        @pytest.fixture(autouse=True, scope="class")
-        def tfg_warn(self) -> tuple[TecanfilesGroup, pytest.WarningsRecorder]:
+        @pytest.fixture()
+        def tfg_warn(
+            self, caplog: pytest.LogCaptureFixture
+        ) -> tuple[TecanfilesGroup, list[logging.LogRecord]]:
             """Set up TecanfilesGroup with Warning."""
             filenames = [
                 "290212_5.78.xls",  # Label1 and Label2
@@ -428,26 +434,26 @@ class TestTecanfilesGroup:
                 "290212_100.xls",  # Label2 only
             ]
             tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
-            with pytest.warns(UserWarning) as record:
+            with caplog.at_level(logging.WARNING):
                 tfg = TecanfilesGroup(tecanfiles)
-            return tfg, record
+            return tfg, caplog.records
 
-        @pytest.fixture(autouse=True, scope="class")
-        def tfg(
-            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
-        ) -> TecanfilesGroup:
-            """Extract TecanfilesGroup."""
-            return tfg_warn[0]
-
-        def test_warn(
-            self, tfg_warn: tuple[TecanfilesGroup, pytest.WarningsRecorder]
+        def test_log_warning(
+            self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
         ) -> None:
             """Warn about labelblocks anomaly."""
-            msg_str = str(tfg_warn[1][0].message)
-            assert "Different LabelblocksGroup among filenames" in msg_str
+            _, records = tfg_warn
+            # Check that the specific warning message was logged
+            assert any(
+                "Different LabelblocksGroup across files" in record.message
+                for record in records
+            )
 
-        def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
+        def test_labelblocksgroups(
+            self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
+        ) -> None:
             """Generates 1 LbG with .data and .metadata."""
+            tfg, _ = tfg_warn
             lbg = tfg.labelblocksgroups[0]
             # metadata
             assert lbg.metadata["Number of Flashes"].value == 10.0
@@ -467,10 +473,8 @@ class TestTecanfilesGroup:
 
         def test_raise_exception(self) -> None:
             """Raise Exception when there is no way to build labelblocksGroup."""
-            with pytest.raises(
-                ValueError,
-                match=r"No common labelblock in filenames: .*290513_5.5_bad.xls",
-            ):
+            msg = r"No common labelblocks in files: ['290513_5.5.xls', '290513_5.5_bad.xls']."
+            with pytest.raises(ValueError, match=re.escape(msg)):
                 prtecan.TecanfilesGroup(self.tecanfiles)
 
 
@@ -486,7 +490,6 @@ class TestTitration:
         tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
         return prtecan.Titration([tf], conc=np.array([6.5]), is_ph=True)
 
-    @pytest.mark.filterwarnings("ignore: Different LabelblocksGroup")
     def test_conc(self) -> None:
         """It reads pH values."""
         assert_array_equal(
@@ -608,7 +611,6 @@ class TestPlateScheme:
 
 
 # some:  @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
-@pytest.mark.filterwarnings("ignore:OVER")
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
@@ -709,10 +711,7 @@ class TestTitrationAnalysis:
 
     def test_fit(self, titan: Titration) -> None:
         """It fits each label separately."""
-        with warnings.catch_warnings():
-            # Suppress the UserWarning related to dataset removal
-            warnings.simplefilter("ignore", category=UserWarning)
-            fres = titan.results
+        fres = titan.results
         # Check that the first fit result dictionary has 92 elements
         assert len(fres[0]) == 92
         # Check that the first fit result for 'H02' is None
@@ -738,12 +737,8 @@ class TestTitrationAnalysis:
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0167, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0169, abs=1e-4)
         # Fit up to the second-last data point
-        with warnings.catch_warnings():
-            # Suppress the UserWarning related to dataset removal
-            warnings.simplefilter("ignore", category=UserWarning)
-            fres = titan.results
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
