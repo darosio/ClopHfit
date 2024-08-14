@@ -543,8 +543,8 @@ class TestTitration:
         tit1.params.dil = False
         tit1.params.bg = False
         tit1.bg = [np.array([11889.25]), np.array([56.75])]
-        assert tit1.buffers[0]["std"][0] == pytest.approx(450.2490)
-        assert tit1.buffers[1]["std"][0] == pytest.approx(4.43706)
+        assert tit1.buffers[0]["sem"][0] == pytest.approx(259.9514)
+        assert tit1.buffers[1]["sem"][0] == pytest.approx(2.561738)
         tit1.params.bg = True
         assert tit1.data[0]["F06"][0] == pytest.approx(7661.75)
         assert tit1.data[1]["H12"][0] == pytest.approx(486.25)
@@ -556,8 +556,8 @@ class TestTitration:
         assert tit1.buffers_nrm[0]["fit"][0] == pytest.approx(639.20699)
         assert tit1.buffers_nrm[0]["mean"][0] == pytest.approx(639.20699)
         assert tit1.buffers_nrm[1]["fit"][0] == pytest.approx(5.06696)
-        assert tit1.buffers_nrm[0]["std"][0] == pytest.approx(24.20694)
-        assert tit1.buffers_nrm[1]["std"][0] == pytest.approx(0.396166)
+        assert tit1.buffers_nrm[0]["sem"][0] == pytest.approx(13.97588)
+        assert tit1.buffers_nrm[1]["sem"][0] == pytest.approx(0.2287266)
         # also bg duplicates data in buffers_nrm
         tit1.params.nrm = True
         tit1.buffer_wells = ["D01", "D12", "E01", "E12"]

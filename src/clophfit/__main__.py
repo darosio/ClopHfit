@@ -120,9 +120,9 @@ def tecan(  # noqa: PLR0913
         titan.load_scheme(Path(scheme))
         if dil:
             titan.load_additions(Path(dil))
-            bg = True  # should not be needed but influence decimals of
-            # exported values; however ``dil imply bg```
-            if not is_ph and titan.additions:  # XXX cl conc must be elsewhere
+            titan.params.bg_adjust = True  # TODO: add click params
+            titan.params.bg_method = "mean"
+            if not is_ph and titan.additions:  # TODO: cl conc must be elsewhere
                 titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)
     titan.export_data(out_fp)
 
