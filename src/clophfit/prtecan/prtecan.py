@@ -380,13 +380,13 @@ class Labelblock:
                     data[well] = float(lines[i][col])
                 except ValueError:
                     data[well] = np.nan
-                    # TODO: fix the ignore
-                    logger.warning(
-                        " OVER value in %s: %s of tecanfile %s",
-                        self.metadata.get("Label", "Unknown").value,  # type: ignore[union-attr]
-                        well,
-                        self.filename,
-                    )
+                    label = self.metadata.get("Label")
+                    if label is not None and hasattr(label, "value"):
+                        lbl = label.value
+                    else:
+                        lbl = "Unknown"
+                    msg = f" OVER value in {lbl}: {well} of tecanfile {self.filename}"
+                    logger.warning(msg)
         return data
 
     def _validate_96_well_format(
