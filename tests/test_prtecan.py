@@ -481,8 +481,15 @@ class TestTecanfilesGroup:
 class TestTitration:
     """Test Titration class."""
 
-    tit_ph = prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
-    tit_cl = prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
+    @pytest.fixture()
+    def tit_ph(self) -> Titration:
+        """Set up a pH titration."""
+        return prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
+
+    @pytest.fixture()
+    def tit_cl(self) -> Titration:
+        """Set up a Cl titration."""
+        return prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
 
     @pytest.fixture()
     def tit1(self) -> Titration:
@@ -490,16 +497,16 @@ class TestTitration:
         tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
         return prtecan.Titration([tf], conc=np.array([6.5]), is_ph=True)
 
-    def test_conc(self) -> None:
+    def test_conc(self, tit_ph: Titration) -> None:
         """It reads pH values."""
         assert_array_equal(
-            self.tit_ph.conc, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
+            tit_ph.conc, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
         )
 
-    def test_labelblocksgroups(self) -> None:
+    def test_labelblocksgroups(self, tit_ph: Titration) -> None:
         """It reads labelblocksgroups data and metadata."""
-        lbg0 = self.tit_ph.labelblocksgroups[0]
-        lbg1 = self.tit_ph.labelblocksgroups[1]
+        lbg0 = tit_ph.labelblocksgroups[0]
+        lbg1 = tit_ph.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"].value == 10.0
         # pH9.3 is 93 Optimal not Manual
@@ -512,18 +519,18 @@ class TestTitration:
         assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]
         assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
 
-    def test_labelblocksgroups_cl(self) -> None:
+    def test_labelblocksgroups_cl(self, tit_cl: Titration) -> None:
         """It reads labelblocksgroups data for Cl too."""
-        lbg = self.tit_cl.labelblocksgroups[0]
+        lbg = tit_cl.labelblocksgroups[0]
         assert lbg.data is not None
         assert lbg.data["A01"] == [6462, 6390, 6465, 6774]
         assert lbg.data["H12"] == [4705, 4850, 4918, 5007]
 
-    def test_export_data(self, tmp_path: Path) -> None:
+    def test_export_data(self, tit_ph: Titration, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
-        self.tit_ph.export_data(tmp_path)
-        a01 = pd.read_csv(tmp_path / "dat/A01.dat")
-        h12 = pd.read_csv(tmp_path / "dat/H12.dat")
+        tit_ph.export_data(tmp_path)
+        a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")
+        h12 = pd.read_csv(tmp_path / "dat" / "H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
         assert a01["y2"].tolist()[1::2] == [9165, 15591, 20788, 22534]
         assert h12["y1"].tolist()[1::2] == [20888, 21711, 23397, 25045]
