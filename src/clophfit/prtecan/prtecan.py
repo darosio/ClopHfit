@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import itertools
 import logging
 import typing
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
@@ -40,12 +41,6 @@ logger = logging.getLogger(__name__)
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
-DAT = "dat"
-DAT_NRM = "dat_nrm"
-DAT_BG = "dat_bg"
-DAT_BG_NRM = "dat_bg_nrm"
-DAT_BG_DIL = "dat_bg_dil"
-DAT_BG_DIL_NRM = "dat_bg_dil_nrm"
 STD_MD_LINE_LENGTH = 2
 NUM_ROWS_96WELL = 8
 NUM_COLS_96WELL = 12
@@ -613,7 +608,7 @@ class TecanfilesGroup:
             msg = f"No common labelblocks in files: {[tf.path.name for tf in self.tecanfiles]}."
             raise ValueError(msg)
         logger.warning(
-            f"Different LabelblocksGroup across files: {[tf.path.name for tf in self.tecanfiles]}."
+            f"Different LabelblocksGroup across files: {[tf.path for tf in self.tecanfiles]}."
         )
 
 
@@ -783,7 +778,7 @@ class Titration(TecanfilesGroup):
         self._buffers_nrm = []
 
     @property
-    def buffer_wells(self) -> list[str] | None:
+    def buffer_wells(self) -> list[str]:
         """List of buffer wells."""
         return self._buffer_wells
 
@@ -796,6 +791,8 @@ class Titration(TecanfilesGroup):
     @property
     def fit_keys(self) -> set[str]:
         """List data wells that are not currently assigned to a buffer."""
+        if not self._fit_keys:
+            self._fit_keys = set(self.labelblocksgroups[0].data_nrm.keys())
         return self._fit_keys
 
     @property
@@ -953,9 +950,11 @@ class Titration(TecanfilesGroup):
                 lbs_data = [
                     lbg.data if lbg.data else {} for lbg in self.labelblocksgroups
                 ]
-            # Transform into arrays
-
-            data = [{k: np.array(dd[k]) for k in self.fit_keys} for dd in lbs_data]
+            # Transform into dict of arrays (or in case empty {})
+            data = [
+                {k: np.array(dd[k]) for k in self.fit_keys} if dd else {}
+                for dd in lbs_data
+            ]
             # bg
             if self.params.bg:
                 data = [
@@ -986,23 +985,16 @@ class Titration(TecanfilesGroup):
         self.buffer_wells = self._scheme.buffer
 
     def export_data(self, out_folder: Path) -> None:
-        """Export dat files [x,y1,..,yN] from labelblocksgroups.
+        """Export dat files [x,y1,..,yN] from copy of self.data."""
 
-        Remember that a Titration has at least 1 normalized Lbg dataset `dat_nrm`.
-
-        dat:            [d1, None] | [d1, d2]
-        dat_bg:         [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
-        dat_bg_dil:     [{}, None] | [d1, None] | [{}, {}] | [d1, d2]
-        dat_nrm:        [d1,d2]
-        dat_bg_nrm:     [{}, {}] | [d1, d2]
-        dat_bg_dil_nrm: [{}, {}] | [d1, d2]
-
-        Parameters
-        ----------
-        out_folder : Path
-            Path to output folder.
-        """
-        out_folder.mkdir(parents=True, exist_ok=True)
+        @contextmanager
+        def tit_copy(tit: Titration) -> typing.Iterator[Titration]:
+            """Context manager to create and work with a deep copy of an object."""
+            obj_copy = copy.deepcopy(tit)
+            try:
+                yield obj_copy
+            finally:
+                del obj_copy  # Explicitly delete the copy to free memory
 
         def write(
             conc: ArrayF,
@@ -1016,33 +1008,27 @@ class Titration(TecanfilesGroup):
                 for key in data[0]:
                     dat = np.vstack((conc, [dt[key] for dt in data]))
                     datxy = pd.DataFrame(dat.T, columns=columns)
-                    datxy.to_csv(
-                        out_folder / Path(key).with_suffix(".dat"), index=False
-                    )
+                    datxy.to_csv(out_folder / f"{key}.dat", index=False)
 
-        write(
-            self.conc,
-            [lbg.data for lbg in self.labelblocksgroups if lbg.data],
-            out_folder / DAT,
-        )
-        write(
-            self.conc,
-            [lbg.data_nrm for lbg in self.labelblocksgroups],
-            out_folder / DAT_NRM,
-        )
-        if self.data:
-            write(
-                self.conc,
-                [e for e in self.data if e],
-                out_folder / DAT_BG_DIL,
-            )
-        # if self.data_nrm:# TODO: complete for bg all methods and dil
-        #     write(
-        #         self.conc,
-        #         self.data_nrm,
-        #         out_folder / DAT_BG_DIL_NRM,
-
-    # TODO: Substitute warning with logging
+        with tit_copy(self) as tit:
+            tit._fit_keys = tit._fit_keys | set(tit.buffer_wells)  # noqa: SLF001
+            combinations = list(itertools.product([False, True], repeat=4))
+            for bg_method in ["mean", "fit"]:
+                for bg, adj, dil, nrm in combinations:
+                    tit.params.bg = bg
+                    tit.params.bg_adjust = adj
+                    tit.params.bg_method = bg_method
+                    tit.params.dil = dil
+                    tit.params.nrm = nrm
+                    sbg = "_bg" if bg else ""
+                    sadj = "_adj" if adj else ""
+                    sdil = "_dil" if dil else ""
+                    snrm = "_nrm" if nrm else ""
+                    sfit = "_fit" if tit.params.bg_method == "fit" else ""
+                    out = "dat" + sbg + sadj + sdil + snrm + sfit
+                    subfolder = out_folder / out
+                    if tit.data:
+                        write(tit.conc, [dd for dd in tit.data if dd], subfolder)
 
     @property
     def params(self) -> TitrationConfig:

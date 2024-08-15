@@ -113,31 +113,15 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH")
     scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
-    out = tmp_path / "out3"
-    out.mkdir()
+    out = str(tmp_path)
     runner = CliRunner()
     # Ensure we're capturing warnings at the appropriate level
     with caplog.at_level(logging.WARNING):
         result = runner.invoke(
             ppr,
-            ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
+            ["--out", out, "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
         )
-        # Check captured log messages
-        for record in caplog.records:
-            assert "OVER" in record.message
-
-    # Temporarily print the result to debug the issue
-    print(result.output)
-    print(result.exception)
-
-    # TODO: capture logged warning properly
-    # with warnings.catch_warnings():
-    #     # Suppress the UserWarnings related to insufficient data points and cleaning
-    #     warnings.simplefilter("ignore", category=UserWarning)# noqa: ERA001
-    #   #same  result = runner.invoke(
-    #         ppr,
-    #         ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],# noqa: ERA001
-
+    assert any("OVER" in record.message for record in caplog.records), "OVER not found"
     assert result.exit_code == 0
 
 
