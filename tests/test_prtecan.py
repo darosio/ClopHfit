@@ -302,27 +302,6 @@ class TestLabelblocksGroup:
         assert_almost_equal(lbgs[1].data_nrm["H12"], [693.980, 714.495], 3)
         assert_almost_equal(lbgs[0].data_nrm["A01"], [995.372, 908.936], 3)
 
-    """# TODO:
-    # def test_data_buffersubtracted(
-    #     self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
-    # ) -> None:
-    #     "Merge data_buffersubtracted."
-    #     assert lbgs[0].data_buffersubtracted is not None
-    #     assert_almost_equal(lbgs[0].data_buffersubtracted["B07"], [7069, 5716.7], 1)
-    #     assert lbgs[1].data_buffersubtracted is None
-
-    # def test_data_buffersubtracted_norm(
-    #     self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
-    # ) -> None:
-    #     "Merge data_buffersubtracted."
-    #     assert_almost_equal(
-    #         lbgs[0].data_buffersubtracted_norm["B07"], [376.01, 304.08], 2
-    #     )
-    #     assert_almost_equal(
-    #         lbgs[1].data_buffersubtracted_norm["B07"], [355.16, 348.57], 2
-    #     )
-    """
-
     def test_notequal_labelblocks(self, tfs: list[Tecanfile]) -> None:
         """Raise Exception when concatenating unequal labelblocks."""
         with pytest.raises(ValueError, match="Creation of labelblock group failed."):
@@ -482,16 +461,21 @@ class TestTitration:
     """Test Titration class."""
 
     @pytest.fixture()
+    def tit(self) -> Titration:
+        """Set up L1 pH titration."""
+        return prtecan.Titration.fromlistfile(data_tests / "L1" / "list.pH", is_ph=True)
+
+    @pytest.fixture(scope="class")
     def tit_ph(self) -> Titration:
         """Set up a pH titration."""
         return prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
 
-    @pytest.fixture()
+    @pytest.fixture(scope="class")
     def tit_cl(self) -> Titration:
         """Set up a Cl titration."""
         return prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
 
-    @pytest.fixture()
+    @pytest.fixture(scope="class")
     def tit1(self) -> Titration:
         """Set up a titration with a single Tecan file."""
         tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
@@ -518,6 +502,21 @@ class TestTitration:
         assert lbg1.data["A01"][1::2] == [9165, 15591, 20788, 22534]
         assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]
         assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
+
+    def test_data_buffersubtracted(self, tit: Titration) -> None:
+        """Check data after normalization and bg subtraction."""
+        tit.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        tit.params.nrm = False
+        assert tit.data[0]
+        assert tit.data[1] == {}
+        sliced_values = tit.data[0]["B07"][-1::-3][:2]
+        assert_almost_equal(sliced_values, [7069, 5716.7], 1)
+        # normalization
+        tit.params.nrm = True
+        sliced_values0 = tit.data[0]["B07"][-1::-3][:2]
+        sliced_values1 = tit.data[1]["B07"][-4::-3]
+        assert_almost_equal(sliced_values0, [376.01, 304.08], 2)
+        assert_almost_equal(sliced_values1, [355.16, 348.57], 2)
 
     def test_labelblocksgroups_cl(self, tit_cl: Titration) -> None:
         """It reads labelblocksgroups data for Cl too."""
@@ -621,7 +620,7 @@ class TestPlateScheme:
 class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
-    @pytest.fixture(autouse=True)  # # TODO: Mind that we are not , scope="class"
+    @pytest.fixture(autouse=True, scope="class")
     def titan(self) -> Titration:
         """Set up TitrationAnalysis."""
         titan = Titration.fromlistfile(data_tests / "140220/list.pH", is_ph=True)
@@ -645,6 +644,7 @@ class TestTitrationAnalysis:
     def test_scheme(self, titan: Titration) -> None:
         """It finds well position for buffer samples."""
         assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
+        assert titan.buffer_wells == ["D01", "E01", "D12", "E12"]
 
     def test_raise_listfilenotfound(self, titan: Titration) -> None:
         """It raises OSError when scheme file does not exist."""
@@ -670,22 +670,19 @@ class TestTitrationAnalysis:
         assert lbg0.data is not None
         assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
         assert type(lbg1) is LabelblocksGroup
-        """# TODO:
-        assert lbg0.data_buffersubtracted is not None
-        assert_array_equal(
-            lbg0.data_buffersubtracted["A12"][::3], [8084.5, 16621.75, 13775.0]
-        )
-        assert lbg1.data_buffersubtracted is not None
-        assert_array_equal(
-            lbg1.data_buffersubtracted["A12"][::3], [9758.25, 1334.0, 283.5]
-        )
-        """
+        titan.params.bg = True
+        titan.params.nrm = False
+        titan.params.dil = False
+        assert_array_equal(titan.data[0]["A12"][::3], [8084.5, 16621.75, 13775.0])
+        assert lbg1.data is not None
+        assert_array_equal(titan.data[1]["A12"][::3], [9758.25, 1334.0, 283.5])
 
     def test_dilution_correction(self, titan: Titration) -> None:
         """It applies dilution correction read from file listing additions."""
         assert titan.additions is not None
         assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
         titan.params.nrm = False
+        titan.params.dil = True
         assert titan.data is not None
         assert titan.data[1] is not None
         assert_almost_equal(
