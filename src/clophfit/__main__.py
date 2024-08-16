@@ -55,45 +55,31 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @ppr.command()
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
+@click.option("--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH.")  # fmt: skip
 @click.option("--scheme", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
 @click.option("--dil", type=cPath(exists=True), help="Initial volume and additions.")
+@click.option("--Klim", type=(float, float), help="Range MIN, MAX of plot_K.")
+@click.option("--sel", type=(float, float), help="Select from K_MIN S1_MIN.")
 @click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
+@click.option("--bg_adjust", is_flag=True, help="Adjust bg to avoid negative value.")
+@click.option("--bg_method", default="mean", show_default=True, help="Method for bg.")
 @click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
-@click.option(
-    "--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH."
-)
-@click.option(
-    "--fit/--no-fit", default=True, show_default=True, help="Perform also fit."
-)
+@click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--fit-all", is_flag=True, help="Fit all exported data.")
-@click.option(
-    "--png/--no-png", default=True, show_default=True, help="Export png files."
-)
+@click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
 @click.option("--pdf", is_flag=True, help="Full report in pdf file.")
-@click.option("--title", "-t", default="", help="Title for some plots.")
-@click.option(
-    "--Klim", default=None, type=(float, float), help="Range MIN, MAX of plot_K."
-)
-@click.option(
-    "--sel", default=None, type=(float, float), help="Select from K_MIN S1_MIN."
-)
+@click.option("--title", "-t", type=str, default="", help="Title for some plots.")
 def tecan(  # noqa: PLR0913
     ctx: Context,
     list_file: str,
+    is_ph: bool,
     scheme: str | None,
     dil: str | None,
-    bg: bool,
-    norm: bool,
-    is_ph: bool,
-    fit: bool,
-    fit_all: bool,
-    png: bool,
-    pdf: bool,
-    title: str,
     klim: tuple[float, float] | None,
     sel: tuple[float, float] | None,
+    **options: dict[str, Path | str | bool | tuple[float, float]],
 ) -> None:
-    """Convert a list of plate reader acquisitions into titrations.
+    """Convert a list of Tecan-exported excel files into titrations.
 
     LIST_FILE : List of Tecan files and concentration values.
 
@@ -110,138 +96,38 @@ def tecan(  # noqa: PLR0913
 
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
-    verbose = ctx.obj.get("VERBOSE", 0)
+    verbose: int = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
+    title = str(options.get("title", ""))
+    fit = bool(options.get("fit", True))
+    bg = bool(options.get("bg", True))
+    # Load titration
     list_fp = Path(list_file)
-    titan = Titration.fromlistfile(list_fp, is_ph)
-
-    if scheme:
-        titan.load_scheme(Path(scheme))
-        if dil:
-            titan.load_additions(Path(dil))
-            titan.params.bg_adjust = True  # TODO: add click params
-            titan.params.bg_method = "mean"
-            if not is_ph and titan.additions:  # TODO: cl conc must be elsewhere
-                titan.conc = prtecan.calculate_conc(titan.additions, 1000.0)
-    titan.export_data(out_fp)
-
+    tit = Titration.fromlistfile(list_fp, is_ph)
+    out_fp.mkdir(parents=True, exist_ok=True)
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
-        for lbg in titan.labelblocksgroups:
+        for lbg in tit.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
-    f = titan.plot_temperature(title=title)
+    f = tit.plot_temperature(title=title)
     f.savefig(out_fp / "temperatures.png")
     if scheme:
-        f = titan.plot_buffer(title=title)
+        tit.load_scheme(Path(scheme))
+        f = tit.plot_buffer(title=title)
         f.savefig(out_fp / "buffer.png")
-        f = titan.plot_buffer(nrm=True, title=title)
+        f = tit.plot_buffer(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
+    if dil:
+        tit.load_additions(Path(dil))
+        # TODO: cl conc must be elsewhere; was under scheme:
+        if not is_ph and tit.additions:
+            tit.conc = prtecan.calculate_conc(tit.additions, 1000.0)
 
-    if fit:
-        if bg and not scheme:
-            # ``as bg requires scheme even though scheme does not imply bg```
-            warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
-        if fit_all:
-            for n, b, d, out2 in [
-                (0, 0, 0, "dat"),
-                (1, 0, 0, "dat_nrm"),
-                (0, 1, 0, "dat_bg"),
-                (1, 1, 0, "dat_bg_nrm"),
-                (0, 1, 1, "dat_bg_dil"),
-                (1, 1, 1, "dat_bg_dil_nrm"),
-            ]:
-                out_fit = out_fp / out2 / "0fit"
-                out_fit.mkdir(parents=True, exist_ok=True)
-                fit_tecan(
-                    titan,
-                    bool(n),
-                    bool(b),
-                    bool(d),
-                    verbose,
-                    out_fit,
-                    klim,
-                    title,
-                    sel,
-                    png,
-                    pdf,
-                )
-        else:
-            fit_tecan(
-                titan,
-                norm,
-                bg,
-                bool(dil),
-                verbose,
-                out_fp,
-                klim,
-                title,
-                sel,
-                png,
-                pdf,
-            )
+    if fit and bg and not scheme:
+        # ``as bg requires scheme even though scheme does not imply bg```
+        warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
 
-
-def fit_tecan(  # noqa: PLR0913
-    titan: Titration,
-    norm: bool,
-    bg: bool,
-    dil: bool,
-    verbose: int,
-    out: Path,
-    klim: tuple[float, float] | None,
-    title: str | None,
-    sel: tuple[float, float] | None,
-    png: bool,
-    pdf: bool,
-) -> None:
-    """Help main."""
-    titan.params.nrm = norm
-    titan.params.bg = bg
-    titan.params.dil = dil
-    # lb = 0, 1, 2(for glob)
-    for i, fit in enumerate(titan.result_dfs):
-        if verbose:
-            try:
-                print(fit)
-                print(klim)
-                meta = titan.labelblocksgroups[i].metadata
-                print("-" * 79)
-                print(f"\nlabel{i:d}")
-                pprint.pprint(meta)
-            except IndexError:
-                print("-" * 79)
-                print("\nGlobal on both labels")
-            titan.print_fitting(i)
-        # CSV tables
-        fit.sort_index().to_csv(out / Path("ffit" + str(i) + ".csv"))
-        if "S1_y1" in fit.columns:
-            order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0", "sS1_y0"]
-            order.extend(["S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
-            ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
-        else:
-            order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
-            order.extend(["S1_default", "sS1_default"])
-            ebar_y, ebar_yerr = "S1_default", "sS1_default"
-        out_df = fit.reindex(order, axis=1).sort_index()
-        out_df.to_csv(out / f"fit{i}.csv", float_format="%.3g")
-        # Plots
-        f = titan.plot_k(i, hue_column=ebar_y, xlim=klim, title=title)
-        f.savefig(out / f"K{i}.png")
-        f = titan.plot_ebar(i, ebar_y, ebar_yerr, title=title)
-        f.savefig(out / f"ebar{i}.png")
-        if sel:
-            xm, ym = sel
-            xmin = xm if titan.is_ph else None
-            xmax = xm if not titan.is_ph else None
-            f = titan.plot_ebar(
-                i, ebar_y, ebar_yerr, xmin=xmin, xmax=xmax, ymin=ym, title=title
-            )
-            f.savefig(out / f"ebar{i}_sel{xm},{ym}.png")
-        if png:
-            titan.export_png(i, out)
-    if pdf:
-        # FIXME: export pdf
-        titan.plot_all_wells(2, out / "all_wells.pdf")
+    tit.export_data(out_fp, verbose, klim, sel, **options)
 
 
 ########################################

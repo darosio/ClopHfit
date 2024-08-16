@@ -108,7 +108,6 @@ def test_prenspire(tmp_path: Path) -> None:
             raise ImageComparisonFailure(msg)
 
 
-@pytest.mark.filterwarnings("ignore:OVER")
 def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH")
@@ -119,13 +118,12 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         result = runner.invoke(
             ppr,
-            ["--out", out, "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
+            ["--out", out, "tecan", list_f, "--no-fit", "--scheme", scheme_f, "--bg"],
         )
     assert any("OVER" in record.message for record in caplog.records), "OVER not found"
     assert result.exit_code == 0
 
 
-@pytest.mark.filterwarnings("ignore:OVER")
 def test_prtecan_cl(tmp_path: Path) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.cl")
@@ -134,7 +132,7 @@ def test_prtecan_cl(tmp_path: Path) -> None:
     out = tmp_path / "out4"
     out.mkdir()
     runner = CliRunner()
-    base_args = ["--out", str(out), "tecan", list_f, "--fit", "--scheme", scheme_f]
+    base_args = ["--out", str(out), "tecan", list_f, "--no-fit", "--scheme", scheme_f]
     base_args.extend(["--dil", adds_f, "--bg", "--no-is-ph"])
     result = runner.invoke(ppr, base_args)
     assert result.exit_code == 0
