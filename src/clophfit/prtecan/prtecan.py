@@ -6,8 +6,9 @@ import copy
 import hashlib
 import itertools
 import logging
+import pprint
 import typing
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
@@ -42,8 +43,8 @@ logger = logging.getLogger(__name__)
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
 STD_MD_LINE_LENGTH = 2
-NUM_ROWS_96WELL = 8
 NUM_COLS_96WELL = 12
+ROW_NAMES = tuple("ABCDEFGH")
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -370,10 +371,9 @@ class Labelblock:
         -----
             When a cell contains saturated signal (converted into np.nan).
         """
-        rownames = tuple("ABCDEFGH")
         data = {}
-        self._validate_96_well_format(lines, rownames)
-        for i, row in enumerate(rownames):
+        self._validate_96_well_format(lines)
+        for i, row in enumerate(ROW_NAMES):
             for col in range(1, NUM_COLS_96WELL + 1):
                 well = f"{row}{col:0>2}"
                 try:
@@ -389,17 +389,12 @@ class Labelblock:
                     logger.warning(msg)
         return data
 
-    def _validate_96_well_format(
-        self, lines: list[list[str | int | float]], rownames: tuple[str, ...]
-    ) -> None:
+    def _validate_96_well_format(self, lines: list[list[str | int | float]]) -> None:
         """Validate 96-well plate data format."""
-        msg = "Cannot extract data in Labelblock: not 96 wells?"
-        if len(lines) != NUM_ROWS_96WELL:
-            raise ValueError(msg)
-        for i, row in enumerate(rownames):
+        for i, row in enumerate(ROW_NAMES):
             if lines[i][0] != row:
+                msg = f"Row {i} label mismatch: expected {row}, got {lines[i][0]}"
                 raise ValueError(msg)
-        # TODO: f"Row {i} label mismatch: expected {row}, got {lines[i][0]}"
 
     def _normalize_data(self) -> None:
         """Normalize the data against specific metadata."""
@@ -724,6 +719,7 @@ class Buffer:
     """Buffer computations for titrations."""
 
 
+# TODO: TitrationPlotter init with a tit
 @dataclass
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
@@ -776,6 +772,16 @@ class Titration(TecanfilesGroup):
         self._bg_sd = []
         self._buffers = []
         self._buffers_nrm = []
+
+    @property
+    def params(self) -> TitrationConfig:
+        """Get the datafit parameters."""
+        return self._params
+
+    @params.setter
+    def params(self, value: TitrationConfig) -> None:
+        self._params = value
+        self._reset_data_results_and_buffers()
 
     @property
     def buffer_wells(self) -> list[str]:
@@ -950,11 +956,9 @@ class Titration(TecanfilesGroup):
                 lbs_data = [
                     lbg.data if lbg.data else {} for lbg in self.labelblocksgroups
                 ]
-            # Transform into dict of arrays (or in case empty {})
-            data = [
-                {k: np.array(dd[k]) for k in self.fit_keys} if dd else {}
-                for dd in lbs_data
-            ]
+            # Transform values of non-empty dict into arrays
+            data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
+
             # bg
             if self.params.bg:
                 data = [
@@ -984,22 +988,23 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer_wells = self._scheme.buffer
 
-    def export_data(self, out_folder: Path) -> None:
+    def export_data(  # noqa: PLR0915,C901
+        self,
+        out_fp: Path,
+        verbose: int,
+        klim: tuple[float, float] | None,
+        sel: tuple[float, float] | None,
+        **options: dict[str, Path | str | bool | tuple[float, float]],
+    ) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data."""
-
-        @contextmanager
-        def tit_copy(tit: Titration) -> typing.Iterator[Titration]:
-            """Context manager to create and work with a deep copy of an object."""
-            obj_copy = copy.deepcopy(tit)
-            try:
-                yield obj_copy
-            finally:
-                del obj_copy  # Explicitly delete the copy to free memory
+        export_all = bool(options.get("fit_all", False))
+        run_fit = bool(options.get("fit", False))
+        title = str(options.get("title", ""))
+        png = bool(options.get("png", False))
+        pdf = bool(options.get("pdf", False))
 
         def write(
-            conc: ArrayF,
-            data: list[dict[str, list[float]] | dict[str, ArrayF]],
-            out_folder: Path,
+            conc: ArrayF, data: list[dict[str, ArrayF]], out_folder: Path
         ) -> None:
             """Write data."""
             if any(data):
@@ -1010,30 +1015,87 @@ class Titration(TecanfilesGroup):
                     datxy = pd.DataFrame(dat.T, columns=columns)
                     datxy.to_csv(out_folder / f"{key}.dat", index=False)
 
-        with tit_copy(self) as tit:
-            tit._fit_keys = tit._fit_keys | set(tit.buffer_wells)  # noqa: SLF001
-            combinations = list(itertools.product([False, True], repeat=4))
-            for bg_method in ["mean", "fit"]:
-                for bg, adj, dil, nrm in combinations:
-                    tit.params.bg = bg
-                    tit.params.bg_adjust = adj
-                    tit.params.bg_method = bg_method
-                    tit.params.dil = dil
-                    tit.params.nrm = nrm
-                    sbg = "_bg" if bg else ""
-                    sadj = "_adj" if adj else ""
-                    sdil = "_dil" if dil else ""
-                    snrm = "_nrm" if nrm else ""
-                    sfit = "_fit" if tit.params.bg_method == "fit" else ""
-                    out = "dat" + sbg + sadj + sdil + snrm + sfit
-                    subfolder = out_folder / out
-                    if tit.data:
-                        write(tit.conc, [dd for dd in tit.data if dd], subfolder)
+        saved_p = copy.copy(self.params)
+        if export_all:
+            bool_iter = itertools.product([False, True], repeat=4)
+            combinations = list(itertools.product(bool_iter, ["mean", "fit"]))
+        else:
+            combinations = [
+                (
+                    (saved_p.bg, saved_p.bg_adjust, saved_p.dil, saved_p.nrm),
+                    saved_p.bg_method,
+                )
+            ]
+        # for bg_method in ["mean", "fit"]:
+        for (bg, adj, dil, nrm), mth in combinations:
+            self.params.bg = bg
+            self.params.bg_adjust = adj
+            self.params.dil = dil
+            self.params.nrm = nrm
+            self.params.bg_method = mth
+            sbg = "_bg" if bg else ""
+            sadj = "_adj" if adj else ""
+            sdil = "_dil" if dil else ""
+            snrm = "_nrm" if nrm else ""
+            sfit = "_fit" if self.params.bg_method == "fit" else ""
+            out = "dat" + sbg + sadj + sdil + snrm + sfit
+            subfolder = out_fp / out
+            write(self.conc, [dd for dd in self.data if dd], subfolder)
+            if run_fit:
+                outfit = subfolder / "1fit"
+                outfit.mkdir(parents=True, exist_ok=True)
 
-    @property
-    def params(self) -> TitrationConfig:
-        """Get the datafit parameters."""
-        return self._params
+                for i, fit in enumerate(self.result_dfs):
+                    if verbose:
+                        try:
+                            print(fit)
+                            print(klim)
+                            meta = self.labelblocksgroups[i].metadata
+                            print("-" * 79)
+                            print(f"\nlabel{i:d}")
+                            pprint.pprint(meta)
+                        except IndexError:
+                            print("-" * 79)
+                            print("\nGlobal on both labels")
+                        self.print_fitting(i)
+                    # CSV tables
+                    fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
+                    if "S1_y1" in fit.columns:
+                        order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0"]
+                        order.extend(["sS1_y0", "S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
+                        ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
+                    else:
+                        order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
+                        order.extend(["S1_default", "sS1_default"])
+                        ebar_y, ebar_yerr = "S1_default", "sS1_default"
+                    out_df = fit.reindex(order, axis=1).sort_index()
+                    out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
+                    # Plots
+                    f = self.plot_k(i, hue_column=ebar_y, xlim=klim, title="title")
+                    f.savefig(outfit / f"K{i}.png")
+                    f = self.plot_ebar(i, ebar_y, ebar_yerr, title="title")
+                    f.savefig(outfit / f"ebar{i}.png")
+                    if sel and sel[0] and sel[1]:
+                        xmin = float(sel[0]) if self.is_ph else None
+                        xmax = float(sel[0]) if not self.is_ph else None
+                        ymin = float(sel[1])
+                        f = self.plot_ebar(
+                            i,
+                            ebar_y,
+                            ebar_yerr,
+                            xmin=xmin,
+                            xmax=xmax,
+                            ymin=ymin,
+                            title=title,
+                        )
+                        f.savefig(outfit / f"ebar{i}_sel{xmin},{ymin}.png")
+                    if png:
+                        self.export_png(i, outfit)
+                if pdf:
+                    # FIXME: export pdf
+                    self.plot_all_wells(2, outfit / "all_wells.pdf")
+
+        self.params = saved_p
 
     @property
     def results(self) -> list[dict[str, FitResult]]:
@@ -1149,11 +1211,10 @@ class Titration(TecanfilesGroup):
         -----
         This method is less general and is designed for two label blocks.
         """
-        x = np.array(self.conc)  # # TODO: remove array here
+        x = self.conc
         fittings = []
-        # Any Lbg at least contains normalized data.
-        keys_fit = self.labelblocksgroups[0].data_nrm.keys() - set(self.scheme.buffer)
-        self.keys_unk = list(keys_fit - set(self.scheme.ctrl))
+        # Any lbg at least contains normalized data.
+        self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
 
         # TODO: Use sd array after proper masking
         weights = [1 / sd.mean() if sd.size > 0 else sd for sd in self.bg_sd]
@@ -1161,7 +1222,7 @@ class Titration(TecanfilesGroup):
         for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
             if dat:
-                for k in keys_fit:
+                for k in self.fit_keys:
                     ds = Dataset(x, np.array(dat[k]), is_ph=self.is_ph)
                     ds.add_weights(np.array(weights[lbl_n - 1]))
                     # Alternatively weight_multi_ds_titration(ds)
@@ -1174,12 +1235,12 @@ class Titration(TecanfilesGroup):
         # Global weighted on relative residues of single fittings.
         if self.data[0] and self.data[1]:
             fitting = {}
-            for k in keys_fit:
+            for k in self.fit_keys:
                 y0 = np.array(self.data[0][k])
                 y1 = np.array(self.data[1][k])
                 ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
                 # Alternatively weight_multi_ds_titration(ds)
-                # NEXT: use correction for dilution imply masked weights
+                # NEXT: use correction for dilution imply masked weights * dil_corr
                 # NEXT: list.pH with xerr
                 # TODO: dilution corr must be masked where y is NaN
                 # for the moment use np broadcasting from 1D array of len=1
@@ -1476,7 +1537,6 @@ class Titration(TecanfilesGroup):
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
 
-    # NEXT: use fitted buffer values datafit
     def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
         buffer_dfs = self.buffers_nrm if nrm else self.buffers

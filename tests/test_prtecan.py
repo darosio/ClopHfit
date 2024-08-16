@@ -192,9 +192,7 @@ class TestLabelblock:
         """It raises Exception when a row is missing from the labelblock."""
         csvl = prtecan.read_xls(data_tests / "exceptions/84wells_290212_20.xlsx")
         idxs = prtecan.lookup_listoflines(csvl)
-        with pytest.raises(
-            ValueError, match="Cannot extract data in Labelblock: not 96 wells?"
-        ):
+        with pytest.raises(ValueError, match="Row 7 label mismatch: expected H, got "):
             Labelblock(csvl[idxs[0] : len(csvl)])
 
 
@@ -527,7 +525,10 @@ class TestTitration:
 
     def test_export_data(self, tit_ph: Titration, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
-        tit_ph.export_data(tmp_path)
+        tit_ph.params.bg = False
+        tit_ph.params.dil = False
+        tit_ph.params.nrm = False
+        tit_ph.export_data(tmp_path, verbose=False, sel=None, klim=None)
         a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")
         h12 = pd.read_csv(tmp_path / "dat" / "H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
