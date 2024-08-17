@@ -113,9 +113,9 @@ def tecan(  # noqa: PLR0913
     f.savefig(out_fp / "temperatures.png")
     if scheme:
         tit.load_scheme(Path(scheme))
-        f = tit.plot_buffer(title=title)
+        f = tit.buffer.plot(title=title)
         f.savefig(out_fp / "buffer.png")
-        f = tit.plot_buffer(nrm=True, title=title)
+        f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
     if dil:
         tit.load_additions(Path(dil))
