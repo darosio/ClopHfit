@@ -714,12 +714,212 @@ class TitrationConfig:
             self._trigger_callback()
 
 
+# TODO: TitrationPlotter init with a tit within a Manager
+@dataclass
+class TitrationPlotter:
+    """Generate various plot for a titration."""
+
+    tit: Titration
+
+
 @dataclass
 class Buffer:
-    """Buffer computations for titrations."""
+    """Buffer handling for a titration."""
+
+    tit: Titration
+    _wells: list[str] = field(default_factory=list)
+
+    _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _dataframes_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _bg: list[ArrayF] = field(init=False, default_factory=list)
+    _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
+
+    @property
+    def wells(self) -> list[str]:
+        """List of buffer wells."""
+        return self._wells
+
+    @wells.setter
+    def wells(self, wells: list[str]) -> None:
+        """Set the list of buffer wells and trigger recomputation."""
+        self._wells = wells
+        self._reset_buffer()
+        self.tit.update_fit_keys(wells)
+
+    def _reset_buffer(self) -> None:
+        """Reset buffer data."""
+        self._dataframes = []
+        self._dataframes_nrm = []
+        self._bg = []
+        self._bg_sd = []
+
+    @property
+    def dataframes(self) -> list[pd.DataFrame]:
+        """Buffer dataframes with fit."""
+        if not self._dataframes and self.wells:
+            self._dataframes = [
+                pd.DataFrame(
+                    {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
+                )
+                for lbg in self.tit.labelblocksgroups
+            ]
+            self._fit_buffer(self._dataframes)  # fit
+        return self._dataframes
+
+    @property
+    def dataframes_nrm(self) -> list[pd.DataFrame]:
+        """Buffer normalized dataframes with fit."""
+        if not self._dataframes_nrm and self.wells:
+            self._dataframes_nrm = [
+                pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
+                for lbg in self.tit.labelblocksgroups
+            ]
+            self._fit_buffer(self._dataframes_nrm)  # fit
+        return self._dataframes_nrm
+
+    @property
+    def bg(self) -> list[ArrayF]:
+        """List of buffer values."""
+        if not self._bg:
+            self._bg, self._bg_sd = self._compute_bg_and_sd()
+        return self._bg
+
+    @bg.setter
+    def bg(self, value: list[ArrayF]) -> None:
+        """Set the buffer values and reset SEM."""
+        self._bg = value
+        self._bg_sd = []
+
+    @property
+    def bg_sd(self) -> list[ArrayF]:
+        """List of buffer SEM values."""
+        if not self._bg_sd:
+            self._bg, self._bg_sd = self._compute_bg_and_sd()
+        return self._bg_sd
+
+    def _compute_bg_and_sd(self) -> tuple[list[ArrayF], list[ArrayF]]:
+        """Compute and return buffer values and their SEM."""
+        buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
+        if self.tit.params.bg_method == "fit":
+            bg = [
+                bdf["fit"].to_numpy() if not bdf.empty else np.array([])
+                for bdf in buffers
+            ]
+            bg_sd = [
+                bdf["fit_err"].to_numpy() if not bdf.empty else np.array([])
+                for bdf in buffers
+            ]
+        elif self.tit.params.bg_method == "mean":
+            bg = [
+                bdf["mean"].to_numpy() if not bdf.empty else np.array([])
+                for bdf in buffers
+            ]
+            bg_sd = [
+                bdf["sem"].to_numpy() if not bdf.empty else np.array([])
+                for bdf in buffers
+            ]
+        else:
+            msg = f"Unknown bg_method: {self.tit.params.bg_method}"
+            raise ValueError(msg)
+        return bg, bg_sd
+
+    def _fit_buffer(self, dfs: list[pd.DataFrame]) -> None:
+        """Fit buffers of all labelblocksgroups."""
+
+        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
+            """Define linear model function."""
+            return pars[0] * x + pars[1]
+
+        def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
+            x = x[:, np.newaxis]  # Ensure x is a 2D array
+            jacobian = np.concatenate((x, np.ones((x.shape[0], 1))), axis=1)
+            fit_variance: ArrayF = np.einsum(
+                "ij,jk,ik->i", jacobian, cov_matrix, jacobian
+            )
+            return np.sqrt(fit_variance)  # Standard error
+
+        for lbl_n, buf_df in enumerate(dfs, start=1):
+            if not buf_df.empty:
+                mean = buf_df.mean(axis=1).to_numpy()
+                sem = buf_df.sem(axis=1).to_numpy()
+                data = RealData(self.tit.conc, mean, sy=sem)
+                model = Model(linear_model)
+                # Initial guess for slope and intercept
+                odr = ODR(data, model, beta0=[0.0, mean.mean()])
+                output = odr.run()
+                # Extract the best-fit parameters and their standard errors
+                m_best, b_best = output.beta
+                m_err, b_err = output.sd_beta
+                cov_matrix = output.cov_beta
+                print(
+                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
+                )
+                buf_df["Label"] = lbl_n
+                buf_df["fit"] = m_best * self.tit.conc + b_best
+                buf_df["fit_err"] = fit_error(self.tit.conc, cov_matrix)
+                buf_df["mean"] = mean
+                buf_df["sem"] = sem
+
+    def plot(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
+        """Plot buffers of all labelblocksgroups."""
+        buffer_dfs = self.dataframes_nrm if nrm else self.dataframes
+        if not buffer_dfs or not self.wells:
+            return sns.catplot()
+        pp = PlotParameters(is_ph=self.tit.is_ph)
+        melted_buffers = []
+        wells_lbl = self.wells.copy()
+        wells_lbl.extend(["Label"])
+        for buf_df in buffer_dfs:
+            if not buf_df.empty:
+                buffer = buf_df[wells_lbl].copy()
+                buffer[pp.kind] = self.tit.conc
+                melted_buffers.append(
+                    buffer.melt(
+                        id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
+                    )
+                )
+        # Combine data from both buffers
+        data = pd.concat(melted_buffers, ignore_index=True)
+        g = sns.lmplot(
+            data=data,
+            y="F",
+            x=pp.kind,
+            ci=68,
+            height=4,
+            aspect=1.75,
+            row="Label",
+            x_estimator=np.median,
+            markers="x",
+            scatter=1,
+            scatter_kws={"alpha": 0.33},
+            facet_kws={"sharey": False},
+        )
+        num_labels = np.sum([not b_df.empty for b_df in buffer_dfs])
+        for label_n in range(1, num_labels + 1):
+            sns.scatterplot(
+                data=data[data.Label == label_n],
+                y="F",
+                x=pp.kind,
+                hue="well",
+                ax=g.axes_dict[label_n],
+                legend=label_n == num_labels,
+            )
+            g.axes_dict[label_n].errorbar(
+                x=self.tit.conc,
+                y=buffer_dfs[label_n - 1]["fit"],
+                yerr=buffer_dfs[label_n - 1]["fit_err"],
+                xerr=0.1,
+                fmt="",
+                color="r",
+                linewidth=2,
+                capsize=6,
+            )
+        if title:
+            plt.suptitle(title, fontsize=14, x=0.96, ha="right")
+        plt.close()
+        return g
 
 
-# TODO: TitrationPlotter init with a tit
 @dataclass
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
@@ -741,10 +941,10 @@ class Titration(TecanfilesGroup):
 
     conc: ArrayF
     is_ph: bool
+    buffer: Buffer = field(init=False)
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
-    _buffer_wells: list[str] = field(init=False, default_factory=list)
     _fit_keys: set[str] = field(init=False, default_factory=set)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
@@ -756,22 +956,22 @@ class Titration(TecanfilesGroup):
     keys_unk: list[str] = field(init=False, default_factory=list)
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _buffers: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _buffers_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         """Create metadata and data."""
-        self._params.set_callback(self._reset_data_results_and_buffers)
+        self.buffer = Buffer(tit=self)
+        self._params.set_callback(self._reset_data_results_and_bg)
         super().__post_init__()
 
-    def _reset_data_results_and_buffers(self) -> None:
+    def _reset_data_and_results(self) -> None:
         self._data = []
         self._results = []
         self._result_dfs = []
-        self._bg = []
+
+    def _reset_data_results_and_bg(self) -> None:
+        self._reset_data_and_results()
+        self.bg = []
         self._bg_sd = []
-        self._buffers = []
-        self._buffers_nrm = []
 
     @property
     def params(self) -> TitrationConfig:
@@ -781,76 +981,36 @@ class Titration(TecanfilesGroup):
     @params.setter
     def params(self, value: TitrationConfig) -> None:
         self._params = value
-        self._reset_data_results_and_buffers()
-
-    @property
-    def buffer_wells(self) -> list[str]:
-        """List of buffer wells."""
-        return self._buffer_wells
-
-    @buffer_wells.setter
-    def buffer_wells(self, value: list[str]) -> None:
-        self._buffer_wells = value
-        self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(value)
-        self._reset_data_results_and_buffers()
+        self._reset_data_results_and_bg()
 
     @property
     def fit_keys(self) -> set[str]:
         """List data wells that are not currently assigned to a buffer."""
         if not self._fit_keys:
-            self._fit_keys = set(self.labelblocksgroups[0].data_nrm.keys())
+            self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(
+                self.buffer.wells
+            )
         return self._fit_keys
 
-    @property
-    def bg_sd(self) -> list[ArrayF]:
-        """List of buffer SEM values."""
-        if not self._bg_sd:
-            if self.buffers:
-                buffers = self.buffers_nrm if self.params.nrm else self.buffers
-                if self.params.bg_method == "fit":
-                    self._bg_sd = [
-                        bdf["fit_err"].to_numpy() if not bdf.empty else np.array([])
-                        for bdf in buffers
-                    ]
-                elif self.params.bg_method == "mean":
-                    self._bg_sd = [
-                        bdf["sem"].to_numpy() if not bdf.empty else np.array([])
-                        for bdf in buffers
-                    ]
-                else:
-                    msg = f"Unknown bg_method: {self.params.bg_method}"
-                    raise ValueError(msg)
-            else:
-                self._bg_sd = [np.ones_like(self.conc)] * self.n_labels
-        return self._bg_sd
+    def update_fit_keys(self, buffer_wells: list[str]) -> None:
+        """Public method to update fit keys based on buffer wells."""
+        self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(buffer_wells)
+        self._reset_data_results_and_bg()
 
     @property
     def bg(self) -> list[ArrayF]:
         """List of buffer values."""
-        if not self._bg:
-            if self.buffers:
-                buffers = self.buffers_nrm if self.params.nrm else self.buffers
-                if self.params.bg_method == "fit":
-                    self._bg = [
-                        bdf["fit"].to_numpy() if not bdf.empty else np.array([])
-                        for bdf in buffers
-                    ]
-                elif self.params.bg_method == "mean":
-                    self._bg = [
-                        bdf["mean"].to_numpy() if not bdf.empty else np.array([])
-                        for bdf in buffers
-                    ]
-                else:
-                    msg = f"Unknown bg_method: {self.params.bg_method}"
-                    raise ValueError(msg)
-            else:
-                self._bg = [np.zeros_like(self.conc)] * self.n_labels
-        return self._bg
+        return self.buffer.bg
 
     @bg.setter
     def bg(self, value: list[ArrayF]) -> None:
-        self._reset_data_results_and_buffers()
-        self._bg = value
+        self.buffer.bg = value
+        self._reset_data_and_results()
+
+    @property
+    def bg_sd(self) -> list[ArrayF]:
+        """List of buffer SEM values."""
+        return self.buffer.bg_sd
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
@@ -986,7 +1146,7 @@ class Titration(TecanfilesGroup):
     def load_scheme(self, schemefile: Path) -> None:
         """Load scheme from file. Set buffer_wells."""
         self._scheme = PlateScheme(schemefile)
-        self.buffer_wells = self._scheme.buffer
+        self.buffer.wells = self._scheme.buffer
 
     def export_data(  # noqa: PLR0915,C901
         self,
@@ -1125,71 +1285,6 @@ class Titration(TecanfilesGroup):
                             df0.loc[well, "ctrl"] = ctrl_name
                 self._result_dfs.append(df0)
         return self._result_dfs
-
-    @property
-    def buffers(self) -> list[pd.DataFrame]:
-        """Buffer dataframes with fit."""
-        if not self._buffers and self.buffer_wells:
-            self._buffers = [
-                pd.DataFrame(
-                    {
-                        k: lbg.data[k]
-                        for k in self.buffer_wells
-                        if lbg.data and k in lbg.data
-                    }
-                )
-                for lbg in self.labelblocksgroups
-            ]
-            self._fit_buffer(self._buffers)  # fit
-        return self._buffers
-
-    @property
-    def buffers_nrm(self) -> list[pd.DataFrame]:
-        """Buffer normalized dataframes with fit."""
-        if not self._buffers_nrm and self.buffer_wells:
-            self._buffers_nrm = [
-                pd.DataFrame({k: lbg.data_nrm[k] for k in self.buffer_wells})
-                for lbg in self.labelblocksgroups
-            ]
-            self._fit_buffer(self._buffers_nrm)  # fit
-        return self._buffers_nrm
-
-    def _fit_buffer(self, buffer_dfs: list[pd.DataFrame]) -> None:
-        """Fit buffers of all labelblocksgroups."""
-
-        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
-            """Define linear model function."""
-            return pars[0] * x + pars[1]
-
-        def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
-            x = x[:, np.newaxis]  # Ensure x is a 2D array
-            jacobian = np.concatenate((x, np.ones((x.shape[0], 1))), axis=1)
-            fit_variance: ArrayF = np.einsum(
-                "ij,jk,ik->i", jacobian, cov_matrix, jacobian
-            )
-            return np.sqrt(fit_variance)  # Standard error
-
-        for lbl_n, buf_df in enumerate(buffer_dfs, start=1):
-            if not buf_df.empty:
-                mean = buf_df.mean(axis=1).to_numpy()
-                sem = buf_df.sem(axis=1).to_numpy()
-                data = RealData(self.conc, mean, sy=sem)
-                model = Model(linear_model)
-                # Initial guess for slope and intercept
-                odr = ODR(data, model, beta0=[0.0, mean.mean()])
-                output = odr.run()
-                # Extract the best-fit parameters and their standard errors
-                m_best, b_best = output.beta
-                m_err, b_err = output.sd_beta
-                cov_matrix = output.cov_beta
-                print(
-                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
-                )
-                buf_df["Label"] = lbl_n
-                buf_df["fit"] = m_best * self.conc + b_best
-                buf_df["fit_err"] = fit_error(self.conc, cov_matrix)
-                buf_df["mean"] = mean
-                buf_df["sem"] = sem
 
     def fit(self) -> list[dict[str, FitResult]]:
         """Fit titrations.
@@ -1497,7 +1592,6 @@ class Titration(TecanfilesGroup):
                 lb.metadata["Temperature"].value for lb in lbg.labelblocks
             ]
         pp = PlotParameters(is_ph=self.is_ph)
-        print(type(pp.kind))
         temperatures[pp.kind] = self.conc.tolist()
         data = pd.DataFrame(temperatures)
         data = data.melt(id_vars=pp.kind, var_name="Label", value_name="Temperature")
@@ -1536,65 +1630,6 @@ class Titration(TecanfilesGroup):
         plt.legend(title="Label")
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
-
-    def plot_buffer(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
-        """Plot buffers of all labelblocksgroups."""
-        buffer_dfs = self.buffers_nrm if nrm else self.buffers
-        if not buffer_dfs or not self.buffer_wells:
-            return sns.catplot()
-        pp = PlotParameters(is_ph=self.is_ph)
-        melted_buffers = []
-        wells_lbl = self.buffer_wells.copy()
-        wells_lbl.extend(["Label"])
-        for buf_df in buffer_dfs:
-            if not buf_df.empty:
-                buffer = buf_df[wells_lbl].copy()
-                buffer[pp.kind] = self.conc
-                melted_buffers.append(
-                    buffer.melt(
-                        id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
-                    )
-                )
-        # Combine data from both buffers
-        data = pd.concat(melted_buffers, ignore_index=True)
-        g = sns.lmplot(
-            data=data,
-            y="F",
-            x=pp.kind,
-            ci=68,
-            height=4,
-            aspect=1.75,
-            row="Label",
-            x_estimator=np.median,
-            markers="x",
-            scatter=1,
-            scatter_kws={"alpha": 0.33},
-            facet_kws={"sharey": False},
-        )
-        num_labels = np.sum([not b_df.empty for b_df in buffer_dfs])
-        for label_n in range(1, num_labels + 1):
-            sns.scatterplot(
-                data=data[data.Label == label_n],
-                y="F",
-                x=pp.kind,
-                hue="well",
-                ax=g.axes_dict[label_n],
-                legend=label_n == num_labels,
-            )
-            g.axes_dict[label_n].errorbar(
-                x=self.conc,
-                y=buffer_dfs[label_n - 1]["fit"],
-                yerr=buffer_dfs[label_n - 1]["fit_err"],
-                xerr=0.1,
-                fmt="",
-                color="r",
-                linewidth=2,
-                capsize=6,
-            )
-        if title:
-            plt.suptitle(title, fontsize=14, x=0.96, ha="right")
-        plt.close()
-        return g
 
     def export_png(self, lb: int, path: str | Path) -> None:
         """Export png like lb1/ lb2/ lb1_lb2/."""
