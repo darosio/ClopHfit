@@ -503,7 +503,7 @@ class TestTitration:
 
     def test_data_buffersubtracted(self, tit: Titration) -> None:
         """Check data after normalization and bg subtraction."""
-        tit.buffer_wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        tit.buffer.wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
         tit.params.nrm = False
         assert tit.data[0]
         assert tit.data[1] == {}
@@ -548,13 +548,13 @@ class TestTitration:
 
     def test_data_bg_and_nrm(self, tit1: Titration) -> None:
         """Calculate buffer value from average of buffer wells and subtract."""
-        tit1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        tit1.buffer.wells = ["D01", "D12", "E01", "E12"]
         tit1.params.nrm = False
         tit1.params.dil = False
         tit1.params.bg = False
         tit1.bg = [np.array([11889.25]), np.array([56.75])]
-        assert tit1.buffers[0]["sem"][0] == pytest.approx(259.9514)
-        assert tit1.buffers[1]["sem"][0] == pytest.approx(2.561738)
+        assert tit1.buffer.dataframes[0]["sem"][0] == pytest.approx(259.9514)
+        assert tit1.buffer.dataframes[1]["sem"][0] == pytest.approx(2.561738)
         tit1.params.bg = True
         assert tit1.data[0]["F06"][0] == pytest.approx(7661.75)
         assert tit1.data[1]["H12"][0] == pytest.approx(486.25)
@@ -563,14 +563,14 @@ class TestTitration:
         assert tit1.data[0]["F06"][0] == 19550
         assert tit1.data[1]["H12"][0] == 540.1
         # nrm
-        assert tit1.buffers_nrm[0]["fit"][0] == pytest.approx(639.20699)
-        assert tit1.buffers_nrm[0]["mean"][0] == pytest.approx(639.20699)
-        assert tit1.buffers_nrm[1]["fit"][0] == pytest.approx(5.06696)
-        assert tit1.buffers_nrm[0]["sem"][0] == pytest.approx(13.97588)
-        assert tit1.buffers_nrm[1]["sem"][0] == pytest.approx(0.2287266)
+        assert tit1.buffer.dataframes_nrm[0]["fit"][0] == pytest.approx(639.20699)
+        assert tit1.buffer.dataframes_nrm[0]["mean"][0] == pytest.approx(639.20699)
+        assert tit1.buffer.dataframes_nrm[1]["fit"][0] == pytest.approx(5.06696)
+        assert tit1.buffer.dataframes_nrm[0]["sem"][0] == pytest.approx(13.97588)
+        assert tit1.buffer.dataframes_nrm[1]["sem"][0] == pytest.approx(0.2287266)
         # also bg duplicates data in buffers_nrm
         tit1.params.nrm = True
-        tit1.buffer_wells = ["D01", "D12", "E01", "E12"]
+        tit1.buffer.wells = ["D01", "D12", "E01", "E12"]
         assert tit1.bg[0][0] == pytest.approx(639.20699)
         assert tit1.bg[1] == pytest.approx(5.06696)
         # nrm data
@@ -645,7 +645,7 @@ class TestTitrationAnalysis:
     def test_scheme(self, titan: Titration) -> None:
         """It finds well position for buffer samples."""
         assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
-        assert titan.buffer_wells == ["D01", "E01", "D12", "E12"]
+        assert titan.buffer.wells == ["D01", "E01", "D12", "E12"]
 
     def test_raise_listfilenotfound(self, titan: Titration) -> None:
         """It raises OSError when scheme file does not exist."""
@@ -747,30 +747,30 @@ class TestTitrationAnalysis:
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
-        g = titan.plot_buffer(title="Test Title")
+        g = titan.buffer.plot(title="Test Title")
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
         assert g.fig._suptitle.get_text() == "Test Title"  # noqa: SLF001
 
     def test_plot_buffer_normalized(self, titan: Titration) -> None:
         """It plots buffers_norm for 2 lbg."""
-        g = titan.plot_buffer(nrm=True)
+        g = titan.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
 
     def test_plot_buffer_empty_buffers(self, titan_no_scheme: Titration) -> None:
         """It handles empty buffers (before assignment of buffer_wells)."""
-        g = titan_no_scheme.plot_buffer()
+        g = titan_no_scheme.buffer.plot()
         assert isinstance(g, sns.FacetGrid)
 
     def test_plot_buffer_1lbg(self, titan_1lbg: Titration) -> None:
         """It plots buffers_norm in the case of 1 mergeable lbg."""
-        g = titan_1lbg.plot_buffer()
+        g = titan_1lbg.buffer.plot()
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 1
 
     def test_plot_buffer_1lbg_normalized(self, titan_1lbg: Titration) -> None:
         """It plots buffers_norm in the case of 1 mergeable lbg."""
-        g = titan_1lbg.plot_buffer(nrm=True)
+        g = titan_1lbg.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
