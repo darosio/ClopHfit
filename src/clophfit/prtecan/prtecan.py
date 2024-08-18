@@ -1140,7 +1140,113 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    def export_data(  # noqa: PLR0915,C901
+    def _generate_combinations(
+        self, all_combinations: bool = True
+    ) -> list[tuple[tuple[bool, ...], str]]:
+        """Generate parameter combinations for export and fitting."""
+        if all_combinations:
+            bool_iter = itertools.product([False, True], repeat=4)
+            return [
+                (tuple(bool_combo), method)
+                for bool_combo in bool_iter
+                for method in ["mean", "fit"]
+            ]
+        pars = self.params
+        return [((pars.bg, pars.bg_adjust, pars.dil, pars.nrm), pars.bg_method)]
+
+    def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
+        """Apply a combination of parameters to the Titration."""
+        (bg, adj, dil, nrm), method = combination
+        self.params.bg = bg
+        self.params.bg_adjust = adj
+        self.params.dil = dil
+        self.params.nrm = nrm
+        self.params.bg_method = method
+
+    def _prepare_output_folder(
+        self, base_path: Path, combination: tuple[tuple[bool, ...], str]
+    ) -> Path:
+        """Prepare the output folder for a given combination of parameters."""
+        (bg, adj, dil, nrm), method = combination
+        sbg = "_bg" if bg else ""
+        sadj = "_adj" if adj else ""
+        sdil = "_dil" if dil else ""
+        snrm = "_nrm" if nrm else ""
+        sfit = "_fit" if method == "fit" else ""
+        subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit
+        subfolder = base_path / subfolder_name
+        subfolder.mkdir(parents=True, exist_ok=True)
+        return subfolder
+
+    @dataclass
+    class _ExportConfig:
+        out_fp: Path
+        verbose: int
+        # NEXT: Use empty tuple instead
+        klim: tuple[float, float] | None
+        sel: tuple[float, float] | None
+        fit_all: bool = False
+        fit: bool = False
+        title: str = ""
+        png: bool = False
+        pdf: bool = False
+
+    def _export_fit(self, subfolder: Path, config: _ExportConfig) -> None:
+        outfit = subfolder / "1fit"
+        outfit.mkdir(parents=True, exist_ok=True)
+
+        for i, fit in enumerate(self.result_dfs):
+            if config.verbose:
+                try:
+                    print(fit)
+                    print(config.klim)
+                    meta = self.labelblocksgroups[i].metadata
+                    print("-" * 79)
+                    print(f"\nlabel{i:d}")
+                    pprint.pprint(meta)
+                except IndexError:
+                    print("-" * 79)
+                    print("\nGlobal on both labels")
+                self.print_fitting(i)
+            # CSV tables
+            fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
+            if "S1_y1" in fit.columns:
+                order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0"]
+                order.extend(["sS1_y0", "S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
+                ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
+            else:
+                order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
+                order.extend(["S1_default", "sS1_default"])
+                ebar_y, ebar_yerr = "S1_default", "sS1_default"
+            out_df = fit.reindex(order, axis=1).sort_index()
+            out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
+            # Plots
+            plotter = TitrationPlotter(self)
+            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.klim, title="title")
+            f.savefig(outfit / f"K{i}.png")
+            f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title="title")
+            f.savefig(outfit / f"ebar{i}.png")
+            if config.sel and config.sel[0] and config.sel[1]:
+                xmin = float(config.sel[0]) if self.is_ph else None
+                xmax = float(config.sel[0]) if not self.is_ph else None
+                ymin = float(config.sel[1])
+                f = plotter.plot_ebar(
+                    i,
+                    ebar_y,
+                    ebar_yerr,
+                    xmin=xmin,
+                    xmax=xmax,
+                    ymin=ymin,
+                    title=config.title,
+                )
+                f.savefig(outfit / f"ebar{i}_sel{xmin},{ymin}.png")
+            if config.png:
+                self.export_png(i, outfit)
+        if config.pdf:
+            # FIXME: export pdf
+            plotter.plot_all_wells(2, outfit / "all_wells.pdf")
+
+    def export_data_fit(
         self,
         out_fp: Path,
         verbose: int,
@@ -1154,6 +1260,9 @@ class Titration(TecanfilesGroup):
         title = str(options.get("title", ""))
         png = bool(options.get("png", False))
         pdf = bool(options.get("pdf", False))
+        config = self._ExportConfig(
+            out_fp, verbose, klim, sel, export_all, run_fit, title, png, pdf
+        )
 
         def write(
             conc: ArrayF, data: list[dict[str, ArrayF]], out_folder: Path
@@ -1168,86 +1277,13 @@ class Titration(TecanfilesGroup):
                     datxy.to_csv(out_folder / f"{key}.dat", index=False)
 
         saved_p = copy.copy(self.params)
-        if export_all:
-            bool_iter = itertools.product([False, True], repeat=4)
-            combinations = list(itertools.product(bool_iter, ["mean", "fit"]))
-        else:
-            combinations = [
-                (
-                    (saved_p.bg, saved_p.bg_adjust, saved_p.dil, saved_p.nrm),
-                    saved_p.bg_method,
-                )
-            ]
-        # for bg_method in ["mean", "fit"]:
-        for (bg, adj, dil, nrm), mth in combinations:
-            self.params.bg = bg
-            self.params.bg_adjust = adj
-            self.params.dil = dil
-            self.params.nrm = nrm
-            self.params.bg_method = mth
-            sbg = "_bg" if bg else ""
-            sadj = "_adj" if adj else ""
-            sdil = "_dil" if dil else ""
-            snrm = "_nrm" if nrm else ""
-            sfit = "_fit" if self.params.bg_method == "fit" else ""
-            out = "dat" + sbg + sadj + sdil + snrm + sfit
-            subfolder = out_fp / out
+        combinations = self._generate_combinations(export_all)
+        for combination in combinations:
+            self._apply_combination(combination)
+            subfolder = self._prepare_output_folder(out_fp, combination)
             write(self.conc, [dd for dd in self.data if dd], subfolder)
             if run_fit:
-                outfit = subfolder / "1fit"
-                outfit.mkdir(parents=True, exist_ok=True)
-
-                for i, fit in enumerate(self.result_dfs):
-                    if verbose:
-                        try:
-                            print(fit)
-                            print(klim)
-                            meta = self.labelblocksgroups[i].metadata
-                            print("-" * 79)
-                            print(f"\nlabel{i:d}")
-                            pprint.pprint(meta)
-                        except IndexError:
-                            print("-" * 79)
-                            print("\nGlobal on both labels")
-                        self.print_fitting(i)
-                    # CSV tables
-                    fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
-                    if "S1_y1" in fit.columns:
-                        order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0"]
-                        order.extend(["sS1_y0", "S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
-                        ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
-                    else:
-                        order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
-                        order.extend(["S1_default", "sS1_default"])
-                        ebar_y, ebar_yerr = "S1_default", "sS1_default"
-                    out_df = fit.reindex(order, axis=1).sort_index()
-                    out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
-                    # Plots
-                    plotter = TitrationPlotter(self)
-                    f = plotter.plot_k(i, hue_column=ebar_y, xlim=klim, title="title")
-                    f.savefig(outfit / f"K{i}.png")
-                    f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title="title")
-                    f.savefig(outfit / f"ebar{i}.png")
-                    if sel and sel[0] and sel[1]:
-                        xmin = float(sel[0]) if self.is_ph else None
-                        xmax = float(sel[0]) if not self.is_ph else None
-                        ymin = float(sel[1])
-                        f = plotter.plot_ebar(
-                            i,
-                            ebar_y,
-                            ebar_yerr,
-                            xmin=xmin,
-                            xmax=xmax,
-                            ymin=ymin,
-                            title=title,
-                        )
-                        f.savefig(outfit / f"ebar{i}_sel{xmin},{ymin}.png")
-                    if png:
-                        self.export_png(i, outfit)
-                if pdf:
-                    # FIXME: export pdf
-                    plotter.plot_all_wells(2, outfit / "all_wells.pdf")
-
+                self._export_fit(subfolder, config)
         self.params = saved_p
 
     @property
@@ -1440,10 +1476,8 @@ class Titration(TecanfilesGroup):
                 v.figure.savefig(folder / f"{k}.png")
 
 
-# TODO: Move here all plots
 # TODO: refactor plots
 # TODO: Test plots
-# TODO: refactor export
 @dataclass
 class TitrationPlotter:
     """Class responsible for plotting Titration data."""

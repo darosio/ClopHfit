@@ -127,7 +127,7 @@ def tecan(  # noqa: PLR0913
         # ``as bg requires scheme even though scheme does not imply bg```
         warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
 
-    tit.export_data(out_fp, verbose, klim, sel, **options)
+    tit.export_data_fit(out_fp, verbose, klim, sel, **options)
 
 
 ########################################
