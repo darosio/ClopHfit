@@ -528,7 +528,7 @@ class TestTitration:
         tit_ph.params.bg = False
         tit_ph.params.dil = False
         tit_ph.params.nrm = False
-        tit_ph.export_data(tmp_path, verbose=False, sel=None, klim=None)
+        tit_ph.export_data_fit(tmp_path, verbose=False, sel=None, klim=None)
         a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")
         h12 = pd.read_csv(tmp_path / "dat" / "H12.dat")
         assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
