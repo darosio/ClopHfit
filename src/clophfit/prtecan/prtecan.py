@@ -714,14 +714,6 @@ class TitrationConfig:
             self._trigger_callback()
 
 
-# TODO: TitrationPlotter init with a tit within a Manager
-@dataclass
-class TitrationPlotter:
-    """Generate various plot for a titration."""
-
-    tit: Titration
-
-
 @dataclass
 class Buffer:
     """Buffer handling for a titration."""
@@ -1231,15 +1223,16 @@ class Titration(TecanfilesGroup):
                     out_df = fit.reindex(order, axis=1).sort_index()
                     out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
                     # Plots
-                    f = self.plot_k(i, hue_column=ebar_y, xlim=klim, title="title")
+                    plotter = TitrationPlotter(self)
+                    f = plotter.plot_k(i, hue_column=ebar_y, xlim=klim, title="title")
                     f.savefig(outfit / f"K{i}.png")
-                    f = self.plot_ebar(i, ebar_y, ebar_yerr, title="title")
+                    f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title="title")
                     f.savefig(outfit / f"ebar{i}.png")
                     if sel and sel[0] and sel[1]:
                         xmin = float(sel[0]) if self.is_ph else None
                         xmax = float(sel[0]) if not self.is_ph else None
                         ymin = float(sel[1])
-                        f = self.plot_ebar(
+                        f = plotter.plot_ebar(
                             i,
                             ebar_y,
                             ebar_yerr,
@@ -1253,7 +1246,7 @@ class Titration(TecanfilesGroup):
                         self.export_png(i, outfit)
                 if pdf:
                     # FIXME: export pdf
-                    self.plot_all_wells(2, outfit / "all_wells.pdf")
+                    plotter.plot_all_wells(2, outfit / "all_wells.pdf")
 
         self.params = saved_p
 
@@ -1347,200 +1340,6 @@ class Titration(TecanfilesGroup):
                     fitting[k] = FitResult(None, None, None)
             fittings.append(fitting)
         return fittings
-
-    def plot_k(
-        self,
-        lb: int,
-        hue_column: str,
-        xlim: tuple[float, float] | None = None,
-        title: str | None = None,
-    ) -> figure.Figure:
-        """Plot K values as stripplot.
-
-        Parameters
-        ----------
-        lb: int
-            Labelblock index.
-        hue_column: str
-            Column in `fitresults_df` used for color-coding data points in the
-            stripplot.
-        xlim : tuple[float, float] | None, optional
-            Range.
-        title : str | None, optional
-            To name the plot.
-
-        Returns
-        -------
-        figure.Figure
-            The figure.
-        """
-        sns.set(style="whitegrid")
-        f = plt.figure(figsize=(12, 16))
-        # Ctrl
-        ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-        if len(self.scheme.ctrl) > 0:
-            res_ctrl = self.result_dfs[lb].loc[self.scheme.ctrl].sort_values("ctrl")
-            sns.stripplot(
-                x=res_ctrl["K"],
-                y=res_ctrl.index,
-                size=8,
-                orient="h",
-                hue=res_ctrl.ctrl,
-                ax=ax1,
-            )
-            plt.legend(loc="upper left", frameon=False)
-            plt.errorbar(
-                res_ctrl.K,
-                range(len(res_ctrl)),
-                xerr=res_ctrl["sK"],
-                fmt=".",
-                c="lightgray",
-                lw=8,
-            )
-            plt.grid(True, axis="both")
-        # Unk
-        res_unk = self.result_dfs[lb].loc[self.keys_unk].sort_index(ascending=False)
-        # Compute 'K - 2*sK' for each row in res_unk
-        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
-        # Sort the DataFrame by this computed value in descending order
-        res_unk = res_unk.sort_values(by="sort_val", ascending=True)
-        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        sns.stripplot(
-            x=res_unk["K"],
-            y=res_unk.index,
-            size=12,
-            orient="h",
-            palette="Blues",
-            hue=res_unk[hue_column],
-            ax=ax2,
-        )
-        plt.legend(loc="upper left", frameon=False)
-        plt.errorbar(
-            res_unk["K"],
-            range(len(res_unk)),
-            xerr=res_unk["sK"],
-            fmt=".",
-            c="gray",
-            lw=2,
-        )
-        ytick_labels = [str(label) for label in res_unk.index]
-        plt.yticks(range(len(res_unk)), ytick_labels)
-        plt.ylim(-1, len(res_unk))
-        plt.grid(True, axis="both")
-        if not xlim:
-            xlim = (res_unk["K"].min(), res_unk["K"].max())
-            if len(self.scheme.ctrl) > 0:
-                xlim = (
-                    0.99 * min(res_ctrl["K"].min(), xlim[0]),
-                    1.01 * max(res_ctrl["K"].max(), xlim[1]),
-                )
-            xlim = (0.99 * xlim[0], 1.01 * xlim[1])
-        ax1.set_xlim(xlim)
-        ax2.set_xlim(xlim)
-        ax1.set_xticklabels([])
-        ax1.set_xlabel("")
-        title = title if title else ""
-        title += "  label:" + str(lb)
-        f.suptitle(title, fontsize=16)
-        f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
-        return f
-
-    def plot_all_wells(self, lb: int, path: str | Path) -> None:
-        """Plot all wells into a pdf."""
-        # Create a PdfPages object
-        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
-        # TODO: Order.
-        """
-        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-            out.savefig(self.plot_well(str(k)))
-        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
-            out.savefig(self.plot_well(str(k)))
-        """
-        for lbl, fr in self.results[lb].items():
-            fig = fr.figure
-            if fig is not None:
-                # A4 size in inches. You can adjust this as per your need.
-                fig.set_size_inches((8.27, 11.69))
-                # Get the first axes in the figure to adjust the positions
-                ax = fig.get_axes()[0]
-                # Adjust position as needed. Values are [left, bottom, width, height]
-                ax.set_position((0.1, 0.5, 0.8, 0.4))
-                # Create a new axes for the text
-                text_ax = fig.add_axes((0.1, 0.05, 0.8, 0.35))  # Adjust as needed
-                text = lmfit.printfuncs.fit_report(self.results[lb][lbl].result)
-                text_ax.text(0.0, 0.0, text, fontsize=14)
-                text_ax.axis("off")  # Hide the axes for the text
-                # Save the figure into the PDF
-                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore[no-untyped-call]
-        # Close the PdfPages object
-        pdf_pages.close()  # type: ignore[no-untyped-call]
-        # Close all the figures
-        plt.close("all")
-
-    def plot_ebar(  # noqa: PLR0913
-        self,
-        lb: int,
-        y: str,
-        yerr: str,
-        x: str = "K",
-        xerr: str = "sK",
-        xmin: float | None = None,
-        ymin: float | None = None,
-        xmax: float | None = None,
-        title: str | None = None,
-    ) -> figure.Figure:
-        """Plot SA vs.
-
-        K with errorbar for the whole plate.
-        """
-        fit_df = self.result_dfs[lb]
-        with plt.style.context("fivethirtyeight"):
-            f = plt.figure(figsize=(10, 10))
-            if xmin:
-                fit_df = fit_df[fit_df[x] > xmin]
-            if xmax:
-                fit_df = fit_df[fit_df[x] < xmax]
-            if ymin:
-                fit_df = fit_df[fit_df[y] > ymin]
-            with suppress(ValueError):
-                plt.errorbar(
-                    fit_df[x],
-                    fit_df[y],
-                    xerr=fit_df[xerr],
-                    yerr=fit_df[yerr],
-                    fmt="o",
-                    elinewidth=1,
-                    markersize=10,
-                    alpha=0.7,
-                )
-            if "ctrl" not in fit_df:
-                fit_df["ctrl"] = 0
-            fit_df = fit_df[~np.isnan(fit_df[x])]
-            fit_df = fit_df[~np.isnan(fit_df[y])]
-            for idx, xv, yv, l in zip(  # noqa: E741
-                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"], strict=False
-            ):
-                # x or y do not exist.# try:
-                if isinstance(l, str):
-                    color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
-                    plt.text(xv, yv, l, fontsize=13, color=color)
-                else:
-                    plt.text(xv, yv, idx, fontsize=12)
-                # x or y do not exist.# except:
-                # x or y do not exist.# continue
-            plt.yscale("log")
-            # min(x) can be = NaN
-            min_x = min(max([0.01, fit_df[x].min()]), 14)
-            min_y = min(max([0.01, fit_df[y].min()]), 5000)
-            plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
-            plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
-            plt.grid(True, axis="both")
-            plt.ylabel(y)
-            plt.xlabel(x)
-            title = title if title else ""
-            title += "  label:" + str(lb)
-            plt.title(title, fontsize=15)
-            return f
 
     def print_fitting(self, lb: int) -> None:
         """Print fitting parameters for the whole plate."""
@@ -1639,3 +1438,221 @@ class Titration(TecanfilesGroup):
         for k, v in self.results[lb].items():
             if v.figure:
                 v.figure.savefig(folder / f"{k}.png")
+
+
+# TODO: Move here all plots
+# TODO: refactor plots
+# TODO: Test plots
+# TODO: refactor export
+@dataclass
+class TitrationPlotter:
+    """Class responsible for plotting Titration data."""
+
+    tit: Titration
+
+    def plot_k(
+        self,
+        lb: int,
+        hue_column: str,
+        xlim: tuple[float, float] | None = None,
+        title: str = "",
+    ) -> figure.Figure:
+        """Plot K values as stripplot.
+
+        Parameters
+        ----------
+        lb: int
+            Labelblock index.
+        hue_column: str
+            Column in `fitresults_df` used for color-coding data points in the
+            stripplot.
+        xlim : tuple[float, float] | None, optional
+            Range.
+        title : str, optional
+            To name the plot.
+
+        Returns
+        -------
+        figure.Figure
+            The figure.
+        """
+        sns.set(style="whitegrid")
+        f = plt.figure(figsize=(12, 16))
+        # Ctrl
+        ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
+        if len(self.tit.scheme.ctrl) > 0:
+            res_ctrl = (
+                self.tit.result_dfs[lb].loc[self.tit.scheme.ctrl].sort_values("ctrl")
+            )
+            sns.stripplot(
+                x=res_ctrl["K"],
+                y=res_ctrl.index,
+                size=8,
+                orient="h",
+                hue=res_ctrl.ctrl,
+                ax=ax1,
+            )
+            plt.legend(loc="upper left", frameon=False)
+            plt.errorbar(
+                res_ctrl.K,
+                range(len(res_ctrl)),
+                xerr=res_ctrl["sK"],
+                fmt=".",
+                c="lightgray",
+                lw=8,
+            )
+            plt.grid(True, axis="both")
+        # Unk
+        res_unk = (
+            self.tit.result_dfs[lb].loc[self.tit.keys_unk].sort_index(ascending=False)
+        )
+        # Compute 'K - 2*sK' for each row in res_unk
+        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
+        # Sort the DataFrame by this computed value in descending order
+        res_unk = res_unk.sort_values(by="sort_val", ascending=True)
+        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
+        sns.stripplot(
+            x=res_unk["K"],
+            y=res_unk.index,
+            size=12,
+            orient="h",
+            palette="Blues",
+            hue=res_unk[hue_column],
+            ax=ax2,
+        )
+        plt.legend(loc="upper left", frameon=False)
+        plt.errorbar(
+            res_unk["K"],
+            range(len(res_unk)),
+            xerr=res_unk["sK"],
+            fmt=".",
+            c="gray",
+            lw=2,
+        )
+        ytick_labels = [str(label) for label in res_unk.index]
+        plt.yticks(range(len(res_unk)), ytick_labels)
+        plt.ylim(-1, len(res_unk))
+        plt.grid(True, axis="both")
+        xlim = self._determine_xlim(res_ctrl, res_unk, xlim)
+        # Configure axis and title
+        ax1.set_xlim(xlim)
+        ax2.set_xlim(xlim)
+        ax1.set_xticklabels([])
+        ax1.set_xlabel("")
+        title += "  label:" + str(lb)
+        f.suptitle(title, fontsize=16)
+        f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
+        return f
+
+    def _determine_xlim(
+        self,
+        res_ctrl: pd.DataFrame | None,
+        res_unk: pd.DataFrame,
+        xlim: tuple[float, float] | None,
+    ) -> tuple[float, float]:
+        if not xlim:
+            xlim = (res_unk["K"].min(), res_unk["K"].max())
+            if res_ctrl is not None:
+                xlim = (
+                    0.99 * min(res_ctrl["K"].min(), xlim[0]),
+                    1.01 * max(res_ctrl["K"].max(), xlim[1]),
+                )
+                xlim = (0.99 * xlim[0], 1.01 * xlim[1])
+        return xlim
+
+    def plot_all_wells(self, lb: int, path: str | Path) -> None:
+        """Plot all wells into a pdf."""
+        # Create a PdfPages object
+        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
+        # TODO: Order.
+        """
+        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
+            out.savefig(self.plot_well(str(k)))
+        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
+            out.savefig(self.plot_well(str(k)))
+        """
+        for lbl, fr in self.tit.results[lb].items():
+            fig = fr.figure
+            if fig is not None:
+                # A4 size in inches. You can adjust this as per your need.
+                fig.set_size_inches((8.27, 11.69))
+                # Get the first axes in the figure to adjust the positions
+                ax = fig.get_axes()[0]
+                # Adjust position as needed. Values are [left, bottom, width, height]
+                ax.set_position((0.1, 0.5, 0.8, 0.4))
+                # Create a new axes for the text
+                text_ax = fig.add_axes((0.1, 0.05, 0.8, 0.35))  # Adjust as needed
+                text = lmfit.printfuncs.fit_report(self.tit.results[lb][lbl].result)
+                text_ax.text(0.0, 0.0, text, fontsize=14)
+                text_ax.axis("off")  # Hide the axes for the text
+                # Save the figure into the PDF
+                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore[no-untyped-call]
+        # Close the PdfPages object
+        pdf_pages.close()  # type: ignore[no-untyped-call]
+        # Close all the figures
+        plt.close("all")
+
+    def plot_ebar(  # noqa: PLR0913
+        self,
+        lb: int,
+        y: str,
+        yerr: str,
+        x: str = "K",
+        xerr: str = "sK",
+        xmin: float | None = None,
+        ymin: float | None = None,
+        xmax: float | None = None,
+        title: str | None = None,
+    ) -> figure.Figure:
+        """Plot SA vs.
+
+        K with errorbar for the whole plate.
+        """
+        fit_df = self.tit.result_dfs[lb]
+        with plt.style.context("fivethirtyeight"):
+            f = plt.figure(figsize=(10, 10))
+            if xmin:
+                fit_df = fit_df[fit_df[x] > xmin]
+            if xmax:
+                fit_df = fit_df[fit_df[x] < xmax]
+            if ymin:
+                fit_df = fit_df[fit_df[y] > ymin]
+            with suppress(ValueError):
+                plt.errorbar(
+                    fit_df[x],
+                    fit_df[y],
+                    xerr=fit_df[xerr],
+                    yerr=fit_df[yerr],
+                    fmt="o",
+                    elinewidth=1,
+                    markersize=10,
+                    alpha=0.7,
+                )
+            if "ctrl" not in fit_df:
+                fit_df["ctrl"] = 0
+            fit_df = fit_df[~np.isnan(fit_df[x])]
+            fit_df = fit_df[~np.isnan(fit_df[y])]
+            for idx, xv, yv, l in zip(  # noqa: E741
+                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"], strict=False
+            ):
+                # x or y do not exist.# try:
+                if isinstance(l, str):
+                    color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
+                    plt.text(xv, yv, l, fontsize=13, color=color)
+                else:
+                    plt.text(xv, yv, idx, fontsize=12)
+                # x or y do not exist.# except:
+                # x or y do not exist.# continue
+            plt.yscale("log")
+            # min(x) can be = NaN
+            min_x = min(max([0.01, fit_df[x].min()]), 14)
+            min_y = min(max([0.01, fit_df[y].min()]), 5000)
+            plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
+            plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
+            plt.grid(True, axis="both")
+            plt.ylabel(y)
+            plt.xlabel(x)
+            title = title if title else ""
+            title += "  label:" + str(lb)
+            plt.title(title, fontsize=15)
+            return f
