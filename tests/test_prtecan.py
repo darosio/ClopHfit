@@ -343,7 +343,7 @@ class TestTecanfilesGroup:
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
 
-        @pytest.fixture()
+        @pytest.fixture
         def tfg_warn(
             self, caplog: pytest.LogCaptureFixture
         ) -> tuple[TecanfilesGroup, list[logging.LogRecord]]:
@@ -400,7 +400,7 @@ class TestTecanfilesGroup:
     class TestOnly1commonLbg:
         """Test TfG with different number of labelblocks, but mergeable."""
 
-        @pytest.fixture()
+        @pytest.fixture
         def tfg_warn(
             self, caplog: pytest.LogCaptureFixture
         ) -> tuple[TecanfilesGroup, list[logging.LogRecord]]:
@@ -458,7 +458,7 @@ class TestTecanfilesGroup:
 class TestTitration:
     """Test Titration class."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def tit(self) -> Titration:
         """Set up L1 pH titration."""
         return prtecan.Titration.fromlistfile(data_tests / "L1" / "list.pH", is_ph=True)
