@@ -118,7 +118,7 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         result = runner.invoke(
             ppr,
-            ["--out", out, "tecan", list_f, "--fit", "--scheme", scheme_f, "--bg"],
+            ["--out", out, "tecan", list_f, "--fit", "--sch", scheme_f, "--bg"],
         )
     assert any("OVER" in record.message for record in caplog.records), "OVER not found"
     assert result.exit_code == 0
@@ -132,8 +132,8 @@ def test_prtecan_cl(tmp_path: Path) -> None:
     out = tmp_path / "out4"
     out.mkdir()
     runner = CliRunner()
-    base_args = ["--out", str(out), "tecan", list_f, "--no-fit", "--scheme", scheme_f]
-    base_args.extend(["--dil", adds_f, "--bg", "--no-is-ph"])
+    base_args = ["--out", str(out), "tecan", list_f, "--no-fit", "--sch", scheme_f]
+    base_args.extend(["--add", adds_f, "--bg", "--no-is-ph"])
     result = runner.invoke(ppr, base_args)
     assert result.exit_code == 0
 
