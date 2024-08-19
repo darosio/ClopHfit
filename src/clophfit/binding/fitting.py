@@ -489,7 +489,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
     if failed_fit_labels:
         minimum_weight = np.inf
         for lbl in ds.keys() - set(failed_fit_labels):
-            minimum_weight = min(np.min(w_d[lbl]), minimum_weight)  # type: ignore[assignment]
+            minimum_weight = min(np.min(w_d[lbl]).item(), minimum_weight)
         for lbl in failed_fit_labels:
             w_d[lbl] *= minimum_weight / 10
     ds.add_weights(w_d)
