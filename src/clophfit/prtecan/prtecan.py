@@ -1092,7 +1092,8 @@ class Titration(TecanfilesGroup):
             key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 30
         ) -> ArrayF:
             """Adjust negative values."""
-            # tolerance threshold =  max_val / 50
+            # alpha is a tolerance threshold and estimate of fluorescence ratio
+            # between bound and unbound states. Values shift up so that min=alpha.
             if y.min() < alpha * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
                 msg = f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
@@ -1243,8 +1244,8 @@ class Titration(TecanfilesGroup):
             if config.png:
                 self.export_png(i, outfit)
         if config.pdf:
-            # FIXME: export pdf
-            plotter.plot_all_wells(2, outfit / "all_wells.pdf")
+            # Export pdf for tentatively global result
+            plotter.plot_all_wells(-1, outfit / "all_wells.pdf")
 
     def export_data_fit(
         self,
