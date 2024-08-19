@@ -18,7 +18,7 @@ from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
 from clophfit.prenspire import EnspireFile
-from clophfit.prtecan import Titration
+from clophfit.prtecan import TecanConfig, Titration
 
 
 @click.group()
@@ -56,28 +56,40 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
 @click.option("--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH.")  # fmt: skip
-@click.option("--scheme", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
-@click.option("--dil", type=cPath(exists=True), help="Initial volume and additions.")
-@click.option("--Klim", type=(float, float), help="Range MIN, MAX of plot_K.")
+@click.option("--bg", is_flag=True, help="Subtract buffer (from scheme.txt).")
+@click.option("--bg-adj", is_flag=True, help="Adjust bg to avoid negative value.")
+@click.option("--dil", is_flag=True, help="Apply dilution correction.")
+@click.option("--nrm", is_flag=True, help="Normalize using metadata.")
+@click.option("--bg-mth", default="mean", show_default=True, help="Method for bg.")
+@click.option("--sch", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
+@click.option("--add", type=cPath(exists=True), help="Initial volume and additions.")
+@click.option(
+    "--all", "comb", is_flag=True, help="Export (fit) all corrections combinations."
+)
+@click.option("--lim", type=(float, float), help="Range MIN, MAX of plot_K.")
 @click.option("--sel", type=(float, float), help="Select from K_MIN S1_MIN.")
-@click.option("--bg", is_flag=True, help="Subtract buffer (scheme wells=='buffer').")
-@click.option("--bg_adjust", is_flag=True, help="Adjust bg to avoid negative value.")
-@click.option("--bg_method", default="mean", show_default=True, help="Method for bg.")
-@click.option("--norm", is_flag=True, help="Normalize using metadata (gain, flashes).")
+@click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
-@click.option("--fit-all", is_flag=True, help="Fit all exported data.")
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
-@click.option("--pdf", is_flag=True, help="Full report in pdf file.")
-@click.option("--title", "-t", type=str, default="", help="Title for some plots.")
+@click.option("--pdf/--no-pdf", default=False, show_default=True, help="Full report in pdf.")  # fmt: skip
 def tecan(  # noqa: PLR0913
     ctx: Context,
     list_file: str,
     is_ph: bool,
-    scheme: str | None,
-    dil: str | None,
-    klim: tuple[float, float] | None,
+    bg: bool,
+    bg_adj: bool,
+    dil: bool,
+    nrm: bool,
+    bg_mth: str,
+    sch: str | None,
+    add: str | None,
+    comb: bool,
+    lim: tuple[float, float] | None,
     sel: tuple[float, float] | None,
-    **options: dict[str, Path | str | bool | tuple[float, float]],
+    title: str,
+    fit: bool,
+    png: bool,
+    pdf: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
@@ -99,35 +111,38 @@ def tecan(  # noqa: PLR0913
     verbose: int = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
-    title = str(options.get("title", ""))
-    fit = bool(options.get("fit", True))
-    bg = bool(options.get("bg", True))
+    tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png, pdf)
     # Load titration
     list_fp = Path(list_file)
     tit = Titration.fromlistfile(list_fp, is_ph)
+    tit.params.bg = bg
+    tit.params.bg_adj = bg_adj
+    tit.params.dil = dil
+    tit.params.nrm = nrm
+    tit.params.bg_mth = bg_mth
     out_fp.mkdir(parents=True, exist_ok=True)
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in tit.labelblocksgroups:
             pprint.pprint(lbg.metadata, stream=fp)
     f = tit.plot_temperature(title=title)
     f.savefig(out_fp / "temperatures.png")
-    if scheme:
-        tit.load_scheme(Path(scheme))
+    if sch:
+        tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)
         f.savefig(out_fp / "buffer.png")
         f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
-    if dil:
-        tit.load_additions(Path(dil))
+    if add:
+        tit.load_additions(Path(add))
         # TODO: cl conc must be elsewhere; was under scheme:
         if not is_ph and tit.additions:
             tit.conc = prtecan.calculate_conc(tit.additions, 1000.0)
 
-    if fit and bg and not scheme:
+    if fit and bg and not sch:
         # ``as bg requires scheme even though scheme does not imply bg```
         warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
-
-    tit.export_data_fit(out_fp, verbose, klim, sel, **options)
+    print(tit.params)
+    tit.export_data_fit(tecan_config)
 
 
 ########################################

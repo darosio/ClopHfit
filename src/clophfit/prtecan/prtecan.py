@@ -688,11 +688,11 @@ class PlateScheme:
 class TitrationConfig:
     """Parameters defining the fitting data with callback support."""
 
-    nrm: bool = True
     bg: bool = True
+    bg_adj: bool = False
     dil: bool = True
-    bg_method: str = "mean"
-    bg_adjust: bool = False
+    nrm: bool = True
+    bg_mth: str = "mean"
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -792,7 +792,7 @@ class Buffer:
     def _compute_bg_and_sd(self) -> tuple[list[ArrayF], list[ArrayF]]:
         """Compute and return buffer values and their SEM."""
         buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
-        if self.tit.params.bg_method == "fit":
+        if self.tit.params.bg_mth == "fit":
             bg = [
                 bdf["fit"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
@@ -801,7 +801,7 @@ class Buffer:
                 bdf["fit_err"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
-        elif self.tit.params.bg_method == "mean":
+        elif self.tit.params.bg_mth == "mean":
             bg = [
                 bdf["mean"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
@@ -811,7 +811,7 @@ class Buffer:
                 for bdf in buffers
             ]
         else:
-            msg = f"Unknown bg_method: {self.tit.params.bg_method}"
+            msg = f"Unknown bg_method: {self.tit.params.bg_mth}"
             raise ValueError(msg)
         return bg, bg_sd
 
@@ -1118,7 +1118,7 @@ class Titration(TecanfilesGroup):
                     {k: v - bg for k, v in dd.items()}
                     for dd, bg in zip(data, self.bg, strict=True)
                 ]
-                if self.params.bg_adjust:
+                if self.params.bg_adj:
                     for i in range(self.n_labels):
                         label_str = self.labelblocksgroups[i].metadata["Label"].value
                         lbl_s = str(label_str)
@@ -1141,58 +1141,39 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    def _generate_combinations(
-        self, all_combinations: bool = True
-    ) -> list[tuple[tuple[bool, ...], str]]:
+    def _generate_combinations(self) -> list[tuple[tuple[bool, ...], str]]:
         """Generate parameter combinations for export and fitting."""
-        if all_combinations:
-            bool_iter = itertools.product([False, True], repeat=4)
-            return [
-                (tuple(bool_combo), method)
-                for bool_combo in bool_iter
-                for method in ["mean", "fit"]
-            ]
-        pars = self.params
-        return [((pars.bg, pars.bg_adjust, pars.dil, pars.nrm), pars.bg_method)]
+        bool_iter = itertools.product([False, True], repeat=4)
+        return [
+            (tuple(bool_combo), method)
+            for bool_combo in bool_iter
+            for method in ["mean", "fit"]
+        ]
 
     def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
         """Apply a combination of parameters to the Titration."""
         (bg, adj, dil, nrm), method = combination
+        print(f"Params are: ........... {(bg, adj, dil, nrm), method}")
         self.params.bg = bg
-        self.params.bg_adjust = adj
+        self.params.bg_adj = adj
         self.params.dil = dil
         self.params.nrm = nrm
-        self.params.bg_method = method
+        self.params.bg_mth = method
 
-    def _prepare_output_folder(
-        self, base_path: Path, combination: tuple[tuple[bool, ...], str]
-    ) -> Path:
+    def _prepare_output_folder(self, base_path: Path) -> Path:
         """Prepare the output folder for a given combination of parameters."""
-        (bg, adj, dil, nrm), method = combination
-        sbg = "_bg" if bg else ""
-        sadj = "_adj" if adj else ""
-        sdil = "_dil" if dil else ""
-        snrm = "_nrm" if nrm else ""
-        sfit = "_fit" if method == "fit" else ""
+        p = self.params
+        sbg = "_bg" if p.bg else ""
+        sadj = "_adj" if p.bg_adj else ""
+        sdil = "_dil" if p.dil else ""
+        snrm = "_nrm" if p.nrm else ""
+        sfit = "_fit" if p.bg_mth == "fit" else ""
         subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit
         subfolder = base_path / subfolder_name
         subfolder.mkdir(parents=True, exist_ok=True)
         return subfolder
 
-    @dataclass
-    class _ExportConfig:
-        out_fp: Path
-        verbose: int
-        # NEXT: Use empty tuple instead
-        klim: tuple[float, float] | None
-        sel: tuple[float, float] | None
-        fit_all: bool = False
-        fit: bool = False
-        title: str = ""
-        png: bool = False
-        pdf: bool = False
-
-    def _export_fit(self, subfolder: Path, config: _ExportConfig) -> None:
+    def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "1fit"
         outfit.mkdir(parents=True, exist_ok=True)
 
@@ -1200,7 +1181,7 @@ class Titration(TecanfilesGroup):
             if config.verbose:
                 try:
                     print(fit)
-                    print(config.klim)
+                    print(config.lim)
                     meta = self.labelblocksgroups[i].metadata
                     print("-" * 79)
                     print(f"\nlabel{i:d}")
@@ -1223,7 +1204,7 @@ class Titration(TecanfilesGroup):
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             # Plots
             plotter = TitrationPlotter(self)
-            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.klim, title="title")
+            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title="title")
             f.savefig(outfit / f"K{i}.png")
             f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title="title")
             f.savefig(outfit / f"ebar{i}.png")
@@ -1247,23 +1228,8 @@ class Titration(TecanfilesGroup):
             # Export pdf for tentatively global result
             plotter.plot_all_wells(-1, outfit / "all_wells.pdf")
 
-    def export_data_fit(
-        self,
-        out_fp: Path,
-        verbose: int,
-        klim: tuple[float, float] | None,
-        sel: tuple[float, float] | None,
-        **options: dict[str, Path | str | bool | tuple[float, float]],
-    ) -> None:
+    def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data."""
-        export_all = bool(options.get("fit_all", False))
-        run_fit = bool(options.get("fit", False))
-        title = str(options.get("title", ""))
-        png = bool(options.get("png", False))
-        pdf = bool(options.get("pdf", False))
-        config = self._ExportConfig(
-            out_fp, verbose, klim, sel, export_all, run_fit, title, png, pdf
-        )
 
         def write(
             conc: ArrayF, data: list[dict[str, ArrayF]], out_folder: Path
@@ -1277,15 +1243,21 @@ class Titration(TecanfilesGroup):
                     datxy = pd.DataFrame(dat.T, columns=columns)
                     datxy.to_csv(out_folder / f"{key}.dat", index=False)
 
-        saved_p = copy.copy(self.params)
-        combinations = self._generate_combinations(export_all)
-        for combination in combinations:
-            self._apply_combination(combination)
-            subfolder = self._prepare_output_folder(out_fp, combination)
+        if tecan_config.comb:
+            saved_p = copy.copy(self.params)
+            combinations = self._generate_combinations()
+            for combination in combinations:
+                self._apply_combination(combination)
+                subfolder = self._prepare_output_folder(tecan_config.out_fp)
+                write(self.conc, [dd for dd in self.data if dd], subfolder)
+                if tecan_config.fit:
+                    self._export_fit(subfolder, tecan_config)
+            self.params = saved_p
+        else:
+            subfolder = self._prepare_output_folder(tecan_config.out_fp)
             write(self.conc, [dd for dd in self.data if dd], subfolder)
-            if run_fit:
-                self._export_fit(subfolder, config)
-        self.params = saved_p
+            if tecan_config.fit:
+                self._export_fit(subfolder, tecan_config)
 
     @property
     def results(self) -> list[dict[str, FitResult]]:
@@ -1342,6 +1314,7 @@ class Titration(TecanfilesGroup):
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
 
         # TODO: Use sd array after proper masking
+        # NEXT: Fix bg_sd when scheme is None (add a test).
         weights = [1 / sd.mean() if sd.size > 0 else sd for sd in self.bg_sd]
         print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
@@ -1691,3 +1664,18 @@ class TitrationPlotter:
             title += "  label:" + str(lb)
             plt.title(title, fontsize=15)
             return f
+
+
+@dataclass
+class TecanConfig:
+    """Group tecan cli options."""
+
+    out_fp: Path
+    verbose: int
+    comb: bool
+    lim: tuple[float, float] | None
+    sel: tuple[float, float] | None
+    title: str
+    fit: bool
+    png: bool
+    pdf: bool
