@@ -1119,14 +1119,14 @@ class Titration(TecanfilesGroup):
                     {k: v - bg for k, v in dd.items()}
                     for dd, bg in zip(data, self.bg, strict=True)
                 ]
-                # XXX: testing
-                if self.params.bg_adj:
-                    for i in range(self.n_labels):
-                        label_str = self.labelblocksgroups[i].metadata["Label"].value
-                        lbl_s = str(label_str)
-                        sd = self.bg_sd[i].mean()
-                        for k, v in data[i].items():
-                            data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
+            # bg adjust negative values
+            if self.params.bg_adj:
+                for i in range(self.n_labels):
+                    label_str = self.labelblocksgroups[i].metadata["Label"].value
+                    lbl_s = str(label_str)
+                    sd = self.bg_sd[i].mean()
+                    for k, v in data[i].items():
+                        data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
             # dil
             if self.params.dil and self.additions:
                 data = [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
