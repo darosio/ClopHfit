@@ -1206,9 +1206,10 @@ class Titration(TecanfilesGroup):
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             # Plots
             plotter = TitrationPlotter(self)
-            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title="title")
+            title = config.title
+            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
-            f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title="title")
+            f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title=title)
             f.savefig(outfit / f"ebar{i}.png")
             if config.sel and config.sel[0] and config.sel[1]:
                 xmin = float(config.sel[0]) if self.is_ph else None
@@ -1459,8 +1460,7 @@ class Titration(TecanfilesGroup):
                 v.figure.savefig(folder / f"{k}.png")
 
 
-# TODO: refactor plots
-# TODO: Test plots
+# MAYBE: Test plots
 @dataclass
 class TitrationPlotter:
     """Class responsible for plotting Titration data."""
@@ -1481,8 +1481,7 @@ class TitrationPlotter:
         lb: int
             Labelblock index.
         hue_column: str
-            Column in `fitresults_df` used for color-coding data points in the
-            stripplot.
+            Result dataframe column for stripplot hue.
         xlim : tuple[float, float] | None, optional
             Range.
         title : str, optional
@@ -1493,88 +1492,53 @@ class TitrationPlotter:
         figure.Figure
             The figure.
         """
+        dataframe = self.tit.result_dfs[lb]
         sns.set(style="whitegrid")
-        f = plt.figure(figsize=(12, 16))
-        # Ctrl
-        ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-        if len(self.tit.scheme.ctrl) > 0:
-            res_ctrl = (
-                self.tit.result_dfs[lb].loc[self.tit.scheme.ctrl].sort_values("ctrl")
-            )
-            sns.stripplot(
-                x=res_ctrl["K"],
-                y=res_ctrl.index,
-                size=8,
-                orient="h",
-                hue=res_ctrl.ctrl,
-                ax=ax1,
-            )
-            plt.legend(loc="upper left", frameon=False)
-            plt.errorbar(
-                res_ctrl.K,
-                range(len(res_ctrl)),
-                xerr=res_ctrl["sK"],
-                fmt=".",
-                c="lightgray",
-                lw=8,
-            )
-            plt.grid(True, axis="both")
-        # Unk
-        res_unk = (
-            self.tit.result_dfs[lb].loc[self.tit.keys_unk].sort_index(ascending=False)
-        )
-        # Compute 'K - 2*sK' for each row in res_unk
-        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
-        # Sort the DataFrame by this computed value in descending order
-        res_unk = res_unk.sort_values(by="sort_val", ascending=True)
+        fig = plt.figure(figsize=(12, 16))
+        df_ctr = dataframe.loc[self.tit.scheme.ctrl]
+        if not df_ctr.empty:
+            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
+            df_ctr = df_ctr.sort_values("ctrl")
+            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
+            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
+            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
+            ax1.legend(loc="upper left", frameon=False)
+            ax1.grid(True, axis="both")
+            ax1.set_xticklabels([])
+            ax1.set_xlabel("")
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        sns.stripplot(
-            x=res_unk["K"],
-            y=res_unk.index,
-            size=12,
-            orient="h",
-            palette="Blues",
-            hue=res_unk[hue_column],
-            ax=ax2,
-        )
-        plt.legend(loc="upper left", frameon=False)
-        plt.errorbar(
-            res_unk["K"],
-            range(len(res_unk)),
-            xerr=res_unk["sK"],
-            fmt=".",
-            c="gray",
-            lw=2,
-        )
-        ytick_labels = [str(label) for label in res_unk.index]
-        plt.yticks(range(len(res_unk)), ytick_labels)
-        plt.ylim(-1, len(res_unk))
-        plt.grid(True, axis="both")
-        xlim = self._determine_xlim(res_ctrl, res_unk, xlim)
-        # Configure axis and title
-        ax1.set_xlim(xlim)
+        df_unk = dataframe.loc[self.tit.keys_unk].sort_index(ascending=False)
+        # Sort by 'K - 2 * sK'.
+        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
+        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
+        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
+        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
+        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
+        ax2.legend(loc="upper left", frameon=False)
+        ax2.grid(True, axis="both")
+        ax2.set_yticks(range(len(df_unk)))
+        ax2.set_yticklabels([str(label) for label in df_unk.index])
+        ax2.set_ylim(-1, len(df_unk))
+        # Set x-limits
+        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+        if self.tit.scheme.ctrl:
+            ax1.set_xlim(xlim)
         ax2.set_xlim(xlim)
-        ax1.set_xticklabels([])
-        ax1.set_xlabel("")
-        title += "  label:" + str(lb)
-        f.suptitle(title, fontsize=16)
-        f.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
-        return f
+        # Set title
+        fig.suptitle(title + f"  label: {lb}", fontsize=16)
+        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
+        # Close the figure after returning it to avoid memory issues
+        plt.close(fig)
+        return fig
 
     def _determine_xlim(
-        self,
-        res_ctrl: pd.DataFrame | None,
-        res_unk: pd.DataFrame,
-        xlim: tuple[float, float] | None,
+        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
     ) -> tuple[float, float]:
-        if not xlim:
-            xlim = (res_unk["K"].min(), res_unk["K"].max())
-            if res_ctrl is not None:
-                xlim = (
-                    0.99 * min(res_ctrl["K"].min(), xlim[0]),
-                    1.01 * max(res_ctrl["K"].max(), xlim[1]),
-                )
-                xlim = (0.99 * xlim[0], 1.01 * xlim[1])
+        lower, upper = 0.99, 1.01
+        xlim = (df_unk["K"].min(), df_unk["K"].max())
+        if not df_ctr.empty:
+            xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
+            xlim = (lower * xlim[0], upper * xlim[1])
         return xlim
 
     def plot_all_wells(self, lb: int, path: str | Path) -> None:
@@ -1663,9 +1627,11 @@ class TitrationPlotter:
             plt.yscale("log")
             # min(x) can be = NaN
             min_x = min(max([0.01, fit_df[x].min()]), 14)
+            if min_x > -np.inf and fit_df[x].max() < np.inf:
+                plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
             min_y = min(max([0.01, fit_df[y].min()]), 5000)
-            plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
-            plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
+            if min_y > -np.inf and fit_df[y].max() < np.inf:
+                plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
             plt.grid(True, axis="both")
             plt.ylabel(y)
             plt.xlabel(x)
