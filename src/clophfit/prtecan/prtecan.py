@@ -28,6 +28,7 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     fit_binding_glob,
     format_estimate,
+    weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
 
@@ -1113,11 +1114,12 @@ class Titration(TecanfilesGroup):
             data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
 
             # bg
-            if self.params.bg:
+            if self.params.bg and self.bg:
                 data = [
                     {k: v - bg for k, v in dd.items()}
                     for dd, bg in zip(data, self.bg, strict=True)
                 ]
+                # XXX: testing
                 if self.params.bg_adj:
                     for i in range(self.n_labels):
                         label_str = self.labelblocksgroups[i].metadata["Label"].value
@@ -1314,7 +1316,8 @@ class Titration(TecanfilesGroup):
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
 
         # TODO: Use sd array after proper masking
-        # NEXT: Fix bg_sd when scheme is None (add a test).
+        # Buffer wells (by either mean or fit SEM) provide good estimates of
+        # weights. When they are not available use single ds fit residuals.
         weights = [1 / sd.mean() if sd.size > 0 else sd for sd in self.bg_sd]
         print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
@@ -1322,8 +1325,10 @@ class Titration(TecanfilesGroup):
             if dat:
                 for k in self.fit_keys:
                     ds = Dataset(x, np.array(dat[k]), is_ph=self.is_ph)
-                    ds.add_weights(np.array(weights[lbl_n - 1]))
-                    # Alternatively weight_multi_ds_titration(ds)
+                    if weights:
+                        ds.add_weights(np.array(weights[lbl_n - 1]))
+                    else:
+                        weight_multi_ds_titration(ds)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
@@ -1337,12 +1342,16 @@ class Titration(TecanfilesGroup):
                 y0 = np.array(self.data[0][k])
                 y1 = np.array(self.data[1][k])
                 ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
-                # Alternatively weight_multi_ds_titration(ds)
                 # NEXT: use correction for dilution imply masked weights * dil_corr
                 # NEXT: list.pH with xerr
                 # TODO: dilution corr must be masked where y is NaN
                 # for the moment use np broadcasting from 1D array of len=1
-                ds.add_weights({"y0": np.array(weights[0]), "y1": np.array(weights[1])})
+                if weights:
+                    ds.add_weights(
+                        {"y0": np.array(weights[0]), "y1": np.array(weights[1])}
+                    )
+                else:
+                    weight_multi_ds_titration(ds)
                 try:
                     fitting[k] = fit_binding_glob(ds)
                 except InsufficientDataError:
