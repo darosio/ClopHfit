@@ -133,7 +133,7 @@ def test_prtecan_cl(tmp_path: Path) -> None:
     out.mkdir()
     runner = CliRunner()
     base_args = ["--out", str(out), "tecan", list_f, "--no-fit", "--sch", scheme_f]
-    base_args.extend(["--add", adds_f, "--bg", "--no-is-ph"])
+    base_args.extend(["--add", adds_f, "--bg", "--cl", "1000.0"])
     result = runner.invoke(ppr, base_args)
     assert result.exit_code == 0
 
