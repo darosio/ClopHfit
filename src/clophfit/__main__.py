@@ -110,6 +110,7 @@ def tecan(  # noqa: PLR0913
     verbose: int = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
+    out_fp.mkdir(parents=True, exist_ok=True)
     # Options validation.
     if cl and not add:
         msg = "--cl requires --add to be specified."
@@ -124,7 +125,7 @@ def tecan(  # noqa: PLR0913
     if comb and not (bg and sch and dil):
         msg = "All combinations requires --bg and --dil to be specified."
         raise click.UsageError(msg)
-
+    # Config
     tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png, pdf)
     # Load titration
     list_fp = Path(list_file)
@@ -134,25 +135,25 @@ def tecan(  # noqa: PLR0913
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
-
-    out_fp.mkdir(parents=True, exist_ok=True)
-    with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
-        for lbg in tit.labelblocksgroups:
-            pprint.pprint(lbg.metadata, stream=fp)
-    f = tit.plot_temperature(title=title)
-    f.savefig(out_fp / "temperatures.png")
+    if add:
+        tit.load_additions(Path(add))
+    if cl and tit.additions:
+        tit.conc = prtecan.calculate_conc(tit.additions, cl)
     if sch:
         tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)
         f.savefig(out_fp / "buffer.png")
         f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
-    if add:
-        tit.load_additions(Path(add))
-    if cl and tit.additions:
-        tit.conc = prtecan.calculate_conc(tit.additions, cl)
-
-    print(tit.params)
+    with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
+        for lbg in tit.labelblocksgroups:
+            pprint.pprint(lbg.metadata, stream=fp)
+    f = tit.plot_temperature(title=title)
+    f.savefig(out_fp / "temperatures.png")
+    # Output and export
+    click.secho(f"** File: {list_fp.resolve()}", fg="green")
+    click.echo(tit.params)
+    click.echo(tecan_config)
     tit.export_data_fit(tecan_config)
 
 
