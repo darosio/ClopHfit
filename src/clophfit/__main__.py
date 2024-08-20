@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import pprint
-import warnings
 from collections import namedtuple
 from pathlib import Path
 from typing import Any
@@ -55,7 +54,7 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @ppr.command()
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
-@click.option("--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH.")  # fmt: skip
+@click.option("--cl", type=float, help="Cl titration: [Cl] (mM) of added aliquots.")
 @click.option("--bg", is_flag=True, help="Subtract buffer (from scheme.txt).")
 @click.option("--bg-adj", is_flag=True, help="Adjust bg to avoid negative value.")
 @click.option("--dil", is_flag=True, help="Apply dilution correction.")
@@ -75,7 +74,7 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 def tecan(  # noqa: PLR0913
     ctx: Context,
     list_file: str,
-    is_ph: bool,
+    cl: float,
     bg: bool,
     bg_adj: bool,
     dil: bool,
@@ -110,16 +109,32 @@ def tecan(  # noqa: PLR0913
     """
     verbose: int = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __tecan_out_dir__)
-    out_fp = Path(out) / "pH" if is_ph else Path(out) / "Cl"
+    out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
+    # Options validation.
+    if cl and not add:
+        msg = "--cl requires --add to be specified."
+        raise click.UsageError(msg)
+    if dil and not add:
+        msg = "--dil requires --add to be specified."
+        raise click.UsageError(msg)
+    if bg and not sch:
+        # Also --sch must contain valid buffers!
+        msg = "Scheme is needed to compute buffer bg i.e. --bg requires --sch!"
+        raise click.UsageError(msg)
+    if comb and not (bg and sch and dil):
+        msg = "All combinations requires --bg and --dil to be specified."
+        raise click.UsageError(msg)
+
     tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png, pdf)
     # Load titration
     list_fp = Path(list_file)
-    tit = Titration.fromlistfile(list_fp, is_ph)
+    tit = Titration.fromlistfile(list_fp, not cl)
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
+
     out_fp.mkdir(parents=True, exist_ok=True)
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in tit.labelblocksgroups:
@@ -134,13 +149,9 @@ def tecan(  # noqa: PLR0913
         f.savefig(out_fp / "buffer_norm.png")
     if add:
         tit.load_additions(Path(add))
-        # TODO: cl conc must be elsewhere; was under scheme:
-        if not is_ph and tit.additions:
-            tit.conc = prtecan.calculate_conc(tit.additions, 1000.0)
+    if cl and tit.additions:
+        tit.conc = prtecan.calculate_conc(tit.additions, cl)
 
-    if fit and bg and not sch:
-        # ``as bg requires scheme even though scheme does not imply bg```
-        warnings.warn("Scheme is needed to compute buffer bg!", stacklevel=2)
     print(tit.params)
     tit.export_data_fit(tecan_config)
 
