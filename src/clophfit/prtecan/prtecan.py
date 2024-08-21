@@ -716,6 +716,21 @@ class TitrationConfig:
 
 
 @dataclass
+class BufferFit:
+    """Store (robust) linear fit result."""
+
+    m: float = np.nan
+    q: float = np.nan
+    m_err: float = np.nan
+    q_err: float = np.nan
+
+    @property
+    def empty(self) -> bool:
+        """Return True if all attributes are NaN, emulating DataFrame's empty behavior."""
+        return all(np.isnan(value) for value in vars(self).values())
+
+
+@dataclass
 class Buffer:
     """Buffer handling for a titration."""
 
@@ -726,6 +741,8 @@ class Buffer:
     _dataframes_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
+    fit_results: list[BufferFit] = field(init=False, default_factory=list)
+    fit_results_nrm: list[BufferFit] = field(init=False, default_factory=list)
 
     @property
     def wells(self) -> list[str]:
@@ -756,7 +773,7 @@ class Buffer:
                 )
                 for lbg in self.tit.labelblocksgroups
             ]
-            self._fit_buffer(self._dataframes)  # fit
+            self.fit_results = self._fit_buffer(self._dataframes)  # fit
         return self._dataframes
 
     @property
@@ -767,7 +784,7 @@ class Buffer:
                 pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
                 for lbg in self.tit.labelblocksgroups
             ]
-            self._fit_buffer(self._dataframes_nrm)  # fit
+            self.fit_results_nrm = self._fit_buffer(self._dataframes_nrm)  # fit
         return self._dataframes_nrm
 
     @property
@@ -816,7 +833,7 @@ class Buffer:
             raise ValueError(msg)
         return bg, bg_sd
 
-    def _fit_buffer(self, dfs: list[pd.DataFrame]) -> None:
+    def _fit_buffer(self, dfs: list[pd.DataFrame]) -> list[BufferFit]:
         """Fit buffers of all labelblocksgroups."""
 
         def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
@@ -831,8 +848,11 @@ class Buffer:
             )
             return np.sqrt(fit_variance)  # Standard error
 
+        fit_results = []
         for lbl_n, buf_df in enumerate(dfs, start=1):
-            if not buf_df.empty:
+            if buf_df.empty:
+                fit_results.append(BufferFit())
+            else:
                 mean = buf_df.mean(axis=1).to_numpy()
                 sem = buf_df.sem(axis=1).to_numpy()
                 data = RealData(self.tit.conc, mean, sy=sem)
@@ -841,21 +861,21 @@ class Buffer:
                 odr = ODR(data, model, beta0=[0.0, mean.mean()])
                 output = odr.run()
                 # Extract the best-fit parameters and their standard errors
-                m_best, b_best = output.beta
-                m_err, b_err = output.sd_beta
+                m_best, q_best = output.beta
+                m_err, q_err = output.sd_beta
                 cov_matrix = output.cov_beta
-                print(
-                    f"Best fit: m = {m_best:.3f} ± {m_err:.3f}, b = {b_best:.3f} ± {b_err:.3f}"
-                )
+                fit_results.append(BufferFit(m_best, q_best, m_err, q_err))
                 buf_df["Label"] = lbl_n
-                buf_df["fit"] = m_best * self.tit.conc + b_best
+                buf_df["fit"] = m_best * self.tit.conc + q_best
                 buf_df["fit_err"] = fit_error(self.tit.conc, cov_matrix)
                 buf_df["mean"] = mean
                 buf_df["sem"] = sem
+        return fit_results
 
     def plot(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
         buffer_dfs = self.dataframes_nrm if nrm else self.dataframes
+        fit_results = self.fit_results_nrm if nrm else self.fit_results
         if not buffer_dfs or not self.wells:
             return sns.catplot()
         pp = PlotParameters(is_ph=self.tit.is_ph)
@@ -907,6 +927,27 @@ class Buffer:
                 linewidth=2,
                 capsize=6,
             )
+            # Extract the slope and intercept from BufferFit
+            buffer_fit = fit_results[label_n - 1]
+            m = buffer_fit.m
+            m_err = buffer_fit.m_err
+            q = buffer_fit.q
+            q_err = buffer_fit.q_err
+            # Add slope and intercept as text annotation on the plot
+            g.axes_dict[label_n].text(
+                0.05,
+                0.95,  # Position of the text (adjust as needed)
+                f"m = {m:.1f} ± {m_err:.1f}\nq = {q:.0f} ± {q_err:.1f}",
+                transform=g.axes_dict[label_n].transAxes,
+                fontsize=10,
+                verticalalignment="top",
+                bbox={
+                    "boxstyle": "round,pad=0.3",
+                    "edgecolor": "black",
+                    "facecolor": "white",
+                    "alpha": 0.7,
+                },
+            )
         if title:
             plt.suptitle(title, fontsize=14, x=0.96, ha="right")
         plt.close()
@@ -942,13 +983,13 @@ class Titration(TecanfilesGroup):
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
-    _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
     _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
+    _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
 
     def __post_init__(self) -> None:
         """Create metadata and data."""

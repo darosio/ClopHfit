@@ -129,12 +129,15 @@ def tecan(  # noqa: PLR0913
     tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png, pdf)
     # Load titration
     list_fp = Path(list_file)
+    click.secho(f"** File: {list_fp.resolve()}", fg="green")
+    click.echo(tecan_config)
     tit = Titration.fromlistfile(list_fp, not cl)
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
+    click.echo(tit.params)
     if add:
         tit.load_additions(Path(add))
     if cl and tit.additions:
@@ -151,9 +154,6 @@ def tecan(  # noqa: PLR0913
     f = tit.plot_temperature(title=title)
     f.savefig(out_fp / "temperatures.png")
     # Output and export
-    click.secho(f"** File: {list_fp.resolve()}", fg="green")
-    click.echo(tit.params)
-    click.echo(tecan_config)
     tit.export_data_fit(tecan_config)
 
 
