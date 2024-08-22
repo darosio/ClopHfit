@@ -3,6 +3,117 @@
 
 # Changelog
 
+## v0.11.0 (2024-08-22)
+
+### Feat
+
+- **tecan**: Buffer plot display fit result
+- **tecan**: Adjust negative value also when --bg is None
+- **tecan**: Alternative weight when buffer is empty
+- **tecan**: Validate cli options
+- **tecan**: Enrich and clean export_dat_fit
+- **tecan**: Optional buffer adjustment to avoid negative values
+- **tecan**: Add fit fit_err to properties buffers(\_norm)
+- **tecan**: Add `fit_buffer`
+- **tecan**: Add plot_temperature
+- **tecan**: New buffer plot
+- **tecan**: Add buffers{,\_norm} dfs to titan
+- **tecan**: Add ODR fit
+- **tecan**: buffer subtraction until non negative
+- **tecan**: Adjust Lbg bg_subtract to avoid negative values
+
+### Fix
+
+- **tecan**: export pdf to use last lbg
+- **tecan**: plot_temperature
+- **tecan**: Dataset creation
+- **tecan**: lbg subtraction tolerance threshold
+- **tecan**: when only one lbg can be built
+
+### Docs
+
+- **tecan**: Correct tecan tutorial
+
+### Test
+
+- **tecan**: Fix cli testing tecan_cl
+
+### Build
+
+- **deps**: update types-setuptools requirement (#687)
+- **deps**: update types-setuptools requirement (#686)
+- **deps**: update xdoctest requirement from <=1.1.6 to <=1.2.0 (#685)
+- **deps**: update scipy requirement from <=1.14.0 to <=1.14.1 (#684)
+- **pre-commit**: update hooks (#683)
+- **deps**: update numpy requirement from <=2.0.1 to <=2.1.0 (#680)
+- **deps**: update ruff requirement from <=0.6.0 to <=0.6.1 (#682)
+- **deps**: update types-setuptools requirement (#681)
+- **deps**: update ruff requirement from <=0.5.7 to <=0.6.0 (#678)
+- **deps**: update nbsphinx requirement from <=0.9.4 to <=0.9.5 (#677)
+- **deps**: update matplotlib requirement from <=3.9.1.post1 to <=3.9.2 (#676)
+- **deps**: update types-setuptools requirement (#675)
+- **pre-commit**: update hooks (#674)
+- **deps**: update sympy requirement from <=1.13.1 to <=1.13.2 (#673)
+- **deps**: update commitizen requirement from <=3.28.0 to <=3.29.0 (#672)
+- **deps**: update ruff requirement from <=0.5.6 to <=0.5.7 (#671)
+- **deps**: update pandas-stubs requirement (#670)
+- **deps**: update matplotlib requirement from <=3.9.1 to <=3.9.1.post1 (#669)
+- Re-enable windows pytests
+- **tecan**: Try restore xdoctest with windows
+- **deps**: update pandas-stubs requirement from <=2.2.2.240603 to <=2.2.2.240805 (#666)
+- **deps**: update autodocsumm requirement from <=0.2.12 to <=0.2.13 (#668)
+- **deps**: update types-setuptools requirement (#667)
+- **pre-commit**: update hooks (#665)
+- **deps**: update coverage[toml] requirement from <=7.6.0 to <=7.6.1 (#664)
+- **deps**: update tqdm requirement from <=4.66.4 to <=4.66.5 (#663)
+- **deps**: update ruff requirement from <=0.5.5 to <=0.5.6 (#662)
+- **deps**: update xdoctest requirement from <=1.1.5 to <=1.1.6 (#661)
+- **deps**: update mypy requirement from <=1.11.0 to <=1.11.1 (#660)
+- **deps**: update sphinx requirement from <=7.4.7 to <=8.0.2 (#659)
+- **pre-commit**: update hooks (#658)
+- **deps**: bump pip from 24.1.2 to 24.2 in /.github/workflows (#657)
+- **deps**: update pre-commit requirement from <=3.7.1 to <=3.8.0 (#656)
+- **deps**: update types-setuptools requirement (#655)
+- **deps**: update pytest requirement from <=8.3.1 to <=8.3.2 (#654)
+- **deps**: update ruff requirement from <=0.5.4 to <=0.5.5 (#653)
+- **deps**: update arviz requirement from <=0.18.0 to <=0.19.0
+- **deps**: update types-setuptools requirement (#652)
+- **deps**: update types-setuptools requirement (#651)
+- **pre-commit**: update hooks (#650)
+- **deps**: update ruff requirement from <=0.5.3 to <=0.5.4 (#649)
+- **deps**: update lmfit requirement from <=1.3.1 to <=1.3.2 (#648)
+- **deps**: update types-setuptools requirement (#647)
+- **deps**: update sympy requirement from <=1.13.0 to <=1.13.1 (#646)
+- **deps**: update pytest requirement from <=8.2.2 to <=8.3.1 (#645)
+- **deps**: update mypy requirement from <=1.10.1 to <=1.11.0 (#644)
+- **deps**: update numpy requirement from <=2.0.0 to <=2.0.1 (#643)
+- **deps**: update sphinx requirement from <=7.4.6 to <=7.4.7 (#642)
+- **deps**: update ruff requirement from <=0.5.2 to <=0.5.3 (#640)
+- **deps**: update sphinx requirement from <=7.4.5 to <=7.4.6 (#639)
+- **deps**: update commitizen requirement from <=3.27.0 to <=3.28.0 (#638)
+- **deps**: update sphinx-autodoc-typehints requirement (#637)
+- **deps**: update sphinx requirement from <=7.4.4 to <=7.4.5 (#636)
+
+### Refactor
+
+- **tecan**: plot_k; fix plot_ebar
+- **tecan**: cli options grouped into TecanConfig BREAKING CHANGE
+- **tecan**: Export data and fit using all params combinations
+- **tecan**: Add TitrationPlotter
+- **tecan**: New Buffer dataclass extracted from Titration
+- **tecan**: Merge export and fit simplifies cli
+- **tecan**: Adopt logging
+- **tecan**: Cleanup fitdata and data_nrm
+- **tecan**: tit extends tfg; new params is TitrationConfig
+- **tecan**: Composition Over Inheritance; Merge Titration(Analysis)
+- **tecan**: Drop FitKwargs with ini:fin and weight
+- **tecan**: Separate glob fitting from label weights assignment
+- Dataset
+
+### chore
+
+- **tecan**: buffer adjust msg
+
 ## v0.10.9 (2024-07-16)
 
 ### Build
