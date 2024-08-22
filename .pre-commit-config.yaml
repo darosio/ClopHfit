@@ -3,6 +3,8 @@ ci:
   autoupdate_commit_msg: "build(pre-commit): update hooks"
   autofix_commit_msg: "style: pre-commit fixes"
 
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
@@ -80,12 +82,23 @@ repos:
     hooks:
       - id: pydoclint
 
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+  # - repo: https://github.com/codespell-project/codespell
+  #   rev: v2.3.0
+  #   hooks:
+  #     - id: codespell
+  #       additional_dependencies:
+  #         - tomli
+  #       stages:
+  #         - commit-msg # Add commit-msg stage to check commit messages
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.19.0
     hooks:
-      - id: codespell
-        additional_dependencies:
-          - tomli
+      - id: typos
+        # args: [] # Turn off automatic fixing
+        stages: [pre-commit]
+      - id: typos
+        name: commit-msg-typos
+        stages: [commit-msg]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1
