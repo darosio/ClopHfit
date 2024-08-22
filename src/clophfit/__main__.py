@@ -62,11 +62,8 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.option("--bg-mth", default="mean", show_default=True, help="Method for bg.")
 @click.option("--sch", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
 @click.option("--add", type=cPath(exists=True), help="Initial volume and additions.")
-@click.option(
-    "--all", "comb", is_flag=True, help="Export (fit) all corrections combinations."
-)
+@click.option("--all", "comb", is_flag=True, help="Export (fit) all data combinations.")
 @click.option("--lim", type=(float, float), help="Range MIN, MAX of plot_K.")
-@click.option("--sel", type=(float, float), help="Select from K_MIN S1_MIN.")
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
@@ -83,7 +80,6 @@ def tecan(  # noqa: PLR0913
     add: str | None,
     comb: bool,
     lim: tuple[float, float] | None,
-    sel: tuple[float, float] | None,
     title: str,
     fit: bool,
     png: bool,
@@ -96,8 +92,6 @@ def tecan(  # noqa: PLR0913
     function produces:
 
     - K plot
-
-    - ebar and (for selection) ebarZ plot
 
     - csv tables for all labelblocks and global fittings.
 
@@ -122,7 +116,7 @@ def tecan(  # noqa: PLR0913
         msg = "All combinations requires --bg and --dil to be specified."
         raise click.UsageError(msg)
     # Config
-    tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png)
+    tecan_config = TecanConfig(out_fp, verbose, comb, lim, title, fit, png)
     # Load titration
     list_fp = Path(list_file)
     click.secho(f"** File: {list_fp.resolve()}", fg="green")

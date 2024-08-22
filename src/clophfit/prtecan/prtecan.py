@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import itertools
 import logging
 import pprint
 import typing
-from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
@@ -1236,11 +1234,11 @@ class Titration(TecanfilesGroup):
             if "S1_y1" in fit.columns:
                 order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0"]
                 order.extend(["sS1_y0", "S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
-                ebar_y, ebar_yerr = "S1_y1", "sS1_y1"
+                ebar_y = "S1_y1"
             else:
                 order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
                 order.extend(["S1_default", "sS1_default"])
-                ebar_y, ebar_yerr = "S1_default", "sS1_default"
+                ebar_y = "S1_default"
             out_df = fit.reindex(order, axis=1).sort_index()
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             # Plots
@@ -1248,22 +1246,6 @@ class Titration(TecanfilesGroup):
             title = config.title
             f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
-            f = plotter.plot_ebar(i, ebar_y, ebar_yerr, title=title)
-            f.savefig(outfit / f"ebar{i}.png")
-            if config.sel and config.sel[0] and config.sel[1]:
-                xmin = float(config.sel[0]) if self.is_ph else None
-                xmax = float(config.sel[0]) if not self.is_ph else None
-                ymin = float(config.sel[1])
-                f = plotter.plot_ebar(
-                    i,
-                    ebar_y,
-                    ebar_yerr,
-                    xmin=xmin,
-                    xmax=xmax,
-                    ymin=ymin,
-                    title=config.title,
-                )
-                f.savefig(outfit / f"ebar{i}_sel{xmin},{ymin}.png")
             if config.png:
                 self.export_png(i, outfit)
 
@@ -1577,73 +1559,6 @@ class TitrationPlotter:
             xlim = (lower * xlim[0], upper * xlim[1])
         return xlim
 
-    def plot_ebar(  # noqa: PLR0913
-        self,
-        lb: int,
-        y: str,
-        yerr: str,
-        x: str = "K",
-        xerr: str = "sK",
-        xmin: float | None = None,
-        ymin: float | None = None,
-        xmax: float | None = None,
-        title: str | None = None,
-    ) -> figure.Figure:
-        """Plot SA vs.
-
-        K with errorbar for the whole plate.
-        """
-        fit_df = self.tit.result_dfs[lb]
-        with plt.style.context("fivethirtyeight"):
-            f = plt.figure(figsize=(10, 10))
-            if xmin:
-                fit_df = fit_df[fit_df[x] > xmin]
-            if xmax:
-                fit_df = fit_df[fit_df[x] < xmax]
-            if ymin:
-                fit_df = fit_df[fit_df[y] > ymin]
-            with suppress(ValueError):
-                plt.errorbar(
-                    fit_df[x],
-                    fit_df[y],
-                    xerr=fit_df[xerr],
-                    yerr=fit_df[yerr],
-                    fmt="o",
-                    elinewidth=1,
-                    markersize=10,
-                    alpha=0.7,
-                )
-            if "ctrl" not in fit_df:
-                fit_df["ctrl"] = 0
-            fit_df = fit_df[~np.isnan(fit_df[x])]
-            fit_df = fit_df[~np.isnan(fit_df[y])]
-            for idx, xv, yv, l in zip(  # noqa: E741
-                fit_df.index, fit_df[x], fit_df[y], fit_df["ctrl"], strict=False
-            ):
-                # x or y do not exist.# try:
-                if isinstance(l, str):
-                    color = "#" + hashlib.sha224(l.encode()).hexdigest()[2:8]
-                    plt.text(xv, yv, l, fontsize=13, color=color)
-                else:
-                    plt.text(xv, yv, idx, fontsize=12)
-                # x or y do not exist.# except:
-                # x or y do not exist.# continue
-            plt.yscale("log")
-            # min(x) can be = NaN
-            min_x = min(max([0.01, fit_df[x].min()]), 14)
-            if min_x > -np.inf and fit_df[x].max() < np.inf:
-                plt.xlim(0.99 * min_x, 1.01 * fit_df[x].max())
-            min_y = min(max([0.01, fit_df[y].min()]), 5000)
-            if min_y > -np.inf and fit_df[y].max() < np.inf:
-                plt.ylim(0.90 * min_y, 1.10 * fit_df[y].max())
-            plt.grid(True, axis="both")
-            plt.ylabel(y)
-            plt.xlabel(x)
-            title = title if title else ""
-            title += "  label:" + str(lb)
-            plt.title(title, fontsize=15)
-            return f
-
 
 @dataclass
 class TecanConfig:
@@ -1653,7 +1568,6 @@ class TecanConfig:
     verbose: int
     comb: bool
     lim: tuple[float, float] | None
-    sel: tuple[float, float] | None
     title: str
     fit: bool
     png: bool

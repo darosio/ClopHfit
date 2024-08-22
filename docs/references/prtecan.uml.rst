@@ -64,7 +64,6 @@
      #verbose: int
      #comb: bool
      #lim: tuple[]|None
-     #sel: tuple[]|None
      #title: str
      #fit: bool
      #png: bool
@@ -112,7 +111,6 @@
      #tit: Titration
 	 +plot_k(int, str)
 	 +plot_all_wells(int, Path|str)
-	 +plot_ebar(int, str, str)
    }
 
 

@@ -533,7 +533,6 @@ class TestTitration:
             verbose=False,
             comb=False,
             lim=None,
-            sel=None,
             title="",
             fit=False,
             png=False,
