@@ -70,7 +70,6 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
-@click.option("--pdf/--no-pdf", default=False, show_default=True, help="Full report in pdf.")  # fmt: skip
 def tecan(  # noqa: PLR0913
     ctx: Context,
     list_file: str,
@@ -88,7 +87,6 @@ def tecan(  # noqa: PLR0913
     title: str,
     fit: bool,
     png: bool,
-    pdf: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
@@ -100,8 +98,6 @@ def tecan(  # noqa: PLR0913
     - K plot
 
     - ebar and (for selection) ebarZ plot
-
-    - all_wells pdf
 
     - csv tables for all labelblocks and global fittings.
 
@@ -126,7 +122,7 @@ def tecan(  # noqa: PLR0913
         msg = "All combinations requires --bg and --dil to be specified."
         raise click.UsageError(msg)
     # Config
-    tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png, pdf)
+    tecan_config = TecanConfig(out_fp, verbose, comb, lim, sel, title, fit, png)
     # Load titration
     list_fp = Path(list_file)
     click.secho(f"** File: {list_fp.resolve()}", fg="green")

@@ -12,13 +12,11 @@ from contextlib import suppress
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
-import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
-from matplotlib.backends.backend_pdf import PdfPages
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
@@ -1268,9 +1266,6 @@ class Titration(TecanfilesGroup):
                 f.savefig(outfit / f"ebar{i}_sel{xmin},{ymin}.png")
             if config.png:
                 self.export_png(i, outfit)
-        if config.pdf:
-            # Export pdf for tentatively global result
-            plotter.plot_all_wells(-1, outfit / "all_wells.pdf")
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data."""
@@ -1582,38 +1577,6 @@ class TitrationPlotter:
             xlim = (lower * xlim[0], upper * xlim[1])
         return xlim
 
-    def plot_all_wells(self, lb: int, path: str | Path) -> None:
-        """Plot all wells into a pdf."""
-        # Create a PdfPages object
-        pdf_pages = PdfPages(Path(path).with_suffix(".pdf"))  # type: ignore[no-untyped-call]
-        # TODO: Order.
-        """
-        for k in self.fitresults[0].loc[self.scheme.ctrl].sort_values("ctrl").index:
-            out.savefig(self.plot_well(str(k)))
-        for k in self.fitresults[0].loc[self.keys_unk].sort_index().index:
-            out.savefig(self.plot_well(str(k)))
-        """
-        for lbl, fr in self.tit.results[lb].items():
-            fig = fr.figure
-            if fig is not None:
-                # A4 size in inches. You can adjust this as per your need.
-                fig.set_size_inches((8.27, 11.69))
-                # Get the first axes in the figure to adjust the positions
-                ax = fig.get_axes()[0]
-                # Adjust position as needed. Values are [left, bottom, width, height]
-                ax.set_position((0.1, 0.5, 0.8, 0.4))
-                # Create a new axes for the text
-                text_ax = fig.add_axes((0.1, 0.05, 0.8, 0.35))  # Adjust as needed
-                text = lmfit.printfuncs.fit_report(self.tit.results[lb][lbl].result)
-                text_ax.text(0.0, 0.0, text, fontsize=14)
-                text_ax.axis("off")  # Hide the axes for the text
-                # Save the figure into the PDF
-                pdf_pages.savefig(fig, bbox_inches="tight")  # type: ignore[no-untyped-call]
-        # Close the PdfPages object
-        pdf_pages.close()  # type: ignore[no-untyped-call]
-        # Close all the figures
-        plt.close("all")
-
     def plot_ebar(  # noqa: PLR0913
         self,
         lb: int,
@@ -1694,4 +1657,3 @@ class TecanConfig:
     title: str
     fit: bool
     png: bool
-    pdf: bool

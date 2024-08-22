@@ -537,7 +537,6 @@ class TestTitration:
             title="",
             fit=False,
             png=False,
-            pdf=False,
         )
         tit_ph.export_data_fit(tecan_config)
         a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")

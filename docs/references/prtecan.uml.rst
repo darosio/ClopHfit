@@ -68,7 +68,6 @@
      #title: str
      #fit: bool
      #png: bool
-     #pdf: bool
    }
 
    class Buffer{
