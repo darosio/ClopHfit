@@ -30,41 +30,89 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-from clophfit.types import ArrayDict, ArrayF
 
+if typing.TYPE_CHECKING:
+    from clophfit.types import ArrayDict, ArrayF
+
+ArrayMask = np.typing.NDArray[np.bool_]
 N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800
 
 
 @dataclass
-class DataArrays:
+class DataArray:
     """A collection of matching x, y, and optional w data arrays."""
 
-    x: ArrayF
-    y: ArrayF
-    w: ArrayF | None = None
+    #: x at creation
+    xc: ArrayF
+    #: y at creation
+    yc: ArrayF
+    #: w at creation
+    wc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
+    _mask: ArrayMask = field(init=False)
 
     def __post_init__(self) -> None:
         """Ensure the x and y arrays are of equal length after initialization."""
-        if len(self.x) != len(self.y):
-            msg = "Length of 'x' and 'y' must be equal."
-            raise ValueError(msg)
-        if self.w is not None and len(self.x) != len(self.w):
-            msg = "Length of 'x' and 'w' must be equal."
+        self._validate_lengths()
+        self._mask = ~np.isnan(self.yc)
+
+    def _validate_lengths(self) -> None:
+        """Validate that xc and yc have the same length."""
+        if len(self.xc) != len(self.yc):
+            msg = "Length of 'xc' and 'yc' must be equal."
             raise ValueError(msg)
 
+    def _validate_wc_lengths(self) -> None:
+        """Validate that xc and wc have the same length."""
+        if self.wc.any() and len(self.xc) != len(self.wc):
+            msg = f"Length of 'xc' {self.wc} and 'wc' must be equal."
+            raise ValueError(msg)
 
-class Dataset(dict[str, DataArrays]):
+    @property
+    def mask(self) -> ArrayMask:
+        """Mask."""
+        return self._mask
+
+    @mask.setter
+    def mask(self, mask: ArrayMask) -> None:
+        """Only boolean where yc is not nan are considered."""
+        self._mask = mask & ~np.isnan(self.yc)
+
+    @property
+    def x(self) -> ArrayF:
+        """Masked x."""
+        return self.xc[self.mask]
+
+    @property
+    def y(self) -> ArrayF:
+        """Masked y."""
+        return self.yc[self.mask]
+
+    @property
+    def w(self) -> ArrayF | None:
+        """Masked weights."""
+        return self.wc[self.mask] if self.wc.any() else None
+
+    @w.setter
+    def w(self, wc: ArrayF) -> None:
+        """Set weights and validate their length."""
+        if wc.ndim == 0:
+            wc = np.ones_like(self.xc) * wc
+        self.wc = wc
+        self._validate_wc_lengths()
+
+
+class Dataset(dict[str, DataArray]):
     """Contain pairs of matching x and y data arrays, indexed by a string key.
 
     Initialization will remove any NaN values from the x and y arrays.
 
     Parameters
     ----------
-    x : ArrayF | ArrayDict
+    x : ArrayF | ArrayDict | None
         The x values of the dataset(s), either as a single ArrayF or as an ArrayDict
         if multiple datasets are provided.
-    y : ArrayF | ArrayDict
+    y : ArrayF | ArrayDict | None
         The y values of the dataset(s), either as a single ArrayF or as an ArrayDict
         if multiple datasets are provided.
     is_ph : bool
@@ -72,6 +120,8 @@ class Dataset(dict[str, DataArrays]):
     w : ArrayF | ArrayDict | None
         The w values (weights) of the dataset(s), either as a single ArrayF or
         as an ArrayDict if multiple datasets are provided.
+    data_dict: dict[str, DataArray] | None
+        Optional initialization using a dict of DataArrays (default is None).
 
     Raises
     ------
@@ -83,30 +133,25 @@ class Dataset(dict[str, DataArrays]):
 
     def __init__(
         self,
-        x: ArrayF | ArrayDict,
-        y: ArrayF | ArrayDict,
+        x: ArrayF | ArrayDict | None = None,
+        y: ArrayF | ArrayDict | None = None,
         is_ph: bool = False,
         w: ArrayF | ArrayDict | None = None,
+        data_dict: dict[str, DataArray] | None = None,
     ) -> None:
-        def filter_nan(arr: ArrayF, reference: ArrayF) -> ArrayF:
-            return typing.cast(ArrayF, arr[~np.isnan(reference)])
-
-        def create_data(x: ArrayF, y: ArrayF, w: ArrayF | None) -> DataArrays:
-            x, y = filter_nan(x, y), filter_nan(y, y)
-            w = filter_nan(w, y) if w is not None else None
-            return DataArrays(x, y, w)
-
-        # x:array, y:array
-        if (
+        if data_dict is not None:
+            # Initialize using the dictionary of DataArray objects
+            data = data_dict
+        elif (
             isinstance(x, np.ndarray)
             and isinstance(y, np.ndarray)
             and not isinstance(w, dict)
         ):
-            data = {"default": create_data(x, y, w)}
+            data = {"default": DataArray(x, y, w) if w else DataArray(x, y)}
         # x:array, y:dict_of_arrays
         elif isinstance(x, np.ndarray) and isinstance(y, dict):
             data = {
-                k: create_data(x, v, w[k] if isinstance(w, dict) else w)
+                k: DataArray(x, v, w[k]) if isinstance(w, dict) else DataArray(x, v)
                 for k, v in y.items()
             }
         # x:dict_of_arrays, y:dict_of_arrays
@@ -115,11 +160,13 @@ class Dataset(dict[str, DataArrays]):
                 msg = "Keys of 'x', 'y', and 'w' (if w is a dict) must match."
                 raise ValueError(msg)
             data = {
-                k: create_data(x[k], y[k], w[k] if isinstance(w, dict) else w)
+                k: DataArray(x[k], y[k], w[k])
+                if isinstance(w, dict)
+                else DataArray(x[k], y[k])
                 for k in x
             }
-        super().__init__(data)
         self.is_ph = is_ph
+        super().__init__(data)
 
     def add_weights(self, w: ArrayF | ArrayDict) -> None:
         """Add weights to the dataset.
@@ -467,13 +514,13 @@ def weight_individual_ds(ds: Dataset) -> None:
     da = next(iter(ds.values()))
     if len(params) > len(da.y):
         print("failed")
-        w = 1.0 * np.ones_like(da.x)
+        w = 1.0 * np.ones_like(da.xc)
     else:
         res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
         # Calculate residuals SEM
         sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
-        w = 1 / sem * np.ones_like(da.x)
-    ds.add_weights(w)
+        w = 1 / sem * np.ones_like(da.xc)
+    da.w = w
 
 
 def weight_multi_ds_titration(ds: Dataset) -> None:
@@ -483,7 +530,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
     for lbl in ds:
         d = ds.copy(keys=[lbl])
         weight_individual_ds(d)
-        w_d[lbl] = next(iter(d.values())).w  # type: ignore[assignment]
+        w_d[lbl] = d[lbl].wc
         if np.all(w_d[lbl] == 1.0):
             failed_fit_labels.append(lbl)
     if failed_fit_labels:

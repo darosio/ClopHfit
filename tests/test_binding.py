@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from clophfit import binding
-from clophfit.binding.fitting import DataArrays, Dataset, fit_binding_glob
+from clophfit.binding.fitting import DataArray, Dataset, fit_binding_glob
 
 
 def test_kd() -> None:
@@ -60,13 +60,24 @@ class TestFitBinding:
         assert np.isclose(result.params["S1_default"].value, 0, 1e-4)
 
 
+def test_dataarray() -> None:
+    """Mask nan values, keep values."""
+    x = np.array([1, 2, 3, 4])
+    y = np.array([5, 6, np.nan, 8])
+    dataarray = DataArray(x, y)
+    assert np.array_equal(dataarray.x, np.array([1, 2, 4]))
+    dataarray.mask = np.array([0, 1, 1, 1], dtype="bool")
+    # `nan` are anyway discarded
+    assert np.array_equal(dataarray.x, np.array([2, 4]))
+
+
 def test_dataset_single_array_no_nan() -> None:
     """Clean nan."""
     x = np.array([1, 2, 3])
     y = np.array([4, 5, 6])
     dataset = Dataset(x, y)
     assert len(dataset) == 1
-    assert isinstance(dataset["default"], DataArrays)
+    assert isinstance(dataset["default"], DataArray)
     assert np.array_equal(dataset["default"].x, x)
     assert np.array_equal(dataset["default"].y, y)
 
@@ -77,7 +88,7 @@ def test_dataset_single_array_with_nan() -> None:
     y = np.array([5, 6, np.nan, 8])
     dataset = Dataset(x, y)
     assert len(dataset) == 1
-    assert isinstance(dataset["default"], DataArrays)
+    assert isinstance(dataset["default"], DataArray)
     assert np.array_equal(dataset["default"].x, np.array([1, 2, 4]))
     assert np.array_equal(dataset["default"].y, np.array([5, 6, 8]))
 

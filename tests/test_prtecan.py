@@ -736,22 +736,22 @@ class TestTitrationAnalysis:
         assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
-        assert k_h02.stderr == pytest.approx(0.0170, abs=1e-4)
+        assert k_h02.stderr == pytest.approx(0.0143, abs=1e-4)
         # Check 'K' and std error for 'H02' in the third fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
-        assert k_h02.stderr == pytest.approx(0.0169, abs=1e-4)
+        assert k_h02.stderr == pytest.approx(0.0143, abs=1e-4)
         # Check 'K' and std error for 'E02' in the second fit result
         assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0243, abs=1e-4)
+        assert k_e02.value == pytest.approx(7.98497, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0219, abs=1e-4)
         # Check 'K' and std error for 'E02' in the third fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.9771, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0169, abs=1e-4)
+        assert k_e02.value == pytest.approx(7.9850, abs=1e-4)
+        assert k_e02.stderr == pytest.approx(0.0149, abs=1e-4)
         # Fit up to the second-last data point
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:

@@ -24,6 +24,7 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     fit_binding_glob,
     format_estimate,
+    weight_individual_ds,
     weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
@@ -1069,6 +1070,7 @@ class Titration(TecanfilesGroup):
         tecanfiles, conc = Titration._listfile(Path(list_file))
         return cls(tecanfiles, conc, is_ph)
 
+    # NEXT: list.pH with xerr
     @staticmethod
     def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
         """Help construction from file.
@@ -1166,6 +1168,8 @@ class Titration(TecanfilesGroup):
                         data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
             # dil
             if self.params.dil and self.additions:
+                # Dilution correction works with nan values
+                # further masking delegated to DataArray
                 data = [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
             self._data = data
         return self._data
@@ -1331,13 +1335,11 @@ class Titration(TecanfilesGroup):
         """
         x = self.conc
         fittings = []
-        # Any lbg at least contains normalized data.
+        # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
-
-        # TODO: Use sd array after proper masking
-        # Buffer wells (by either mean or fit SEM) provide good estimates of
-        # weights. When they are not available use single ds fit residuals.
-        weights = [1 / sd.mean() if sd.size > 0 else sd for sd in self.bg_sd]
+        # Buffer wells SEM (or fit SE) provides good estimate of weights. When
+        # no scheme is available use single_ds_fit residuals.
+        weights = [1 / sd if sd.size > 0 else sd for sd in self.bg_sd]
         print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
@@ -1347,7 +1349,7 @@ class Titration(TecanfilesGroup):
                     if weights:
                         ds.add_weights(np.array(weights[lbl_n - 1]))
                     else:
-                        weight_multi_ds_titration(ds)
+                        weight_individual_ds(ds)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
@@ -1361,14 +1363,9 @@ class Titration(TecanfilesGroup):
                 y0 = np.array(self.data[0][k])
                 y1 = np.array(self.data[1][k])
                 ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
-                # NEXT: use correction for dilution imply masked weights * dil_corr
-                # NEXT: list.pH with xerr
-                # TODO: dilution corr must be masked where y is NaN
-                # for the moment use np broadcasting from 1D array of len=1
                 if weights:
-                    ds.add_weights(
-                        {"y0": np.array(weights[0]), "y1": np.array(weights[1])}
-                    )
+                    # weights have right length (no need to broadcast 1D array of len=1)
+                    ds.add_weights({"y0": weights[0], "y1": weights[1]})
                 else:
                     weight_multi_ds_titration(ds)
                 try:
@@ -1378,6 +1375,10 @@ class Titration(TecanfilesGroup):
                     fitting[k] = FitResult(None, None, None)
             fittings.append(fitting)
         return fittings
+
+    # TODO: test cases are:
+    # 1) w>1 from buffer
+    # 2) w=1 from weight_multi_ds_titration() with/out masked da
 
     def print_fitting(self, lb: int) -> None:
         """Print fitting parameters for the whole plate."""
@@ -1413,8 +1414,8 @@ class Titration(TecanfilesGroup):
         res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
         # Sort the DataFrame by this computed value in descending order
         res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
-        # # TODO: in case: del res_unk["sort_val"] # if you want to remove the
-        # # temporary sorting column
+        # MAYBE: in case: del res_unk["sort_val"] # if you want to remove the
+        # temporary sorting column
         print("\n" + header)
         print("  UNK")
         # for i, r in res_unk.sort_index().iterrows():
