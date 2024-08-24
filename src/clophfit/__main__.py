@@ -131,7 +131,7 @@ def tecan(  # noqa: PLR0913
     if add:
         tit.load_additions(Path(add))
     if cl and tit.additions:
-        tit.conc = prtecan.calculate_conc(tit.additions, cl)
+        tit.x = prtecan.calculate_conc(tit.additions, cl)
     if sch:
         tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)

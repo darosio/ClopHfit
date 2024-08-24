@@ -147,7 +147,11 @@ class Dataset(dict[str, DataArray]):
             and isinstance(y, np.ndarray)
             and not isinstance(w, dict)
         ):
-            data = {"default": DataArray(x, y, w) if w else DataArray(x, y)}
+            data = {
+                "default": DataArray(x, y, w)
+                if w is not None and w.size > 0
+                else DataArray(x, y)
+            }
         # x:array, y:dict_of_arrays
         elif isinstance(x, np.ndarray) and isinstance(y, dict):
             data = {

@@ -737,7 +737,7 @@ class Buffer:
     _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
     _dataframes_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
-    _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
+    _bg_err: list[ArrayF] = field(init=False, default_factory=list)
     fit_results: list[BufferFit] = field(init=False, default_factory=list)
     fit_results_nrm: list[BufferFit] = field(init=False, default_factory=list)
 
@@ -758,7 +758,7 @@ class Buffer:
         self._dataframes = []
         self._dataframes_nrm = []
         self._bg = []
-        self._bg_sd = []
+        self._bg_err = []
 
     @property
     def dataframes(self) -> list[pd.DataFrame]:
@@ -788,21 +788,21 @@ class Buffer:
     def bg(self) -> list[ArrayF]:
         """List of buffer values."""
         if not self._bg:
-            self._bg, self._bg_sd = self._compute_bg_and_sd()
+            self._bg, self._bg_err = self._compute_bg_and_sd()
         return self._bg
 
     @bg.setter
     def bg(self, value: list[ArrayF]) -> None:
         """Set the buffer values and reset SEM."""
         self._bg = value
-        self._bg_sd = []
+        self._bg_err = []
 
     @property
-    def bg_sd(self) -> list[ArrayF]:
+    def bg_err(self) -> list[ArrayF]:
         """List of buffer SEM values."""
-        if not self._bg_sd:
-            self._bg, self._bg_sd = self._compute_bg_and_sd()
-        return self._bg_sd
+        if not self._bg_err:
+            self._bg, self._bg_err = self._compute_bg_and_sd()
+        return self._bg_err
 
     def _compute_bg_and_sd(self) -> tuple[list[ArrayF], list[ArrayF]]:
         """Compute and return buffer values and their SEM."""
@@ -812,7 +812,7 @@ class Buffer:
                 bdf["fit"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
-            bg_sd = [
+            bg_err = [
                 bdf["fit_err"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
@@ -821,14 +821,14 @@ class Buffer:
                 bdf["mean"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
-            bg_sd = [
+            bg_err = [
                 bdf["sem"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
         else:
             msg = f"Unknown bg_method: {self.tit.params.bg_mth}"
             raise ValueError(msg)
-        return bg, bg_sd
+        return bg, bg_err
 
     def _fit_buffer(self, dfs: list[pd.DataFrame]) -> list[BufferFit]:
         """Fit buffers of all labelblocksgroups."""
@@ -852,7 +852,7 @@ class Buffer:
             else:
                 mean = buf_df.mean(axis=1).to_numpy()
                 sem = buf_df.sem(axis=1).to_numpy()
-                data = RealData(self.tit.conc, mean, sy=sem)
+                data = RealData(self.tit.x, mean, sy=sem)
                 model = Model(linear_model)
                 # Initial guess for slope and intercept
                 odr = ODR(data, model, beta0=[0.0, mean.mean()])
@@ -863,8 +863,8 @@ class Buffer:
                 cov_matrix = output.cov_beta
                 fit_results.append(BufferFit(m_best, q_best, m_err, q_err))
                 buf_df["Label"] = lbl_n
-                buf_df["fit"] = m_best * self.tit.conc + q_best
-                buf_df["fit_err"] = fit_error(self.tit.conc, cov_matrix)
+                buf_df["fit"] = m_best * self.tit.x + q_best
+                buf_df["fit_err"] = fit_error(self.tit.x, cov_matrix)
                 buf_df["mean"] = mean
                 buf_df["sem"] = sem
         return fit_results
@@ -882,7 +882,7 @@ class Buffer:
         for buf_df in buffer_dfs:
             if not buf_df.empty:
                 buffer = buf_df[wells_lbl].copy()
-                buffer[pp.kind] = self.tit.conc
+                buffer[pp.kind] = self.tit.x
                 melted_buffers.append(
                     buffer.melt(
                         id_vars=[pp.kind, "Label"], var_name="well", value_name="F"
@@ -915,7 +915,7 @@ class Buffer:
                 legend=label_n == num_labels,
             )
             g.axes_dict[label_n].errorbar(
-                x=self.tit.conc,
+                x=self.tit.x,
                 y=buffer_dfs[label_n - 1]["fit"],
                 yerr=buffer_dfs[label_n - 1]["fit_err"],
                 xerr=0.1,
@@ -959,10 +959,12 @@ class Titration(TecanfilesGroup):
     ----------
     tecanfiles: list[Tecanfile]
         List of Tecanfiles.
-    conc : ArrayF
+    x : ArrayF
         Concentration or pH values.
     is_ph : bool
         Indicate if x values represent pH (default is False).
+    x_err : ArrayF | None
+        Uncertainties of concentration or pH values.
 
     Raises
     ------
@@ -970,15 +972,16 @@ class Titration(TecanfilesGroup):
         For unexpected file format, e.g. header `names`.
     """
 
-    conc: ArrayF
+    x: ArrayF
     is_ph: bool
+    x_err: ArrayF | None = None
     buffer: Buffer = field(init=False)
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
     _fit_keys: set[str] = field(init=False, default_factory=set)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
-    _bg_sd: list[ArrayF] = field(init=False, default_factory=list)
+    _bg_err: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
@@ -1002,7 +1005,7 @@ class Titration(TecanfilesGroup):
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()
         self.bg = []
-        self._bg_sd = []
+        self._bg_err = []
 
     @property
     def params(self) -> TitrationConfig:
@@ -1039,73 +1042,44 @@ class Titration(TecanfilesGroup):
         self._reset_data_and_results()
 
     @property
-    def bg_sd(self) -> list[ArrayF]:
+    def bg_err(self) -> list[ArrayF]:
         """List of buffer SEM values."""
-        return self.buffer.bg_sd
+        return self.buffer.bg_err
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
         return (
             f'Titration\n\tfiles=["{self.tecanfiles[0].path}", ...],\n'
-            f"\tconc={list(self.conc)!r},\n"
+            f"\tx={list(self.x)!r},\n"
             f"\tnumber of labels={self.n_labels},\n"
             f"\tparams={self.params!r}"
         )
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> Titration:
-        """Build `Titration` from a list[.pH|.Cl] file.
-
-        Parameters
-        ----------
-        list_file: Path | str
-            File path to the listfile ([fpath conc]).
-        is_ph : bool
-            Indicate if x values represent pH.
-
-        Returns
-        -------
-        Titration
-        """
-        tecanfiles, conc = Titration._listfile(Path(list_file))
-        return cls(tecanfiles, conc, is_ph)
+        """Build `Titration` from a list[.pH|.Cl] file."""
+        tecanfiles, x, x_err = cls._listfile(Path(list_file))
+        return cls(tecanfiles, x, is_ph, x_err=x_err)
 
     # NEXT: list.pH with xerr
     @staticmethod
-    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF]:
-        """Help construction from file.
-
-        Parameters
-        ----------
-        listfile: Path
-            File path to the listfile ([fpath conc]).
-
-        Returns
-        -------
-        tecanfiles: list[Tecanfile]
-            List of tecanfiles.
-        conc: ArrayF
-            Concentration array.
-
-        Raises
-        ------
-        FileNotFoundError
-            When cannot access `list_file`.
-        ValueError
-            For unexpected file format, e.g. length of filename column differs from
-            length of conc values.
-        """
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF, ArrayF | None]:
+        """Help construction from list file."""
         try:
-            table = pd.read_csv(listfile, sep="\t", names=["filenames", "conc"])
+            table = pd.read_csv(listfile, sep="\t", names=["filenames", "x", "x_err"])
         except FileNotFoundError as exc:
             msg = f"Cannot find: {listfile}"
             raise FileNotFoundError(msg) from exc
-        if table["filenames"].count() != table["conc"].count():
-            msg = f"Check format [filenames conc] for listfile: {listfile}"
+        # For unexpected file format, e.g. length of filename column differs
+        # from length of x values.
+        if table["filenames"].count() != table["x"].count():
+            msg = f"Check format [filenames x x_err] for listfile: {listfile}"
             raise ValueError(msg)
-        conc = table["conc"].to_numpy()
+        # Check if x_err is provided
+        x_err = table["x_err"].to_numpy() if "x_err" in table else None
+        x = table["x"].to_numpy()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
-        return tecanfiles, conc
+        return tecanfiles, x, x_err
 
     @property
     def additions(self) -> list[float] | None:
@@ -1151,7 +1125,6 @@ class Titration(TecanfilesGroup):
                 ]
             # Transform values of non-empty dict into arrays
             data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
-
             # bg
             if self.params.bg and self.bg:
                 data = [
@@ -1163,7 +1136,7 @@ class Titration(TecanfilesGroup):
                 for i in range(self.n_labels):
                     label_str = self.labelblocksgroups[i].metadata["Label"].value
                     lbl_s = str(label_str)
-                    sd = self.bg_sd[i].mean()
+                    sd = self.bg_err[i].mean()
                     for k, v in data[i].items():
                         data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
             # dil
@@ -1256,15 +1229,13 @@ class Titration(TecanfilesGroup):
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data."""
 
-        def write(
-            conc: ArrayF, data: list[dict[str, ArrayF]], out_folder: Path
-        ) -> None:
+        def write(x: ArrayF, data: list[dict[str, ArrayF]], out_folder: Path) -> None:
             """Write data."""
             if any(data):
                 out_folder.mkdir(parents=True, exist_ok=True)
                 columns = ["x"] + [f"y{i}" for i in range(1, len(data) + 1)]
                 for key in data[0]:
-                    dat = np.vstack((conc, [dt[key] for dt in data]))
+                    dat = np.vstack((x, [dt[key] for dt in data]))
                     datxy = pd.DataFrame(dat.T, columns=columns)
                     datxy.to_csv(out_folder / f"{key}.dat", index=False)
 
@@ -1274,13 +1245,13 @@ class Titration(TecanfilesGroup):
             for combination in combinations:
                 self._apply_combination(combination)
                 subfolder = self._prepare_output_folder(tecan_config.out_fp)
-                write(self.conc, [dd for dd in self.data if dd], subfolder)
+                write(self.x, [dd for dd in self.data if dd], subfolder)
                 if tecan_config.fit:
                     self._export_fit(subfolder, tecan_config)
             self.params = saved_p
         else:
             subfolder = self._prepare_output_folder(tecan_config.out_fp)
-            write(self.conc, [dd for dd in self.data if dd], subfolder)
+            write(self.x, [dd for dd in self.data if dd], subfolder)
             if tecan_config.fit:
                 self._export_fit(subfolder, tecan_config)
 
@@ -1333,13 +1304,13 @@ class Titration(TecanfilesGroup):
         -----
         This method is less general and is designed for two label blocks.
         """
-        x = self.conc
+        x = self.x
         fittings = []
         # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
         # no scheme is available use single_ds_fit residuals.
-        weights = [1 / sd if sd.size > 0 else sd for sd in self.bg_sd]
+        weights = [1 / sd if sd.size > 0 else sd for sd in self.bg_err]
         print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
@@ -1430,7 +1401,7 @@ class Titration(TecanfilesGroup):
                 lb.metadata["Temperature"].value for lb in lbg.labelblocks
             ]
         pp = PlotParameters(is_ph=self.is_ph)
-        temperatures[pp.kind] = self.conc.tolist()
+        temperatures[pp.kind] = self.x.tolist()
         data = pd.DataFrame(temperatures)
         data = data.melt(id_vars=pp.kind, var_name="Label", value_name="Temperature")
         g = sns.lineplot(

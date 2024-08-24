@@ -477,13 +477,11 @@ class TestTitration:
     def tit1(self) -> Titration:
         """Set up a titration with a single Tecan file."""
         tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
-        return prtecan.Titration([tf], conc=np.array([6.5]), is_ph=True)
+        return prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
 
     def test_conc(self, tit_ph: Titration) -> None:
         """It reads pH values."""
-        assert_array_equal(
-            tit_ph.conc, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31]
-        )
+        assert_array_equal(tit_ph.x, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31])
 
     def test_labelblocksgroups(self, tit_ph: Titration) -> None:
         """It reads labelblocksgroups data and metadata."""
