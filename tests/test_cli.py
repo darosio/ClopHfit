@@ -120,7 +120,7 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
             ppr,
             ["--out", out, "tecan", list_f, "--fit", "--sch", scheme_f, "--bg"],
         )
-    assert any("OVER" in record.message for record in caplog.records), "OVER not found"
+    assert any("OVER" in record.message for record in caplog.records)
     assert result.exit_code == 0
 
 
