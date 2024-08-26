@@ -852,7 +852,7 @@ class Buffer:
             else:
                 mean = buf_df.mean(axis=1).to_numpy()
                 sem = buf_df.sem(axis=1).to_numpy()
-                data = RealData(self.tit.x, mean, sy=sem)
+                data = RealData(self.tit.x, mean, sy=sem, sx=self.tit.x_err)
                 model = Model(linear_model)
                 # Initial guess for slope and intercept
                 odr = ODR(data, model, beta0=[0.0, mean.mean()])
@@ -918,7 +918,7 @@ class Buffer:
                 x=self.tit.x,
                 y=buffer_dfs[label_n - 1]["fit"],
                 yerr=buffer_dfs[label_n - 1]["fit_err"],
-                xerr=0.1,
+                xerr=self.tit.x_err,
                 fmt="",
                 color="r",
                 linewidth=2,
@@ -974,7 +974,7 @@ class Titration(TecanfilesGroup):
 
     x: ArrayF
     is_ph: bool
-    x_err: ArrayF | None = None
+    x_err: ArrayF = field(default_factory=lambda: np.array([]))
     buffer: Buffer = field(init=False)
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
@@ -1051,6 +1051,7 @@ class Titration(TecanfilesGroup):
         return (
             f'Titration\n\tfiles=["{self.tecanfiles[0].path}", ...],\n'
             f"\tx={list(self.x)!r},\n"
+            f"\tx_err={list(self.x_err)!r},\n"
             f"\tnumber of labels={self.n_labels},\n"
             f"\tparams={self.params!r}"
         )
