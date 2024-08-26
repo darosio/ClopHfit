@@ -815,6 +815,7 @@ def odr_fitting(
 
     data = odr.RealData(x_data_combined, y_data, sx=x_err_combined, sy=y_err)
 
+    # MAYBE: Reuse _1site binding et al..
     def model_function(pars: list[float], x: ArrayF) -> ArrayF:
         K, S0, S1 = pars  # noqa: N806
         return binding_1site(x, K, S0, S1, is_ph=True)
@@ -828,7 +829,7 @@ def odr_fitting(
     combined_model_odr = odr.Model(combined_model)
     # combined_model_odr = odr.Model(model_function)  # noqa: ERA001
 
-    keys = ["K", "S0_y1", "S1_y1", "S0_y2", "S1_y2"]
+    keys = ["K", "S0_y0", "S1_y0", "S0_y1", "S1_y1"]
     # keys = ["K", "S0_default", "S1_default"]  # noqa: ERA001
     initial_params = [pars[key].value for key in keys]
 

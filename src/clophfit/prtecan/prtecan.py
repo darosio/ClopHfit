@@ -1062,12 +1062,11 @@ class Titration(TecanfilesGroup):
         tecanfiles, x, x_err = cls._listfile(Path(list_file))
         return cls(tecanfiles, x, is_ph, x_err=x_err)
 
-    # NEXT: list.pH with xerr
     @staticmethod
-    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF, ArrayF | None]:
+    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF, ArrayF]:
         """Help construction from list file."""
         try:
-            table = pd.read_csv(listfile, sep="\t", names=["filenames", "x", "x_err"])
+            table = pd.read_csv(listfile, names=["filenames", "x", "x_err"])
         except FileNotFoundError as exc:
             msg = f"Cannot find: {listfile}"
             raise FileNotFoundError(msg) from exc
@@ -1076,10 +1075,9 @@ class Titration(TecanfilesGroup):
         if table["filenames"].count() != table["x"].count():
             msg = f"Check format [filenames x x_err] for listfile: {listfile}"
             raise ValueError(msg)
-        # Check if x_err is provided
-        x_err = table["x_err"].to_numpy() if "x_err" in table else None
-        x = table["x"].to_numpy()
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
+        x = table["x"].to_numpy()
+        x_err = table["x_err"].to_numpy()
         return tecanfiles, x, x_err
 
     @property
