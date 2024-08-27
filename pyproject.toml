@@ -367,4 +367,5 @@ convention = "numpy"
 [tool.typos]
 
 [tool.typos.default.extend-words]
+arange = "arange"
 arosio = "Arosio"
