@@ -110,7 +110,7 @@ def test_prenspire(tmp_path: Path) -> None:
 
 def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
-    list_f = str(tpath / "Tecan" / "140220" / "list.pH")
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
     scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
     out = str(tmp_path)
     runner = CliRunner()
@@ -126,7 +126,7 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
 
 def test_prtecan_cl(tmp_path: Path) -> None:
     """Test prtecan command with actual data."""
-    list_f = str(tpath / "Tecan" / "140220" / "list.cl")
+    list_f = str(tpath / "Tecan" / "140220" / "list.cl.csv")
     scheme_f = str(tpath / "Tecan" / "140220" / "scheme.txt")
     adds_f = str(tpath / "Tecan" / "140220" / "additions.cl")
     out = tmp_path / "out4"

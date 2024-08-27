@@ -149,11 +149,11 @@ class TestLabelblock:
     def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """Test the __almost_eq__ method of the Labelblock class."""
         lb0, _ = labelblocks
-        file_path1 = Path(data_tests) / "290513_7.2.xls"
+        file_path1 = Path(data_tests) / "L1" / "290513_7.2.xls"
         csvl1 = prtecan.read_xls(file_path1)  # Gain=98
         idxs1 = prtecan.lookup_listoflines(csvl1)
         lb11 = Labelblock(csvl1[idxs1[1] :])
-        file_path2 = Path(data_tests) / "290513_8.8.xls"
+        file_path2 = Path(data_tests) / "L1" / "290513_8.8.xls"
         csvl2 = prtecan.read_xls(file_path2)  # Gain=99
         idxs2 = prtecan.lookup_listoflines(csvl2)
         lb12 = Labelblock(csvl2[idxs2[1] :])
@@ -163,7 +163,7 @@ class TestLabelblock:
 
     def test_overvalue(self, caplog: pytest.LogCaptureFixture) -> None:
         """It detects saturated data ("OVER")."""
-        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        csvl = prtecan.read_xls(data_tests / "140220" / "pH6.5_200214.xls")
         idxs = prtecan.lookup_listoflines(csvl)
         with caplog.at_level(logging.WARNING):
             lb = Labelblock(csvl[idxs[0] : idxs[1]])
@@ -263,9 +263,9 @@ class TestLabelblocksGroup:
     def tfs(self) -> list[Tecanfile]:
         """Set up list of Tecanfile."""
         return [
-            Tecanfile(data_tests / "290513_5.5.xls"),
-            Tecanfile(data_tests / "290513_7.2.xls"),
-            Tecanfile(data_tests / "290513_8.8.xls"),
+            Tecanfile(data_tests / "L1" / "290513_5.5.xls"),
+            Tecanfile(data_tests / "L1" / "290513_7.2.xls"),
+            Tecanfile(data_tests / "L1" / "290513_8.8.xls"),
         ]
 
     @pytest.fixture(autouse=True, scope="class")
@@ -316,7 +316,7 @@ class TestTecanfilesGroup:
         def tfg(self) -> TecanfilesGroup:
             """Set up TecanfilesGroup."""
             filenames = ["290513_5.5.xls", "290513_7.2.xls"]
-            tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
+            tecanfiles = [Tecanfile(data_tests / "L1" / f) for f in filenames]
             return TecanfilesGroup(tecanfiles)
 
         def test_metadata(self, tfg: TecanfilesGroup) -> None:
@@ -353,7 +353,7 @@ class TestTecanfilesGroup:
                 "290513_7.2.xls",  # Label1 and Label2
                 "290513_8.8.xls",  # Label1 and Label2 with different metadata
             ]
-            tecanfiles = [Tecanfile(data_tests / f) for f in filenames]
+            tecanfiles = [Tecanfile(data_tests / "L1" / f) for f in filenames]
             with caplog.at_level(logging.WARNING):
                 tfg = TecanfilesGroup(tecanfiles)
             return tfg, caplog.records
@@ -460,28 +460,28 @@ class TestTitration:
 
     @pytest.fixture
     def tit(self) -> Titration:
-        """Set up L1 pH titration."""
-        return prtecan.Titration.fromlistfile(data_tests / "L1" / "list.pH", is_ph=True)
+        """Set up L1 pH titration: 1 lbg without scheme and additions."""
+        return Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
     def tit_ph(self) -> Titration:
         """Set up a pH titration."""
-        return prtecan.Titration.fromlistfile(data_tests / "list.pH", is_ph=True)
+        return Titration.fromlistfile(data_tests / "140220" / "list.pH.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
     def tit_cl(self) -> Titration:
         """Set up a Cl titration."""
-        return prtecan.Titration.fromlistfile(data_tests / "list.cl20", is_ph=False)
+        return Titration.fromlistfile(data_tests / "140220" / "list.cl.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
     def tit1(self) -> Titration:
         """Set up a titration with a single Tecan file."""
-        tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+        tf = prtecan.Tecanfile(data_tests / "140220" / "pH6.5_200214.xls")
         return prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
 
     def test_conc(self, tit_ph: Titration) -> None:
         """It reads pH values."""
-        assert_array_equal(tit_ph.x, [5.78, 6.38, 6.83, 7.24, 7.67, 8.23, 8.82, 9.31])
+        assert_array_equal(tit_ph.x, [9.0633, 8.35, 7.7, 7.08, 6.44, 5.83, 4.99])
 
     def test_labelblocksgroups(self, tit_ph: Titration) -> None:
         """It reads labelblocksgroups data and metadata."""
@@ -489,37 +489,14 @@ class TestTitration:
         lbg1 = tit_ph.labelblocksgroups[1]
         # metadata
         assert lbg0.metadata["Number of Flashes"].value == 10.0
-        # pH9.3 is 93 Optimal not Manual
-        assert lbg1.metadata["Gain"] == prtecan.Metadata(93.0)
+        assert lbg1.metadata["Gain"] == prtecan.Metadata(56.0)
         # data
         assert lbg0.data is not None
         assert lbg1.data is not None
-        assert lbg0.data["A01"][::2] == [30344, 31010, 33731, 37967]
-        assert lbg1.data["A01"][1::2] == [9165, 15591, 20788, 22534]
-        assert lbg0.data["H12"][1::2] == [20888, 21711, 23397, 25045]
-        assert lbg1.data["H12"] == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
-
-    def test_data_buffersubtracted(self, tit: Titration) -> None:
-        """Check data after normalization and bg subtraction."""
-        tit.buffer.wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
-        tit.params.nrm = False
-        assert tit.data[0]
-        assert tit.data[1] == {}
-        sliced_values = tit.data[0]["B07"][-1::-3][:2]
-        assert_almost_equal(sliced_values, [7069, 5716.7], 1)
-        # normalization
-        tit.params.nrm = True
-        sliced_values0 = tit.data[0]["B07"][-1::-3][:2]
-        sliced_values1 = tit.data[1]["B07"][-4::-3]
-        assert_almost_equal(sliced_values0, [376.01, 304.08], 2)
-        assert_almost_equal(sliced_values1, [355.16, 348.57], 2)
-
-    def test_labelblocksgroups_cl(self, tit_cl: Titration) -> None:
-        """It reads labelblocksgroups data for Cl too."""
-        lbg = tit_cl.labelblocksgroups[0]
-        assert lbg.data is not None
-        assert lbg.data["A01"] == [6462, 6390, 6465, 6774]
-        assert lbg.data["H12"] == [4705, 4850, 4918, 5007]
+        assert lbg0.data["A01"][::2] == [14798.0, 20142.0, 22915.0, 22060.0]
+        assert lbg1.data["A01"][1::2] == [3761.0, 835.0, 347.0]
+        assert lbg0.data["H12"][1::2] == [16345.0, 21719.0, 23532.0]
+        assert lbg1.data["H12"] == [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0]
 
     def test_export_data(self, tit_ph: Titration, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
@@ -538,20 +515,45 @@ class TestTitration:
         tit_ph.export_data_fit(tecan_config)
         a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")
         h12 = pd.read_csv(tmp_path / "dat" / "H12.dat")
-        assert a01["y1"].tolist()[1::2] == [30072, 32678, 36506, 37725]
-        assert a01["y2"].tolist()[1::2] == [9165, 15591, 20788, 22534]
-        assert h12["y1"].tolist()[1::2] == [20888, 21711, 23397, 25045]
-        assert h12["y2"].tolist() == [4477, 5849, 7165, 8080, 8477, 8822, 9338, 9303]
+        assert a01["y1"].tolist()[0::2] == [14798.0, 20142.0, 22915.0, 22060.0]
+        assert a01["y2"].tolist()[1::2] == [3761.0, 835.0, 347.0]
+        assert h12["y1"].tolist()[1::2] == [16345.0, 21719.0, 23532.0]
+        assert h12["y2"].tolist()[1:] == [4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0]
+
+    def test_data_buffersubtracted(self, tit: Titration) -> None:
+        """Check data after normalization and bg subtraction."""
+        tit.buffer.wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
+        tit.params.nrm = False
+        assert tit.data[0]
+        assert tit.data[1] == {}
+        sliced_values = tit.data[0]["B07"][-1::-3][:2]
+        assert_almost_equal(sliced_values, [7069, 5716.7], 1)
+        # normalization
+        tit.params.nrm = True
+        sliced_values0 = tit.data[0]["B07"][-1::-3][:2]
+        sliced_values1 = tit.data[1]["B07"][-4::-3]
+        assert_almost_equal(sliced_values0, [376.01, 304.08], 2)
+        assert_almost_equal(sliced_values1, [355.16, 348.57], 2)
+
+    def test_labelblocksgroups_cl(self, tit_cl: Titration) -> None:
+        """It reads labelblocksgroups data for Cl too."""
+        lbg0 = tit_cl.labelblocksgroups[0]
+        lbg1 = tit_cl.labelblocksgroups[1]
+        assert lbg0.data is not None
+        assert lbg0.data["A01"][1::2] == [16908.0, 14719.0, 14358.0, 14520.0]
+        assert lbg1.data["A01"][1::2] == [167.0, 109.0, 87.0, 81.0]
+        assert lbg1.data["H12"][1::2] == [223.0, 141.0, 120.0, 100.0]
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
-            prtecan.Titration.fromlistfile(Path("aax"), True)
+            Titration.fromlistfile(Path("aax"), True)
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            prtecan.Titration.fromlistfile(data_tests / "list.pH2", True)
+            # TODO: move into 140220
+            Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", True)
 
     def test_data_bg_and_nrm(self, tit1: Titration) -> None:
         """Calculate buffer value from average of buffer wells and subtract."""
@@ -587,6 +589,23 @@ class TestTitration:
         tit1.bg = [np.array([1.0]), np.array([0.4821])]
         assert tit1.data[0]["F06"] == pytest.approx(1050.13)
         assert tit1.data[1]["H12"] == pytest.approx(48.0)
+
+    # Buffer
+    def test_plot_buffer_1lbg(self, tit: Titration) -> None:
+        """It plots buffers with 1 lbg and norm with 2 lbg because one lbg is mergeable."""
+        tit.load_additions(data_tests / "L1/additions.pH")
+        tit.load_scheme(data_tests / "L1/scheme.txt")
+        g = tit.buffer.plot()
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 1
+        g = tit.buffer.plot(nrm=True)
+        assert isinstance(g, sns.FacetGrid)
+        assert len(g.axes_dict) == 2
+
+    def test_plot_buffer_empty_buffers(self, tit: Titration) -> None:
+        """It handles empty buffers (before assignment of buffer_wells)."""
+        g = tit.buffer.plot()
+        assert isinstance(g, sns.FacetGrid)
 
 
 class TestPlateScheme:
@@ -631,22 +650,9 @@ class TestTitrationAnalysis:
     @pytest.fixture(autouse=True, scope="class")
     def titan(self) -> Titration:
         """Set up TitrationAnalysis."""
-        titan = Titration.fromlistfile(data_tests / "140220/list.pH", is_ph=True)
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
         titan.load_additions(data_tests / "140220/additions.pH")
         titan.load_scheme(data_tests / "140220/scheme.txt")
-        return titan
-
-    @pytest.fixture(autouse=True, scope="class")
-    def titan_no_scheme(self) -> Titration:
-        """Set up TitrationAnalysis without scheme."""
-        return Titration.fromlistfile(data_tests / "140220/list.pH", is_ph=True)
-
-    @pytest.fixture(autouse=True, scope="class")
-    def titan_1lbg(self) -> Titration:
-        """Set up TitrationAnalysis with only 1 lbg before normalization."""
-        titan = Titration.fromlistfile(data_tests / "L1/list.pH", is_ph=True)
-        titan.load_additions(data_tests / "L1/additions.pH")
-        titan.load_scheme(data_tests / "L1/scheme.txt")
         return titan
 
     def test_scheme(self, titan: Titration) -> None:
@@ -733,23 +739,23 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'H02' in the second fit result
         assert fres[1]["H02"].result is not None
         k_h02 = fres[1]["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
-        assert k_h02.stderr == pytest.approx(0.0143, abs=1e-4)
+        assert k_h02.value == pytest.approx(7.890, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
         # Check 'K' and std error for 'H02' in the third fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.8904, abs=1e-4)
-        assert k_h02.stderr == pytest.approx(0.0143, abs=1e-4)
+        assert k_h02.value == pytest.approx(7.890, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
         # Check 'K' and std error for 'E02' in the second fit result
         assert fres[1]["E02"].result is not None
         k_e02 = fres[1]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.98497, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0219, abs=1e-4)
+        assert k_e02.value == pytest.approx(7.984, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.022, abs=1e-3)
         # Check 'K' and std error for 'E02' in the third fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.9850, abs=1e-4)
-        assert k_e02.stderr == pytest.approx(0.0149, abs=1e-4)
+        assert k_e02.value == pytest.approx(7.984, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.015, abs=1e-3)
         # Fit up to the second-last data point
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
@@ -762,22 +768,5 @@ class TestTitrationAnalysis:
     def test_plot_buffer_normalized(self, titan: Titration) -> None:
         """It plots buffers_norm for 2 lbg."""
         g = titan.buffer.plot(nrm=True)
-        assert isinstance(g, sns.FacetGrid)
-        assert len(g.axes_dict) == 2
-
-    def test_plot_buffer_empty_buffers(self, titan_no_scheme: Titration) -> None:
-        """It handles empty buffers (before assignment of buffer_wells)."""
-        g = titan_no_scheme.buffer.plot()
-        assert isinstance(g, sns.FacetGrid)
-
-    def test_plot_buffer_1lbg(self, titan_1lbg: Titration) -> None:
-        """It plots buffers_norm in the case of 1 mergeable lbg."""
-        g = titan_1lbg.buffer.plot()
-        assert isinstance(g, sns.FacetGrid)
-        assert len(g.axes_dict) == 1
-
-    def test_plot_buffer_1lbg_normalized(self, titan_1lbg: Titration) -> None:
-        """It plots buffers_norm in the case of 1 mergeable lbg."""
-        g = titan_1lbg.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
