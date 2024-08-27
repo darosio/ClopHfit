@@ -19,6 +19,7 @@ from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.fitting import (
+    DataArray,
     Dataset,
     FitResult,
     InsufficientDataError,
@@ -1309,13 +1310,14 @@ class Titration(TecanfilesGroup):
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
         # no scheme is available use single_ds_fit residuals.
-        weights = [1 / sd if sd.size > 0 else sd for sd in self.bg_err]
+        weights = [1 / e if e.size > 0 else e for e in self.bg_err]
         print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
             if dat:
                 for k in self.fit_keys:
-                    ds = Dataset(x, np.array(dat[k]), is_ph=self.is_ph)
+                    da = DataArray(x, np.array(dat[k]), x_errc=self.x_err)
+                    ds = Dataset(data_dict={"default": da}, is_ph=self.is_ph)
                     if weights:
                         ds.add_weights(np.array(weights[lbl_n - 1]))
                     else:
@@ -1324,7 +1326,7 @@ class Titration(TecanfilesGroup):
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
                         print(f"Skip {k} for Label{lbl_n}.")
-                        fitting[k] = FitResult(None, None, None)
+                        fitting[k] = FitResult()
                 fittings.append(fitting)
         # Global weighted on relative residues of single fittings.
         if self.data[0] and self.data[1]:
@@ -1332,7 +1334,9 @@ class Titration(TecanfilesGroup):
             for k in self.fit_keys:
                 y0 = np.array(self.data[0][k])
                 y1 = np.array(self.data[1][k])
-                ds = Dataset(x, {"y0": y0, "y1": y1}, is_ph=self.is_ph)
+                da0 = DataArray(x, y0, x_errc=self.x_err)
+                da1 = DataArray(x, y1, x_errc=self.x_err)
+                ds = Dataset(data_dict={"y0": da0, "y1": da1}, is_ph=self.is_ph)
                 if weights:
                     # weights have right length (no need to broadcast 1D array of len=1)
                     ds.add_weights({"y0": weights[0], "y1": weights[1]})
@@ -1342,13 +1346,13 @@ class Titration(TecanfilesGroup):
                     fitting[k] = fit_binding_glob(ds)
                 except InsufficientDataError:
                     print(f"Skip {k} for global fit.")
-                    fitting[k] = FitResult(None, None, None)
+                    fitting[k] = FitResult()
             fittings.append(fitting)
         return fittings
 
     # TODO: test cases are:
-    # 1) w>1 from buffer
-    # 2) w=1 from weight_multi_ds_titration() with/out masked da
+    # 1) len(w)>1 from buffer
+    # 2) len(w)=1 from weight_multi_ds_titration() with/out masked da
 
     def print_fitting(self, lb: int) -> None:
         """Print fitting parameters for the whole plate."""

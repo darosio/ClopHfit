@@ -329,10 +329,11 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     if weight:
         binding.fitting.weight_multi_ds_titration(ds)
     f_res = binding.fitting.fit_binding_glob(ds)
+    params = f_res.result.params if f_res.result else lmfit.Parameters()
     # Figure
     figure, ax = plt.subplots()
     binding.fitting.plot_fit(
-        ax, ds, f_res.result, nboot=30, pp=binding.plotting.PlotParameters(is_ph)
+        ax, ds, params, nboot=30, pp=binding.plotting.PlotParameters(is_ph)
     )
     lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
     figure.savefig(Path(file).with_suffix(".png"))
