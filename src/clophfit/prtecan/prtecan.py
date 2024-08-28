@@ -826,6 +826,17 @@ class Buffer:
                 bdf["sem"].to_numpy() if not bdf.empty else np.array([])
                 for bdf in buffers
             ]
+        elif self.tit.params.bg_mth == "meansd":
+            bg = [
+                bdf["mean"].to_numpy() if not bdf.empty else np.array([])
+                for bdf in buffers
+            ]
+            bg_err = [
+                np.repeat(np.percentile(bdf["sem"], 50), len(bdf["sem"]))
+                if not bdf.empty
+                else np.array([])
+                for bdf in buffers
+            ]
         else:
             msg = f"Unknown bg_method: {self.tit.params.bg_mth}"
             raise ValueError(msg)
@@ -1163,7 +1174,7 @@ class Titration(TecanfilesGroup):
         return [
             (tuple(bool_combo), method)
             for bool_combo in bool_iter
-            for method in ["mean", "fit"]
+            for method in ["mean", "meansd", "fit"]
         ]
 
     def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
@@ -1184,7 +1195,8 @@ class Titration(TecanfilesGroup):
         sdil = "_dil" if p.dil else ""
         snrm = "_nrm" if p.nrm else ""
         sfit = "_fit" if p.bg_mth == "fit" else ""
-        subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit
+        smeansd = "_1sd" if p.bg_mth == "meansd" else ""
+        subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit + smeansd
         subfolder = base_path / subfolder_name
         subfolder.mkdir(parents=True, exist_ok=True)
         return subfolder
