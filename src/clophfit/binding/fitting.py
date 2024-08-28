@@ -46,8 +46,8 @@ class DataArray:
     xc: ArrayF
     #: y at creation
     yc: ArrayF
-    #: w at creation
-    wc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
+    #: y_err at creation
+    y_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
     #: x_err at creation
     x_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
     _mask: ArrayMask = field(init=False)
@@ -63,10 +63,10 @@ class DataArray:
             msg = "Length of 'xc' and 'yc' must be equal."
             raise ValueError(msg)
 
-    def _validate_wc_lengths(self) -> None:
+    def _validate_yerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
-        if self.wc.any() and len(self.xc) != len(self.wc):
-            msg = "Length of 'xc' and 'wc' must be equal."
+        if self.y_errc.any() and len(self.xc) != len(self.y_errc):
+            msg = "Length of 'xc' and 'y_errc' must be equal."
             raise ValueError(msg)
 
     def _validate_xerrc_lengths(self) -> None:
@@ -95,19 +95,18 @@ class DataArray:
         """Masked y."""
         return self.yc[self.mask]
 
-    # TODO: convert to y_err
     @property
-    def w(self) -> ArrayF | None:
+    def y_err(self) -> ArrayF | None:
         """Masked weights."""
-        return self.wc[self.mask] if self.wc.any() else None
+        return self.y_errc[self.mask] if self.y_errc.any() else None
 
-    @w.setter
-    def w(self, wc: ArrayF) -> None:
+    @y_err.setter
+    def y_err(self, y_errc: ArrayF) -> None:
         """Set weights and validate their length."""
-        if wc.ndim == 0:
-            wc = np.ones_like(self.xc) * wc
-        self.wc = wc
-        self._validate_wc_lengths()
+        if y_errc.ndim == 0:
+            y_errc = np.ones_like(self.xc) * y_errc
+        self.y_errc = y_errc
+        self._validate_yerrc_lengths()
 
     @property
     def x_err(self) -> ArrayF | None:
@@ -119,7 +118,7 @@ class DataArray:
         """Set weights and validate their length."""
         if x_errc.ndim == 0:
             x_errc = np.ones_like(self.xc) * x_errc
-        self.wc = x_errc
+        self.x_errc = x_errc
         self._validate_xerrc_lengths()
 
 
@@ -130,66 +129,34 @@ class Dataset(dict[str, DataArray]):
 
     Parameters
     ----------
-    x : ArrayF | ArrayDict | None
+    dataarrays : list[DataArray]
         The x values of the dataset(s), either as a single ArrayF or as an ArrayDict
         if multiple datasets are provided.
-    y : ArrayF | ArrayDict | None
-        The y values of the dataset(s), either as a single ArrayF or as an ArrayDict
-        if multiple datasets are provided.
-    is_ph : bool
+    is_ph : bool, optional
         Indicate if x values represent pH (default is False).
-    w : ArrayF | ArrayDict | None
+    keys : list[str]|None
         The w values (weights) of the dataset(s), either as a single ArrayF or
         as an ArrayDict if multiple datasets are provided.
-    data_dict: dict[str, DataArray] | None
-        Optional initialization using a dict of DataArrays (default is None).
-
-    Raises
-    ------
-    ValueError
-        If x and y are both ArrayDict and their keys don't match.
     """
 
     is_ph: bool = False
 
     def __init__(
         self,
-        x: ArrayF | ArrayDict | None = None,
-        y: ArrayF | ArrayDict | None = None,
+        dataarrays: list[DataArray],
         is_ph: bool = False,
-        w: ArrayF | ArrayDict | None = None,
-        data_dict: dict[str, DataArray] | None = None,
+        keys: list[str] | None = None,
     ) -> None:
-        if data_dict is not None:
-            # Initialize using the dictionary of DataArray objects
-            data = data_dict
-        elif (
-            isinstance(x, np.ndarray)
-            and isinstance(y, np.ndarray)
-            and not isinstance(w, dict)
-        ):
-            data = {
-                "default": DataArray(x, y, w)
-                if w is not None and w.size > 0
-                else DataArray(x, y)
-            }
-        # x:array, y:dict_of_arrays
-        elif isinstance(x, np.ndarray) and isinstance(y, dict):
-            data = {
-                k: DataArray(x, v, w[k]) if isinstance(w, dict) else DataArray(x, v)
-                for k, v in y.items()
-            }
-        # x:dict_of_arrays, y:dict_of_arrays
-        elif isinstance(x, dict) and isinstance(y, dict):
-            if x.keys() != y.keys() or (isinstance(w, dict) and x.keys() != w.keys()):
-                msg = "Keys of 'x', 'y', and 'w' (if w is a dict) must match."
-                raise ValueError(msg)
-            data = {
-                k: DataArray(x[k], y[k], w[k])
-                if isinstance(w, dict)
-                else DataArray(x[k], y[k])
-                for k in x
-            }
+        if keys is None:
+            keys = []
+        if not dataarrays:
+            return
+        if len(dataarrays) == 1:
+            data = {"default": dataarrays[0]}
+        elif keys and len(keys) == len(dataarrays):
+            data = dict(zip(keys, dataarrays, strict=True))
+        else:
+            data = {f"y{i}": da for i, da in enumerate(dataarrays)}
         self.is_ph = is_ph
         super().__init__(data)
 
@@ -209,11 +176,11 @@ class Dataset(dict[str, DataArray]):
         """
         if isinstance(w, np.ndarray):
             for da in self.values():
-                da.w = w
+                da.y_err = w
         elif isinstance(w, dict):
             for k, weights in w.items():
                 if k in self:
-                    self[k].w = weights
+                    self[k].y_err = weights
                 else:
                     msg = f"No matching found for key '{k}' in the current Dataset."
                     raise ValueError(msg)
@@ -240,16 +207,14 @@ class Dataset(dict[str, DataArray]):
             If a provided key does not exist in the Dataset.
         """
         if keys is None:
-            copied = copy.deepcopy(self)
-        else:
-            # If keys are specified, only copy those keys
-            copied = Dataset({}, {}, is_ph=self.is_ph)
-            for key in keys:
-                if key in self:
-                    copied[key] = copy.deepcopy(self[key])
-                else:
-                    msg = f"No such key: '{key}' in the Dataset."
-                    raise KeyError(msg)
+            return copy.deepcopy(self)
+        copied = Dataset([], is_ph=self.is_ph)
+        for key in keys:
+            if key in self:
+                copied[key] = copy.deepcopy(self[key])
+            else:
+                msg = f"No such key: '{key}' in the Dataset."
+                raise KeyError(msg)
         return copied
 
     def clean_data(self, n_params: int) -> None:
@@ -329,7 +294,10 @@ def _binding_1site_models(params: Parameters, x: ArrayDict, is_ph: bool) -> Arra
 def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bool]:
     x = {k: da.x for k, da in ds.items()}
     y = {k: da.y for k, da in ds.items()}
-    w = {k: da.w if da.w is not None else np.ones_like(da.y) for k, da in ds.items()}
+    w = {
+        k: da.y_err if da.y_err is not None else np.ones_like(da.y)
+        for k, da in ds.items()
+    }
     return x, y, w, ds.is_ph
 
 
@@ -548,7 +516,7 @@ def weight_individual_ds(ds: Dataset) -> None:
         # Calculate residuals SEM
         sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
         w = 1 / sem * np.ones_like(da.xc)
-    da.w = w
+    da.y_err = w
 
 
 def weight_multi_ds_titration(ds: Dataset) -> None:
@@ -558,7 +526,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
     for lbl in ds:
         d = ds.copy(keys=[lbl])
         weight_individual_ds(d)
-        w_d[lbl] = d[lbl].wc
+        w_d[lbl] = d[lbl].y_errc
         if np.all(w_d[lbl] == 1.0):
             failed_fit_labels.append(lbl)
     if failed_fit_labels:
@@ -627,7 +595,7 @@ def plot_fit(
     colors = [COLOR_MAP(i) for i in range(len(ds))]
     for (lbl, da), clr in zip(ds.items(), colors, strict=False):
         # Make sure a label will be displayed.
-        label = lbl if (da.w is None and nboot == 0) else None
+        label = lbl if (da.y_err is None and nboot == 0) else None
         # Plot data.
         if pp:
             ax.scatter(
@@ -646,8 +614,8 @@ def plot_fit(
         # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         # Display label in error bar plot.
-        if da.w is not None or da.x_err is not None:
-            ye = 100 / da.w if da.w is not None else None
+        if da.y_err is not None or da.x_err is not None:
+            ye = 100 / da.y_err if da.y_err is not None else None
             ax.errorbar(
                 da.x,
                 da.y,
@@ -796,7 +764,7 @@ def odr_fitting2(fit_result: FitResult) -> _ODRResult:
         x_data = np.concatenate([v.x for v in fit_result.dataset.values()])
         y_data = np.concatenate([v.y for v in fit_result.dataset.values()])
         x_err = np.concatenate([v.x_err for v in fit_result.dataset.values()])
-        y_err = np.concatenate([v.w for v in fit_result.dataset.values()])
+        y_err = np.concatenate([v.y_err for v in fit_result.dataset.values()])
 
     data = odr.RealData(x_data, y_data, sx=x_err, sy=y_err)
 

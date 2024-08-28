@@ -212,7 +212,8 @@ def fit_enspire(  # noqa: C901,PLR0912
                     len(d_tit.keys() - dbands.keys()) > 1  # svd > 1
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
-                    ds = binding.fitting.Dataset(x_combined, y_combined, is_ph)
+                    da = binding.fitting.DataArray(x_combined, y_combined)
+                    ds = binding.fitting.Dataset([da], is_ph)
                     spectra_gres = binding.fitting.analyze_spectra_glob(
                         d_tit, ds, dbands
                     )
