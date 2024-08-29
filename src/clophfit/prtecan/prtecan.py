@@ -25,7 +25,7 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     fit_binding_glob,
     format_estimate,
-    weight_individual_ds,
+    weight_da,
     weight_multi_ds_titration,
 )
 from clophfit.binding.plotting import PlotParameters
@@ -832,7 +832,7 @@ class Buffer:
                 for bdf in buffers
             ]
             bg_err = [
-                np.repeat(np.percentile(bdf["sem"], 50), len(bdf["sem"]))
+                np.repeat(np.nanpercentile(bdf["sem"], 50), len(bdf["sem"]))
                 if not bdf.empty
                 else np.array([])
                 for bdf in buffers
@@ -863,7 +863,8 @@ class Buffer:
                 fit_results.append(BufferFit())
             else:
                 mean = buf_df.mean(axis=1).to_numpy()
-                sem = buf_df.sem(axis=1).to_numpy()
+                sem = buf_df.sem(axis=1).to_numpy()  # # FIXME: ddof=2
+                # y_err estimate is important when using 2 ds and x_err for ODR
                 data = RealData(self.tit.x, mean, sy=sem, sx=self.tit.x_err)
                 model = Model(linear_model)
                 # Initial guess for slope and intercept
@@ -1322,18 +1323,24 @@ class Titration(TecanfilesGroup):
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
         # no scheme is available use single_ds_fit residuals.
-        weights = [1 / e if e.size > 0 else e for e in self.bg_err]
-        print(f"weights: {weights}")
         for lbl_n, dat in enumerate(self.data, start=1):
             fitting = {}
             if dat:
                 for k in self.fit_keys:
-                    da = DataArray(x, np.array(dat[k]), x_errc=self.x_err)
-                    ds = Dataset(data_dict={"default": da}, is_ph=self.is_ph)
-                    if weights:
-                        ds.add_weights(np.array(weights[lbl_n - 1]))
-                    else:
-                        weight_individual_ds(ds)
+                    da = (
+                        DataArray(
+                            x,
+                            np.array(dat[k]),
+                            x_errc=self.x_err,
+                            y_errc=self.bg_err[lbl_n - 1],
+                        )
+                        if self.bg_err
+                        else DataArray(x, np.array(dat[k]), x_errc=self.x_err)
+                    )
+                    ds = Dataset({"default": da}, is_ph=self.is_ph)
+                    # if weights:
+                    if not self.bg_err:
+                        weight_da(da, ds.is_ph)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
@@ -1346,13 +1353,18 @@ class Titration(TecanfilesGroup):
             for k in self.fit_keys:
                 y0 = np.array(self.data[0][k])
                 y1 = np.array(self.data[1][k])
-                da0 = DataArray(x, y0, x_errc=self.x_err)
-                da1 = DataArray(x, y1, x_errc=self.x_err)
-                ds = Dataset(data_dict={"y0": da0, "y1": da1}, is_ph=self.is_ph)
-                if weights:
-                    # weights have right length (no need to broadcast 1D array of len=1)
-                    ds.add_weights({"y0": weights[0], "y1": weights[1]})
-                else:
+                da0 = (
+                    DataArray(x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
+                    if self.bg_err
+                    else DataArray(x, y0, x_errc=self.x_err)
+                )
+                da1 = (
+                    DataArray(x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
+                    if self.bg_err
+                    else DataArray(x, y1, x_errc=self.x_err)
+                )
+                ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+                if not self.bg_err:
                     weight_multi_ds_titration(ds)
                 try:
                     fitting[k] = fit_binding_glob(ds)
