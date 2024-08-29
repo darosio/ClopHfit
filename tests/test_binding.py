@@ -72,18 +72,18 @@ def test_dataset_single_array_no_nan() -> None:
     x = np.array([1, 2, 3])
     y = np.array([4, 5, 6])
     dataarray = DataArray(x, y)
-    dataset = Dataset.from_dataarrays([dataarray])
+    dataset = Dataset.from_da([dataarray])
     assert len(dataset) == 1
-    assert isinstance(dataset["default"], DataArray)
-    assert np.array_equal(dataset["default"].x, x)
-    assert np.array_equal(dataset["default"].y, y)
+    assert isinstance(dataset["y0"], DataArray)
+    assert np.array_equal(dataset["y0"].x, x)
+    assert np.array_equal(dataset["y0"].y, y)
 
 
 def test_dataset_single_array_with_nan() -> None:
     """Clean nan."""
     x = np.array([1, 2, 3, 4])
     y = np.array([5, 6, np.nan, 8])
-    dataset = Dataset.from_dataarrays([DataArray(x, y)])
+    dataset = Dataset.from_da(DataArray(x, y))
     assert len(dataset) == 1
     assert isinstance(dataset["default"], DataArray)
     assert np.array_equal(dataset["default"].x, np.array([1, 2, 4]))
@@ -136,7 +136,7 @@ def test_dataset_clean_data() -> None:
     """Clean too small datasets."""
     x = np.array([1, 2, 3])
     y = np.array([2, 3, 4])
-    ds = Dataset.from_dataarrays([DataArray(x, y)], is_ph=True)
+    ds = Dataset.from_da(DataArray(x, y), is_ph=True)
     # Check initial keys
     assert "default" in ds
     # Call clean_data and check for warning

@@ -96,26 +96,26 @@ class DataArray:
         return self.yc[self.mask]
 
     @property
-    def y_err(self) -> ArrayF | None:
-        """Masked weights."""
-        return self.y_errc[self.mask] if self.y_errc.any() else None
+    def y_err(self) -> ArrayF:
+        """Masked y_err."""
+        return self.y_errc[self.mask] if self.y_errc.size > 0 else self.y_errc
 
     @y_err.setter
     def y_err(self, y_errc: ArrayF) -> None:
-        """Set weights and validate their length."""
+        """Set y_err and validate its length."""
         if y_errc.ndim == 0:
             y_errc = np.ones_like(self.xc) * y_errc
         self.y_errc = y_errc
         self._validate_yerrc_lengths()
 
     @property
-    def x_err(self) -> ArrayF | None:
-        """Masked weights."""
-        return self.x_errc[self.mask] if self.x_errc.any() else None
+    def x_err(self) -> ArrayF:
+        """Masked x_err."""
+        return self.x_errc[self.mask] if self.x_errc.size > 0 else self.x_errc
 
     @x_err.setter
     def x_err(self, x_errc: ArrayF) -> None:
-        """Set weights and validate their length."""
+        """Set x_err and validate its length."""
         if x_errc.ndim == 0:
             x_errc = np.ones_like(self.xc) * x_errc
         self.x_errc = x_errc
@@ -140,14 +140,12 @@ class Dataset(dict[str, DataArray]):
         self.is_ph = is_ph
 
     @classmethod
-    def from_dataarrays(
-        cls, dataarrays: list[DataArray], is_ph: bool = False
-    ) -> Dataset:
+    def from_da(cls, da: DataArray | list[DataArray], is_ph: bool = False) -> Dataset:
         """Alternative constructor to create Dataset from a list of DataArray.
 
         Parameters
         ----------
-        dataarrays : list[DataArray]
+        da : DataArray | list[DataArray]
             The DataArray objects to populate the dataset.
         is_ph : bool, optional
             Indicate if x values represent pH (default is False).
@@ -157,12 +155,12 @@ class Dataset(dict[str, DataArray]):
         Dataset
             The constructed Dataset object.
         """
-        if not dataarrays:
+        if not da:
             return cls({})
-        if len(dataarrays) == 1:
-            data = {"default": dataarrays[0]}
-        else:
-            data = {f"y{i}": da for i, da in enumerate(dataarrays)}
+        if isinstance(da, list):
+            data = {f"y{i}": da_item for i, da_item in enumerate(da)}
+        elif isinstance(da, DataArray):
+            data = {"default": da}
         return cls(data, is_ph)
 
     def add_weights(self, w: ArrayF | ArrayDict) -> None:
@@ -300,7 +298,7 @@ def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bo
     x = {k: da.x for k, da in ds.items()}
     y = {k: da.y for k, da in ds.items()}
     w = {
-        k: da.y_err if da.y_err is not None else np.ones_like(da.y)
+        k: 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
         for k, da in ds.items()
     }
     return x, y, w, ds.is_ph
@@ -475,7 +473,7 @@ def analyze_spectra(
         )
         # rescale y
         y /= np.abs(y).max() / 10
-        ds = Dataset.from_dataarrays([DataArray(x, y)], is_ph)
+        ds = Dataset.from_da(DataArray(x, y), is_ph)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
     weight_multi_ds_titration(ds)
@@ -506,41 +504,35 @@ def fit_binding_glob(ds: Dataset) -> FitResult:
 
 
 # TODO: remove the print statements use logging
-def weight_individual_ds(ds: Dataset) -> None:
+def weight_da(da: DataArray, is_ph: bool) -> bool:
     """Assign weights to each label based on individual label fitting."""
-    if len(ds.keys()) != 1:
-        print("Expect single label dataset.")
-        return
+    failed = False
+    ds = Dataset.from_da(da, is_ph=is_ph)
     params = _build_params_1site(ds)
-    da = next(iter(ds.values()))
     if len(params) > len(da.y):
         print("failed")
-        w = 1.0 * np.ones_like(da.xc)
+        failed = True
+        sem = 1.0 * np.ones_like(da.xc)
     else:
         res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
         # Calculate residuals SEM
         sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
-        w = 1 / sem * np.ones_like(da.xc)
-    da.y_err = w
+    da.y_err = sem
+    return failed
 
 
 def weight_multi_ds_titration(ds: Dataset) -> None:
     """Assign weights to each label based on individual label fitting."""
-    w_d: ArrayDict = {}
     failed_fit_labels = []
-    for lbl in ds:
-        d = ds.copy(keys=[lbl])
-        weight_individual_ds(d)
-        w_d[lbl] = d[lbl].y_errc
-        if np.all(w_d[lbl] == 1.0):
+    for lbl, da in ds.items():
+        if weight_da(da, ds.is_ph):
             failed_fit_labels.append(lbl)
     if failed_fit_labels:
-        minimum_weight = np.inf
+        max_yerr = -np.inf
         for lbl in ds.keys() - set(failed_fit_labels):
-            minimum_weight = min(np.min(w_d[lbl]).item(), minimum_weight)
+            max_yerr = max(np.max(ds[lbl].y_err).item(), max_yerr)
         for lbl in failed_fit_labels:
-            w_d[lbl] *= minimum_weight / 10
-    ds.add_weights(w_d)
+            ds[lbl].y_err = np.array([max_yerr * 10])
 
 
 def analyze_spectra_glob(
@@ -565,7 +557,7 @@ def analyze_spectra_glob(
         spectra_merged = pd.concat(adjusted_list)
         svd = analyze_spectra(spectra_merged, ds.is_ph)
         ds_svd = ds.copy(labels_svd)
-        weight_multi_ds_titration(ds)
+        weight_multi_ds_titration(ds_svd)  # Fixed from ds
         f_res = fit_binding_glob(ds_svd)
         fig = _plot_spectra_glob_emcee(titration, ds_svd, f_res)
         gsvd = FitResult(fig, f_res.result, f_res.mini)
@@ -600,7 +592,7 @@ def plot_fit(
     colors = [COLOR_MAP(i) for i in range(len(ds))]
     for (lbl, da), clr in zip(ds.items(), colors, strict=False):
         # Make sure a label will be displayed.
-        label = lbl if (da.y_err is None and nboot == 0) else None
+        label = lbl if (da.y_err.size == 0 and nboot == 0) else None
         # Plot data.
         if pp:
             ax.scatter(
@@ -619,13 +611,13 @@ def plot_fit(
         # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         # Display label in error bar plot.
-        if da.y_err is not None or da.x_err is not None:
-            ye = 100 / da.y_err if da.y_err is not None else None
+        if da.y_err.size > 0:
+            xe = da.x_err if da.x_err.size > 0 else None
             ax.errorbar(
                 da.x,
                 da.y,
-                yerr=ye,
-                xerr=da.x_err,
+                yerr=da.y_err,
+                xerr=xe,
                 fmt=".",  # alternative to "none"
                 label=lbl,
                 color=clr,
