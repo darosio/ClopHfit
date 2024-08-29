@@ -15,9 +15,10 @@ import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
 
-from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, prenspire, prtecan
-from clophfit.prenspire import EnspireFile
-from clophfit.prtecan import TecanConfig, Titration
+from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding
+from clophfit.binding.fitting import DataArray, Dataset
+from clophfit.prenspire import EnspireFile, Note
+from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 
 
 @click.group()
@@ -131,7 +132,7 @@ def tecan(  # noqa: PLR0913
     if add:
         tit.load_additions(Path(add))
     if cl and tit.additions:
-        tit.x = prtecan.calculate_conc(tit.additions, cl)
+        tit.x = calculate_conc(tit.additions, cl)
     if sch:
         tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)
@@ -182,11 +183,10 @@ def fit_enspire(  # noqa: C901,PLR0912
     verbose: int,
 ) -> None:
     """Fit prenspire titration (all labels, temp, mutant, titrations)."""
-    note = prenspire.prenspire.Note(note_fp, verbose=verbose)
+    note = Note(note_fp, verbose=verbose)
     note.build_titrations(ef)
     dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
-    x_combined = {}
-    y_combined = {}
+    ds_data = {}
     for name, d_name in note.titrations.items():
         for temp, d_temp in d_name.items():
             for tit, d_tit in d_temp.items():
@@ -201,8 +201,8 @@ def fit_enspire(  # noqa: C901,PLR0912
                     band = dbands.get(label)
                     fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
                     if fit_result.is_valid() and fit_result.mini:
-                        x_combined[label] = fit_result.mini.userargs[0]["default"].x
-                        y_combined[label] = fit_result.mini.userargs[0]["default"].y
+                        userargs = fit_result.mini.userargs[0]["default"]
+                        ds_data[label] = DataArray(userargs.x, userargs.y)
                         pdf_file = out_dir / f"{name}_{temp}_{label}_{tit}_{band}.pdf"
                         if fit_result.figure:
                             fit_result.figure.savefig(pdf_file)
@@ -212,8 +212,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     len(d_tit.keys() - dbands.keys()) > 1  # svd > 1
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
-                    da = binding.fitting.DataArray(x_combined, y_combined)
-                    ds = binding.fitting.Dataset([da], is_ph)
+                    ds = Dataset(ds_data, is_ph)
                     spectra_gres = binding.fitting.analyze_spectra_glob(
                         d_tit, ds, dbands
                     )
@@ -325,8 +324,11 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     burn = 75
     if verbose:
         click.echo(file_df)
-    yc = {lbl: file_df[lbl].to_numpy() for lbl in file_df.columns[1:]}
-    ds = binding.fitting.Dataset(file_df["x"].to_numpy(), yc, is_ph)
+    x = file_df["x"].to_numpy()
+    ds_data = {
+        lbl: DataArray(x, file_df[lbl].to_numpy()) for lbl in file_df.columns[1:]
+    }
+    ds = Dataset(ds_data, is_ph)
     if weight:
         binding.fitting.weight_multi_ds_titration(ds)
     f_res = binding.fitting.fit_binding_glob(ds)

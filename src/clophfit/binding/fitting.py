@@ -123,42 +123,47 @@ class DataArray:
 
 
 class Dataset(dict[str, DataArray]):
-    """Contain pairs of matching x and y data arrays, indexed by a string key.
-
-    Initialization will remove any NaN values from the x and y arrays.
+    """Holds datasets as key-value pairs of strings and `DataArray` objects.
 
     Parameters
     ----------
-    dataarrays : list[DataArray]
-        The x values of the dataset(s), either as a single ArrayF or as an ArrayDict
-        if multiple datasets are provided.
+    data : dict[str, DataArray]
+        Dictionary mapping string keys to `DataArray` instances.
     is_ph : bool, optional
         Indicate if x values represent pH (default is False).
-    keys : list[str]|None
-        The w values (weights) of the dataset(s), either as a single ArrayF or
-        as an ArrayDict if multiple datasets are provided.
     """
 
     is_ph: bool = False
 
-    def __init__(
-        self,
-        dataarrays: list[DataArray],
-        is_ph: bool = False,
-        keys: list[str] | None = None,
-    ) -> None:
-        if keys is None:
-            keys = []
+    def __init__(self, data: dict[str, DataArray], is_ph: bool = False) -> None:
+        super().__init__(data or {})
+        self.is_ph = is_ph
+
+    @classmethod
+    def from_dataarrays(
+        cls, dataarrays: list[DataArray], is_ph: bool = False
+    ) -> Dataset:
+        """Alternative constructor to create Dataset from a list of DataArray.
+
+        Parameters
+        ----------
+        dataarrays : list[DataArray]
+            The DataArray objects to populate the dataset.
+        is_ph : bool, optional
+            Indicate if x values represent pH (default is False).
+
+        Returns
+        -------
+        Dataset
+            The constructed Dataset object.
+        """
         if not dataarrays:
-            return
+            return cls({})
         if len(dataarrays) == 1:
             data = {"default": dataarrays[0]}
-        elif keys and len(keys) == len(dataarrays):
-            data = dict(zip(keys, dataarrays, strict=True))
         else:
             data = {f"y{i}": da for i, da in enumerate(dataarrays)}
-        self.is_ph = is_ph
-        super().__init__(data)
+        return cls(data, is_ph)
 
     def add_weights(self, w: ArrayF | ArrayDict) -> None:
         """Add weights to the dataset.
@@ -208,7 +213,7 @@ class Dataset(dict[str, DataArray]):
         """
         if keys is None:
             return copy.deepcopy(self)
-        copied = Dataset([], is_ph=self.is_ph)
+        copied = Dataset({}, is_ph=self.is_ph)
         for key in keys:
             if key in self:
                 copied[key] = copy.deepcopy(self[key])
@@ -453,7 +458,7 @@ def analyze_spectra(
         spectra = spectra.dropna(axis=0)
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
-        ds = Dataset(x, v[0, :] + y_offset, is_ph)
+        ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph)
         plot_autovectors(ax2, spectra.index, u)
         plot_autovalues(ax3, s[:])  # don't plot last auto-values?
         plot_pca(ax5, v, x, PlotParameters(is_ph))
@@ -470,7 +475,7 @@ def analyze_spectra(
         )
         # rescale y
         y /= np.abs(y).max() / 10
-        ds = Dataset(x, y, is_ph)
+        ds = Dataset.from_dataarrays([DataArray(x, y)], is_ph)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
     weight_multi_ds_titration(ds)
@@ -644,7 +649,7 @@ def plot_fit(
             ax.fill_between(
                 xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, alpha=0.1, color=clr
             )
-    ax.legend()
+    ax.legend()  # UserWarning: No artists... in tests
     if params["K"].stderr:  # Can be None in case of critical fitting
         k = ufloat(params["K"].value, params["K"].stderr)
     else:

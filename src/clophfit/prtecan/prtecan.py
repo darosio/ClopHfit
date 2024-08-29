@@ -1329,7 +1329,7 @@ class Titration(TecanfilesGroup):
             if dat:
                 for k in self.fit_keys:
                     da = DataArray(x, np.array(dat[k]), x_errc=self.x_err)
-                    ds = Dataset(data_dict={"default": da}, is_ph=self.is_ph)
+                    ds = Dataset({"default": da}, is_ph=self.is_ph)
                     if weights:
                         ds.add_weights(np.array(weights[lbl_n - 1]))
                     else:
@@ -1348,7 +1348,7 @@ class Titration(TecanfilesGroup):
                 y1 = np.array(self.data[1][k])
                 da0 = DataArray(x, y0, x_errc=self.x_err)
                 da1 = DataArray(x, y1, x_errc=self.x_err)
-                ds = Dataset(data_dict={"y0": da0, "y1": da1}, is_ph=self.is_ph)
+                ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
                 if weights:
                     # weights have right length (no need to broadcast 1D array of len=1)
                     ds.add_weights({"y0": weights[0], "y1": weights[1]})
