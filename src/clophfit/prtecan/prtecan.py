@@ -24,7 +24,9 @@ from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
     fit_binding_glob,
+    fit_binding_odr,
     format_estimate,
+    outlier,
     weight_da,
     weight_multi_ds_titration,
 )
@@ -1205,7 +1207,6 @@ class Titration(TecanfilesGroup):
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "1fit"
         outfit.mkdir(parents=True, exist_ok=True)
-
         for i, fit in enumerate(self.result_dfs):
             if config.verbose:
                 try:
@@ -1297,7 +1298,7 @@ class Titration(TecanfilesGroup):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
-    def fit(self) -> list[dict[str, FitResult]]:
+    def fit(self) -> list[dict[str, FitResult]]:  # noqa: C901
         """Fit titrations.
 
         The fitting process uses the initial point (`ini`), the final point
@@ -1372,6 +1373,20 @@ class Titration(TecanfilesGroup):
                     print(f"Skip {k} for global fit.")
                     fitting[k] = FitResult()
             fittings.append(fitting)
+        # Global ODR fitting
+        fitting = {}
+        for k in self.fit_keys:
+            result_glob = fittings[-1][k]
+            dataset = result_glob.dataset
+            if dataset:
+                result_odr = fit_binding_odr(result_glob)
+                omask = outlier(result_odr.mini, 2.0)
+                while omask.any():
+                    dataset.apply_mask(~omask)
+                    result_odr = fit_binding_odr(result_glob)
+                    omask = outlier(result_odr.mini, 2.0)
+                fitting[k] = result_odr
+        fittings.append(fitting)
         return fittings
 
     # TODO: test cases are:

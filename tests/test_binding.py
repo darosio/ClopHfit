@@ -60,11 +60,103 @@ def test_dataarray() -> None:
     """Mask nan values, keep values."""
     x = np.array([1, 2, 3, 4])
     y = np.array([5, 6, np.nan, 8])
-    dataarray = DataArray(x, y)
-    assert np.array_equal(dataarray.x, np.array([1, 2, 4]))
-    dataarray.mask = np.array([0, 1, 1, 1], dtype="bool")
+    da = DataArray(x, y)
+    assert np.array_equal(da.x, np.array([1, 2, 4]))
+    da.mask = np.array([0, 1, 1, 1], dtype="bool")
     # `nan` are anyway discarded
-    assert np.array_equal(dataarray.x, np.array([2, 4]))
+    assert np.array_equal(da.x, np.array([2, 4]))
+    assert np.array_equal(da.y_errc, np.array([]))
+    assert np.array_equal(da.x_errc, np.array([]))
+
+
+def test_initialization_failure() -> None:
+    """."""
+    xc = np.array([1, 2, 3])
+    yc = np.array([10, 20, 30, 40])  # Mismatched length
+    with pytest.raises(ValueError, match="Length of 'xc' and 'yc' must be equal."):
+        DataArray(xc=xc, yc=yc)
+
+
+def test_y_err_initialization() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, 30, 40])
+    y_errc = np.array([0.1, 0.2, 0.3, 0.4])
+    da = DataArray(xc=xc, yc=yc, y_errc=y_errc)
+    assert np.array_equal(da.y_errc, y_errc)
+
+
+def test_y_err_length_mismatch() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, 30, 40])
+    y_errc = np.array([0.1, 0.2])  # Mismatched length
+    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal."):
+        da = DataArray(xc=xc, yc=yc, y_errc=y_errc)
+    da = DataArray(xc=xc, yc=yc)
+    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal."):
+        da.y_err = y_errc
+
+
+def test_x_err_length_mismatch() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, 30, 40])
+    x_errc = np.array([0.1, 0.2])  # Mismatched length
+    with pytest.raises(ValueError, match="Length of 'xc' and 'x_errc' must be equal."):
+        DataArray(xc=xc, yc=yc, x_errc=x_errc)
+
+
+def test_masking_with_nan() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, np.nan, 30, 40])
+    da = DataArray(xc=xc, yc=yc)
+    assert np.array_equal(da.mask, np.array([True, False, True, True]))
+    assert np.array_equal(da.x, np.array([1, 3, 4]))
+    assert np.array_equal(da.y, np.array([10, 30, 40]))
+
+
+def test_setting_y_err() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, 30, 40])
+    da = DataArray(xc=xc, yc=yc)
+    da.y_err = np.array(0.5)
+    assert np.array_equal(da.y_err, np.ones_like(xc) * 0.5)
+
+
+def test_setting_x_err() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, 30, 40])
+    da = DataArray(xc=xc, yc=yc)
+    da.x_err = np.array(0.1)
+    assert np.array_equal(da.x_errc, np.ones_like(xc) * 0.1)
+
+
+def test_masking_effect_on_errors() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, np.nan, 30, 40])
+    y_errc = np.array([0.1, 0.2, 0.3, 0.4])
+    da = DataArray(xc=xc, yc=yc, y_errc=y_errc)
+    assert np.array_equal(da.y_err, np.array([0.1, 0.3, 0.4]))
+    da.mask = np.array([True, True, False, True])
+    assert np.array_equal(da.y_err, np.array([0.1, 0.4]))
+
+
+def test_setting_and_validating_mask() -> None:
+    """."""
+    xc = np.array([1, 2, 3, 4])
+    yc = np.array([10, 20, np.nan, 40])
+    da = DataArray(xc=xc, yc=yc)
+    da.mask = np.array([False, True, True, True])
+    assert np.array_equal(da.x, np.array([2, 4]))
+    assert np.array_equal(da.y, np.array([20, 40]))
+    da.mask = np.array([True, True, True, False])
+    assert np.array_equal(da.x, np.array([1, 2]))
+    assert np.array_equal(da.y, np.array([10, 20]))
 
 
 def test_dataset_single_array_no_nan() -> None:

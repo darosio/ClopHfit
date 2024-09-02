@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from sys import float_info
 
 import lmfit  # type: ignore[import-untyped]
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
@@ -55,6 +56,8 @@ class DataArray:
     def __post_init__(self) -> None:
         """Ensure the x and y arrays are of equal length after initialization."""
         self._validate_lengths()
+        self._validate_yerrc_lengths()
+        self._validate_xerrc_lengths()
         self._mask = ~np.isnan(self.yc)
 
     def _validate_lengths(self) -> None:
@@ -65,13 +68,13 @@ class DataArray:
 
     def _validate_yerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
-        if self.y_errc.any() and len(self.xc) != len(self.y_errc):
+        if self.y_errc.size > 0 and len(self.xc) != len(self.y_errc):
             msg = "Length of 'xc' and 'y_errc' must be equal."
             raise ValueError(msg)
 
     def _validate_xerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
-        if self.x_errc.any() and len(self.xc) != len(self.x_errc):
+        if self.x_errc.size > 0 and len(self.xc) != len(self.x_errc):
             msg = "Length of 'xc' and 'x_errc' must be equal."
             raise ValueError(msg)
 
@@ -207,6 +210,36 @@ class Dataset(dict[str, DataArray]):
                     stacklevel=2,
                 )
                 del self[key]
+
+    def concatenate_data(self) -> tuple[ArrayF, ArrayF, ArrayF, ArrayF]:
+        """Concatenate x, y, x_err, and y_err across all datasets."""
+        x_data = np.concatenate([v.x for v in self.values()])
+        y_data = np.concatenate([v.y for v in self.values()])
+        x_err = np.concatenate([v.x_err for v in self.values()])
+        y_err = np.concatenate([v.y_err for v in self.values()])
+        return x_data, y_data, x_err, y_err
+
+    def apply_mask(self, combined_mask: ArrayMask) -> None:
+        """Correctly distribute and apply the combined mask across all DataArrays.
+
+        Parameters
+        ----------
+        combined_mask : ArrayMask
+            Boolean array where True keeps the data point, and False masks it out.
+
+        Raises
+        ------
+        ValueError
+            If the length of the combined_mask does not match the total number of data points.
+        """
+        if combined_mask.size != sum(len(da.y) for da in self.values()):
+            msg = "Length of combined_mask must match the total number of data points."
+            raise ValueError(msg)
+        start_idx = 0
+        for da in self.values():
+            end_idx = start_idx + len(da.y)
+            da.mask[da.mask] &= combined_mask[start_idx:end_idx]
+            start_idx = end_idx
 
 
 # fmt: off
@@ -675,97 +708,89 @@ def format_estimate(
     return f"{formatted_value} ± {formatted_error}"
 
 
+def generalized_combined_model(
+    pars: list[float], x: ArrayF, dataset_lengths: list[int]
+) -> ArrayF:
+    """Handle multiple datasets with different lengths and masks."""
+    start_idx = 0
+    results = []
+    # The shared K parameter is always the first parameter
+    K = pars[0]  # noqa: N806
+    for i, length in enumerate(dataset_lengths):
+        end_idx = start_idx + length
+        current_x = x[start_idx:end_idx]
+        S0 = pars[1 + 2 * i]  # S0 for dataset i # noqa: N806
+        S1 = pars[2 + 2 * i]  # S1 for dataset i # noqa: N806
+        model_output = binding_1site(current_x, K, S0, S1, is_ph=True)
+        results.append(model_output)
+        start_idx = end_idx
+    return np.concatenate(results)
+
+
 @dataclass
-class _ODRResult:
-    parameters: Parameters
-    output: odr.Output
+class _Result:
+    params: Parameters
 
 
-def odr_fitting(
-    x: ArrayF,
-    x_err: ArrayF,
-    y_list: list[ArrayF],
-    y_err_list: list[ArrayF],
-    pars: Parameters,
-) -> _ODRResult:
-    """Fit ODR model on two datasets."""
-    # Combine y1 and y2 data and errors
-    n_dataset = len(y_list)
-    y_data = np.concatenate(y_list)
-    y_err = np.concatenate(y_err_list)
-    x_data_combined = np.tile(x, n_dataset)
-    x_err_combined = np.tile(x_err, n_dataset)
-
-    data = odr.RealData(x_data_combined, y_data, sx=x_err_combined, sy=y_err)
-
-    # MAYBE: Reuse _1site binding et al..
-    def model_function(pars: list[float], x: ArrayF) -> ArrayF:
-        K, S0, S1 = pars  # noqa: N806
-        return binding_1site(x, K, S0, S1, is_ph=True)
-
-    def combined_model(pars: list[float], x: ArrayF) -> ArrayF:
-        K, S0_1, S1_1, S0_2, S1_2 = pars  # noqa: N806
-        y1_model = model_function([K, S0_1, S1_1], x[: len(x) // 2])
-        y2_model = model_function([K, S0_2, S1_2], x[len(x) // 2 :])
-        return np.concatenate((y1_model, y2_model))
-
-    combined_model_odr = odr.Model(combined_model)
-    # combined_model_odr = odr.Model(model_function)  # noqa: ERA001
-
-    keys = ["K", "S0_y0", "S1_y0", "S0_y1", "S1_y1"]
-    # keys = ["K", "S0_default", "S1_default"]  # noqa: ERA001
-    initial_params = [pars[key].value for key in keys]
-
-    # Create ODR objects
-    odr_obj = odr.ODR(data, combined_model_odr, beta0=initial_params)
-    # Run the fitting
-    output = odr_obj.run()
-
-    params = Parameters()
-    for name, value, error in zip(keys, output.beta, output.sd_beta, strict=True):
-        params.add(name, value=value)
-        params[name].stderr = error
-    return _ODRResult(params, output)
-
-
-# FIXME: only one odr fitting please
-def odr_fitting2(fit_result: FitResult) -> _ODRResult:
-    """Fit ODR model on two datasets."""
-    # Combine y1 and y2 data and errors
-    if fit_result.dataset:
-        x_data = np.concatenate([v.x for v in fit_result.dataset.values()])
-        y_data = np.concatenate([v.y for v in fit_result.dataset.values()])
-        x_err = np.concatenate([v.x_err for v in fit_result.dataset.values()])
-        y_err = np.concatenate([v.y_err for v in fit_result.dataset.values()])
-
+def fit_binding_odr(fit_result: FitResult) -> FitResult:
+    """Analyze multi-label titration datasets and visualize the results."""
+    if fit_result.result is None or fit_result.dataset is None:
+        return FitResult()
+    params = fit_result.result.params
+    ds = copy.deepcopy(fit_result.dataset)
+    for da in ds.values():
+        da.y_err = da.y_errc * (1 + np.sqrt(da.yc)) * np.sqrt(len(da.y) - 2)
+    # Collect dataset lengths
+    dataset_lengths = [len(da.y) for da in ds.values()]
+    # # TODO: drop outlier     masks = [da._mask for da in ds.values()]
+    x_data, y_data, x_err, y_err = ds.concatenate_data()
     data = odr.RealData(x_data, y_data, sx=x_err, sy=y_err)
+    # Initial parameters setup
+    initial_params = [params["K"].value]
+    for lbl in ds:
+        initial_params.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
 
-    # MAYBE: Reuse _1site binding et al..
-    def model_function(pars: list[float], x: ArrayF) -> ArrayF:
-        K, S0, S1 = pars  # noqa: N806
-        return binding_1site(x, K, S0, S1, is_ph=True)
+    # Define the combined model
+    def combined_model_odr(pars: list[float], x: ArrayF) -> ArrayF:
+        return generalized_combined_model(pars, x, dataset_lengths)
 
-    def combined_model(pars: list[float], x: ArrayF) -> ArrayF:
-        K, S0_1, S1_1, S0_2, S1_2 = pars  # noqa: N806
-        y1_model = model_function([K, S0_1, S1_1], x[: len(x) // 2])
-        y2_model = model_function([K, S0_2, S1_2], x[len(x) // 2 :])
-        return np.concatenate((y1_model, y2_model))
-
-    combined_model_odr = odr.Model(combined_model)
-    # combined_model_odr = odr.Model(model_function)  # noqa: ERA001
-
-    keys = ["K", "S0_y0", "S1_y0", "S0_y1", "S1_y1"]
-    # keys = ["K", "S0_default", "S1_default"]  # noqa: ERA001
-    pars = fit_result.result.params if fit_result.result else Parameters()
-    initial_params = [pars[key].value for key in keys]
-
-    # Create ODR objects
-    odr_obj = odr.ODR(data, combined_model_odr, beta0=initial_params)
-    # Run the fitting
+    combined_model = odr.Model(combined_model_odr)
+    odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
     output = odr_obj.run()
-
+    # reassign x_err and y_err to ds
+    start_idx = 0
+    for da in ds.values():
+        end_idx = start_idx + len(da.y)
+        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])
+        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
+        start_idx = end_idx
+    # Update the parameters with results from ODR
+    keys = ["K"]
+    for lbl in ds:
+        keys.append(f"S0_{lbl}")
+        keys.append(f"S1_{lbl}")
     params = Parameters()
     for name, value, error in zip(keys, output.beta, output.sd_beta, strict=True):
         params.add(name, value=value)
         params[name].stderr = error
-    return _ODRResult(params, output)
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+    return FitResult(fig, _Result(params), output, ds)
+
+
+def outlier(
+    output: odr.Output, threshold: float = 2.0, plot_z_scores: bool = False
+) -> ArrayMask:
+    """Identify outliers."""
+    residuals_x = output.delta
+    residuals_y = output.eps
+    residuals = np.sqrt(residuals_x**2 + residuals_y**2)
+    residuals = np.sqrt(residuals_y**2)
+    z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
+    if plot_z_scores:
+        plt.scatter(range(len(z_scores)), z_scores)
+        plt.axhline(y=threshold, color="r", linestyle="-")
+        plt.title("Z-scores")
+    outliers: ArrayMask = z_scores > threshold
+    return outliers
