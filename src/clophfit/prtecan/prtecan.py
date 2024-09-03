@@ -1150,7 +1150,7 @@ class Titration(TecanfilesGroup):
                 for i in range(self.n_labels):
                     label_str = self.labelblocksgroups[i].metadata["Label"].value
                     lbl_s = str(label_str)
-                    sd = self.bg_err[i].mean()
+                    sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
                     for k, v in data[i].items():
                         data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
             # dil
