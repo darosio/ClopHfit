@@ -101,7 +101,9 @@ class DataArray:
     @property
     def y_err(self) -> ArrayF:
         """Masked y_err."""
-        return self.y_errc[self.mask] if self.y_errc.size > 0 else self.y_errc
+        if self.y_errc.size == 0:
+            self.y_errc = np.ones_like(self.xc)
+        return self.y_errc[self.mask]
 
     @y_err.setter
     def y_err(self, y_errc: ArrayF) -> None:
@@ -114,7 +116,9 @@ class DataArray:
     @property
     def x_err(self) -> ArrayF:
         """Masked x_err."""
-        return self.x_errc[self.mask] if self.x_errc.size > 0 else self.x_errc
+        if self.x_errc.size == 0:
+            self.x_errc = np.ones_like(self.xc)
+        return self.x_errc[self.mask]
 
     @x_err.setter
     def x_err(self, x_errc: ArrayF) -> None:
@@ -739,7 +743,9 @@ def fit_binding_odr(fit_result: FitResult) -> FitResult:
     params = fit_result.result.params
     ds = copy.deepcopy(fit_result.dataset)
     for da in ds.values():
-        da.y_err = da.y_errc * (1 + np.sqrt(da.yc)) * np.sqrt(len(da.y) - 2)
+        # even if da.y_err is set to [1,1,..] array y_errc remains []
+        shot_factor = 1 + np.sqrt(np.abs(da.yc))
+        da.y_err = da.y_errc * shot_factor if da.y_errc.size > 0 else 1.0 * shot_factor
     # Collect dataset lengths
     dataset_lengths = [len(da.y) for da in ds.values()]
     # # TODO: drop outlier     masks = [da._mask for da in ds.values()]
