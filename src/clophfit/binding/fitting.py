@@ -8,6 +8,8 @@ import warnings
 from dataclasses import dataclass, field
 from sys import float_info
 
+import arviz as az
+import emcee  # type: ignore[import-untyped]
 import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
@@ -737,7 +739,7 @@ class _Result:
 
 
 def fit_binding_odr(fit_result: FitResult) -> FitResult:
-    """Analyze multi-label titration datasets and visualize the results."""
+    """Analyze multi-label titration datasets using ODR."""
     if fit_result.result is None or fit_result.dataset is None:
         return FitResult()
     params = fit_result.result.params
@@ -800,3 +802,111 @@ def outlier(
         plt.title("Z-scores")
     outliers: ArrayMask = z_scores > threshold
     return outliers
+
+
+def fit_binding_emcee(fit_result: FitResult) -> FitResult:
+    """Analyze multi-label titration datasets using emcee."""
+    if fit_result.result is None or fit_result.dataset is None:
+        return FitResult()
+    p = fit_result.result.params
+    n_sd = 20
+    S0_y1_inf = p["S0_y0"].value - p["S0_y0"].stderr * n_sd  # noqa: N806
+    S0_y1_sup = p["S0_y0"].value + p["S0_y0"].stderr * n_sd  # noqa: N806
+    S1_y1_inf = p["S1_y0"].value - p["S1_y0"].stderr * n_sd  # noqa: N806
+    S1_y1_sup = p["S1_y0"].value + p["S1_y0"].stderr * n_sd  # noqa: N806
+
+    S0_y2_inf = p["S0_y1"].value - p["S0_y1"].stderr * n_sd  # noqa: N806
+    S0_y2_sup = p["S0_y1"].value + p["S0_y1"].stderr * n_sd  # noqa: N806
+    S1_y2_inf = p["S1_y1"].value - p["S1_y1"].stderr * n_sd  # noqa: N806
+    S1_y2_sup = p["S1_y1"].value + p["S1_y1"].stderr * n_sd  # noqa: N806
+
+    K_inf = p["K"].value - p["K"].stderr * n_sd  # noqa: N806
+    K_sup = p["K"].value + p["K"].stderr * n_sd  # noqa: N806
+
+    # Define the log-prior
+    def log_prior(params: list[float]) -> float:
+        K, S0_1, S1_1, S0_2, S1_2 = params  # noqa: N806
+        if (
+            S0_y1_inf < S0_1 < S0_y1_sup
+            and S1_y1_inf < S1_1 < S1_y1_sup
+            and S0_y2_inf < S0_2 < S0_y2_sup
+            and S1_y2_inf < S1_2 < S1_y2_sup
+            and K_inf < K < K_sup
+        ):
+            return 0.0
+        return -np.inf
+
+    ds = fit_result.dataset
+    dataset_lengths = [len(da.y) for da in ds.values()]
+
+    # Define the log-likelihood
+    def log_likelihood(
+        params: list[float], x: ArrayF, y: ArrayF, xerr: ArrayF, yerr: ArrayF
+    ) -> float:
+        # TODO: x_adjusted = x + np.random.normal(0, xerr)
+        np.sum(xerr)
+        model = generalized_combined_model(params, x, dataset_lengths)
+        sigma2 = yerr**2
+        log_ = -0.5 * np.sum((y - model) ** 2 / sigma2 + np.log(sigma2))
+        return float(log_)
+
+    # Define the log-posterior
+    def log_posterior(
+        params: list[float], x: ArrayF, y: ArrayF, xerr: ArrayF, yerr: ArrayF
+    ) -> float:
+        lp = log_prior(params)
+        if not np.isfinite(lp):
+            return -np.inf
+        return lp + log_likelihood(params, x, y, xerr, yerr)
+
+    # Number of dimensions, walkers, and steps
+    initial_params = [
+        p["K"].value,
+        p["S0_y0"].value,
+        p["S1_y0"].value,
+        p["S0_y1"].value,
+        p["S1_y1"].value,
+    ]
+    ndim = len(initial_params)
+    nwalkers = 50
+    nsteps = 5000
+
+    # Initialize the walkers
+    rng = np.random.default_rng()
+    pos = initial_params + 1e-4 * rng.standard_normal((nwalkers, ndim))
+
+    x_data_combined, y_data, x_err_combined, y_err = ds.concatenate_data()
+    # Set up the sampler
+    sampler = emcee.EnsembleSampler(
+        nwalkers,
+        ndim,
+        log_posterior,
+        args=(x_data_combined, y_data, x_err_combined, y_err),
+    )
+
+    # Run the MCMC chain
+    sampler.run_mcmc(pos, nsteps, progress=True)
+    # Extract the samples
+    samples = sampler.get_chain(discard=100, thin=10, flat=True)
+
+    # Calculate the HDI for each parameter
+    # Ensure that samples are shaped as (chain, draw)
+    ## TODO:  if samples.ndim == 2:
+    ## TODO:  a    samples = np.expand_dims(samples, axis=0)
+    hdi_intervals = az.hdi(samples, hdi_prob=0.94)  # type: ignore[no-untyped-call]
+    keys = ["K"]
+    for lbl in ds:
+        keys.append(f"S0_{lbl}")
+        keys.append(f"S1_{lbl}")
+    pars = Parameters()
+    for i, name in enumerate(keys):
+        hdi_lower = hdi_intervals[i][0]  # Access HDI intervals by index
+        hdi_upper = hdi_intervals[i][1]
+        median_value = np.median(samples[:, i])  # Use appropriate indexing
+        pars.add(name, value=median_value, min=hdi_lower, max=hdi_upper)
+    print(samples.shape)
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, pars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+
+    return FitResult(fig, _Result(pars), samples, None)
