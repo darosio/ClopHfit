@@ -14,6 +14,7 @@ import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pymc as pm
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
@@ -359,17 +360,18 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
 def _build_params_1site(ds: Dataset) -> Parameters:
     """Initialize parameters for 1 site model based on the given dataset."""
     params = Parameters()
+    if ds.is_ph:
+        params.add("K", min=3, max=11)
+    else:
+        # epsilon avoids x/K raise x/0 error
+        params.add("K", min=float_info.epsilon)
     k_initial = []
     for lbl, da in ds.items():
         params.add(f"S0_{lbl}", value=da.y[0])
         params.add(f"S1_{lbl}", value=da.y[-1])
         target_y = (da.y[0] + da.y[-1]) / 2
         k_initial.append(da.x[np.argmin(np.abs(da.y - target_y))])
-    if ds.is_ph:
-        params.add("K", value=np.mean(k_initial), min=3, max=11)
-    else:
-        # epsilon avoids x/K raise x/0 error
-        params.add("K", value=np.mean(k_initial), min=float_info.epsilon)
+    params["K"].value = np.mean(k_initial)
     return params
 
 
@@ -804,12 +806,11 @@ def outlier(
     return outliers
 
 
-def fit_binding_emcee(fit_result: FitResult) -> FitResult:
+def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # noqa: PLR0915
     """Analyze multi-label titration datasets using emcee."""
     if fit_result.result is None or fit_result.dataset is None:
         return FitResult()
     p = fit_result.result.params
-    n_sd = 20
     S0_y1_inf = p["S0_y0"].value - p["S0_y0"].stderr * n_sd  # noqa: N806
     S0_y1_sup = p["S0_y0"].value + p["S0_y0"].stderr * n_sd  # noqa: N806
     S1_y1_inf = p["S1_y0"].value - p["S1_y0"].stderr * n_sd  # noqa: N806
@@ -839,7 +840,6 @@ def fit_binding_emcee(fit_result: FitResult) -> FitResult:
     ds = fit_result.dataset
     dataset_lengths = [len(da.y) for da in ds.values()]
 
-    # Define the log-likelihood
     def log_likelihood(
         params: list[float], x: ArrayF, y: ArrayF, xerr: ArrayF, yerr: ArrayF
     ) -> float:
@@ -850,7 +850,6 @@ def fit_binding_emcee(fit_result: FitResult) -> FitResult:
         log_ = -0.5 * np.sum((y - model) ** 2 / sigma2 + np.log(sigma2))
         return float(log_)
 
-    # Define the log-posterior
     def log_posterior(
         params: list[float], x: ArrayF, y: ArrayF, xerr: ArrayF, yerr: ArrayF
     ) -> float:
@@ -859,40 +858,27 @@ def fit_binding_emcee(fit_result: FitResult) -> FitResult:
             return -np.inf
         return lp + log_likelihood(params, x, y, xerr, yerr)
 
+    # Initial parameters setup
+    initial_params = [p["K"].value]
+    for lbl in ds:
+        initial_params.extend([p[f"S0_{lbl}"].value, p[f"S1_{lbl}"].value])
     # Number of dimensions, walkers, and steps
-    initial_params = [
-        p["K"].value,
-        p["S0_y0"].value,
-        p["S1_y0"].value,
-        p["S0_y1"].value,
-        p["S1_y1"].value,
-    ]
     ndim = len(initial_params)
     nwalkers = 50
     nsteps = 5000
-
     # Initialize the walkers
     rng = np.random.default_rng()
     pos = initial_params + 1e-4 * rng.standard_normal((nwalkers, ndim))
 
-    x_data_combined, y_data, x_err_combined, y_err = ds.concatenate_data()
-    # Set up the sampler
-    sampler = emcee.EnsembleSampler(
-        nwalkers,
-        ndim,
-        log_posterior,
-        args=(x_data_combined, y_data, x_err_combined, y_err),
-    )
-
-    # Run the MCMC chain
+    args = ds.concatenate_data()  # (x, y, x_err, y_err)
+    sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior, args=args)
     sampler.run_mcmc(pos, nsteps, progress=True)
     # Extract the samples
     samples = sampler.get_chain(discard=100, thin=10, flat=True)
-
-    # Calculate the HDI for each parameter
     # Ensure that samples are shaped as (chain, draw)
-    ## TODO:  if samples.ndim == 2:
-    ## TODO:  a    samples = np.expand_dims(samples, axis=0)
+    if samples.ndim == 2:  # noqa: PLR2004
+        samples = np.expand_dims(samples, axis=0)
+    # Calculate the HDI for each parameter
     hdi_intervals = az.hdi(samples, hdi_prob=0.94)  # type: ignore[no-untyped-call]
     keys = ["K"]
     for lbl in ds:
@@ -902,11 +888,61 @@ def fit_binding_emcee(fit_result: FitResult) -> FitResult:
     for i, name in enumerate(keys):
         hdi_lower = hdi_intervals[i][0]  # Access HDI intervals by index
         hdi_upper = hdi_intervals[i][1]
-        median_value = np.median(samples[:, i])  # Use appropriate indexing
+        median_value = np.median(samples[:, :, i])  # Use appropriate indexing
+        std_value = np.std(samples[:, :, i])  # Use appropriate indexing
         pars.add(name, value=median_value, min=hdi_lower, max=hdi_upper)
-    print(samples.shape)
+        pars[name].stderr = std_value
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, pars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-
     return FitResult(fig, _Result(pars), samples, None)
+
+
+def fit_binding_pymc(fit_result: FitResult, n_sd: int = 10) -> ArrayF:
+    """Analyze multi-label titration datasets using emcee."""
+    if fit_result.result is None or fit_result.dataset is None:
+        return np.array([])
+    p = fit_result.result.params
+    S0_y1_inf = p["S0_y0"].value - p["S0_y0"].stderr * n_sd  # noqa: N806
+    S0_y1_sup = p["S0_y0"].value + p["S0_y0"].stderr * n_sd  # noqa: N806
+    S1_y1_inf = p["S1_y0"].value - p["S1_y0"].stderr * n_sd  # noqa: N806
+    S1_y1_sup = p["S1_y0"].value + p["S1_y0"].stderr * n_sd  # noqa: N806
+    S0_y2_inf = p["S0_y1"].value - p["S0_y1"].stderr * n_sd  # noqa: N806
+    S0_y2_sup = p["S0_y1"].value + p["S0_y1"].stderr * n_sd  # noqa: N806
+    S1_y2_inf = p["S1_y1"].value - p["S1_y1"].stderr * n_sd  # noqa: N806
+    S1_y2_sup = p["S1_y1"].value + p["S1_y1"].stderr * n_sd  # noqa: N806
+    K_inf = p["K"].value - p["K"].stderr * n_sd  # noqa: N806
+    K_sup = p["K"].value + p["K"].stderr * n_sd  # noqa: N806
+    ds = fit_result.dataset
+    init_pars = [
+        p["K"].value,
+        p["S0_y0"].value,
+        p["S1_y0"].value,
+        p["S0_y1"].value,
+        p["S1_y1"].value,
+    ]
+    with pm.Model() as _:
+        # Priors for shared parameters
+        K = pm.Uniform("K", lower=K_inf, upper=K_sup)  # noqa: N806
+        S0_y0 = pm.Uniform("S0_y0", lower=S0_y1_inf, upper=S0_y1_sup)  # noqa: N806
+        S1_y0 = pm.Uniform("S1_y0", lower=S1_y1_inf, upper=S1_y1_sup)  # noqa: N806
+        S0_y1 = pm.Uniform("S0_y1", lower=S0_y2_inf, upper=S0_y2_sup)  # noqa: N806
+        S1_y1 = pm.Uniform("S1_y1", lower=S1_y2_inf, upper=S1_y2_sup)  # noqa: N806
+        K, S0_y0, S1_y0, S0_y1, S1_y1 = pm.MvNormal(  # noqa: N806
+            "params", mu=init_pars, cov=fit_result.result.covar, shape=len(init_pars)
+        )
+
+        # Loop over datasets and create the likelihood for each
+        xc = next(iter(ds.values())).xc
+        x_errc = next(iter(ds.values())).x_errc
+        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc * 2, shape=len(xc))
+        mu = {}
+        mu["y0"] = binding_1site(x_true, K, S0_y0, S1_y0)
+        mu["y1"] = binding_1site(x_true, K, S0_y1, S1_y1)
+        for lbl, da in ds.items():
+            pm.Normal(
+                f"y_obs_{lbl}", mu=mu[lbl][da.mask], sigma=da.y_err, observed=da.y
+            )
+        # Inference
+        trace: ArrayF = pm.sample(2000, return_inferencedata=True)
+    return trace
