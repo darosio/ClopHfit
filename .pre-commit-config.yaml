@@ -41,7 +41,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.3
+    rev: v0.6.4
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -78,7 +78,7 @@ repos:
       - id: pydocstringformatter
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.5.6
+    rev: 0.5.7
     hooks:
       - id: pydoclint
 
@@ -91,7 +91,7 @@ repos:
   #       stages:
   #         - commit-msg # Add commit-msg stage to check commit messages
   - repo: https://github.com/crate-ci/typos
-    rev: typos-dict-v0.11.27
+    rev: v1.24.5
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
