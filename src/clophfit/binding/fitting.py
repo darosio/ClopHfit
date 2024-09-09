@@ -740,12 +740,12 @@ class _Result:
     params: Parameters
 
 
-def fit_binding_odr(fit_result: FitResult) -> FitResult:
+def fit_binding_odr(fr: FitResult) -> FitResult:
     """Analyze multi-label titration datasets using ODR."""
-    if fit_result.result is None or fit_result.dataset is None:
+    if fr.result is None or fr.dataset is None:
         return FitResult()
-    params = fit_result.result.params
-    ds = copy.deepcopy(fit_result.dataset)
+    params = fr.result.params
+    ds = copy.deepcopy(fr.dataset)
     for da in ds.values():
         # even if da.y_err is set to [1,1,..] array y_errc remains []
         shot_factor = 1 + np.sqrt(np.abs(da.yc))
@@ -775,12 +775,12 @@ def fit_binding_odr(fit_result: FitResult) -> FitResult:
         da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
         start_idx = end_idx
     # Update the parameters with results from ODR
-    keys = ["K"]
+    p_names = ["K"]
     for lbl in ds:
-        keys.append(f"S0_{lbl}")
-        keys.append(f"S1_{lbl}")
+        p_names.append(f"S0_{lbl}")
+        p_names.append(f"S1_{lbl}")
     params = Parameters()
-    for name, value, error in zip(keys, output.beta, output.sd_beta, strict=True):
+    for name, value, error in zip(p_names, output.beta, output.sd_beta, strict=True):
         params.add(name, value=value)
         params[name].stderr = error
     fig = figure.Figure()
@@ -898,51 +898,140 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
     return FitResult(fig, _Result(pars), samples, None)
 
 
-def fit_binding_pymc(fit_result: FitResult, n_sd: int = 10) -> ArrayF:
+def fit_binding_pymc(  # noqa: PLR0912,C901
+    fr: FitResult, mth: str = "norm", n_sd: float = 1.0, n_xerr: float = 1.1
+) -> FitResult:
     """Analyze multi-label titration datasets using emcee."""
-    if fit_result.result is None or fit_result.dataset is None:
-        return np.array([])
-    p = fit_result.result.params
-    S0_y1_inf = p["S0_y0"].value - p["S0_y0"].stderr * n_sd  # noqa: N806
-    S0_y1_sup = p["S0_y0"].value + p["S0_y0"].stderr * n_sd  # noqa: N806
-    S1_y1_inf = p["S1_y0"].value - p["S1_y0"].stderr * n_sd  # noqa: N806
-    S1_y1_sup = p["S1_y0"].value + p["S1_y0"].stderr * n_sd  # noqa: N806
-    S0_y2_inf = p["S0_y1"].value - p["S0_y1"].stderr * n_sd  # noqa: N806
-    S0_y2_sup = p["S0_y1"].value + p["S0_y1"].stderr * n_sd  # noqa: N806
-    S1_y2_inf = p["S1_y1"].value - p["S1_y1"].stderr * n_sd  # noqa: N806
-    S1_y2_sup = p["S1_y1"].value + p["S1_y1"].stderr * n_sd  # noqa: N806
-    K_inf = p["K"].value - p["K"].stderr * n_sd  # noqa: N806
-    K_sup = p["K"].value + p["K"].stderr * n_sd  # noqa: N806
-    ds = fit_result.dataset
-    init_pars = [
-        p["K"].value,
-        p["S0_y0"].value,
-        p["S1_y0"].value,
-        p["S0_y1"].value,
-        p["S1_y1"].value,
-    ]
+    if fr.result is None or fr.dataset is None:
+        return FitResult()
+    params = fr.result.params
+    ds = copy.deepcopy(fr.dataset)
+    p_names = ["K"]
+    for lbl in ds:
+        p_names.append(f"S0_{lbl}")
+        p_names.append(f"S1_{lbl}")
+    init_pars = [params["K"].value]
+    for lbl in ds:
+        init_pars.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
+
+    if hasattr(fr.result, "covar"):
+        cov = fr.result.covar
+    elif fr.mini:
+        cov = fr.mini.cov_beta
+
     with pm.Model() as _:
-        # Priors for shared parameters
-        K = pm.Uniform("K", lower=K_inf, upper=K_sup)  # noqa: N806
-        S0_y0 = pm.Uniform("S0_y0", lower=S0_y1_inf, upper=S0_y1_sup)  # noqa: N806
-        S1_y0 = pm.Uniform("S1_y0", lower=S1_y1_inf, upper=S1_y1_sup)  # noqa: N806
-        S0_y1 = pm.Uniform("S0_y1", lower=S0_y2_inf, upper=S0_y2_sup)  # noqa: N806
-        S1_y1 = pm.Uniform("S1_y1", lower=S1_y2_inf, upper=S1_y2_sup)  # noqa: N806
-        K, S0_y0, S1_y0, S0_y1, S1_y1 = pm.MvNormal(  # noqa: N806
-            "params", mu=init_pars, cov=fit_result.result.covar, shape=len(init_pars)
-        )
+        if mth == "norm":
+            pars = {
+                p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
+                for p in params.values()
+            }
+        elif mth == "cov":
+            parameters = pm.MvNormal(
+                "parameters", mu=init_pars, cov=cov * n_sd, shape=len(p_names)
+            )
+            pars = dict(zip(p_names, parameters, strict=True))
 
         # Loop over datasets and create the likelihood for each
         xc = next(iter(ds.values())).xc
-        x_errc = next(iter(ds.values())).x_errc
-        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc * 2, shape=len(xc))
-        mu = {}
-        mu["y0"] = binding_1site(x_true, K, S0_y0, S1_y0)
-        mu["y1"] = binding_1site(x_true, K, S0_y1, S1_y1)
+        if n_xerr:
+            x_errc = next(iter(ds.values())).x_errc * n_xerr
+            x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+        else:
+            x_true = xc
+
+        y_model = {}
         for lbl, da in ds.items():
+            y_model = binding_1site(
+                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+            )
             pm.Normal(
-                f"y_obs_{lbl}", mu=mu[lbl][da.mask], sigma=da.y_err, observed=da.y
+                f"y_obs_{lbl}", mu=y_model[da.mask], sigma=da.y_err, observed=da.y
             )
         # Inference
+        trace: ArrayF = pm.sample(1100, cores=6, return_inferencedata=True)
+
+    rdf = az.summary(trace)
+    rpars = Parameters()
+    # Loop through each row in the dataframe and extract necessary values
+    for name, row in rdf.iterrows():
+        if name in p_names:
+            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
+            rpars[name].stderr = row["sd"]
+            rpars[name].init_value = row["r_hat"]
+
+    if n_xerr:
+        # Initialize lists to store xc and x_errc values
+        nxc = []
+        nx_errc = []
+        # Loop through the dataframe rows corresponding to x_true[?]
+        for name, row in rdf.iterrows():
+            if isinstance(name, str) and name.startswith("x_true"):
+                nxc.append(row["mean"])
+                nx_errc.append(row["sd"])
+        for da in ds.values():
+            da.xc = np.array(nxc)
+            da.x_errc = np.array(nx_errc)
+
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+
+    return FitResult(fig, _Result(rpars), trace)
+
+
+def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF:
+    """Analyze multi-label titration datasets using emcee."""
+    ds = next(iter(result.values())).dataset
+    while ds is None:
+        ds = next(iter(result.values())).dataset
+    xc = next(iter(ds.values())).xc
+    x_errc = next(iter(ds.values())).x_errc * 2
+    with pm.Model() as _:
+        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+
+        for key, r in result.items():
+            if r.result and r.dataset:
+                ds = r.dataset
+                da0 = ds["y0"]
+                da1 = ds["y1"]
+                pars = r.result.params
+                K = pm.Normal(  # noqa: N806
+                    f"K_{key}", mu=pars["K"].value, sigma=pars["K"].stderr * n_sd
+                )
+                S0_y0 = pm.Normal(  # noqa: N806
+                    f"S0_y0_{key}",
+                    mu=pars["S0_y0"].value,
+                    sigma=pars["S0_y0"].stderr * n_sd,
+                )
+                S1_y0 = pm.Normal(  # noqa: N806
+                    f"S1_y0_{key}",
+                    mu=pars["S1_y0"].value,
+                    sigma=pars["S1_y0"].stderr * n_sd,
+                )
+                S0_y1 = pm.Normal(  # noqa: N806
+                    f"S0_y1_{key}",
+                    mu=pars["S0_y1"].value,
+                    sigma=pars["S0_y1"].stderr * n_sd,
+                )
+                S1_y1 = pm.Normal(  # noqa: N806
+                    f"S1_y1_{key}",
+                    mu=pars["S1_y1"].value,
+                    sigma=pars["S1_y1"].stderr * n_sd,
+                )
+
+                # Model equations
+                y0_model = binding_1site(x_true[da0.mask], K, S0_y0, S1_y0, ds.is_ph)
+                y1_model = binding_1site(x_true[da1.mask], K, S0_y1, S1_y1, ds.is_ph)
+
+                # Likelihood
+                pm.Normal(
+                    f"y0_likelihood_{key}", mu=y0_model, sigma=da0.y_err, observed=da0.y
+                )
+                pm.Normal(
+                    f"y1_likelihood_{key}", mu=y1_model, sigma=da1.y_err, observed=da1.y
+                )
+
+        # Inference
         trace: ArrayF = pm.sample(2000, return_inferencedata=True)
+
     return trace
