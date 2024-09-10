@@ -68,6 +68,7 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
+@click.option("--mcmc/--no-mcmc", default=False, show_default=True, help="Run MCMC sampling.")  # fmt: skip
 def tecan(  # noqa: PLR0913
     ctx: Context,
     list_file: str,
@@ -84,6 +85,7 @@ def tecan(  # noqa: PLR0913
     title: str,
     fit: bool,
     png: bool,
+    mcmc: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
@@ -128,6 +130,7 @@ def tecan(  # noqa: PLR0913
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
+    tit.params.mcmc = mcmc
     click.echo(tit.params)
     if add:
         tit.load_additions(Path(add))

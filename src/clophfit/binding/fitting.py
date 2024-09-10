@@ -6,6 +6,7 @@ import copy
 import typing
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from sys import float_info
 
 import arviz as az
@@ -50,10 +51,10 @@ class DataArray:
     xc: ArrayF
     #: y at creation
     yc: ArrayF
-    #: y_err at creation
-    y_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
     #: x_err at creation
     x_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
+    #: y_err at creation
+    y_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
     _mask: ArrayMask = field(init=False)
 
     def __post_init__(self) -> None:
@@ -173,6 +174,28 @@ class Dataset(dict[str, DataArray]):
             data = {"default": da}
         return cls(data, is_ph)
 
+    def apply_mask(self, combined_mask: ArrayMask) -> None:
+        """Correctly distribute and apply the combined mask across all DataArrays.
+
+        Parameters
+        ----------
+        combined_mask : ArrayMask
+            Boolean array where True keeps the data point, and False masks it out.
+
+        Raises
+        ------
+        ValueError
+            If the length of the combined_mask does not match the total number of data points.
+        """
+        if combined_mask.size != sum(len(da.y) for da in self.values()):
+            msg = "Length of combined_mask must match the total number of data points."
+            raise ValueError(msg)
+        start_idx = 0
+        for da in self.values():
+            end_idx = start_idx + len(da.y)
+            da.mask[da.mask] &= combined_mask[start_idx:end_idx]
+            start_idx = end_idx
+
     def copy(self, keys: list[str] | set[str] | None = None) -> Dataset:
         """Return a copy of the Dataset.
 
@@ -226,27 +249,17 @@ class Dataset(dict[str, DataArray]):
         y_err = np.concatenate([v.y_err for v in self.values()])
         return x_data, y_data, x_err, y_err
 
-    def apply_mask(self, combined_mask: ArrayMask) -> None:
-        """Correctly distribute and apply the combined mask across all DataArrays.
-
-        Parameters
-        ----------
-        combined_mask : ArrayMask
-            Boolean array where True keeps the data point, and False masks it out.
-
-        Raises
-        ------
-        ValueError
-            If the length of the combined_mask does not match the total number of data points.
-        """
-        if combined_mask.size != sum(len(da.y) for da in self.values()):
-            msg = "Length of combined_mask must match the total number of data points."
-            raise ValueError(msg)
-        start_idx = 0
-        for da in self.values():
-            end_idx = start_idx + len(da.y)
-            da.mask[da.mask] &= combined_mask[start_idx:end_idx]
-            start_idx = end_idx
+    def export(self, filep: str | Path) -> None:
+        """Export this dataset into a csv file."""
+        fp = Path(filep)
+        for lbl, da in self.items():
+            data: dict[str, ArrayF | ArrayMask] = {"xc": da.xc, "yc": da.yc}
+            if da.x_errc.size > 0:
+                data["x_errc"] = da.x_errc
+            if da.y_errc.size > 0:
+                data["y_errc"] = da.y_errc
+            data["mask"] = da.mask
+            pd.DataFrame(data).to_csv(fp.with_stem(f"{fp.stem}_{lbl}"), index=False)
 
 
 # fmt: off
@@ -898,8 +911,12 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
     return FitResult(fig, _Result(pars), samples, None)
 
 
-def fit_binding_pymc(  # noqa: PLR0912,C901
-    fr: FitResult, mth: str = "norm", n_sd: float = 1.0, n_xerr: float = 1.1
+def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
+    fr: FitResult,
+    mth: str = "norm",
+    n_sd: float = 1.0,
+    n_xerr: float = 1.1,
+    fit_sigma: bool = False,
 ) -> FitResult:
     """Analyze multi-label titration datasets using emcee."""
     if fr.result is None or fr.dataset is None:
@@ -944,11 +961,14 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
             y_model = binding_1site(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
             )
-            pm.Normal(
-                f"y_obs_{lbl}", mu=y_model[da.mask], sigma=da.y_err, observed=da.y
+            ye = (
+                pm.HalfNormal(f"ye_{lbl}", sigma=2 * np.mean(da.y_err))
+                if fit_sigma
+                else da.y_err
             )
+            pm.Normal(f"y_obs_{lbl}", mu=y_model[da.mask], sigma=ye, observed=da.y)
         # Inference
-        trace: ArrayF = pm.sample(1100, cores=6, return_inferencedata=True)
+        trace: ArrayF = pm.sample(2000, cores=4, return_inferencedata=True)
 
     rdf = az.summary(trace)
     rpars = Parameters()
@@ -958,7 +978,6 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
             rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
             rpars[name].stderr = row["sd"]
             rpars[name].init_value = row["r_hat"]
-
     if n_xerr:
         # Initialize lists to store xc and x_errc values
         nxc = []
@@ -971,12 +990,18 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
         for da in ds.values():
             da.xc = np.array(nxc)
             da.x_errc = np.array(nx_errc)
-
+    if fit_sigma:
+        ye = []
+        for name, row in rdf.iterrows():
+            if isinstance(name, str) and name.startswith("ye_"):
+                ye.append(row["mean"])
+        for i, da in enumerate(ds.values()):
+            da.y_errc = np.repeat(ye[i], len(da.y_errc))
     fig = figure.Figure()
     ax = fig.add_subplot(111)
-    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-
-    return FitResult(fig, _Result(rpars), trace)
+    if mth == "norm":
+        plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+    return FitResult(fig, _Result(rpars), trace, ds)
 
 
 def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF:

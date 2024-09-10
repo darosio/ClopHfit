@@ -1,8 +1,10 @@
 """Test cases for the binding functions module."""
 
 import warnings
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from clophfit import binding
@@ -278,12 +280,17 @@ def test_dataset_class() -> None:
     assert np.array_equal(ds["y1"].y, y1)
 
 
-def test_dataset_copy() -> None:
-    """Test deep copy."""
+@pytest.fixture
+def ds() -> Dataset:
+    """Dataset with two labels."""
     x0 = np.array([5.5, 7.0, 8.5])
     y0 = np.array([2.1, 1.6, 1.1])
     y1 = np.array([1.8, 1.6, 1.4])
-    ds = Dataset({"y0": DataArray(x0, y0), "y1": DataArray(x0, y1)})
+    return Dataset({"y0": DataArray(x0, y0), "y1": DataArray(x0, y1)})
+
+
+def test_dataset_copy(ds: Dataset) -> None:
+    """Test deep copy."""
     # Test full copy
     ds_copy = ds.copy()
     assert ds_copy.is_ph == ds.is_ph
@@ -297,3 +304,12 @@ def test_dataset_copy() -> None:
     # Test KeyError
     with pytest.raises(KeyError):
         ds_copy = ds.copy(keys={"nonexistent"})
+
+
+def test_export_ds(ds: Dataset, tmp_path: Path) -> None:
+    """It exports to csv."""
+    filep = str(tmp_path / "A00.csv")
+    ds.export(filep)
+    filep = str(tmp_path / "A00_y1.csv")
+    read_ds = pd.read_csv(filep)
+    assert (ds["y1"].y == read_ds.yc.to_numpy()).all()

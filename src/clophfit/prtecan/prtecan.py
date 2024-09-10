@@ -695,6 +695,7 @@ class TitrationConfig:
     dil: bool = True
     nrm: bool = True
     bg_mth: str = "mean"
+    mcmc: bool = False
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -1233,13 +1234,14 @@ class Titration(TecanfilesGroup):
                 ebar_y = "S1_default"
             out_df = fit.reindex(order, axis=1).sort_index()
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
+            if config.png:
+                self.export_pngs(i, outfit)
+                self.export_data(i, outfit)
             # Plots
             plotter = TitrationPlotter(self)
             title = config.title
             f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
-            if config.png:
-                self.export_png(i, outfit)
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data."""
@@ -1378,28 +1380,34 @@ class Titration(TecanfilesGroup):
         fitting = {}
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
-            dataset = result_glob.dataset
-            if dataset:
-                result_odr = fit_binding_odr(result_glob)
-                omask = outlier(result_odr.mini, 2.0)
-                while omask.any():
-                    dataset.apply_mask(~omask)
-                    result_odr = fit_binding_odr(result_glob)
-                    omask = outlier(result_odr.mini, 2.0)
-                fitting[k] = result_odr
+            result_odr = fit_binding_odr(result_glob)
+            omask = outlier(result_odr.mini, 2.0)
+            while omask.any() and result_odr.dataset:
+                result_odr.dataset.apply_mask(~omask)
+                result_odr = fit_binding_odr(result_odr)
+                omask = outlier(result_odr.mini, 3.0)
+            fitting[k] = result_odr
         fittings.append(fitting)
         # Global MCMC fitting
-        fitting = {}
-        for k in self.fit_keys:
-            result_glob = fittings[-2][k]
-            result_odr = fittings[-1][k]
-            dataset = result_glob.dataset
-            if dataset and result_odr.dataset:
-                for lbl, da in dataset.items():  # mask glob using ODR
-                    da.mask = result_odr.dataset[lbl].mask
-                result_pymc = fit_binding_pymc(result_glob)
-                fitting[k] = result_pymc
-        fittings.append(fitting)
+        if self.params.mcmc:
+            logger_pymc = logging.getLogger("pymc_run.log")
+            fitting = {}
+            for k in self.fit_keys:
+                logger_pymc.info(f"Starting PyMC sampling for key: {k}")
+                result = copy.deepcopy(fittings[-1][k])
+                # ds from glob but without outliers
+                dataset = copy.deepcopy(fittings[-2][k].dataset)
+                if dataset:
+                    for lbl, da in dataset.items():
+                        if result.dataset:
+                            da.mask = result.dataset[lbl].mask
+                result.dataset = dataset
+                try:
+                    result_pymc = fit_binding_pymc(result)
+                    fitting[k] = result_pymc
+                except Exception:
+                    logger_pymc.exception(f"Error during sampling for key: {k}")
+            fittings.append(fitting)
 
         return fittings
 
@@ -1496,7 +1504,7 @@ class Titration(TecanfilesGroup):
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
 
-    def export_png(self, lb: int, path: str | Path) -> None:
+    def export_pngs(self, lb: int, path: str | Path) -> None:
         """Export png like lb1/ lb2/ lb1_lb2/."""
         # Make sure the directory exists
         folder = Path(path) / f"lb{lb}"
@@ -1504,6 +1512,15 @@ class Titration(TecanfilesGroup):
         for k, v in self.results[lb].items():
             if v.figure:
                 v.figure.savefig(folder / f"{k}.png")
+
+    def export_data(self, lb: int, path: str | Path) -> None:
+        """Export datasets as csv in lb4/ds."""
+        # Make sure the directory exists
+        folder = Path(path) / f"lb{lb}" / "ds"
+        folder.mkdir(parents=True, exist_ok=True)
+        for k, v in self.results[lb].items():
+            if v.dataset:
+                v.dataset.export(folder / f"{k}.csv")
 
 
 # MAYBE: Test plots
