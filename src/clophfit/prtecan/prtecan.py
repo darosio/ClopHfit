@@ -25,6 +25,7 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     fit_binding_glob,
     fit_binding_odr,
+    fit_binding_pymc,
     format_estimate,
     outlier,
     weight_da,
@@ -1298,7 +1299,7 @@ class Titration(TecanfilesGroup):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
-    def fit(self) -> list[dict[str, FitResult]]:  # noqa: C901
+    def fit(self) -> list[dict[str, FitResult]]:  # noqa: C901,PLR0912,PLR0915
         """Fit titrations.
 
         The fitting process uses the initial point (`ini`), the final point
@@ -1387,6 +1388,19 @@ class Titration(TecanfilesGroup):
                     omask = outlier(result_odr.mini, 2.0)
                 fitting[k] = result_odr
         fittings.append(fitting)
+        # Global MCMC fitting
+        fitting = {}
+        for k in self.fit_keys:
+            result_glob = fittings[-2][k]
+            result_odr = fittings[-1][k]
+            dataset = result_glob.dataset
+            if dataset and result_odr.dataset:
+                for lbl, da in dataset.items():  # mask glob using ODR
+                    da.mask = result_odr.dataset[lbl].mask
+                result_pymc = fit_binding_pymc(result_glob)
+                fitting[k] = result_pymc
+        fittings.append(fitting)
+
         return fittings
 
     # TODO: test cases are:
