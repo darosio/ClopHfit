@@ -24,10 +24,9 @@ from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
     fit_binding_glob,
-    fit_binding_odr,
+    fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     format_estimate,
-    outlier,
     weight_da,
     weight_multi_ds_titration,
 )
@@ -1380,12 +1379,16 @@ class Titration(TecanfilesGroup):
         fitting = {}
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
-            result_odr = fit_binding_odr(result_glob)
+            result_odr = fit_binding_odr_recursive_outlier(result_glob)
+            """
+            Result_odr = fit_binding_odr(result_glob).
+
             omask = outlier(result_odr.mini, 2.0)
             while omask.any() and result_odr.dataset:
                 result_odr.dataset.apply_mask(~omask)
                 result_odr = fit_binding_odr(result_odr)
                 omask = outlier(result_odr.mini, 3.0)
+            """
             fitting[k] = result_odr
         fittings.append(fitting)
         # Global MCMC fitting

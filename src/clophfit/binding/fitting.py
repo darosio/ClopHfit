@@ -802,6 +802,47 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
     return FitResult(fig, _Result(params), output, ds)
 
 
+def fit_binding_odr_recursive(
+    fr: FitResult, max_iterations: int = 15, tol: float = 0.01
+) -> FitResult:
+    """Analyze multi-label titration datasets using ODR."""
+    if fr.result is None or fr.dataset is None:
+        return FitResult()
+    # Initial fit
+    ro = fit_binding_odr(fr)
+    residual_variance = ro.mini.res_var if ro.mini else 0.0
+    for iteration in range(max_iterations):
+        rn = fit_binding_odr(ro)
+        if rn.mini and rn.mini.res_var == 0:
+            rn = ro
+            break
+        # Check convergence
+        if rn.mini and residual_variance - rn.mini.res_var < tol:
+            break
+        residual_variance = rn.mini.res_var if rn.mini else 0.0
+        ro = rn
+        print(iteration)
+    return rn
+
+
+def fit_binding_odr_recursive_outlier(
+    fr: FitResult, max_iterations: int = 15, tol: float = 0.01
+) -> FitResult:
+    """Analyze multi-label titration datasets using ODR."""
+    result = copy.deepcopy(fr)
+    if result.result is None or result.dataset is None:
+        return FitResult()
+    # Initial fit
+    ro = fit_binding_odr_recursive(result, max_iterations, tol)
+    omask = outlier(ro.mini, 3.0)
+    while omask.any() and ro.dataset:
+        result.dataset.apply_mask(~omask)
+        ro = fit_binding_odr_recursive(result, max_iterations, tol)
+        omask = outlier(ro.mini, 3.0)
+    ro.dataset = result.dataset
+    return ro
+
+
 def outlier(
     output: odr.Output, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
@@ -911,12 +952,8 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
     return FitResult(fig, _Result(pars), samples, None)
 
 
-def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
-    fr: FitResult,
-    mth: str = "norm",
-    n_sd: float = 1.0,
-    n_xerr: float = 1.1,
-    fit_sigma: bool = False,
+def fit_binding_pymc(  # noqa: PLR0912,C901
+    fr: FitResult, mth: str = "norm", n_sd: float = 2.0, n_xerr: float = 0.67
 ) -> FitResult:
     """Analyze multi-label titration datasets using emcee."""
     if fr.result is None or fr.dataset is None:
@@ -931,11 +968,6 @@ def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
     for lbl in ds:
         init_pars.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
 
-    if hasattr(fr.result, "covar"):
-        cov = fr.result.covar
-    elif fr.mini:
-        cov = fr.mini.cov_beta
-
     with pm.Model() as _:
         if mth == "norm":
             pars = {
@@ -943,6 +975,10 @@ def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
                 for p in params.values()
             }
         elif mth == "cov":
+            if hasattr(fr.result, "covar"):
+                cov = fr.result.covar
+            elif fr.mini:
+                cov = fr.mini.cov_beta
             parameters = pm.MvNormal(
                 "parameters", mu=init_pars, cov=cov * n_sd, shape=len(p_names)
             )
@@ -956,17 +992,19 @@ def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
         else:
             x_true = xc
 
+        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
+
         y_model = {}
         for lbl, da in ds.items():
             y_model = binding_1site(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
             )
-            ye = (
-                pm.HalfNormal(f"ye_{lbl}", sigma=2 * np.mean(da.y_err))
-                if fit_sigma
-                else da.y_err
+            pm.Normal(
+                f"y_obs_{lbl}",
+                mu=y_model[da.mask],
+                sigma=ye_mag * da.y_err,
+                observed=da.y,
             )
-            pm.Normal(f"y_obs_{lbl}", mu=y_model[da.mask], sigma=ye, observed=da.y)
         # Inference
         trace: ArrayF = pm.sample(2000, cores=4, return_inferencedata=True)
 
@@ -990,13 +1028,10 @@ def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
         for da in ds.values():
             da.xc = np.array(nxc)
             da.x_errc = np.array(nx_errc)
-    if fit_sigma:
-        ye = []
-        for name, row in rdf.iterrows():
-            if isinstance(name, str) and name.startswith("ye_"):
-                ye.append(row["mean"])
-        for i, da in enumerate(ds.values()):
-            da.y_errc = np.repeat(ye[i], len(da.y_errc))
+    mag: float = rdf.loc["ye_mag", "mean"]  # type: ignore[assignment, index]
+    for da in ds.values():
+        da.y_errc *= mag
+
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     if mth == "norm":
