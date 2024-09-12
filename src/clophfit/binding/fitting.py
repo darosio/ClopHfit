@@ -803,15 +803,16 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
 
 
 def fit_binding_odr_recursive(
-    fr: FitResult, max_iterations: int = 15, tol: float = 0.01
+    fr: FitResult, max_iterations: int = 15, tol: float = 0.1
 ) -> FitResult:
     """Analyze multi-label titration datasets using ODR."""
-    if fr.result is None or fr.dataset is None:
+    result = copy.deepcopy(fr)
+    if result.result is None or result.dataset is None:
         return FitResult()
     # Initial fit
-    ro = fit_binding_odr(fr)
+    ro = fit_binding_odr(result)
     residual_variance = ro.mini.res_var if ro.mini else 0.0
-    for iteration in range(max_iterations):
+    for _ in range(max_iterations):
         rn = fit_binding_odr(ro)
         if rn.mini and rn.mini.res_var == 0:
             rn = ro
@@ -821,23 +822,23 @@ def fit_binding_odr_recursive(
             break
         residual_variance = rn.mini.res_var if rn.mini else 0.0
         ro = rn
-        print(iteration)
+    rn.dataset = result.dataset
     return rn
 
 
 def fit_binding_odr_recursive_outlier(
-    fr: FitResult, max_iterations: int = 15, tol: float = 0.01
+    fr: FitResult, tol: float = 0.5, threshold: float = 2.0
 ) -> FitResult:
     """Analyze multi-label titration datasets using ODR."""
     result = copy.deepcopy(fr)
     if result.result is None or result.dataset is None:
         return FitResult()
     # Initial fit
-    ro = fit_binding_odr_recursive(result, max_iterations, tol)
-    omask = outlier(ro.mini, 3.0)
+    ro = fit_binding_odr_recursive(result, tol=tol)
+    omask = outlier(ro.mini, threshold)
     while omask.any() and ro.dataset:
         result.dataset.apply_mask(~omask)
-        ro = fit_binding_odr_recursive(result, max_iterations, tol)
+        ro = fit_binding_odr_recursive(result, tol=tol)
         omask = outlier(ro.mini, 3.0)
     ro.dataset = result.dataset
     return ro
@@ -953,7 +954,7 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
 
 
 def fit_binding_pymc(  # noqa: PLR0912,C901
-    fr: FitResult, mth: str = "norm", n_sd: float = 2.0, n_xerr: float = 0.67
+    fr: FitResult, mth: str = "norm", n_sd: float = 10.0, n_xerr: float = 1.0
 ) -> FitResult:
     """Analyze multi-label titration datasets using emcee."""
     if fr.result is None or fr.dataset is None:
@@ -993,8 +994,6 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
             x_true = xc
 
         ye_mag = pm.HalfNormal("ye_mag", sigma=10)
-
-        y_model = {}
         for lbl, da in ds.items():
             y_model = binding_1site(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
@@ -1006,7 +1005,9 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
                 observed=da.y,
             )
         # Inference
-        trace: ArrayF = pm.sample(2000, cores=4, return_inferencedata=True)
+        trace: ArrayF = pm.sample(
+            2000, tune=2000, target_accept=0.9, cores=4, return_inferencedata=True
+        )
 
     rdf = az.summary(trace)
     rpars = Parameters()

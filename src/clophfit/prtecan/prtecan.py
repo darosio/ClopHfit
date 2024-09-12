@@ -1291,6 +1291,8 @@ class Titration(TecanfilesGroup):
                         for k in pars:
                             row[k] = pars[k].value
                             row[f"s{k}"] = pars[k].stderr
+                            row[f"{k}hdi03"] = pars[k].min
+                            row[f"{k}hdi97"] = pars[k].max
                     data.append(row)
                     df0 = pd.DataFrame(data).set_index("well")
                     # ctrl
@@ -1380,7 +1382,8 @@ class Titration(TecanfilesGroup):
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
             result_odr = fit_binding_odr_recursive_outlier(result_glob)
-            """
+            """# FIXME: this.
+
             Result_odr = fit_binding_odr(result_glob).
 
             omask = outlier(result_odr.mini, 2.0)
@@ -1397,6 +1400,8 @@ class Titration(TecanfilesGroup):
             fitting = {}
             for k in self.fit_keys:
                 logger_pymc.info(f"Starting PyMC sampling for key: {k}")
+                """# FIXME: Now use glob.
+
                 result = copy.deepcopy(fittings[-1][k])
                 # ds from glob but without outliers
                 dataset = copy.deepcopy(fittings[-2][k].dataset)
@@ -1405,6 +1410,14 @@ class Titration(TecanfilesGroup):
                         if result.dataset:
                             da.mask = result.dataset[lbl].mask
                 result.dataset = dataset
+                """
+                result = copy.deepcopy(fittings[-2][k])
+                # ds from glob but without outliers
+                ds_4mask = fittings[-2][k].dataset
+                if result.dataset:
+                    for lbl, da in result.dataset.items():
+                        if ds_4mask:
+                            da.mask = ds_4mask[lbl].mask
                 try:
                     result_pymc = fit_binding_pymc(result)
                     fitting[k] = result_pymc
