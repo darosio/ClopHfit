@@ -1323,7 +1323,7 @@ class Titration(TecanfilesGroup):
         This method is less general and is designed for two label blocks.
         """
         x = self.x
-        fittings = []
+        fittings: list[dict[str, FitResult]] = []
         # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
@@ -1382,44 +1382,27 @@ class Titration(TecanfilesGroup):
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
             result_odr = fit_binding_odr_recursive_outlier(result_glob)
-            """# FIXME: this.
-
-            Result_odr = fit_binding_odr(result_glob).
-
-            omask = outlier(result_odr.mini, 2.0)
-            while omask.any() and result_odr.dataset:
-                result_odr.dataset.apply_mask(~omask)
-                result_odr = fit_binding_odr(result_odr)
-                omask = outlier(result_odr.mini, 3.0)
-            """
             fitting[k] = result_odr
         fittings.append(fitting)
         # Global MCMC fitting
         if self.params.mcmc:
             logger_pymc = logging.getLogger("pymc_run.log")
+            n_sd: float = 0.15 / np.nanmedian(
+                [v.result.params["K"].stderr for v in fittings[-2].values() if v.result]
+            )
+            print("multiply SD:", n_sd)
             fitting = {}
             for k in self.fit_keys:
                 logger_pymc.info(f"Starting PyMC sampling for key: {k}")
-                """# FIXME: Now use glob.
-
-                result = copy.deepcopy(fittings[-1][k])
-                # ds from glob but without outliers
-                dataset = copy.deepcopy(fittings[-2][k].dataset)
-                if dataset:
-                    for lbl, da in dataset.items():
-                        if result.dataset:
-                            da.mask = result.dataset[lbl].mask
-                result.dataset = dataset
-                """
                 result = copy.deepcopy(fittings[-2][k])
-                # ds from glob but without outliers
+                # ds from glob and removing outliers
                 ds_4mask = fittings[-2][k].dataset
                 if result.dataset:
                     for lbl, da in result.dataset.items():
                         if ds_4mask:
                             da.mask = ds_4mask[lbl].mask
                 try:
-                    result_pymc = fit_binding_pymc(result)
+                    result_pymc = fit_binding_pymc(result, n_sd=n_sd)
                     fitting[k] = result_pymc
                 except Exception:
                     logger_pymc.exception(f"Error during sampling for key: {k}")
