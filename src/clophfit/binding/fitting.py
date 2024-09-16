@@ -1047,8 +1047,10 @@ def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * 2
+
     with pm.Model() as _:
         x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
 
         for key, r in result.items():
             if r.result and r.dataset:
@@ -1086,10 +1088,16 @@ def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF
 
                 # Likelihood
                 pm.Normal(
-                    f"y0_likelihood_{key}", mu=y0_model, sigma=da0.y_err, observed=da0.y
+                    f"y0_likelihood_{key}",
+                    mu=y0_model,
+                    sigma=da0.y_err * ye_mag,
+                    observed=da0.y,
                 )
                 pm.Normal(
-                    f"y1_likelihood_{key}", mu=y1_model, sigma=da1.y_err, observed=da1.y
+                    f"y1_likelihood_{key}",
+                    mu=y1_model,
+                    sigma=da1.y_err * ye_mag,
+                    observed=da1.y,
                 )
 
         # Inference
