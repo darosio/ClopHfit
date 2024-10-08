@@ -56,7 +56,7 @@ dev = [
   "jupyter",
   "jupyterlab",
   "ruff <= 0.6.9",
-  "pre-commit <= 3.8.0",
+  "pre-commit <= 4.0.0",
   "pylsp-mypy",
   "ruff-lsp"
 ]
