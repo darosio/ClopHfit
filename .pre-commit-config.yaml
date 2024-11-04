@@ -41,7 +41,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.1
+    rev: v0.7.2
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -91,7 +91,7 @@ repos:
   #       stages:
   #         - commit-msg # Add commit-msg stage to check commit messages
   - repo: https://github.com/crate-ci/typos
-    rev: v1.26.8
+    rev: v1.27.0
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
