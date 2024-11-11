@@ -41,7 +41,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.2
+    rev: v0.7.3
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -91,7 +91,7 @@ repos:
   #       stages:
   #         - commit-msg # Add commit-msg stage to check commit messages
   - repo: https://github.com/crate-ci/typos
-    rev: v1.27.0
+    rev: typos-dict-v0.11.35
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
@@ -107,7 +107,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v3.30.0
+    rev: v3.30.1
     hooks:
       - id: commitizen
       - id: commitizen-branch
