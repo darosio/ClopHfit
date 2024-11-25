@@ -11,7 +11,7 @@ from clophfit.prenspire.prenspire import (
 __all__ = [
     "CsvLineError",
     "EnspireFile",
-    "Note",
     "ManyLinesFoundError",
+    "Note",
     "verbose_print",
 ]
