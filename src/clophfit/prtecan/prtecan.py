@@ -1118,12 +1118,12 @@ class Titration(TecanfilesGroup):
         """Buffer subtracted and corrected for dilution data."""
 
         def _adjust_subtracted_data(
-            key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 30
+            key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 10
         ) -> ArrayF:
             """Adjust negative values."""
             # alpha is a tolerance threshold and estimate of fluorescence ratio
             # between bound and unbound states. Values shift up so that min=alpha.
-            if y.min() < alpha * y.max():
+            if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
                 msg = f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
                 logger.warning(msg)
@@ -1152,8 +1152,8 @@ class Titration(TecanfilesGroup):
                     label_str = self.labelblocksgroups[i].metadata["Label"].value
                     lbl_s = str(label_str)
                     sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
-                    for k, v in data[i].items():
-                        data[i][k] = _adjust_subtracted_data(k, v, sd, lbl_s)
+                    for k in self.fit_keys:
+                        data[i][k] = _adjust_subtracted_data(k, data[i][k], sd, lbl_s)
             # dil
             if self.params.dil and self.additions:
                 # Dilution correction works with nan values
