@@ -610,7 +610,7 @@ class TecanfilesGroup:
 
 @dataclass
 class PlateScheme:
-    """Define buffer, ctrl and unk wells, and ctrl names.
+    """Define buffer, discard, ctrl and unk wells, and ctrl names.
 
     Parameters
     ----------
@@ -620,6 +620,7 @@ class PlateScheme:
 
     file: Path | None = None
     _buffer: list[str] = field(default_factory=list, init=False)
+    _discard: list[str] = field(default_factory=list, init=False)
     _ctrl: list[str] = field(default_factory=list, init=False)
     _names: dict[str, set[str]] = field(default_factory=dict, init=False)
 
@@ -634,6 +635,18 @@ class PlateScheme:
             msg = "Buffer wells must be a list of strings"
             raise TypeError(msg)
         self._buffer = value
+
+    @property
+    def discard(self) -> list[str]:
+        """List of discard wells."""
+        return self._discard
+
+    @discard.setter
+    def discard(self, value: list[str]) -> None:
+        if not all(isinstance(item, str) for item in value):
+            msg = "Discard wells must be a list of strings"
+            raise TypeError(msg)
+        self._discard = value
 
     @property
     def ctrl(self) -> list[str]:
@@ -677,12 +690,18 @@ class PlateScheme:
                 msg = f"Check format [well sample] for schemefile: {self.file}"
                 raise ValueError(msg)
             scheme = table.groupby("sample")["well"].unique()
-            self.buffer = list(scheme["buffer"])
+            self.buffer = list(scheme.get("buffer", []))
+            self.discard = list(scheme.get("discard", []))
             self.ctrl = list(
                 {well for sample in scheme.tolist() for well in sample}
                 - set(self.buffer)
+                - set(self.discard)
             )
-            self.names = {str(k): set(v) for k, v in scheme.items() if k != "buffer"}
+            self.names = {
+                str(k): set(v)
+                for k, v in scheme.items()
+                if k not in ("buffer", "discard")
+            }
 
 
 @dataclass
@@ -755,7 +774,7 @@ class Buffer:
         """Set the list of buffer wells and trigger recomputation."""
         self._wells = wells
         self._reset_buffer()
-        self.tit.update_fit_keys(wells)
+        self.tit.clear_all_data_results()
 
     def _reset_buffer(self) -> None:
         """Reset buffer data."""
@@ -1023,6 +1042,11 @@ class Titration(TecanfilesGroup):
         self.bg = []
         self._bg_err = []
 
+    def clear_all_data_results(self) -> None:
+        """Clear fit keys, data, results and bg when buffer or scheme properties change."""
+        self._reset_data_results_and_bg()
+        self._fit_keys = set()
+
     @property
     def params(self) -> TitrationConfig:
         """Get the datafit parameters."""
@@ -1037,15 +1061,9 @@ class Titration(TecanfilesGroup):
     def fit_keys(self) -> set[str]:
         """List data wells that are not currently assigned to a buffer."""
         if not self._fit_keys:
-            self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(
-                self.buffer.wells
-            )
+            nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
+            self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
         return self._fit_keys
-
-    def update_fit_keys(self, buffer_wells: list[str]) -> None:
-        """Public method to update fit keys based on buffer wells."""
-        self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - set(buffer_wells)
-        self._reset_data_results_and_bg()
 
     @property
     def bg(self) -> list[ArrayF]:
