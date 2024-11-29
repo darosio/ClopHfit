@@ -1399,28 +1399,32 @@ class Titration(TecanfilesGroup):
         fitting = {}
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
-            result_odr = fit_binding_odr_recursive_outlier(result_glob)
+            result_odr = fit_binding_odr_recursive_outlier(result_glob, threshold=2.5)
             fitting[k] = result_odr
         fittings.append(fitting)
         # Global MCMC fitting
         if self.params.mcmc:
             logger_pymc = logging.getLogger("pymc_run.log")
             n_sd: float = 0.2 / np.nanmedian(
-                [v.result.params["K"].stderr for v in fittings[-2].values() if v.result]
+                [
+                    v.result.params["K"].stderr
+                    for v in fittings[-1].values()
+                    if v.result
+                ]  # -2
             )
             print("multiply SD:", n_sd)
             fitting = {}
             for k in self.fit_keys:
                 logger_pymc.info(f"Starting PyMC sampling for key: {k}")
-                result = copy.deepcopy(fittings[-2][k])
+                result = copy.deepcopy(fittings[-1][k])  # -2
                 # ds from glob and removing outliers
-                ds_4mask = fittings[-2][k].dataset
+                ds_4mask = fittings[-1][k].dataset  # -2
                 if result.dataset:
                     for lbl, da in result.dataset.items():
                         if ds_4mask:
                             da.mask = ds_4mask[lbl].mask
                 try:
-                    result_pymc = fit_binding_pymc(result, n_sd=n_sd)
+                    result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)  # n_sd
                     fitting[k] = result_pymc
                 except Exception:
                     logger_pymc.exception(f"Error during sampling for key: {k}")

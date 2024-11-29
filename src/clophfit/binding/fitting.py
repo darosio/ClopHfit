@@ -36,6 +36,7 @@ from clophfit.binding.plotting import (
 )
 
 if typing.TYPE_CHECKING:
+    from clophfit.prtecan import PlateScheme
     from clophfit.types import ArrayDict, ArrayF
 
 ArrayMask = np.typing.NDArray[np.bool_]
@@ -1102,5 +1103,112 @@ def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF
 
         # Inference
         trace: ArrayF = pm.sample(2000, return_inferencedata=True)
+
+    return trace
+
+
+def fit_binding_pymc_many_scheme(
+    result: dict[str, FitResult], scheme: PlateScheme, n_sd: int = 3
+) -> ArrayF:
+    """Analyze multi-label titration datasets using shared control parameters."""
+    # maybe pytensor.config.floatX = "float32"
+    ds = next(iter(result.values())).dataset
+    while ds is None:
+        ds = next(iter(result.values())).dataset
+    xc = next(iter(ds.values())).xc
+    x_errc = next(iter(ds.values())).x_errc * 2
+
+    with pm.Model() as _:
+        # Priors for global parameters
+        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
+
+        # Create shared K parameters for each control group
+        k_params = {
+            control_name: pm.Normal(
+                f"K_{control_name}",
+                mu=7.0,  # TODO: use average # Placeholder mean, adjust as necessary
+                sigma=2.0,  # Placeholder sigma
+            )
+            for control_name in scheme.names
+        }
+
+        for key, r in result.items():
+            if r.result and r.dataset:
+                ds = r.dataset
+                da0 = ds["y0"]
+                da1 = ds["y1"]
+                pars = r.result.params
+
+                # Determine if the well is associated with a control group
+                control_name = next(
+                    (name for name, wells in scheme.names.items() if key in wells), None
+                )
+
+                if control_name:
+                    K = k_params[control_name]  # noqa: N806 # Shared K for this control group
+                else:
+                    # If not part of any control group, create an individual K
+                    K = pm.Normal(  # noqa: N806
+                        f"K_{key}", mu=pars["K"].value, sigma=pars["K"].stderr * n_sd
+                    )
+
+                # Per-well S0 and S1 parameters
+                S0_y0 = pm.Normal(  # noqa: N806
+                    f"S0_y0_{key}",
+                    mu=pars["S0_y0"].value,
+                    sigma=pars["S0_y0"].stderr * n_sd,
+                )
+                S1_y0 = pm.Normal(  # noqa: N806
+                    f"S1_y0_{key}",
+                    mu=pars["S1_y0"].value,
+                    sigma=pars["S1_y0"].stderr * n_sd,
+                )
+                S0_y1 = pm.Normal(  # noqa: N806
+                    f"S0_y1_{key}",
+                    mu=pars["S0_y1"].value,
+                    sigma=pars["S0_y1"].stderr * n_sd,
+                )
+                S1_y1 = pm.Normal(  # noqa: N806
+                    f"S1_y1_{key}",
+                    mu=pars["S1_y1"].value,
+                    sigma=pars["S1_y1"].stderr * n_sd,
+                )
+
+                # Model equations
+                y0_model = binding_1site(
+                    x_true[da0.mask.astype(bool)], K, S0_y0, S1_y0, ds.is_ph
+                )
+                y1_model = binding_1site(
+                    x_true[da1.mask.astype(bool)], K, S0_y1, S1_y1, ds.is_ph
+                )
+
+                # Likelihoods
+                pm.Normal(
+                    f"y0_likelihood_{key}",
+                    mu=y0_model,
+                    sigma=da0.y_err * ye_mag,
+                    observed=da0.y,
+                )
+                pm.Normal(
+                    f"y1_likelihood_{key}",
+                    mu=y1_model,
+                    sigma=da1.y_err * ye_mag,
+                    observed=da1.y,
+                )
+
+            """# # Check the test point
+            # test_point = pm.check_test_point(model)
+            # print(test_point)
+            """
+        # Inference
+        trace: ArrayF = pm.sample(
+            2000,
+            tune=2000,
+            target_accept=0.9,
+            cores=4,
+            chains=6,
+            return_inferencedata=True,
+        )
 
     return trace
