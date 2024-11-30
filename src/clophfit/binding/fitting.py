@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
+import pytensor
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
@@ -1108,20 +1109,34 @@ def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF
 
 
 def fit_binding_pymc_many_scheme(
-    result: dict[str, FitResult], scheme: PlateScheme, n_sd: int = 3
+    result: dict[str, FitResult], scheme: PlateScheme, n_sd: int = 10
 ) -> ArrayF:
     """Analyze multi-label titration datasets using shared control parameters."""
-    # maybe pytensor.config.floatX = "float32"
+    pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next(iter(result.values())).dataset
     while ds is None:
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc * 2
+    x_errc = next(iter(ds.values())).x_errc * 10
 
     with pm.Model() as _:
         # Priors for global parameters
         x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         ye_mag = pm.HalfNormal("ye_mag", sigma=10)
+
+        values = {}
+        stderr = {}
+        for name, wells in scheme.names.items():
+            values[name] = [
+                v.result.params["K"].value
+                for well, v in result.items()
+                if v.result and well in wells
+            ]
+            stderr[name] = [
+                v.result.params["K"].stderr
+                for well, v in result.items()
+                if v.result and well in wells
+            ]
 
         # Create shared K parameters for each control group
         k_params = {
@@ -1197,18 +1212,38 @@ def fit_binding_pymc_many_scheme(
                     observed=da1.y,
                 )
 
-            """# # Check the test point
-            # test_point = pm.check_test_point(model)
-            # print(test_point)
-            """
         # Inference
         trace: ArrayF = pm.sample(
             2000,
-            tune=2000,
             target_accept=0.9,
             cores=4,
             chains=6,
             return_inferencedata=True,
+            init="adapt_diag",
+            initvals={"ye_mag": 1.0},
         )
 
     return trace
+
+
+def weighted_stats(
+    values: dict[str, list[float]], stderr: dict[str, list[float]]
+) -> dict[str, tuple[float, float]]:
+    """Weighted average."""
+    results = {}
+    for sample in values:  # noqa:PLC0206
+        x = np.array(values[sample])
+        se = np.array(stderr[sample])
+
+        # Calculate weights as 1 / stderr^2
+        weights = 1 / se**2
+
+        # Weighted mean
+        weighted_mean = np.sum(weights * x) / np.sum(weights)
+
+        # Weighted stderr
+        weighted_stderr = np.sqrt(1 / np.sum(weights))
+
+        results[sample] = (weighted_mean, weighted_stderr)
+
+    return results
