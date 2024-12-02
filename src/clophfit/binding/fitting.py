@@ -1138,14 +1138,13 @@ def fit_binding_pymc_many_scheme(
                 if v.result and well in wells
             ]
 
+        ctr_ks = weighted_stats(values, stderr)
+        print(ctr_ks)
+
         # Create shared K parameters for each control group
         k_params = {
-            control_name: pm.Normal(
-                f"K_{control_name}",
-                mu=7.0,  # TODO: use average # Placeholder mean, adjust as necessary
-                sigma=2.0,  # Placeholder sigma
-            )
-            for control_name in scheme.names
+            ctr_name: pm.Normal(f"K_{ctr_name}", mu=ctr_ks[ctr_name][0], sigma=0.2)
+            for ctr_name in scheme.names
         }
 
         for key, r in result.items():
@@ -1234,16 +1233,8 @@ def weighted_stats(
     for sample in values:  # noqa:PLC0206
         x = np.array(values[sample])
         se = np.array(stderr[sample])
-
-        # Calculate weights as 1 / stderr^2
-        weights = 1 / se**2
-
-        # Weighted mean
-        weighted_mean = np.sum(weights * x) / np.sum(weights)
-
-        # Weighted stderr
-        weighted_stderr = np.sqrt(1 / np.sum(weights))
-
+        weighted_mean = np.average(x, weights=1 / se**2)
+        weighted_mean = np.median(x)
+        weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
         results[sample] = (weighted_mean, weighted_stderr)
-
     return results
