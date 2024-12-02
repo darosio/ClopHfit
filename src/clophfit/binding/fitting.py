@@ -991,6 +991,8 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
         xc = next(iter(ds.values())).xc
         if n_xerr:
             x_errc = next(iter(ds.values())).x_errc * n_xerr
+            # the first pH value is the less uncertain
+            x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
             x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         else:
             x_true = xc
@@ -1042,13 +1044,17 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
     return FitResult(fig, _Result(rpars), trace, ds)
 
 
-def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF:
+def fit_binding_pymc_many(
+    result: dict[str, FitResult], n_sd: float = 5, n_xerr: float = 5
+) -> ArrayF:
     """Analyze multi-label titration datasets using emcee."""
     ds = next(iter(result.values())).dataset
     while ds is None:
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc * 2
+    x_errc = next(iter(ds.values())).x_errc * n_xerr
+    # the first pH value is the less uncertain
+    x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
 
     with pm.Model() as _:
         x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
@@ -1109,7 +1115,10 @@ def fit_binding_pymc_many(result: dict[str, FitResult], n_sd: int = 3) -> ArrayF
 
 
 def fit_binding_pymc_many_scheme(
-    result: dict[str, FitResult], scheme: PlateScheme, n_sd: int = 10
+    result: dict[str, FitResult],
+    scheme: PlateScheme,
+    n_sd: float = 5.0,
+    n_xerr: float = 5.0,
 ) -> ArrayF:
     """Analyze multi-label titration datasets using shared control parameters."""
     pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
@@ -1117,29 +1126,30 @@ def fit_binding_pymc_many_scheme(
     while ds is None:
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc * 10
+    x_errc = next(iter(ds.values())).x_errc * n_xerr
+    # the first pH value is the less uncertain
+    x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
+
+    values = {}
+    stderr = {}
+    for name, wells in scheme.names.items():
+        values[name] = [
+            v.result.params["K"].value
+            for well, v in result.items()
+            if v.result and well in wells
+        ]
+        stderr[name] = [
+            v.result.params["K"].stderr
+            for well, v in result.items()
+            if v.result and well in wells
+        ]
+    ctr_ks = weighted_stats(values, stderr)
+    print(ctr_ks)
 
     with pm.Model() as _:
         # Priors for global parameters
         x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         ye_mag = pm.HalfNormal("ye_mag", sigma=10)
-
-        values = {}
-        stderr = {}
-        for name, wells in scheme.names.items():
-            values[name] = [
-                v.result.params["K"].value
-                for well, v in result.items()
-                if v.result and well in wells
-            ]
-            stderr[name] = [
-                v.result.params["K"].stderr
-                for well, v in result.items()
-                if v.result and well in wells
-            ]
-
-        ctr_ks = weighted_stats(values, stderr)
-        print(ctr_ks)
 
         # Create shared K parameters for each control group
         k_params = {
@@ -1155,12 +1165,12 @@ def fit_binding_pymc_many_scheme(
                 pars = r.result.params
 
                 # Determine if the well is associated with a control group
-                control_name = next(
+                ctr_name = next(
                     (name for name, wells in scheme.names.items() if key in wells), None
                 )
 
-                if control_name:
-                    K = k_params[control_name]  # noqa: N806 # Shared K for this control group
+                if ctr_name:
+                    K = k_params[ctr_name]  # noqa: N806 # Shared K for this control group
                 else:
                     # If not part of any control group, create an individual K
                     K = pm.Normal(  # noqa: N806
@@ -1234,7 +1244,6 @@ def weighted_stats(
         x = np.array(values[sample])
         se = np.array(stderr[sample])
         weighted_mean = np.average(x, weights=1 / se**2)
-        weighted_mean = np.median(x)
         weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
         results[sample] = (weighted_mean, weighted_stderr)
     return results
