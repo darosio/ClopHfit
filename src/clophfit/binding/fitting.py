@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
-import pytensor
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
@@ -1121,7 +1120,7 @@ def fit_binding_pymc_many_scheme(
     n_xerr: float = 5.0,
 ) -> ArrayF:
     """Analyze multi-label titration datasets using shared control parameters."""
-    pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
+    # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next(iter(result.values())).dataset
     while ds is None:
         ds = next(iter(result.values())).dataset
@@ -1153,8 +1152,10 @@ def fit_binding_pymc_many_scheme(
 
         # Create shared K parameters for each control group
         k_params = {
-            ctr_name: pm.Normal(f"K_{ctr_name}", mu=ctr_ks[ctr_name][0], sigma=0.2)
-            for ctr_name in scheme.names
+            control_name: pm.Normal(
+                f"K_{control_name}", mu=ctr_ks[control_name][0], sigma=0.2
+            )
+            for control_name in scheme.names
         }
 
         for key, r in result.items():
@@ -1199,13 +1200,14 @@ def fit_binding_pymc_many_scheme(
                     sigma=pars["S1_y1"].stderr * n_sd,
                 )
 
+                """# mask_da0 = np.asarray(da0.mask).astype(bool)
+                # mask_da1 = np.asarray(da1.mask).astype(bool)
+                # y0_model = binding_1site(x_true[mask_da0], K, S0_y0, S1_y0, ds.is_ph)
+                # y1_model = binding_1site(x_true[mask_da1], K, S0_y1, S1_y1, ds.is_ph)
+                """
                 # Model equations
-                y0_model = binding_1site(
-                    x_true[da0.mask.astype(bool)], K, S0_y0, S1_y0, ds.is_ph
-                )
-                y1_model = binding_1site(
-                    x_true[da1.mask.astype(bool)], K, S0_y1, S1_y1, ds.is_ph
-                )
+                y0_model = binding_1site(x_true[da0.mask], K, S0_y0, S1_y0, ds.is_ph)
+                y1_model = binding_1site(x_true[da1.mask], K, S0_y1, S1_y1, ds.is_ph)
 
                 # Likelihoods
                 pm.Normal(
@@ -1220,16 +1222,9 @@ def fit_binding_pymc_many_scheme(
                     sigma=da1.y_err * ye_mag,
                     observed=da1.y,
                 )
-
         # Inference
         trace: ArrayF = pm.sample(
-            2000,
-            target_accept=0.9,
-            cores=4,
-            chains=6,
-            return_inferencedata=True,
-            init="adapt_diag",
-            initvals={"ye_mag": 1.0},
+            2000, target_accept=0.9, cores=6, return_inferencedata=True
         )
 
     return trace
