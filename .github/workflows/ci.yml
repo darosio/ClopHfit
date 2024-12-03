@@ -151,7 +151,7 @@ jobs:
         run: |
           python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ clophfit==${{ env.ver }}
           ppr --version
-          ppr -o out2 tecan tests/Tecan/list.pH
+          ppr -o out2 tecan tests/Tecan/L1/list.pH.csv
           cat out2/pH/metadata-labels.txt
 
   release:

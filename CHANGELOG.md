@@ -3,6 +3,154 @@
 
 # Changelog
 
+## v0.12.0 (2024-12-03)
+
+### Feat
+
+- **tecan**: wip for estimation of x_true L1…L4
+- **tecan**: x_errc[0] is the less uncertain x_true
+- **tecan**: mcmc scheme improvements
+- **tecan**: improve multi mcmc scheme
+- **tecan**: Add fit_binding_pymc_many_scheme and mcmc start from odr result
+- **tecan**: Add discard logic to PlateScheme
+- **tecan**: Scale n_sd to median sK from glob fit
+- **tecan**: Recursive ODR fit with outliers removal
+- **tecan**: Add results[4] for pymc fit of ds without outliers
+- **tecan**: Add pymc multi-dataset fit
+- **tecan**: Add pymc fit; glob now reports K as first param
+- **tecan**: Add emcee fit
+- **tecan**: ODR fit in lb3 masking outliers
+- **tecan**: Add bg_mth meansd with a single y_err estimate
+- **tecan**: Add x_err to DataArray and dataset to FitResult
+- **tecan**: Switch to list.pH.csv with x_err
+- **tecan**: Use x_err to fit buffer
+- **tecan**: Add x_err to Titration fromlistfile
+- **tecan**: Add mask support for DataArray in addition to ~isnan
+
+### Fix
+
+- **tecan**: bg_adj only negative not buffer titrations
+- **docs**: avoid print_fitting
+- commitizen pre-push
+- **tecan**: pymc deps in pyproject.toml
+- **tecan**: mean of empty bg_err[i]
+- **tecan**: ODR fit; da.x_err yerr always ones
+
+### Test
+
+- **tecan**: Adopt new format with x_err for list.{pH,cl}.csv
+- **tecan**: Omit types.py
+
+### Build
+
+- **pre-commit**: update hooks (#787)
+- **deps**: update matplotlib requirement from <=3.9.2 to <=3.9.3 (#786)
+- **deps**: update pytest requirement from <=8.3.3 to <=8.3.4 (#785)
+- **deps**: update ruff requirement from <=0.8.0 to <=0.8.1 (#784)
+- **deps**: update pandas-stubs requirement (#783)
+- **deps**: update types-setuptools requirement (#782)
+- **deps**: update commitizen requirement from <=3.31.0 to <=4.0.0 (#781)
+- **pre-commit**: update hooks (#780)
+- **deps**: update corner requirement from <=2.2.2 to <=2.2.3 (#779)
+- **deps**: update coverage[toml] requirement from <=7.6.7 to <=7.6.8 (#778)
+- **deps**: update tqdm requirement from <=4.67.0 to <=4.67.1 (#777)
+- **deps**: update ruff requirement from <=0.7.4 to <=0.8.0 (#776)
+- **deps**: bump codecov/codecov-action from 5.0.4 to 5.0.7 (#775)
+- **deps**: bump codecov/codecov-action from 5.0.2 to 5.0.4 (#774)
+- **deps**: update types-setuptools requirement (#773)
+- **deps**: update types-setuptools requirement (#772)
+- **deps**: update pymc requirement from <=5.18.1 to <=5.18.2 (#771)
+- **pre-commit**: update hooks (#770)
+- **deps**: update coverage[toml] requirement from <=7.6.5 to <=7.6.7 (#767)
+- **deps**: update ruff requirement from <=0.7.3 to <=0.7.4 (#769)
+- **deps**: update types-setuptools requirement (#768)
+- **deps**: update commitizen requirement from <=3.30.1 to <=3.31.0 (#766)
+- **deps**: bump codecov/codecov-action from 5.0.0 to 5.0.2 (#765)
+- **deps**: bump codecov/codecov-action from 4.6.0 to 5.0.0 (#764)
+- **deps**: update coverage[toml] requirement from <=7.6.4 to <=7.6.5 (#763)
+- **deps**: update types-setuptools requirement (#762)
+- **deps**: update pymc requirement from <=5.18.0 to <=5.18.1 (#761)
+- **deps**: update types-setuptools requirement (#760)
+- **pre-commit**: update hooks (#759)
+- **deps**: update ruff requirement from <=0.7.2 to <=0.7.3 (#758)
+- **deps**: update commitizen requirement from <=3.30.0 to <=3.30.1 (#757)
+- **deps**: update tqdm requirement from <=4.66.6 to <=4.67.0 (#756)
+- **deps**: update types-setuptools requirement (#755)
+- **deps**: update types-setuptools requirement (#754)
+- **deps**: update pymc requirement from <=5.17.0 to <=5.18.0 (#753)
+- **pre-commit**: update hooks (#752)
+- **deps**: update numpy requirement from <=2.1.2 to <=2.1.3 (#751)
+- **deps**: update ruff requirement from <=0.7.1 to <=0.7.2 (#750)
+- **deps**: update tqdm requirement from <=4.66.5 to <=4.66.6 (#749)
+- **pre-commit**: update hooks (#748)
+- **deps**: bump pip from 24.2 to 24.3.1 in /.github/workflows (#747)
+- **deps**: update types-setuptools requirement (#746)
+- **deps**: update ruff requirement from <=0.7.0 to <=0.7.1 (#745)
+- **deps**: update commitizen requirement from <=3.29.1 to <=3.30.0 (#744)
+- **deps**: update autodocsumm requirement from <=0.2.13 to <=0.2.14 (#743)
+- **deps**: update mypy requirement from <=1.12.1 to <=1.13.0 (#742)
+- **deps**: update pydata-sphinx-theme requirement (#741)
+- **pre-commit**: update hooks (#740)
+- **deps**: update mypy requirement from <=1.12.0 to <=1.12.1 (#738)
+- **deps**: update types-setuptools requirement (#739)
+- **deps**: update coverage[toml] requirement from <=7.6.3 to <=7.6.4 (#737)
+- **deps**: update types-setuptools requirement (#736)
+- **deps**: update ruff requirement from <=0.6.9 to <=0.7.0 (#735)
+- **deps**: update mypy requirement from <=1.11.2 to <=1.12.0 (#734)
+- **deps**: bump hatch from 1.12.0 to 1.13.0 in /.github/workflows (#733)
+- **deps**: update sphinx requirement from <=8.1.0 to <=8.1.3 (#732)
+- **deps**: update coverage[toml] requirement from <=7.6.2 to <=7.6.3 (#730)
+- **deps**: update types-setuptools requirement (#731)
+- **deps**: update sphinx requirement from <=8.0.2 to <=8.1.0 (#729)
+- **deps**: update coverage[toml] requirement from <=7.6.1 to <=7.6.2 (#728)
+- **deps**: update pandas-stubs requirement (#727)
+- **deps**: update pre-commit requirement from <=4.0.0 to <=4.0.1 (#726)
+- **deps**: update sphinx-autodoc-typehints requirement (#725)
+- **deps**: update pandas requirement from <=2.2.2 to <=2.2.3 (#724)
+- **deps**: bump pascalgn/automerge-action from 0.16.3 to 0.16.4 (#715)
+- **deps**: update pre-commit requirement from <=3.8.0 to <=4.0.0 (#723)
+- **deps**: update pymc requirement from <=5.16.2 to <=5.17.0 (#720)
+- **deps**: update numpy requirement from <=2.1.1 to <=2.1.2 (#722)
+- **deps**: update ruff requirement from <=0.6.4 to <=0.6.9 (#721)
+- **deps**: update types-setuptools requirement from <=74.1.0.20240907 to <=75.1.0.20240917 (#708)
+- **deps**: bump codecov/codecov-action from 4.5.0 to 4.6.0 (#719)
+- **deps**: update arviz requirement from <=0.19.0 to <=0.20.0 (#718)
+- **deps**: update commitizen requirement from <=3.29.0 to <=3.29.1 (#716)
+- **deps**: update pandas requirement from <=2.2.2 to <=2.2.3 (#713)
+- **deps**: update sphinx-autodoc-typehints requirement from <=2.4.0 to <=2.4.4 (#711)
+- **deps**: update sympy requirement from <=1.13.2 to <=1.13.3 (#710)
+- **pre-commit**: update hooks (#707)
+- **deps**: update pytest requirement from <=8.3.2 to <=8.3.3 (#704)
+- **deps**: update pandas-stubs requirement (#703)
+- **pre-commit**: update hooks (#702)
+- **deps**: update types-setuptools requirement (#701)
+- **deps**: update sphinx-autodoc-typehints requirement (#700)
+- **deps**: update ruff requirement from <=0.6.3 to <=0.6.4 (#699)
+- **deps**: update types-setuptools requirement (#698)
+- **deps**: update numpy requirement from <=2.1.0 to <=2.1.1 (#697)
+- **pre-commit**: update hooks (#696)
+- **deps**: update types-setuptools requirement (#695)
+- **deps**: update types-setuptools requirement (#694)
+- **deps**: update sphinx-autodoc-typehints requirement (#693)
+- **deps**: update ruff requirement from <=0.6.2 to <=0.6.3 (#692)
+- **pre-commit**: update hooks (#690)
+- **deps**: update mypy requirement from <=1.11.1 to <=1.11.2 (#689)
+- **deps**: update ruff requirement from <=0.6.1 to <=0.6.2 (#688)
+- Drop Read the Docs
+- Switch from codespell to typos
+
+### Refactor
+
+- **tecan**: mcmc option
+- **tecan**: Only DataArray(x,y,xe,ye) initialize Dataset
+- **tecan**: Remove ebar plot and sel option
+- **tecan**: Remove all well pdf plot
+
+### chore
+
+- **tecan**: Improve fit_binding_mcmc_many
+- **tecan**: Increase ODR recursive tolerance
+
 ## v0.11.0 (2024-08-22)
 
 ### Feat
