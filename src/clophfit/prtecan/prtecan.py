@@ -7,6 +7,7 @@ import itertools
 import logging
 import pprint
 import typing
+import warnings
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
@@ -37,15 +38,37 @@ if typing.TYPE_CHECKING:
 
     from clophfit.types import ArrayF
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
 STD_MD_LINE_LENGTH = 2
 NUM_COLS_96WELL = 12
 ROW_NAMES = tuple("ABCDEFGH")
+
+
+# Redirect warnings to the logging system
+logging.captureWarnings(True)
+
+# Set up logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)  # Global log level for the logger
+# File handler (logs warnings and above, overwriting each time)
+file_handler = logging.FileHandler("tecan.log", mode="w")
+file_handler.setLevel(logging.INFO)
+# Console handler (logs warnings and above to console)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+# Formatter for both handlers
+formatter = logging.Formatter("%(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+# Attach handlers if not already added to prevent duplicates
+if not logger.hasHandlers():
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+# Set up warnings to show each RuntimeWarning only once
+warnings.simplefilter("once", RuntimeWarning)
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -1399,12 +1422,23 @@ class Titration(TecanfilesGroup):
         fitting = {}
         for k in self.fit_keys:
             result_glob = fittings[-1][k]
-            result_odr = fit_binding_odr_recursive_outlier(result_glob, threshold=2.5)
+
+            with warnings.catch_warnings(record=True) as caught_warnings:
+                warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
+
+                result_odr = fit_binding_odr_recursive_outlier(
+                    result_glob, threshold=2.5
+                )
+
+                # Check if any warnings were captured
+                for warn in caught_warnings:
+                    if issubclass(warn.category, RuntimeWarning):
+                        logger.warning(f"Warning for well '{k}': {warn.message}")
+
             fitting[k] = result_odr
         fittings.append(fitting)
         # Global MCMC fitting
         if self.params.mcmc:
-            logger_pymc = logging.getLogger("pymc_run.log")
             n_sd: float = 0.15 / np.nanmedian(
                 [
                     v.result.params["K"].stderr
@@ -1414,8 +1448,9 @@ class Titration(TecanfilesGroup):
             )
             print("multiply SD:", n_sd)
             fitting = {}
+            logger.info("Starting MCMC fitting process.")
             for k in self.fit_keys:
-                logger_pymc.info(f"Starting PyMC sampling for key: {k}")
+                logger.info(f"Starting PyMC sampling for key: {k}")
                 result = copy.deepcopy(fittings[-1][k])  # -2
                 # ds from glob and removing outliers
                 ds_4mask = fittings[-1][k].dataset  # -2
@@ -1427,7 +1462,10 @@ class Titration(TecanfilesGroup):
                     result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)  # n_sd
                     fitting[k] = result_pymc
                 except Exception:
-                    logger_pymc.exception(f"Error during sampling for key: {k}")
+                    logger.exception(f"Error during sampling for key: {k}")
+                finally:
+                    logger.info(f"MCMC fitting completed  for well: {k}.")
+
             fittings.append(fitting)
 
         return fittings
