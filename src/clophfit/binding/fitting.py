@@ -990,8 +990,6 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
         xc = next(iter(ds.values())).xc
         if n_xerr:
             x_errc = next(iter(ds.values())).x_errc * n_xerr
-            # the first pH value is the less uncertain
-            x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
             x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         else:
             x_true = xc
@@ -1052,8 +1050,6 @@ def fit_binding_pymc_many(
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
-    # the first pH value is the less uncertain
-    x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
 
     with pm.Model() as _:
         x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
@@ -1126,8 +1122,6 @@ def fit_binding_pymc_many_scheme(
         ds = next(iter(result.values())).dataset
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
-    # the first pH value is the less uncertain
-    x_errc[0] = next(iter(ds.values())).x_errc[0] * n_xerr / 10
 
     values = {}
     stderr = {}

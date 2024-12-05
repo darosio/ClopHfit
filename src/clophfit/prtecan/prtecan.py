@@ -1405,7 +1405,7 @@ class Titration(TecanfilesGroup):
         # Global MCMC fitting
         if self.params.mcmc:
             logger_pymc = logging.getLogger("pymc_run.log")
-            n_sd: float = 0.2 / np.nanmedian(
+            n_sd: float = 0.15 / np.nanmedian(
                 [
                     v.result.params["K"].stderr
                     for v in fittings[-1].values()
