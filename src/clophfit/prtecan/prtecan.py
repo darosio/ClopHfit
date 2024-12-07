@@ -520,40 +520,43 @@ class LabelblocksGroup:
     allequal: bool = False
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    _data: dict[str, list[float]] = field(init=False, default_factory=dict)
-    _data_nrm: dict[str, list[float]] = field(init=False, default_factory=dict)
+
+    @cached_property
+    def data(self) -> dict[str, list[float]]:
+        """Grouped data if labelblocks are equal, otherwise empty."""
+        if not self.allequal:
+            return {}
+        return self._collect_data("data")
+
+    @cached_property
+    def data_nrm(self) -> dict[str, list[float]]:
+        """Normalized data by number of flashes, integration time and gain."""
+        return self._collect_data("data_nrm")
 
     def __post_init__(self) -> None:
-        """Create common metadata and data."""
+        """Initialize common metadata and validate labelblocks."""
+        self._validate_labelblocks()
+        self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
+
+    def _validate_labelblocks(self) -> None:
+        """Validate labelblocks for equality or near-equality."""
         labelblocks = self.labelblocks
-        allequal = self.allequal
-        if not allequal:
-            allequal = all(labelblocks[0] == lb for lb in labelblocks[1:])
-        if allequal:
-            for key in labelblocks[0].data:
-                self._data[key] = [lb.data[key] for lb in labelblocks]
-        # labelblocks that can be merged only after normalization
+        # Check if all labelblocks are exactly equal
+        if self.allequal or all(labelblocks[0] == lb for lb in labelblocks[1:]):
+            self.allequal = True
+        # Check if all labelblocks are almost equal (requires normalization)
         elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
-            for key in labelblocks[0].data:
-                self._data_nrm[key] = [lb.data_nrm[key] for lb in labelblocks]
+            self.allequal = False
         else:
-            msg = "Creation of labelblock group failed."
+            msg = "Creation of labelblock group failed. Labelblocks are neither equal nor almost equal."
             raise ValueError(msg)
-        self.labelblocks = labelblocks
-        self.metadata = merge_md([lb.metadata for lb in labelblocks])
 
-    @property
-    def data(self) -> dict[str, list[float]]:
-        """Return None or data."""
-        return self._data
-
-    @property
-    def data_nrm(self) -> dict[str, list[float]]:
-        """Normalize data by number of flashes, integration time and gain."""
-        if not self._data_nrm:
-            for key in self.labelblocks[0].data:
-                self._data_nrm[key] = [lb.data_nrm[key] for lb in self.labelblocks]
-        return self._data_nrm
+    def _collect_data(self, attribute: str) -> dict[str, list[float]]:
+        """Collect data from labelblocks for a given attribute."""
+        return {
+            key: [getattr(lb, attribute)[key] for lb in self.labelblocks]
+            for key in getattr(self.labelblocks[0], attribute)
+        }
 
 
 @dataclass
@@ -1074,7 +1077,7 @@ class Titration(TecanfilesGroup):
     def clear_all_data_results(self) -> None:
         """Clear fit keys, data, results and bg when buffer or scheme properties change."""
         self._reset_data_results_and_bg()
-        if hasattr(self, "fit_keys"):
+        if "fit_keys" in self.__dict__:
             del self.fit_keys
 
     @property
