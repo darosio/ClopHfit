@@ -1169,51 +1169,76 @@ class Titration(TecanfilesGroup):
     @property
     def data(self) -> list[dict[str, ArrayF]]:
         """Buffer subtracted and corrected for dilution data."""
+        if not self._data:
+            self._data = self._prepare_data()
+        return self._data
+
+    def _prepare_data(self) -> list[dict[str, ArrayF]]:
+        """Prepare and return the processed data."""
+        # Step 1: Get raw or normalized data
+        data = self._get_normalized_or_raw_data()
+        # Step 2: Subtract background if enabled
+        if self.params.bg and self.bg:
+            data = self._subtract_background(data)
+        # Step 3: Adjust for negative values if enabled
+        if self.params.bg_adj:
+            data = self._adjust_negative_values(data)
+        # Step 4: Apply dilution correction if enabled
+        if self.params.dil and self.additions:
+            data = self._apply_dilution_correction(data)
+        return data
+
+    def _apply_dilution_correction(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Apply dilution correction to the data (works with nan values)."""
+        return [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
+
+    def _get_normalized_or_raw_data(self) -> list[dict[str, ArrayF]]:
+        """Fetch raw or normalized data, transforming into arrays."""
+        if self.params.nrm:
+            return [
+                {k: np.array(v) for k, v in lbg.data_nrm.items()}
+                for lbg in self.labelblocksgroups
+            ]
+        return [
+            {k: np.array(v) for k, v in lbg.data.items()} if lbg.data else {}
+            for lbg in self.labelblocksgroups
+        ]
+
+    def _subtract_background(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Subtract background from data."""
+        return [
+            {k: v - bg for k, v in dd.items()}
+            for dd, bg in zip(data, self.bg, strict=True)
+        ]
+
+    def _adjust_negative_values(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Adjust negative values in the data."""
 
         def _adjust_subtracted_data(
             key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 10
         ) -> ArrayF:
-            """Adjust negative values."""
-            # alpha is a tolerance threshold and estimate of fluorescence ratio
-            # between bound and unbound states. Values shift up so that min=alpha.
+            """Adjust negative values (alpha = F_bound/F_unbound)."""
             if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
-                msg = f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
-                logger.warning(msg)
+                logger.warning(
+                    f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
+                )
                 return y + float(delta)
-            return y  # never used if properly called
+            return y  # never used if properly called?
 
-        if not self._data:
-            # nrm
-            if self.params.nrm:
-                lbs_data = [lbg.data_nrm for lbg in self.labelblocksgroups]
-            else:
-                lbs_data = [
-                    lbg.data if lbg.data else {} for lbg in self.labelblocksgroups
-                ]
-            # Transform values of non-empty dict into arrays
-            data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
-            # bg
-            if self.params.bg and self.bg:
-                data = [
-                    {k: v - bg for k, v in dd.items()}
-                    for dd, bg in zip(data, self.bg, strict=True)
-                ]
-            # bg adjust negative values
-            if self.params.bg_adj:
-                for i in range(self.n_labels):
-                    label_str = self.labelblocksgroups[i].metadata["Label"].value
-                    lbl_s = str(label_str)
-                    sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
-                    for k in self.fit_keys:
-                        data[i][k] = _adjust_subtracted_data(k, data[i][k], sd, lbl_s)
-            # dil
-            if self.params.dil and self.additions:
-                # Dilution correction works with nan values
-                # further masking delegated to DataArray
-                data = [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
-            self._data = data
-        return self._data
+        for i in range(self.n_labels):
+            label_str = self.labelblocksgroups[i].metadata["Label"].value
+            lbl_s = str(label_str)
+            sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
+            for k in self.fit_keys:
+                data[i][k] = _adjust_subtracted_data(k, data[i][k], sd, lbl_s)
+        return data
 
     @property
     def scheme(self) -> PlateScheme:
