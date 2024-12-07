@@ -9,6 +9,7 @@ import pprint
 import typing
 import warnings
 from dataclasses import InitVar, dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -519,40 +520,43 @@ class LabelblocksGroup:
     allequal: bool = False
     #: Metadata shared by all labelblocks.
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    _data: dict[str, list[float]] = field(init=False, default_factory=dict)
-    _data_nrm: dict[str, list[float]] = field(init=False, default_factory=dict)
+
+    @cached_property
+    def data(self) -> dict[str, list[float]]:
+        """Grouped data if labelblocks are equal, otherwise empty."""
+        if not self.allequal:
+            return {}
+        return self._collect_data("data")
+
+    @cached_property
+    def data_nrm(self) -> dict[str, list[float]]:
+        """Normalized data by number of flashes, integration time and gain."""
+        return self._collect_data("data_nrm")
 
     def __post_init__(self) -> None:
-        """Create common metadata and data."""
+        """Initialize common metadata and validate labelblocks."""
+        self._validate_labelblocks()
+        self.metadata = merge_md([lb.metadata for lb in self.labelblocks])
+
+    def _validate_labelblocks(self) -> None:
+        """Validate labelblocks for equality or near-equality."""
         labelblocks = self.labelblocks
-        allequal = self.allequal
-        if not allequal:
-            allequal = all(labelblocks[0] == lb for lb in labelblocks[1:])
-        if allequal:
-            for key in labelblocks[0].data:
-                self._data[key] = [lb.data[key] for lb in labelblocks]
-        # labelblocks that can be merged only after normalization
+        # Check if all labelblocks are exactly equal
+        if self.allequal or all(labelblocks[0] == lb for lb in labelblocks[1:]):
+            self.allequal = True
+        # Check if all labelblocks are almost equal (requires normalization)
         elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
-            for key in labelblocks[0].data:
-                self._data_nrm[key] = [lb.data_nrm[key] for lb in labelblocks]
+            self.allequal = False
         else:
-            msg = "Creation of labelblock group failed."
+            msg = "Creation of labelblock group failed. Labelblocks are neither equal nor almost equal."
             raise ValueError(msg)
-        self.labelblocks = labelblocks
-        self.metadata = merge_md([lb.metadata for lb in labelblocks])
 
-    @property
-    def data(self) -> dict[str, list[float]]:
-        """Return None or data."""
-        return self._data
-
-    @property
-    def data_nrm(self) -> dict[str, list[float]]:
-        """Normalize data by number of flashes, integration time and gain."""
-        if not self._data_nrm:
-            for key in self.labelblocks[0].data:
-                self._data_nrm[key] = [lb.data_nrm[key] for lb in self.labelblocks]
-        return self._data_nrm
+    def _collect_data(self, attribute: str) -> dict[str, list[float]]:
+        """Collect data from labelblocks for a given attribute."""
+        return {
+            key: [getattr(lb, attribute)[key] for lb in self.labelblocks]
+            for key in getattr(self.labelblocks[0], attribute)
+        }
 
 
 @dataclass
@@ -780,12 +784,37 @@ class Buffer:
     tit: Titration
     _wells: list[str] = field(default_factory=list)
 
-    _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _dataframes_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_err: list[ArrayF] = field(init=False, default_factory=list)
+
     fit_results: list[BufferFit] = field(init=False, default_factory=list)
     fit_results_nrm: list[BufferFit] = field(init=False, default_factory=list)
+
+    @cached_property
+    def dataframes(self) -> list[pd.DataFrame]:
+        """Buffer dataframes with fit."""
+        if not self.wells:
+            return []
+        dfs = [
+            pd.DataFrame(
+                {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
+            )
+            for lbg in self.tit.labelblocksgroups
+        ]
+        self.fit_results = self._fit_buffer(dfs)  # Perform fit
+        return dfs
+
+    @cached_property
+    def dataframes_nrm(self) -> list[pd.DataFrame]:
+        """Buffer normalized dataframes with fit."""
+        if not self.wells:
+            return []
+        dfs_nrm = [
+            pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
+            for lbg in self.tit.labelblocksgroups
+        ]
+        self.fit_results_nrm = self._fit_buffer(dfs_nrm)  # Perform fit
+        return dfs_nrm
 
     @property
     def wells(self) -> list[str]:
@@ -796,39 +825,14 @@ class Buffer:
     def wells(self, wells: list[str]) -> None:
         """Set the list of buffer wells and trigger recomputation."""
         self._wells = wells
-        self._reset_buffer()
+        self._reset_cache()
         self.tit.clear_all_data_results()
 
-    def _reset_buffer(self) -> None:
-        """Reset buffer data."""
-        self._dataframes = []
-        self._dataframes_nrm = []
-        self._bg = []
-        self._bg_err = []
-
-    @property
-    def dataframes(self) -> list[pd.DataFrame]:
-        """Buffer dataframes with fit."""
-        if not self._dataframes and self.wells:
-            self._dataframes = [
-                pd.DataFrame(
-                    {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
-                )
-                for lbg in self.tit.labelblocksgroups
-            ]
-            self.fit_results = self._fit_buffer(self._dataframes)  # fit
-        return self._dataframes
-
-    @property
-    def dataframes_nrm(self) -> list[pd.DataFrame]:
-        """Buffer normalized dataframes with fit."""
-        if not self._dataframes_nrm and self.wells:
-            self._dataframes_nrm = [
-                pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
-                for lbg in self.tit.labelblocksgroups
-            ]
-            self.fit_results_nrm = self._fit_buffer(self._dataframes_nrm)  # fit
-        return self._dataframes_nrm
+    def _reset_cache(self) -> None:
+        """Reset all cached properties."""
+        for cached_attr in ["dataframes", "dataframes_nrm", "bg", "bg_err"]:
+            if cached_attr in self.__dict__:
+                del self.__dict__[cached_attr]
 
     @property
     def bg(self) -> list[ArrayF]:
@@ -849,6 +853,11 @@ class Buffer:
         if not self._bg_err:
             self._bg, self._bg_err = self._compute_bg_and_sd()
         return self._bg_err
+
+    @bg_err.setter
+    def bg_err(self, value: list[ArrayF]) -> None:
+        """Set the buffer SEM values manually."""
+        self._bg_err = value
 
     def _compute_bg_and_sd(self) -> tuple[list[ArrayF], list[ArrayF]]:
         """Compute and return buffer values and their SEM."""
@@ -1037,7 +1046,6 @@ class Titration(TecanfilesGroup):
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
-    _fit_keys: set[str] = field(init=False, default_factory=set)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_err: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
@@ -1045,7 +1053,6 @@ class Titration(TecanfilesGroup):
 
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
-    _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
 
@@ -1055,10 +1062,23 @@ class Titration(TecanfilesGroup):
         self._params.set_callback(self._reset_data_results_and_bg)
         super().__post_init__()
 
+    @cached_property
+    def fit_keys(self) -> set[str]:
+        """List data wells that are not currently assigned to a buffer."""
+        nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
+        return self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
+
     def _reset_data_and_results(self) -> None:
         self._data = []
-        self._results = []
         self._result_dfs = []
+        if "results" in self.__dict__:
+            del self.results
+        if "result_global" in self.__dict__:
+            del self.result_global
+        if "result_odr" in self.__dict__:
+            del self.result_odr
+        if "result_mcmc" in self.__dict__:
+            del self.result_mcmc
 
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()
@@ -1068,7 +1088,8 @@ class Titration(TecanfilesGroup):
     def clear_all_data_results(self) -> None:
         """Clear fit keys, data, results and bg when buffer or scheme properties change."""
         self._reset_data_results_and_bg()
-        self._fit_keys = set()
+        if "fit_keys" in self.__dict__:
+            del self.fit_keys
 
     @property
     def params(self) -> TitrationConfig:
@@ -1079,14 +1100,6 @@ class Titration(TecanfilesGroup):
     def params(self, value: TitrationConfig) -> None:
         self._params = value
         self._reset_data_results_and_bg()
-
-    @property
-    def fit_keys(self) -> set[str]:
-        """List data wells that are not currently assigned to a buffer."""
-        if not self._fit_keys:
-            nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
-            self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
-        return self._fit_keys
 
     @property
     def bg(self) -> list[ArrayF]:
@@ -1102,6 +1115,11 @@ class Titration(TecanfilesGroup):
     def bg_err(self) -> list[ArrayF]:
         """List of buffer SEM values."""
         return self.buffer.bg_err
+
+    @bg_err.setter
+    def bg_err(self, value: list[ArrayF]) -> None:
+        self.buffer.bg_err = value
+        self._reset_data_and_results()
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
@@ -1157,51 +1175,76 @@ class Titration(TecanfilesGroup):
     @property
     def data(self) -> list[dict[str, ArrayF]]:
         """Buffer subtracted and corrected for dilution data."""
+        if not self._data:
+            self._data = self._prepare_data()
+        return self._data
+
+    def _prepare_data(self) -> list[dict[str, ArrayF]]:
+        """Prepare and return the processed data."""
+        # Step 1: Get raw or normalized data
+        data = self._get_normalized_or_raw_data()
+        # Step 2: Subtract background if enabled
+        if self.params.bg and self.bg:
+            data = self._subtract_background(data)
+        # Step 3: Adjust for negative values if enabled
+        if self.params.bg_adj:
+            data = self._adjust_negative_values(data)
+        # Step 4: Apply dilution correction if enabled
+        if self.params.dil and self.additions:
+            data = self._apply_dilution_correction(data)
+        return data
+
+    def _apply_dilution_correction(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Apply dilution correction to the data (works with nan values)."""
+        return [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
+
+    def _get_normalized_or_raw_data(self) -> list[dict[str, ArrayF]]:
+        """Fetch raw or normalized data, transforming into arrays."""
+        if self.params.nrm:
+            return [
+                {k: np.array(v) for k, v in lbg.data_nrm.items()}
+                for lbg in self.labelblocksgroups
+            ]
+        return [
+            {k: np.array(v) for k, v in lbg.data.items()} if lbg.data else {}
+            for lbg in self.labelblocksgroups
+        ]
+
+    def _subtract_background(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Subtract background from data."""
+        return [
+            {k: v - bg for k, v in dd.items()}
+            for dd, bg in zip(data, self.bg, strict=True)
+        ]
+
+    def _adjust_negative_values(
+        self, data: list[dict[str, ArrayF]]
+    ) -> list[dict[str, ArrayF]]:
+        """Adjust negative values in the data."""
 
         def _adjust_subtracted_data(
             key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 10
         ) -> ArrayF:
-            """Adjust negative values."""
-            # alpha is a tolerance threshold and estimate of fluorescence ratio
-            # between bound and unbound states. Values shift up so that min=alpha.
+            """Adjust negative values (alpha = F_bound/F_unbound)."""
             if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
-                msg = f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
-                logger.warning(msg)
+                logger.warning(
+                    f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
+                )
                 return y + float(delta)
-            return y  # never used if properly called
+            return y  # never used if properly called?
 
-        if not self._data:
-            # nrm
-            if self.params.nrm:
-                lbs_data = [lbg.data_nrm for lbg in self.labelblocksgroups]
-            else:
-                lbs_data = [
-                    lbg.data if lbg.data else {} for lbg in self.labelblocksgroups
-                ]
-            # Transform values of non-empty dict into arrays
-            data = [{k: np.array(v) for k, v in dd.items()} for dd in lbs_data]
-            # bg
-            if self.params.bg and self.bg:
-                data = [
-                    {k: v - bg for k, v in dd.items()}
-                    for dd, bg in zip(data, self.bg, strict=True)
-                ]
-            # bg adjust negative values
-            if self.params.bg_adj:
-                for i in range(self.n_labels):
-                    label_str = self.labelblocksgroups[i].metadata["Label"].value
-                    lbl_s = str(label_str)
-                    sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
-                    for k in self.fit_keys:
-                        data[i][k] = _adjust_subtracted_data(k, data[i][k], sd, lbl_s)
-            # dil
-            if self.params.dil and self.additions:
-                # Dilution correction works with nan values
-                # further masking delegated to DataArray
-                data = [{k: v * self._dil_corr for k, v in dd.items()} for dd in data]
-            self._data = data
-        return self._data
+        for i in range(self.n_labels):
+            label_str = self.labelblocksgroups[i].metadata["Label"].value
+            lbl_s = str(label_str)
+            sd = self.bg_err[i].mean() if self.bg_err[i].size > 0 else np.nan
+            for k in self.fit_keys:
+                data[i][k] = _adjust_subtracted_data(k, data[i][k], sd, lbl_s)
+        return data
 
     @property
     def scheme(self) -> PlateScheme:
@@ -1313,13 +1356,6 @@ class Titration(TecanfilesGroup):
                 self._export_fit(subfolder, tecan_config)
 
     @property
-    def results(self) -> list[dict[str, FitResult]]:
-        """Result dataframes."""
-        if not self._results:
-            self._results = self.fit()
-        return self._results
-
-    @property
     def result_dfs(self) -> list[pd.DataFrame]:
         """Result dataframes."""
         if not self._result_dfs:
@@ -1343,28 +1379,12 @@ class Titration(TecanfilesGroup):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
-    def fit(self) -> list[dict[str, FitResult]]:  # noqa: C901,PLR0912,PLR0915
-        """Fit titrations.
-
-        The fitting process uses the initial point (`ini`), the final point
-        (`fin`), and weighting (`weight`) parameters defined in the `FitKwargs`
-        instance (accessible through `self.fitkws`).
-
-        To perform a fit, you would first define the fit parameters and then
-        call the fit method: titan.fitkws = TitrationAnalysis.FitKwargs(ini=0,
-        fin=None, weight=True)
-
-        Returns
-        -------
-        list[dict[str, FitResult]]
-            A list of dictionaries with fitting results.
-
-        Notes
-        -----
-        This method is less general and is designed for two label blocks.
-        """
+    @cached_property
+    def results(self) -> list[dict[str, FitResult]]:
+        """Fit results for all single titration dataset."""
         x = self.x
         fittings: list[dict[str, FitResult]] = []
+        # FIXME: This method is less general and is designed for two label blocks.
         # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
@@ -1384,91 +1404,111 @@ class Titration(TecanfilesGroup):
                         else DataArray(x, np.array(dat[k]), x_errc=self.x_err)
                     )
                     ds = Dataset({"default": da}, is_ph=self.is_ph)
-                    # if weights:
                     if not self.bg_err:
                         weight_da(da, ds.is_ph)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
-                        print(f"Skip {k} for Label{lbl_n}.")
+                        logger.warning(f"Skip {k} for Label{lbl_n}.")
                         fitting[k] = FitResult()
                 fittings.append(fitting)
-        # Global weighted on relative residues of single fittings.
-        if self.data[0] and self.data[1]:
-            fitting = {}
-            for k in self.fit_keys:
-                y0 = np.array(self.data[0][k])
-                y1 = np.array(self.data[1][k])
-                da0 = (
-                    DataArray(x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
-                    if self.bg_err
-                    else DataArray(x, y0, x_errc=self.x_err)
-                )
-                da1 = (
-                    DataArray(x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
-                    if self.bg_err
-                    else DataArray(x, y1, x_errc=self.x_err)
-                )
-                ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
-                if not self.bg_err:
-                    weight_multi_ds_titration(ds)
-                try:
-                    fitting[k] = fit_binding_glob(ds)
-                except InsufficientDataError:
-                    print(f"Skip {k} for global fit.")
-                    fitting[k] = FitResult()
-            fittings.append(fitting)
-        # Global ODR fitting
-        fitting = {}
-        for k in self.fit_keys:
-            result_glob = fittings[-1][k]
+        return fittings
 
+    def _create_global_ds(self, key: str) -> Dataset:
+        """Create a global dataset for the given key."""
+        y0 = np.array(self.data[0][key])
+        y1 = np.array(self.data[1][key])
+
+        da0 = (
+            DataArray(self.x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
+            if self.bg_err
+            else DataArray(self.x, y0, x_errc=self.x_err)
+        )
+        da1 = (
+            DataArray(self.x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
+            if self.bg_err
+            else DataArray(self.x, y1, x_errc=self.x_err)
+        )
+        return Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+
+    @cached_property
+    def result_global(self) -> dict[str, FitResult]:
+        """Perform global fitting."""
+        global_fittings = {}
+        if self.data[0] and self.data[1]:
+            for k in self.fit_keys:
+                try:
+                    ds = self._create_global_ds(k)
+                    if not self.bg_err:
+                        weight_multi_ds_titration(ds)
+                    global_fittings[k] = fit_binding_glob(ds)
+                except InsufficientDataError:
+                    logger.warning(f"Skip global fit for well {k}.")
+                    global_fittings[k] = FitResult()
+        return global_fittings
+
+    @cached_property
+    def result_odr(self) -> dict[str, FitResult]:
+        """Perform global ODR fitting."""
+        fitting: dict[str, FitResult] = {}
+        if not self.result_global:
+            logger.warning("Global fitting results are empty. ODR fitting skipped.")
+            return fitting
+        for k in self.fit_keys:
+            result_glob = self.result_global[k]
             with warnings.catch_warnings(record=True) as caught_warnings:
                 warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
-
-                result_odr = fit_binding_odr_recursive_outlier(
-                    result_glob, threshold=2.5
-                )
-
-                # Check if any warnings were captured
+                try:
+                    result_odr = fit_binding_odr_recursive_outlier(
+                        result_glob, threshold=2.5
+                    )
+                except Exception:
+                    logger.exception(f"Error during ODR fitting for well '{k}'")
+                    result_odr = FitResult()
+                # Log any warnings captured during the process
                 for warn in caught_warnings:
                     if issubclass(warn.category, RuntimeWarning):
                         logger.warning(f"Warning for well '{k}': {warn.message}")
-
             fitting[k] = result_odr
-        fittings.append(fitting)
-        # Global MCMC fitting
-        if self.params.mcmc:
-            n_sd: float = 0.15 / np.nanmedian(
+        return fitting
+
+    @cached_property
+    def result_mcmc(self) -> dict[str, FitResult]:
+        """Perform global MCMC fitting."""
+        if not self.params.mcmc:
+            return {}
+        # Calculate n_sd from the previous global fitting results
+        try:
+            n_sd = 0.15 / np.nanmedian(
                 [
                     v.result.params["K"].stderr
-                    for v in fittings[-1].values()
+                    for v in self.result_global.values()
                     if v.result
-                ]  # -2
+                ]
             )
-            print("multiply SD:", n_sd)
-            fitting = {}
-            logger.info("Starting MCMC fitting process.")
-            for k in self.fit_keys:
-                logger.info(f"Starting PyMC sampling for key: {k}")
-                result = copy.deepcopy(fittings[-1][k])  # -2
-                # ds from glob and removing outliers
-                ds_4mask = fittings[-1][k].dataset  # -2
-                if result.dataset:
-                    for lbl, da in result.dataset.items():
-                        if ds_4mask:
-                            da.mask = ds_4mask[lbl].mask
-                try:
-                    result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)  # n_sd
-                    fitting[k] = result_pymc
-                except Exception:
-                    logger.exception(f"Error during sampling for key: {k}")
-                finally:
-                    logger.info(f"MCMC fitting completed  for well: {k}.")
-
-            fittings.append(fitting)
-
-        return fittings
+        except ZeroDivisionError:
+            logger.warning("Unable to calculate n_sd; defaulting to 1.0")
+            n_sd = 1.0  # Fallback if stderr values are missing
+        logger.info(f"Starting MCMC fitting process with n_sd: {n_sd:.3f}")
+        mcmc_fittings = {}
+        for k in self.fit_keys:
+            logger.info(f"Starting PyMC sampling for key: {k}")
+            result = copy.deepcopy(self.result_odr[k])  # Retrieve the result
+            # Use dataset from selected fitting while applying outlier masks
+            ds_4mask = result.dataset
+            if result.dataset:
+                for lbl, da in result.dataset.items():
+                    if ds_4mask:
+                        da.mask = ds_4mask[lbl].mask
+            try:
+                # Perform PyMC sampling
+                result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)
+                mcmc_fittings[k] = result_pymc
+            except Exception:
+                logger.exception(f"Error during MCMC sampling for key: {k}")
+            finally:
+                logger.info(f"MCMC fitting completed for well: {k}")
+        return mcmc_fittings
 
     # TODO: test cases are:
     # 1) len(w)>1 from buffer
