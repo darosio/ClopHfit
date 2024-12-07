@@ -9,6 +9,7 @@ import pprint
 import typing
 import warnings
 from dataclasses import InitVar, dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -1037,7 +1038,6 @@ class Titration(TecanfilesGroup):
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
-    _fit_keys: set[str] = field(init=False, default_factory=set)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_err: list[ArrayF] = field(init=False, default_factory=list)
     _data: list[dict[str, ArrayF]] = field(init=False, default_factory=list)
@@ -1055,6 +1055,12 @@ class Titration(TecanfilesGroup):
         self._params.set_callback(self._reset_data_results_and_bg)
         super().__post_init__()
 
+    @cached_property
+    def fit_keys(self) -> set[str]:
+        """List data wells that are not currently assigned to a buffer."""
+        nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
+        return self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
+
     def _reset_data_and_results(self) -> None:
         self._data = []
         self._results = []
@@ -1068,7 +1074,8 @@ class Titration(TecanfilesGroup):
     def clear_all_data_results(self) -> None:
         """Clear fit keys, data, results and bg when buffer or scheme properties change."""
         self._reset_data_results_and_bg()
-        self._fit_keys = set()
+        if hasattr(self, "fit_keys"):
+            del self.fit_keys
 
     @property
     def params(self) -> TitrationConfig:
@@ -1079,14 +1086,6 @@ class Titration(TecanfilesGroup):
     def params(self, value: TitrationConfig) -> None:
         self._params = value
         self._reset_data_results_and_bg()
-
-    @property
-    def fit_keys(self) -> set[str]:
-        """List data wells that are not currently assigned to a buffer."""
-        if not self._fit_keys:
-            nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
-            self._fit_keys = self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
-        return self._fit_keys
 
     @property
     def bg(self) -> list[ArrayF]:
