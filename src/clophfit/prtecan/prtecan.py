@@ -784,12 +784,37 @@ class Buffer:
     tit: Titration
     _wells: list[str] = field(default_factory=list)
 
-    _dataframes: list[pd.DataFrame] = field(init=False, default_factory=list)
-    _dataframes_nrm: list[pd.DataFrame] = field(init=False, default_factory=list)
     _bg: list[ArrayF] = field(init=False, default_factory=list)
     _bg_err: list[ArrayF] = field(init=False, default_factory=list)
+
     fit_results: list[BufferFit] = field(init=False, default_factory=list)
     fit_results_nrm: list[BufferFit] = field(init=False, default_factory=list)
+
+    @cached_property
+    def dataframes(self) -> list[pd.DataFrame]:
+        """Buffer dataframes with fit."""
+        if not self.wells:
+            return []
+        dfs = [
+            pd.DataFrame(
+                {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
+            )
+            for lbg in self.tit.labelblocksgroups
+        ]
+        self.fit_results = self._fit_buffer(dfs)  # Perform fit
+        return dfs
+
+    @cached_property
+    def dataframes_nrm(self) -> list[pd.DataFrame]:
+        """Buffer normalized dataframes with fit."""
+        if not self.wells:
+            return []
+        dfs_nrm = [
+            pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
+            for lbg in self.tit.labelblocksgroups
+        ]
+        self.fit_results_nrm = self._fit_buffer(dfs_nrm)  # Perform fit
+        return dfs_nrm
 
     @property
     def wells(self) -> list[str]:
@@ -800,39 +825,14 @@ class Buffer:
     def wells(self, wells: list[str]) -> None:
         """Set the list of buffer wells and trigger recomputation."""
         self._wells = wells
-        self._reset_buffer()
+        self._reset_cache()
         self.tit.clear_all_data_results()
 
-    def _reset_buffer(self) -> None:
-        """Reset buffer data."""
-        self._dataframes = []
-        self._dataframes_nrm = []
-        self._bg = []
-        self._bg_err = []
-
-    @property
-    def dataframes(self) -> list[pd.DataFrame]:
-        """Buffer dataframes with fit."""
-        if not self._dataframes and self.wells:
-            self._dataframes = [
-                pd.DataFrame(
-                    {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
-                )
-                for lbg in self.tit.labelblocksgroups
-            ]
-            self.fit_results = self._fit_buffer(self._dataframes)  # fit
-        return self._dataframes
-
-    @property
-    def dataframes_nrm(self) -> list[pd.DataFrame]:
-        """Buffer normalized dataframes with fit."""
-        if not self._dataframes_nrm and self.wells:
-            self._dataframes_nrm = [
-                pd.DataFrame({k: lbg.data_nrm[k] for k in self.wells})
-                for lbg in self.tit.labelblocksgroups
-            ]
-            self.fit_results_nrm = self._fit_buffer(self._dataframes_nrm)  # fit
-        return self._dataframes_nrm
+    def _reset_cache(self) -> None:
+        """Reset all cached properties."""
+        for cached_attr in ["dataframes", "dataframes_nrm", "bg", "bg_err"]:
+            if cached_attr in self.__dict__:
+                del self.__dict__[cached_attr]
 
     @property
     def bg(self) -> list[ArrayF]:
@@ -853,6 +853,11 @@ class Buffer:
         if not self._bg_err:
             self._bg, self._bg_err = self._compute_bg_and_sd()
         return self._bg_err
+
+    @bg_err.setter
+    def bg_err(self, value: list[ArrayF]) -> None:
+        """Set the buffer SEM values manually."""
+        self._bg_err = value
 
     def _compute_bg_and_sd(self) -> tuple[list[ArrayF], list[ArrayF]]:
         """Compute and return buffer values and their SEM."""
@@ -1104,6 +1109,11 @@ class Titration(TecanfilesGroup):
     def bg_err(self) -> list[ArrayF]:
         """List of buffer SEM values."""
         return self.buffer.bg_err
+
+    @bg_err.setter
+    def bg_err(self, value: list[ArrayF]) -> None:
+        self.buffer.bg_err = value
+        self._reset_data_and_results()
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
