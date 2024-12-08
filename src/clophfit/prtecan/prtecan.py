@@ -1053,7 +1053,6 @@ class Titration(TecanfilesGroup):
 
     #: A list of wells containing samples that are neither buffer nor CTR samples.
     keys_unk: list[str] = field(init=False, default_factory=list)
-    _results: list[dict[str, FitResult]] = field(init=False, default_factory=list)
     _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
 
@@ -1071,8 +1070,15 @@ class Titration(TecanfilesGroup):
 
     def _reset_data_and_results(self) -> None:
         self._data = []
-        self._results = []
         self._result_dfs = []
+        if "results" in self.__dict__:
+            del self.results
+        if "result_global" in self.__dict__:
+            del self.result_global
+        if "result_odr" in self.__dict__:
+            del self.result_odr
+        if "result_mcmc" in self.__dict__:
+            del self.result_mcmc
 
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()
@@ -1350,13 +1356,6 @@ class Titration(TecanfilesGroup):
                 self._export_fit(subfolder, tecan_config)
 
     @property
-    def results(self) -> list[dict[str, FitResult]]:
-        """Result dataframes."""
-        if not self._results:
-            self._results = self.fit()
-        return self._results
-
-    @property
     def result_dfs(self) -> list[pd.DataFrame]:
         """Result dataframes."""
         if not self._result_dfs:
@@ -1380,28 +1379,12 @@ class Titration(TecanfilesGroup):
                 self._result_dfs.append(df0)
         return self._result_dfs
 
-    def fit(self) -> list[dict[str, FitResult]]:  # noqa: C901,PLR0912,PLR0915
-        """Fit titrations.
-
-        The fitting process uses the initial point (`ini`), the final point
-        (`fin`), and weighting (`weight`) parameters defined in the `FitKwargs`
-        instance (accessible through `self.fitkws`).
-
-        To perform a fit, you would first define the fit parameters and then
-        call the fit method: titan.fitkws = TitrationAnalysis.FitKwargs(ini=0,
-        fin=None, weight=True)
-
-        Returns
-        -------
-        list[dict[str, FitResult]]
-            A list of dictionaries with fitting results.
-
-        Notes
-        -----
-        This method is less general and is designed for two label blocks.
-        """
+    @cached_property
+    def results(self) -> list[dict[str, FitResult]]:
+        """Fit results for all single titration dataset."""
         x = self.x
         fittings: list[dict[str, FitResult]] = []
+        # FIXME: This method is less general and is designed for two label blocks.
         # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
@@ -1421,91 +1404,111 @@ class Titration(TecanfilesGroup):
                         else DataArray(x, np.array(dat[k]), x_errc=self.x_err)
                     )
                     ds = Dataset({"default": da}, is_ph=self.is_ph)
-                    # if weights:
                     if not self.bg_err:
                         weight_da(da, ds.is_ph)
                     try:
                         fitting[k] = fit_binding_glob(ds)
                     except InsufficientDataError:
-                        print(f"Skip {k} for Label{lbl_n}.")
+                        logger.warning(f"Skip {k} for Label{lbl_n}.")
                         fitting[k] = FitResult()
                 fittings.append(fitting)
-        # Global weighted on relative residues of single fittings.
-        if self.data[0] and self.data[1]:
-            fitting = {}
-            for k in self.fit_keys:
-                y0 = np.array(self.data[0][k])
-                y1 = np.array(self.data[1][k])
-                da0 = (
-                    DataArray(x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
-                    if self.bg_err
-                    else DataArray(x, y0, x_errc=self.x_err)
-                )
-                da1 = (
-                    DataArray(x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
-                    if self.bg_err
-                    else DataArray(x, y1, x_errc=self.x_err)
-                )
-                ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
-                if not self.bg_err:
-                    weight_multi_ds_titration(ds)
-                try:
-                    fitting[k] = fit_binding_glob(ds)
-                except InsufficientDataError:
-                    print(f"Skip {k} for global fit.")
-                    fitting[k] = FitResult()
-            fittings.append(fitting)
-        # Global ODR fitting
-        fitting = {}
-        for k in self.fit_keys:
-            result_glob = fittings[-1][k]
+        return fittings
 
+    def _create_global_ds(self, key: str) -> Dataset:
+        """Create a global dataset for the given key."""
+        y0 = np.array(self.data[0][key])
+        y1 = np.array(self.data[1][key])
+
+        da0 = (
+            DataArray(self.x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
+            if self.bg_err
+            else DataArray(self.x, y0, x_errc=self.x_err)
+        )
+        da1 = (
+            DataArray(self.x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
+            if self.bg_err
+            else DataArray(self.x, y1, x_errc=self.x_err)
+        )
+        return Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+
+    @cached_property
+    def result_global(self) -> dict[str, FitResult]:
+        """Perform global fitting."""
+        global_fittings = {}
+        if self.data[0] and self.data[1]:
+            for k in self.fit_keys:
+                try:
+                    ds = self._create_global_ds(k)
+                    if not self.bg_err:
+                        weight_multi_ds_titration(ds)
+                    global_fittings[k] = fit_binding_glob(ds)
+                except InsufficientDataError:
+                    logger.warning(f"Skip global fit for well {k}.")
+                    global_fittings[k] = FitResult()
+        return global_fittings
+
+    @cached_property
+    def result_odr(self) -> dict[str, FitResult]:
+        """Perform global ODR fitting."""
+        fitting: dict[str, FitResult] = {}
+        if not self.result_global:
+            logger.warning("Global fitting results are empty. ODR fitting skipped.")
+            return fitting
+        for k in self.fit_keys:
+            result_glob = self.result_global[k]
             with warnings.catch_warnings(record=True) as caught_warnings:
                 warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
-
-                result_odr = fit_binding_odr_recursive_outlier(
-                    result_glob, threshold=2.5
-                )
-
-                # Check if any warnings were captured
+                try:
+                    result_odr = fit_binding_odr_recursive_outlier(
+                        result_glob, threshold=2.5
+                    )
+                except Exception:
+                    logger.exception(f"Error during ODR fitting for well '{k}'")
+                    result_odr = FitResult()
+                # Log any warnings captured during the process
                 for warn in caught_warnings:
                     if issubclass(warn.category, RuntimeWarning):
                         logger.warning(f"Warning for well '{k}': {warn.message}")
-
             fitting[k] = result_odr
-        fittings.append(fitting)
-        # Global MCMC fitting
-        if self.params.mcmc:
-            n_sd: float = 0.15 / np.nanmedian(
+        return fitting
+
+    @cached_property
+    def result_mcmc(self) -> dict[str, FitResult]:
+        """Perform global MCMC fitting."""
+        if not self.params.mcmc:
+            return {}
+        # Calculate n_sd from the previous global fitting results
+        try:
+            n_sd = 0.15 / np.nanmedian(
                 [
                     v.result.params["K"].stderr
-                    for v in fittings[-1].values()
+                    for v in self.result_global.values()
                     if v.result
-                ]  # -2
+                ]
             )
-            print("multiply SD:", n_sd)
-            fitting = {}
-            logger.info("Starting MCMC fitting process.")
-            for k in self.fit_keys:
-                logger.info(f"Starting PyMC sampling for key: {k}")
-                result = copy.deepcopy(fittings[-1][k])  # -2
-                # ds from glob and removing outliers
-                ds_4mask = fittings[-1][k].dataset  # -2
-                if result.dataset:
-                    for lbl, da in result.dataset.items():
-                        if ds_4mask:
-                            da.mask = ds_4mask[lbl].mask
-                try:
-                    result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)  # n_sd
-                    fitting[k] = result_pymc
-                except Exception:
-                    logger.exception(f"Error during sampling for key: {k}")
-                finally:
-                    logger.info(f"MCMC fitting completed  for well: {k}.")
-
-            fittings.append(fitting)
-
-        return fittings
+        except ZeroDivisionError:
+            logger.warning("Unable to calculate n_sd; defaulting to 1.0")
+            n_sd = 1.0  # Fallback if stderr values are missing
+        logger.info(f"Starting MCMC fitting process with n_sd: {n_sd:.3f}")
+        mcmc_fittings = {}
+        for k in self.fit_keys:
+            logger.info(f"Starting PyMC sampling for key: {k}")
+            result = copy.deepcopy(self.result_odr[k])  # Retrieve the result
+            # Use dataset from selected fitting while applying outlier masks
+            ds_4mask = result.dataset
+            if result.dataset:
+                for lbl, da in result.dataset.items():
+                    if ds_4mask:
+                        da.mask = ds_4mask[lbl].mask
+            try:
+                # Perform PyMC sampling
+                result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)
+                mcmc_fittings[k] = result_pymc
+            except Exception:
+                logger.exception(f"Error during MCMC sampling for key: {k}")
+            finally:
+                logger.info(f"MCMC fitting completed for well: {k}")
+        return mcmc_fittings
 
     # TODO: test cases are:
     # 1) len(w)>1 from buffer
