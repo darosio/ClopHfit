@@ -41,7 +41,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.1
+    rev: v0.8.2
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -78,7 +78,7 @@ repos:
       - id: pydocstringformatter
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.5.9
+    rev: 0.5.10
     hooks:
       - id: pydoclint
 
@@ -107,7 +107,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.0.0
+    rev: v4.1.0
     hooks:
       - id: commitizen
       - id: commitizen-branch
