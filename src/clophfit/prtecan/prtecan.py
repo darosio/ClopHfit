@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import itertools
 import logging
-import pprint
 import typing
 import warnings
 from dataclasses import InitVar, dataclass, field
@@ -18,7 +17,6 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
-from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.fitting import (
     DataArray,
@@ -1289,22 +1287,29 @@ class Titration(TecanfilesGroup):
         subfolder.mkdir(parents=True, exist_ok=True)
         return subfolder
 
+    def _convert_results_to_dataframe(
+        self, results: dict[str, FitResult]
+    ) -> pd.DataFrame:
+        """Convert FitResult dictionary to a DataFrame."""
+        data = []
+        for lbl, fr in results.items():
+            pars = fr.result.params if fr.result else None
+            row = {"well": lbl}
+            if pars is not None:
+                for k in pars:
+                    row[k] = pars[k].value
+                    row[f"s{k}"] = pars[k].stderr
+                    row[f"{k}hdi03"] = pars[k].min
+                    row[f"{k}hdi97"] = pars[k].max
+            data.append(row)
+        return pd.DataFrame(data).set_index("well")
+
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "1fit"
         outfit.mkdir(parents=True, exist_ok=True)
-        for i, fit in enumerate(self.result_dfs):
-            if config.verbose:
-                try:
-                    print(fit)
-                    print(config.lim)
-                    meta = self.labelblocksgroups[i].metadata
-                    print("-" * 79)
-                    print(f"\nlabel{i:d}")
-                    pprint.pprint(meta)
-                except IndexError:
-                    print("-" * 79)
-                    print("\nGlobal on both labels")
-                self.print_fitting(i)
+        for i, results in enumerate([*self.results, self.result_global]):
+            fit = self._convert_results_to_dataframe(results)
+            # for i, fit in enumerate(self.result_dfs):
             # CSV tables
             fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
             if "S1_y1" in fit.columns:
@@ -1318,12 +1323,16 @@ class Titration(TecanfilesGroup):
             out_df = fit.reindex(order, axis=1).sort_index()
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             if config.png:
-                self.export_pngs(i, outfit)
-                self.export_data(i, outfit)
-            # Plots
+                results.export_pngs(outfit / f"lb{i}")
+                results.export_data(outfit / f"lb{i}")
+            """# Plots
             plotter = TitrationPlotter(self)
+            # f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
+            """
             title = config.title
-            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
+            f = results.plot_k(
+                self.scheme.ctrl, hue_column=ebar_y, xlim=config.lim, title=title
+            )
             f.savefig(outfit / f"K{i}.png")
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
@@ -1355,6 +1364,43 @@ class Titration(TecanfilesGroup):
             if tecan_config.fit:
                 self._export_fit(subfolder, tecan_config)
 
+    """
+    def export_data_fit(self, tecan_config: TecanConfig) -> None:
+        ""\"Export data files [x, y1, ..., yN] and optionally perform fit exports.""\"
+        def write_data(
+            x: ArrayF, datasets: list[dict[str, ArrayF]], output_folder: Path
+        ) -> None:
+            "\""Write datasets to `.dat` files in the specified output folder.""\"
+            if not datasets:
+                return  # No data to write
+            output_folder.mkdir(parents=True, exist_ok=True)
+            columns = ["x"] + [f"y{i}" for i in range(1, len(datasets) + 1)]
+            for key in datasets[0]:
+                # Stack x and y datasets vertically and save as DataFrame
+                data_matrix = np.vstack((x, [dataset[key] for dataset in datasets]))
+                data_df = pd.DataFrame(data_matrix.T, columns=columns)
+                data_df.to_csv(output_folder / f"{key}.dat", index=False)
+        def process_combination(combination: dict, base_output_path: Path) -> None:
+            ""\"Apply a combination and export its data and fit results.""\"
+            self._apply_combination(combination)
+            output_folder = self._prepare_output_folder(base_output_path)
+            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
+            if tecan_config.fit:
+                self._export_fit(output_folder, tecan_config)
+        # Export combinations or default data
+        if tecan_config.comb:
+            saved_params = copy.copy(self.params)  # Save current parameters
+            combinations = self._generate_combinations()  # Generate all combinations
+            for combination in combinations:
+                process_combination(combination, tecan_config.out_fp)
+            self.params = saved_params  # Restore saved parameters
+        else:
+            output_folder = self._prepare_output_folder(tecan_config.out_fp)
+            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
+            if tecan_config.fit:
+                self._export_fit(output_folder, tecan_config)
+    """
+
     @property
     def result_dfs(self) -> list[pd.DataFrame]:
         """Result dataframes."""
@@ -1380,17 +1426,17 @@ class Titration(TecanfilesGroup):
         return self._result_dfs
 
     @cached_property
-    def results(self) -> list[dict[str, FitResult]]:
+    def results(self) -> list[TitrationResults]:
         """Fit results for all single titration dataset."""
         x = self.x
-        fittings: list[dict[str, FitResult]] = []
+        fittings = []
         # FIXME: This method is less general and is designed for two label blocks.
         # lbg always contain normalized data at least.
         self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
         # Buffer wells SEM (or fit SE) provides good estimate of weights. When
         # no scheme is available use single_ds_fit residuals.
         for lbl_n, dat in enumerate(self.data, start=1):
-            fitting = {}
+            fitting = TitrationResults()
             if dat:
                 for k in self.fit_keys:
                     da = (
@@ -1432,9 +1478,9 @@ class Titration(TecanfilesGroup):
         return Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
 
     @cached_property
-    def result_global(self) -> dict[str, FitResult]:
+    def result_global(self) -> TitrationResults:
         """Perform global fitting."""
-        global_fittings = {}
+        global_fittings = TitrationResults()
         if self.data[0] and self.data[1]:
             for k in self.fit_keys:
                 try:
@@ -1514,48 +1560,6 @@ class Titration(TecanfilesGroup):
     # 1) len(w)>1 from buffer
     # 2) len(w)=1 from weight_multi_ds_titration() with/out masked da
 
-    def print_fitting(self, lb: int) -> None:
-        """Print fitting parameters for the whole plate."""
-
-        def format_row(index: str, row: pd.Series[float], keys: list[str]) -> str:
-            formatted_values = []
-            for key in keys:
-                val = ufloat(row[key], row["s" + key])
-                # Format the values with 4 significant figures
-                nominal = f"{val.nominal_value:.3g}"
-                std_dev = f"{val.std_dev:.2g}"
-                # Ensure each value occupies a fixed space
-                formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
-            return f"{index:s} {' '.join(formatted_values)}"
-
-        fit_df = self.result_dfs[lb]
-        out_keys = ["K"] + [
-            col
-            for col in fit_df.columns
-            if col not in ["ctrl", "K", "sK"] and not col.startswith("s")
-        ]
-        header = "    " + " ".join([f"{x:>7s} s{x:>7s}" for x in out_keys])
-        if len(self.scheme.ctrl) > 0:
-            res_ctrl = fit_df.loc[self.scheme.ctrl]
-            groups = res_ctrl.groupby("ctrl")
-            print(header)
-            for name, group in groups:
-                print(f" {name}")
-                for i, r in group.iterrows():
-                    print(format_row(str(i), r, out_keys))
-        res_unk = fit_df.loc[self.keys_unk]
-        # Compute 'K - 2*sK' for each row in res_unk
-        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
-        # Sort the DataFrame by this computed value in descending order
-        res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
-        # MAYBE: in case: del res_unk["sort_val"] # if you want to remove the
-        # temporary sorting column
-        print("\n" + header)
-        print("  UNK")
-        # for i, r in res_unk.sort_index().iterrows():
-        for i, r in res_unk_sorted.iterrows():
-            print(format_row(str(i), r, out_keys))
-
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""
         temperatures: dict[str | int, list[float | int | str | None]] = {}
@@ -1603,23 +1607,118 @@ class Titration(TecanfilesGroup):
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
 
-    def export_pngs(self, lb: int, path: str | Path) -> None:
-        """Export png like lb1/ lb2/ lb1_lb2/."""
-        # Make sure the directory exists
-        folder = Path(path) / f"lb{lb}"
-        folder.mkdir(parents=True, exist_ok=True)
-        for k, v in self.results[lb].items():
-            if v.figure:
-                v.figure.savefig(folder / f"{k}.png")
 
-    def export_data(self, lb: int, path: str | Path) -> None:
-        """Export datasets as csv in lb4/ds."""
-        # Make sure the directory exists
-        folder = Path(path) / f"lb{lb}" / "ds"
-        folder.mkdir(parents=True, exist_ok=True)
-        for k, v in self.results[lb].items():
-            if v.dataset:
-                v.dataset.export(folder / f"{k}.csv")
+class TitrationResults(dict[str, FitResult]):
+    """A specialized dictionary to manage plate titration results."""
+
+    @cached_property
+    def dataframe(self) -> pd.DataFrame:
+        """Convert FitResult dictionary to a DataFrame."""
+        data = []
+        for lbl, fr in self.items():
+            pars = fr.result.params if fr.result else None
+            row = {"well": lbl}
+            if pars is not None:
+                for k in pars:
+                    row[k] = pars[k].value
+                    row[f"s{k}"] = pars[k].stderr
+                    row[f"{k}hdi03"] = pars[k].min
+                    row[f"{k}hdi97"] = pars[k].max
+            data.append(row)
+        return pd.DataFrame(data).set_index("well")
+
+    def export_pngs(self, folder: str | Path) -> None:
+        """Export all fit result plots as PNG files."""
+        # TODO: folder = Path(path) / f"lb{lb}"
+        path = Path(folder)
+        path.mkdir(parents=True, exist_ok=True)
+        for well, result in self.items():
+            if result.figure:
+                result.figure.savefig(path / f"{well}.png")
+
+    def export_data(self, folder: str | Path) -> None:
+        """Export all datasets as CSV files."""
+        path = Path(folder) / "ds"
+        path.mkdir(parents=True, exist_ok=True)
+        for well, result in self.items():
+            if result.dataset:
+                result.dataset.export(path / f"{well}.csv")
+
+    def plot_k(
+        self,
+        ctrl: list[str],
+        hue_column: str,
+        xlim: tuple[float, float] | None = None,
+        title: str = "",
+    ) -> figure.Figure:
+        """Plot K values as stripplot.
+
+        Parameters
+        ----------
+        ctrl: list[str]
+            List of CTR wells.
+        hue_column: str
+            Result dataframe column for stripplot hue.
+        xlim : tuple[float, float] | None, optional
+            Range.
+        title : str, optional
+            To name the plot.
+
+        Returns
+        -------
+        figure.Figure
+            The figure.
+        """
+        dataframe = self.dataframe
+        sns.set(style="whitegrid")
+        fig = plt.figure(figsize=(12, 16))
+        if ctrl:
+            df_ctr = dataframe.loc[ctrl]
+            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
+            ## TODO:  df_ctr = df_ctr.sort_values("ctrl")
+            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["K"])
+            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
+            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
+            ax1.legend(loc="upper left", frameon=False)
+            ax1.grid(True, axis="both")
+            ax1.set_xticklabels([])
+            ax1.set_xlabel("")
+        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
+        keys_unk = list(set(dataframe.index) - set(ctrl))
+        df_unk = dataframe.loc[keys_unk].sort_index(ascending=False)
+        # Sort by 'K - 2 * sK'.
+        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
+        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
+        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
+        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
+        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
+        ax2.legend(loc="upper left", frameon=False)
+        ax2.grid(True, axis="both")
+        ax2.set_yticks(range(len(df_unk)))
+        ax2.set_yticklabels([str(label) for label in df_unk.index])
+        ax2.set_ylim(-1, len(df_unk))
+        # Set x-limits
+        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+        if ctrl:
+            ax1.set_xlim(xlim)
+        ax2.set_xlim(xlim)
+        # Set title
+        lb = 22222222222222
+        fig.suptitle(title + f"  label: {lb}", fontsize=16)
+        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
+        # Close the figure after returning it to avoid memory issues
+        plt.close(fig)
+        return fig
+
+    def _determine_xlim(
+        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
+    ) -> tuple[float, float]:
+        lower, upper = 0.99, 1.01
+        xlim = (df_unk["K"].min(), df_unk["K"].max())
+        if not df_ctr.empty:
+            xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
+            xlim = (lower * xlim[0], upper * xlim[1])
+        return xlim
 
 
 # MAYBE: Test plots
@@ -1628,15 +1727,16 @@ class TitrationPlotter:
     """Class responsible for plotting Titration data."""
 
     tit: Titration
+    r"""
+    def plot_k(.
 
-    def plot_k(
         self,
         lb: int,
         hue_column: str,
         xlim: tuple[float, float] | None = None,
         title: str = "",
     ) -> figure.Figure:
-        """Plot K values as stripplot.
+        "Plot K values as stripplot.
 
         Parameters
         ----------
@@ -1653,7 +1753,7 @@ class TitrationPlotter:
         -------
         figure.Figure
             The figure.
-        """
+        "
         dataframe = self.tit.result_dfs[lb]
         sns.set(style="whitegrid")
         fig = plt.figure(figsize=(12, 16))
@@ -1702,6 +1802,7 @@ class TitrationPlotter:
             xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
             xlim = (lower * xlim[0], upper * xlim[1])
         return xlim
+    """
 
 
 @dataclass
