@@ -1287,28 +1287,13 @@ class Titration(TecanfilesGroup):
         subfolder.mkdir(parents=True, exist_ok=True)
         return subfolder
 
-    def _convert_results_to_dataframe(
-        self, results: dict[str, FitResult]
-    ) -> pd.DataFrame:
-        """Convert FitResult dictionary to a DataFrame."""
-        data = []
-        for lbl, fr in results.items():
-            pars = fr.result.params if fr.result else None
-            row = {"well": lbl}
-            if pars is not None:
-                for k in pars:
-                    row[k] = pars[k].value
-                    row[f"s{k}"] = pars[k].stderr
-                    row[f"{k}hdi03"] = pars[k].min
-                    row[f"{k}hdi97"] = pars[k].max
-            data.append(row)
-        return pd.DataFrame(data).set_index("well")
-
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "1fit"
         outfit.mkdir(parents=True, exist_ok=True)
-        for i, results in enumerate([*self.results, self.result_global]):
-            fit = self._convert_results_to_dataframe(results)
+        for i, results in enumerate(
+            [*self.results, self.result_global, self.result_odr]
+        ):
+            fit = results.dataframe
             # for i, fit in enumerate(self.result_dfs):
             # CSV tables
             fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
@@ -1329,9 +1314,9 @@ class Titration(TecanfilesGroup):
             plotter = TitrationPlotter(self)
             # f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
             """
-            title = config.title
+            title = config.title + f"lb:{i}"
             f = results.plot_k(
-                self.scheme.ctrl, hue_column=ebar_y, xlim=config.lim, title=title
+                self.scheme.names, hue_column=ebar_y, xlim=config.lim, title=title
             )
             f.savefig(outfit / f"K{i}.png")
 
@@ -1494,9 +1479,9 @@ class Titration(TecanfilesGroup):
         return global_fittings
 
     @cached_property
-    def result_odr(self) -> dict[str, FitResult]:
+    def result_odr(self) -> TitrationResults:
         """Perform global ODR fitting."""
-        fitting: dict[str, FitResult] = {}
+        fitting = TitrationResults()
         if not self.result_global:
             logger.warning("Global fitting results are empty. ODR fitting skipped.")
             return fitting
@@ -1519,10 +1504,11 @@ class Titration(TecanfilesGroup):
         return fitting
 
     @cached_property
-    def result_mcmc(self) -> dict[str, FitResult]:
+    def result_mcmc(self) -> TitrationResults:
         """Perform global MCMC fitting."""
+        mcmc_fittings = TitrationResults()
         if not self.params.mcmc:
-            return {}
+            return mcmc_fittings
         # Calculate n_sd from the previous global fitting results
         try:
             n_sd = 0.15 / np.nanmedian(
@@ -1536,7 +1522,6 @@ class Titration(TecanfilesGroup):
             logger.warning("Unable to calculate n_sd; defaulting to 1.0")
             n_sd = 1.0  # Fallback if stderr values are missing
         logger.info(f"Starting MCMC fitting process with n_sd: {n_sd:.3f}")
-        mcmc_fittings = {}
         for k in self.fit_keys:
             logger.info(f"Starting PyMC sampling for key: {k}")
             result = copy.deepcopy(self.result_odr[k])  # Retrieve the result
@@ -1644,9 +1629,10 @@ class TitrationResults(dict[str, FitResult]):
             if result.dataset:
                 result.dataset.export(path / f"{well}.csv")
 
+    # MAYBE: Test plots
     def plot_k(
         self,
-        ctrl: list[str],
+        ctr_names_wells: dict[str, set[str]],
         hue_column: str,
         xlim: tuple[float, float] | None = None,
         title: str = "",
@@ -1655,8 +1641,8 @@ class TitrationResults(dict[str, FitResult]):
 
         Parameters
         ----------
-        ctrl: list[str]
-            List of CTR wells.
+        ctr_names_wells: dict[str, set[str]]
+            Names and wells of controls.
         hue_column: str
             Result dataframe column for stripplot hue.
         xlim : tuple[float, float] | None, optional
@@ -1672,11 +1658,17 @@ class TitrationResults(dict[str, FitResult]):
         dataframe = self.dataframe
         sns.set(style="whitegrid")
         fig = plt.figure(figsize=(12, 16))
-        if ctrl:
+        keys_unk = list(set(dataframe.index))
+        if ctr_names_wells:
+            ctrl = list(set.union(*ctr_names_wells.values()))
+            keys_unk = list(set(dataframe.index) - set(ctrl))
             df_ctr = dataframe.loc[ctrl]
+            for ctrl_name, wells in ctr_names_wells.items():
+                for well in wells:
+                    df_ctr.loc[well, "ctrl"] = ctrl_name
+            df_ctr = df_ctr.sort_values("ctrl")
             ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-            ## TODO:  df_ctr = df_ctr.sort_values("ctrl")
-            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["K"])
+            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
             sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
             ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
             ax1.legend(loc="upper left", frameon=False)
@@ -1684,7 +1676,6 @@ class TitrationResults(dict[str, FitResult]):
             ax1.set_xticklabels([])
             ax1.set_xlabel("")
         ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        keys_unk = list(set(dataframe.index) - set(ctrl))
         df_unk = dataframe.loc[keys_unk].sort_index(ascending=False)
         # Sort by 'K - 2 * sK'.
         df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
@@ -1703,8 +1694,7 @@ class TitrationResults(dict[str, FitResult]):
             ax1.set_xlim(xlim)
         ax2.set_xlim(xlim)
         # Set title
-        lb = 22222222222222
-        fig.suptitle(title + f"  label: {lb}", fontsize=16)
+        fig.suptitle(title, fontsize=16)
         fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
         # Close the figure after returning it to avoid memory issues
         plt.close(fig)
@@ -1721,88 +1711,10 @@ class TitrationResults(dict[str, FitResult]):
         return xlim
 
 
-# MAYBE: Test plots
-@dataclass
-class TitrationPlotter:
-    """Class responsible for plotting Titration data."""
+class LazyTitrationResults(TitrationResults):
+    """A specialized dictionary to manage plate titration results lazily."""
 
-    tit: Titration
-    r"""
-    def plot_k(.
-
-        self,
-        lb: int,
-        hue_column: str,
-        xlim: tuple[float, float] | None = None,
-        title: str = "",
-    ) -> figure.Figure:
-        "Plot K values as stripplot.
-
-        Parameters
-        ----------
-        lb: int
-            Labelblock index.
-        hue_column: str
-            Result dataframe column for stripplot hue.
-        xlim : tuple[float, float] | None, optional
-            Range.
-        title : str, optional
-            To name the plot.
-
-        Returns
-        -------
-        figure.Figure
-            The figure.
-        "
-        dataframe = self.tit.result_dfs[lb]
-        sns.set(style="whitegrid")
-        fig = plt.figure(figsize=(12, 16))
-        df_ctr = dataframe.loc[self.tit.scheme.ctrl]
-        if not df_ctr.empty:
-            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-            df_ctr = df_ctr.sort_values("ctrl")
-            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
-            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
-            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
-            ax1.legend(loc="upper left", frameon=False)
-            ax1.grid(True, axis="both")
-            ax1.set_xticklabels([])
-            ax1.set_xlabel("")
-        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        df_unk = dataframe.loc[self.tit.keys_unk].sort_index(ascending=False)
-        # Sort by 'K - 2 * sK'.
-        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
-        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
-        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
-        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
-        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
-        ax2.legend(loc="upper left", frameon=False)
-        ax2.grid(True, axis="both")
-        ax2.set_yticks(range(len(df_unk)))
-        ax2.set_yticklabels([str(label) for label in df_unk.index])
-        ax2.set_ylim(-1, len(df_unk))
-        # Set x-limits
-        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
-        if self.tit.scheme.ctrl:
-            ax1.set_xlim(xlim)
-        ax2.set_xlim(xlim)
-        # Set title
-        fig.suptitle(title + f"  label: {lb}", fontsize=16)
-        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
-        # Close the figure after returning it to avoid memory issues
-        plt.close(fig)
-        return fig
-
-    def _determine_xlim(
-        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
-    ) -> tuple[float, float]:
-        lower, upper = 0.99, 1.01
-        xlim = (df_unk["K"].min(), df_unk["K"].max())
-        if not df_ctr.empty:
-            xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
-            xlim = (lower * xlim[0], upper * xlim[1])
-        return xlim
-    """
+    pass
 
 
 @dataclass
