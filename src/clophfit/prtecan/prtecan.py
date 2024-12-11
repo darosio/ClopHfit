@@ -1192,7 +1192,6 @@ class Titration(TecanfilesGroup):
         """Create metadata and data."""
         self.buffer = Buffer(tit=self)
         self._params.set_callback(self._reset_data_results_and_bg)
-        self._res2 = LazyTitrationResults(self._generic_fit)
         super().__post_init__()
 
     @cached_property
@@ -1562,7 +1561,6 @@ class Titration(TecanfilesGroup):
         """Create a global dataset for the given key."""
         y0 = np.array(self.data[0][key])
         y1 = np.array(self.data[1][key])
-
         da0 = (
             DataArray(self.x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
             if self.bg_err
@@ -1573,7 +1571,10 @@ class Titration(TecanfilesGroup):
             if self.bg_err
             else DataArray(self.x, y1, x_errc=self.x_err)
         )
-        return Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+        ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+        if not self.bg_err:  # bg_err is a better weight
+            weight_multi_ds_titration(ds)
+        return ds
 
     @cached_property
     def result_global(self) -> TitrationResults:
@@ -1591,21 +1592,19 @@ class Titration(TecanfilesGroup):
                     global_fittings[k] = FitResult()
         return global_fittings
 
-    def _generic_fit(self, k: str) -> FitResult:
-        """Return Generic fit."""
+    def _fit_global_key(self, k: str) -> FitResult:
+        """Perform global fitting for a single key."""
         try:
             ds = self._create_global_ds(k)
-            if not self.bg_err:
-                weight_multi_ds_titration(ds)
             return fit_binding_glob(ds)
         except InsufficientDataError:
-            logger.warning(f"Skip global fit for well {k}.")
+            logger.warning(f"Skipping global fit for well '{k}'.")
             return FitResult()
 
-    @property
+    @cached_property
     def result_global2(self) -> LazyTitrationResults:
-        """Perform global fitting."""
-        return self._res2
+        """Perform global fitting lazily."""
+        return LazyTitrationResults(compute_funcs=self._fit_global_key)
 
     @cached_property
     def result_odr(self) -> TitrationResults:
