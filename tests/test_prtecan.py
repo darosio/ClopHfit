@@ -731,6 +731,7 @@ class TestTitrationAnalysis:
         """It fits each label separately."""
         fres = titan.results
         # Check that the first fit result dictionary has 92 elements
+        fres[0].compute_all()
         assert len(fres[0]) == 92
         # Check that the first fit result for 'H02' is None
         assert fres[0]["H02"] == FitResult(None, None, None)

@@ -5,11 +5,10 @@ from __future__ import annotations
 import copy
 import itertools
 import logging
-import pprint
 import typing
 import warnings
 from dataclasses import InitVar, dataclass, field
-from functools import cached_property
+from functools import cached_property, partial
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -18,7 +17,6 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
-from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.fitting import (
     DataArray,
@@ -39,6 +37,9 @@ if typing.TYPE_CHECKING:
 
     from clophfit.types import ArrayF
 
+# TODO: remove verbose from ConfigTecan?
+# TODO: results list will become dict
+# TODO: Add tqdm progress bar
 
 # list_of_lines
 # after set([type(x) for l in csvl for x in l]) = float | int | str
@@ -651,6 +652,11 @@ class PlateScheme:
     _ctrl: list[str] = field(default_factory=list, init=False)
     _names: dict[str, set[str]] = field(default_factory=dict, init=False)
 
+    @cached_property
+    def nofit_keys(self) -> set[str]:
+        """Buffer and discarded wells."""
+        return set(self.buffer) | set(self.discard)
+
     @property
     def buffer(self) -> list[str]:
         """List of buffer wells."""
@@ -1019,6 +1025,180 @@ class Buffer:
 
 
 @dataclass
+class TitrationResults:
+    """Manage titration results with optional lazy computation."""
+
+    scheme: PlateScheme
+    fit_keys: set[str]
+    compute_func: Callable[[str], FitResult]
+    results: dict[str, FitResult] = field(default_factory=dict)
+    _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+    @property
+    def dataframe(self) -> pd.DataFrame:
+        """Convert FitResult dictionary to a DataFrame."""
+        if all(key in list(self._dataframe.index) for key in self.fit_keys):
+            return self._dataframe
+        if not self.results:
+            self.compute_all()
+        data = []
+        for lbl, fr in self.results.items():
+            pars = fr.result.params if fr.result else None
+            row = {"well": lbl}
+            if pars is not None:
+                for k in pars:
+                    row[k] = pars[k].value
+                    row[f"s{k}"] = pars[k].stderr
+                    row[f"{k}hdi03"] = pars[k].min
+                    row[f"{k}hdi97"] = pars[k].max
+            data.append(row)
+        self._dataframe = pd.DataFrame(data).set_index("well")
+        return self._dataframe
+
+    def __repr__(self) -> str:
+        """Get or lazily compute a result for a given key."""
+        return repr(self.results)
+
+    def __getitem__(self, key: str) -> FitResult:
+        """Get or lazily compute a result for a given key."""
+        if key not in self.results:
+            if key not in self.fit_keys:
+                msg = f"Key '{key}' is not a valid fit key."
+                raise KeyError(msg)
+            self.results[key] = self.compute_func(key)
+        return self.results[key]
+
+    def __bool__(self) -> bool:
+        """Return True if there are any computed results, trigger full computation."""
+        return bool(self.results)
+
+    def __call__(self) -> None:
+        """Ensure all results are computed when called."""
+        self.compute_all()
+
+    def __len__(self) -> int:
+        """Ensure length is accurate after full computation."""
+        return len(self.results)
+
+    def compute_all(self) -> None:
+        """Compute results for all keys."""
+        for key in self.fit_keys:
+            # Access each key to trigger computation
+            self[key]
+
+    def n_sd(self, par: str = "K", expected_sd: float = 0.15) -> float:
+        """Compute median of K."""
+        if not self.all_computed():
+            self.compute_all()
+        try:
+            n_sd: float = expected_sd / np.nanmedian(
+                [v.result.params[par].stderr for v in self.results.values() if v.result]
+            )
+        except ZeroDivisionError:
+            logger.warning("Unable to calculate n_sd; defaulting to 1.0")
+            n_sd = 1.0  # Fallback if stderr values are missing
+        return n_sd
+
+    def all_computed(self) -> bool:
+        """Check if all keys have been computed."""
+        return all(key in self.results for key in self.fit_keys)
+
+    def export_pngs(self, folder: str | Path) -> None:
+        """Export all fit result plots as PNG files."""
+        # TODO: folder = Path(path) / f"lb{lb}"
+        path = Path(folder)
+        path.mkdir(parents=True, exist_ok=True)
+        for well, result in self.results.items():
+            if result.figure:
+                result.figure.savefig(path / f"{well}.png")
+
+    def export_data(self, folder: str | Path) -> None:
+        """Export all datasets as CSV files."""
+        path = Path(folder) / "ds"
+        path.mkdir(parents=True, exist_ok=True)
+        for well, result in self.results.items():
+            if result.dataset:
+                result.dataset.export(path / f"{well}.csv")
+
+    # MAYBE: Test plots
+    def plot_k(
+        self,
+        hue_column: str,
+        xlim: tuple[float, float] | None = None,
+        title: str = "",
+    ) -> figure.Figure:
+        """Plot K values as stripplot.
+
+        Parameters
+        ----------
+        hue_column: str
+            Result dataframe column for stripplot hue.
+        xlim : tuple[float, float] | None, optional
+            Range.
+        title : str, optional
+            To name the plot.
+
+        Returns
+        -------
+        figure.Figure
+            The figure.
+        """
+        dataframe = self.dataframe
+        sns.set(style="whitegrid")
+        fig = plt.figure(figsize=(12, 16))
+        keys_unk = list(set(dataframe.index))
+        if self.scheme.names:
+            keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
+            df_ctr = dataframe.loc[self.scheme.ctrl]
+            for name, wells in self.scheme.names.items():
+                for well in wells:
+                    df_ctr.loc[well, "ctrl"] = name
+            df_ctr = df_ctr.sort_values("ctrl")
+            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
+            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
+            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
+            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
+            ax1.legend(loc="upper left", frameon=False)
+            ax1.grid(True, axis="both")
+            ax1.set_xticklabels([])
+            ax1.set_xlabel("")
+        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
+        df_unk = dataframe.loc[keys_unk].sort_index(ascending=False)
+        # Sort by 'K - 2 * sK'.
+        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
+        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
+        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
+        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
+        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
+        ax2.legend(loc="upper left", frameon=False)
+        ax2.grid(True, axis="both")
+        ax2.set_yticks(range(len(df_unk)))
+        ax2.set_yticklabels([str(label) for label in df_unk.index])
+        ax2.set_ylim(-1, len(df_unk))
+        # Set x-limits
+        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+        if self.scheme.ctrl:
+            ax1.set_xlim(xlim)
+        ax2.set_xlim(xlim)
+        # Set title
+        fig.suptitle(title, fontsize=16)
+        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
+        # Close the figure after returning it to avoid memory issues
+        plt.close(fig)
+        return fig
+
+    def _determine_xlim(
+        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
+    ) -> tuple[float, float]:
+        lower, upper = 0.99, 1.01
+        xlim = (df_unk["K"].min(), df_unk["K"].max())
+        if not df_ctr.empty:
+            xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
+            xlim = (lower * xlim[0], upper * xlim[1])
+        return xlim
+
+
+@dataclass
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
@@ -1052,8 +1232,6 @@ class Titration(TecanfilesGroup):
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
 
     #: A list of wells containing samples that are neither buffer nor CTR samples.
-    keys_unk: list[str] = field(init=False, default_factory=list)
-    _result_dfs: list[pd.DataFrame] = field(init=False, default_factory=list)
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
 
     def __post_init__(self) -> None:
@@ -1064,13 +1242,11 @@ class Titration(TecanfilesGroup):
 
     @cached_property
     def fit_keys(self) -> set[str]:
-        """List data wells that are not currently assigned to a buffer."""
-        nonfit_wells = set(self.scheme.buffer) | set(self.scheme.discard)
-        return self.labelblocksgroups[0].data_nrm.keys() - nonfit_wells
+        """Set of wells to be fitted."""
+        return self.labelblocksgroups[0].data_nrm.keys() - self.scheme.nofit_keys
 
     def _reset_data_and_results(self) -> None:
         self._data = []
-        self._result_dfs = []
         if "results" in self.__dict__:
             del self.results
         if "result_global" in self.__dict__:
@@ -1290,21 +1466,14 @@ class Titration(TecanfilesGroup):
         return subfolder
 
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
-        outfit = subfolder / "1fit"
+        outfit = subfolder / "fit"
         outfit.mkdir(parents=True, exist_ok=True)
-        for i, fit in enumerate(self.result_dfs):
-            if config.verbose:
-                try:
-                    print(fit)
-                    print(config.lim)
-                    meta = self.labelblocksgroups[i].metadata
-                    print("-" * 79)
-                    print(f"\nlabel{i:d}")
-                    pprint.pprint(meta)
-                except IndexError:
-                    print("-" * 79)
-                    print("\nGlobal on both labels")
-                self.print_fitting(i)
+        export_list = [*self.results, self.result_global, self.result_odr]
+        if self.params.mcmc:
+            export_list.append(self.result_mcmc)
+        for i, results in enumerate(export_list):
+            results.compute_all()
+            fit = results.dataframe
             # CSV tables
             fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
             if "S1_y1" in fit.columns:
@@ -1318,12 +1487,10 @@ class Titration(TecanfilesGroup):
             out_df = fit.reindex(order, axis=1).sort_index()
             out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             if config.png:
-                self.export_pngs(i, outfit)
-                self.export_data(i, outfit)
-            # Plots
-            plotter = TitrationPlotter(self)
-            title = config.title
-            f = plotter.plot_k(i, hue_column=ebar_y, xlim=config.lim, title=title)
+                results.export_pngs(outfit / f"lb{i}")
+                results.export_data(outfit / f"lb{i}")
+            title = config.title + f"lb:{i}"
+            f = results.plot_k(hue_column=ebar_y, xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
@@ -1355,70 +1522,107 @@ class Titration(TecanfilesGroup):
             if tecan_config.fit:
                 self._export_fit(subfolder, tecan_config)
 
-    @property
-    def result_dfs(self) -> list[pd.DataFrame]:
-        """Result dataframes."""
-        if not self._result_dfs:
-            for fitresult in self.results:
-                data = []
-                for lbl, fr in fitresult.items():
-                    pars = fr.result.params if fr.result else None
-                    row = {"well": lbl}
-                    if pars is not None:
-                        for k in pars:
-                            row[k] = pars[k].value
-                            row[f"s{k}"] = pars[k].stderr
-                            row[f"{k}hdi03"] = pars[k].min
-                            row[f"{k}hdi97"] = pars[k].max
-                    data.append(row)
-                    df0 = pd.DataFrame(data).set_index("well")
-                    # ctrl
-                    for ctrl_name, wells in self.scheme.names.items():
-                        for well in wells:
-                            df0.loc[well, "ctrl"] = ctrl_name
-                self._result_dfs.append(df0)
-        return self._result_dfs
+    # TODO: test cases are:
+    # 1) len(w)>1 from buffer
+    # 2) len(w)=1 from weight_multi_ds_titration() with/out masked da
+    """
+    def export_data_fit(self, tecan_config: TecanConfig) -> None:
+        ""\"Export data files [x, y1, ..., yN] and optionally perform fit exports.""\"
+        def write_data(
+            x: ArrayF, datasets: list[dict[str, ArrayF]], output_folder: Path
+        ) -> None:
+            "\""Write datasets to `.dat` files in the specified output folder.""\"
+            if not datasets:
+                return  # No data to write
+            output_folder.mkdir(parents=True, exist_ok=True)
+            columns = ["x"] + [f"y{i}" for i in range(1, len(datasets) + 1)]
+            for key in datasets[0]:
+                # Stack x and y datasets vertically and save as DataFrame
+                data_matrix = np.vstack((x, [dataset[key] for dataset in datasets]))
+                data_df = pd.DataFrame(data_matrix.T, columns=columns)
+                data_df.to_csv(output_folder / f"{key}.dat", index=False)
+        def process_combination(combination: dict, base_output_path: Path) -> None:
+            ""\"Apply a combination and export its data and fit results.""\"
+            self._apply_combination(combination)
+            output_folder = self._prepare_output_folder(base_output_path)
+            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
+            if tecan_config.fit:
+                self._export_fit(output_folder, tecan_config)
+        # Export combinations or default data
+        if tecan_config.comb:
+            saved_params = copy.copy(self.params)  # Save current parameters
+            combinations = self._generate_combinations()  # Generate all combinations
+            for combination in combinations:
+                process_combination(combination, tecan_config.out_fp)
+            self.params = saved_params  # Restore saved parameters
+        else:
+            output_folder = self._prepare_output_folder(tecan_config.out_fp)
+            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
+            if tecan_config.fit:
+                self._export_fit(output_folder, tecan_config)
+    """
 
     @cached_property
-    def results(self) -> list[dict[str, FitResult]]:
+    def results(self) -> list[TitrationResults]:
         """Fit results for all single titration dataset."""
-        x = self.x
-        fittings: list[dict[str, FitResult]] = []
-        # FIXME: This method is less general and is designed for two label blocks.
-        # lbg always contain normalized data at least.
-        self.keys_unk = list(self.fit_keys - set(self.scheme.ctrl))
-        # Buffer wells SEM (or fit SE) provides good estimate of weights. When
-        # no scheme is available use single_ds_fit residuals.
+        fittings = []
         for lbl_n, dat in enumerate(self.data, start=1):
-            fitting = {}
             if dat:
-                for k in self.fit_keys:
-                    da = (
-                        DataArray(
-                            x,
-                            np.array(dat[k]),
-                            x_errc=self.x_err,
-                            y_errc=self.bg_err[lbl_n - 1],
-                        )
-                        if self.bg_err
-                        else DataArray(x, np.array(dat[k]), x_errc=self.x_err)
-                    )
-                    ds = Dataset({"default": da}, is_ph=self.is_ph)
-                    if not self.bg_err:
-                        weight_da(da, ds.is_ph)
-                    try:
-                        fitting[k] = fit_binding_glob(ds)
-                    except InsufficientDataError:
-                        logger.warning(f"Skip {k} for Label{lbl_n}.")
-                        fitting[k] = FitResult()
-                fittings.append(fitting)
+                fit = TitrationResults(
+                    self.scheme,
+                    self.fit_keys,
+                    partial(self._compute_fit, label_n=lbl_n),
+                )
+                fittings.append(fit)
         return fittings
+
+    @cached_property
+    def result_global(self) -> TitrationResults:
+        """Perform global fitting lazily."""
+        return TitrationResults(self.scheme, self.fit_keys, self._compute_global_fit)
+
+    @cached_property
+    def result_odr(self) -> TitrationResults:
+        """Perform global ODR fitting."""
+        return TitrationResults(self.scheme, self.fit_keys, self._compute_odr_fit)
+
+    def _compute_fit(self, key: str, label_n: int) -> FitResult:
+        """Compute individual dataset fit for a single key."""
+        try:
+            ds = self._create_ds(key, label_n)
+            return fit_binding_glob(ds)
+        except InsufficientDataError:
+            logger.warning(f"Skip fit for well {key} for Label:{label_n}.")
+            return FitResult()
+
+    def _compute_global_fit(self, key: str) -> FitResult:
+        """Compute global fit for a single key."""
+        try:
+            ds = self._create_global_ds(key)
+            return fit_binding_glob(ds)
+        except InsufficientDataError:
+            logger.warning(f"Skipping global fit for well {key}.")
+            return FitResult()
+
+    def _create_ds(self, key: str, label_n: int) -> Dataset:
+        """Create a dataset for the given key."""
+        y = np.array(self.data[label_n - 1][key])
+        da = (
+            DataArray(self.x, y, x_errc=self.x_err, y_errc=self.bg_err[label_n - 1])
+            if self.bg_err
+            else DataArray(self.x, y, x_errc=self.x_err)
+        )
+        ds = Dataset({"default": da}, is_ph=self.is_ph)
+        # bg_err is a better weight that residuals from single fit
+        if not self.bg_err:
+            weight_da(da, ds.is_ph)
+        return ds
 
     def _create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
+        # FIXME: This method is less general and is designed for two label blocks.
         y0 = np.array(self.data[0][key])
         y1 = np.array(self.data[1][key])
-
         da0 = (
             DataArray(self.x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
             if self.bg_err
@@ -1429,132 +1633,56 @@ class Titration(TecanfilesGroup):
             if self.bg_err
             else DataArray(self.x, y1, x_errc=self.x_err)
         )
-        return Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+        ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
+        # bg_err is a better weight that residuals from single fit
+        if not self.bg_err:
+            weight_multi_ds_titration(ds)
+        return ds
 
-    @cached_property
-    def result_global(self) -> dict[str, FitResult]:
-        """Perform global fitting."""
-        global_fittings = {}
-        if self.data[0] and self.data[1]:
-            for k in self.fit_keys:
-                try:
-                    ds = self._create_global_ds(k)
-                    if not self.bg_err:
-                        weight_multi_ds_titration(ds)
-                    global_fittings[k] = fit_binding_glob(ds)
-                except InsufficientDataError:
-                    logger.warning(f"Skip global fit for well {k}.")
-                    global_fittings[k] = FitResult()
-        return global_fittings
+    def _compute_odr_fit(self, key: str) -> FitResult:
+        """Compute global ODR fit for a single key.
 
-    @cached_property
-    def result_odr(self) -> dict[str, FitResult]:
-        """Perform global ODR fitting."""
-        fitting: dict[str, FitResult] = {}
-        if not self.result_global:
-            logger.warning("Global fitting results are empty. ODR fitting skipped.")
-            return fitting
-        for k in self.fit_keys:
-            result_glob = self.result_global[k]
-            with warnings.catch_warnings(record=True) as caught_warnings:
-                warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
-                try:
-                    result_odr = fit_binding_odr_recursive_outlier(
-                        result_glob, threshold=2.5
-                    )
-                except Exception:
-                    logger.exception(f"Error during ODR fitting for well '{k}'")
-                    result_odr = FitResult()
-                # Log any warnings captured during the process
-                for warn in caught_warnings:
-                    if issubclass(warn.category, RuntimeWarning):
-                        logger.warning(f"Warning for well '{k}': {warn.message}")
-            fitting[k] = result_odr
-        return fitting
-
-    @cached_property
-    def result_mcmc(self) -> dict[str, FitResult]:
-        """Perform global MCMC fitting."""
-        if not self.params.mcmc:
-            return {}
-        # Calculate n_sd from the previous global fitting results
-        try:
-            n_sd = 0.15 / np.nanmedian(
-                [
-                    v.result.params["K"].stderr
-                    for v in self.result_global.values()
-                    if v.result
-                ]
+        if not self.result_global[key]:
+            logger.warning(
+                f"Global fitting results for {key} are empty. ODR fitting skipped."
             )
-        except ZeroDivisionError:
-            logger.warning("Unable to calculate n_sd; defaulting to 1.0")
-            n_sd = 1.0  # Fallback if stderr values are missing
-        logger.info(f"Starting MCMC fitting process with n_sd: {n_sd:.3f}")
-        mcmc_fittings = {}
-        for k in self.fit_keys:
-            logger.info(f"Starting PyMC sampling for key: {k}")
-            result = copy.deepcopy(self.result_odr[k])  # Retrieve the result
-            # Use dataset from selected fitting while applying outlier masks
-            ds_4mask = result.dataset
-            if result.dataset:
-                for lbl, da in result.dataset.items():
-                    if ds_4mask:
-                        da.mask = ds_4mask[lbl].mask
+        """
+        result_glob = self.result_global[key]
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
             try:
-                # Perform PyMC sampling
-                result_pymc = fit_binding_pymc(result, n_sd=n_sd, n_xerr=1)
-                mcmc_fittings[k] = result_pymc
+                result_odr = fit_binding_odr_recursive_outlier(
+                    result_glob, threshold=2.5
+                )
             except Exception:
-                logger.exception(f"Error during MCMC sampling for key: {k}")
-            finally:
-                logger.info(f"MCMC fitting completed for well: {k}")
-        return mcmc_fittings
+                logger.exception(f"Error during ODR fitting for well '{key}'")
+                result_odr = FitResult()
+            # Log any warnings captured during the process
+            for warn in caught_warnings:
+                if issubclass(warn.category, RuntimeWarning):
+                    logger.warning(f"Warning for well '{key}': {warn.message}")
+        return result_odr
 
-    # TODO: test cases are:
-    # 1) len(w)>1 from buffer
-    # 2) len(w)=1 from weight_multi_ds_titration() with/out masked da
+    @cached_property
+    def result_mcmc(self) -> TitrationResults:
+        """Perform global MCMC fitting."""
+        n_sd = self.result_odr.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[ODR] estimated for MCMC fitting: {n_sd:.3f}")
+        return TitrationResults(
+            self.scheme, self.fit_keys, partial(self._compute_mcmc_fit, n_sd=n_sd)
+        )
 
-    def print_fitting(self, lb: int) -> None:
-        """Print fitting parameters for the whole plate."""
-
-        def format_row(index: str, row: pd.Series[float], keys: list[str]) -> str:
-            formatted_values = []
-            for key in keys:
-                val = ufloat(row[key], row["s" + key])
-                # Format the values with 4 significant figures
-                nominal = f"{val.nominal_value:.3g}"
-                std_dev = f"{val.std_dev:.2g}"
-                # Ensure each value occupies a fixed space
-                formatted_values.extend([f"{nominal:>7s}", f"{std_dev:>7s}"])
-            return f"{index:s} {' '.join(formatted_values)}"
-
-        fit_df = self.result_dfs[lb]
-        out_keys = ["K"] + [
-            col
-            for col in fit_df.columns
-            if col not in ["ctrl", "K", "sK"] and not col.startswith("s")
-        ]
-        header = "    " + " ".join([f"{x:>7s} s{x:>7s}" for x in out_keys])
-        if len(self.scheme.ctrl) > 0:
-            res_ctrl = fit_df.loc[self.scheme.ctrl]
-            groups = res_ctrl.groupby("ctrl")
-            print(header)
-            for name, group in groups:
-                print(f" {name}")
-                for i, r in group.iterrows():
-                    print(format_row(str(i), r, out_keys))
-        res_unk = fit_df.loc[self.keys_unk]
-        # Compute 'K - 2*sK' for each row in res_unk
-        res_unk["sort_val"] = res_unk["K"] - 2 * res_unk["sK"]
-        # Sort the DataFrame by this computed value in descending order
-        res_unk_sorted = res_unk.sort_values(by="sort_val", ascending=False)
-        # MAYBE: in case: del res_unk["sort_val"] # if you want to remove the
-        # temporary sorting column
-        print("\n" + header)
-        print("  UNK")
-        # for i, r in res_unk.sort_index().iterrows():
-        for i, r in res_unk_sorted.iterrows():
-            print(format_row(str(i), r, out_keys))
+    def _compute_mcmc_fit(self, key: str, n_sd: float) -> FitResult:
+        """Compute global MCMC fit for a single key."""
+        # Calculate n_sd from the previous global fitting results
+        logger.info(f"Starting PyMC sampling for key: {key}")
+        try:
+            result_pymc = fit_binding_pymc(self.result_odr[key], n_sd=n_sd, n_xerr=1)
+        except Exception:
+            logger.exception(f"Error during MCMC sampling for key: {key}")
+        finally:
+            logger.info(f"MCMC fitting completed for well: {key}")
+        return result_pymc
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""
@@ -1602,106 +1730,6 @@ class Titration(TecanfilesGroup):
         plt.legend(title="Label")
         plt.close()
         return typing.cast(figure.Figure, g.get_figure())
-
-    def export_pngs(self, lb: int, path: str | Path) -> None:
-        """Export png like lb1/ lb2/ lb1_lb2/."""
-        # Make sure the directory exists
-        folder = Path(path) / f"lb{lb}"
-        folder.mkdir(parents=True, exist_ok=True)
-        for k, v in self.results[lb].items():
-            if v.figure:
-                v.figure.savefig(folder / f"{k}.png")
-
-    def export_data(self, lb: int, path: str | Path) -> None:
-        """Export datasets as csv in lb4/ds."""
-        # Make sure the directory exists
-        folder = Path(path) / f"lb{lb}" / "ds"
-        folder.mkdir(parents=True, exist_ok=True)
-        for k, v in self.results[lb].items():
-            if v.dataset:
-                v.dataset.export(folder / f"{k}.csv")
-
-
-# MAYBE: Test plots
-@dataclass
-class TitrationPlotter:
-    """Class responsible for plotting Titration data."""
-
-    tit: Titration
-
-    def plot_k(
-        self,
-        lb: int,
-        hue_column: str,
-        xlim: tuple[float, float] | None = None,
-        title: str = "",
-    ) -> figure.Figure:
-        """Plot K values as stripplot.
-
-        Parameters
-        ----------
-        lb: int
-            Labelblock index.
-        hue_column: str
-            Result dataframe column for stripplot hue.
-        xlim : tuple[float, float] | None, optional
-            Range.
-        title : str, optional
-            To name the plot.
-
-        Returns
-        -------
-        figure.Figure
-            The figure.
-        """
-        dataframe = self.tit.result_dfs[lb]
-        sns.set(style="whitegrid")
-        fig = plt.figure(figsize=(12, 16))
-        df_ctr = dataframe.loc[self.tit.scheme.ctrl]
-        if not df_ctr.empty:
-            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-            df_ctr = df_ctr.sort_values("ctrl")
-            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
-            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
-            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
-            ax1.legend(loc="upper left", frameon=False)
-            ax1.grid(True, axis="both")
-            ax1.set_xticklabels([])
-            ax1.set_xlabel("")
-        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        df_unk = dataframe.loc[self.tit.keys_unk].sort_index(ascending=False)
-        # Sort by 'K - 2 * sK'.
-        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
-        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
-        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
-        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
-        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
-        ax2.legend(loc="upper left", frameon=False)
-        ax2.grid(True, axis="both")
-        ax2.set_yticks(range(len(df_unk)))
-        ax2.set_yticklabels([str(label) for label in df_unk.index])
-        ax2.set_ylim(-1, len(df_unk))
-        # Set x-limits
-        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
-        if self.tit.scheme.ctrl:
-            ax1.set_xlim(xlim)
-        ax2.set_xlim(xlim)
-        # Set title
-        fig.suptitle(title + f"  label: {lb}", fontsize=16)
-        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
-        # Close the figure after returning it to avoid memory issues
-        plt.close(fig)
-        return fig
-
-    def _determine_xlim(
-        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
-    ) -> tuple[float, float]:
-        lower, upper = 0.99, 1.01
-        xlim = (df_unk["K"].min(), df_unk["K"].max())
-        if not df_ctr.empty:
-            xlim = (min(df_ctr["K"].min(), xlim[0]), max(df_ctr["K"].max(), xlim[1]))
-            xlim = (lower * xlim[0], upper * xlim[1])
-        return xlim
 
 
 @dataclass
