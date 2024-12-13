@@ -1602,37 +1602,31 @@ class Titration(TecanfilesGroup):
             logger.warning(f"Skipping global fit for well {key}.")
             return FitResult()
 
-    def _create_ds(self, key: str, label_n: int) -> Dataset:
-        """Create a dataset for the given key."""
-        y = np.array(self.data[label_n - 1][key])
-        da = (
-            DataArray(self.x, y, x_errc=self.x_err, y_errc=self.bg_err[label_n - 1])
+    def _create_data_array(self, key: str, label_n: int) -> DataArray:
+        """Create a DataArray for a specific key and label."""
+        y = np.array(self.data[label_n][key])
+        return (
+            DataArray(self.x, y, x_errc=self.x_err, y_errc=self.bg_err[label_n])
             if self.bg_err
             else DataArray(self.x, y, x_errc=self.x_err)
         )
+
+    def _create_ds(self, key: str, label_n: int) -> Dataset:
+        """Create a dataset for the given key."""
+        da = self._create_data_array(key, label_n - 1)
         ds = Dataset({"default": da}, is_ph=self.is_ph)
-        # bg_err is a better weight that residuals from single fit
+        # Apply weighting if bg_err is not provided
         if not self.bg_err:
             weight_da(da, ds.is_ph)
         return ds
 
     def _create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
-        # FIXME: This method is less general and is designed for two label blocks.
-        y0 = np.array(self.data[0][key])
-        y1 = np.array(self.data[1][key])
-        da0 = (
-            DataArray(self.x, y0, x_errc=self.x_err, y_errc=self.bg_err[0])
-            if self.bg_err
-            else DataArray(self.x, y0, x_errc=self.x_err)
-        )
-        da1 = (
-            DataArray(self.x, y1, x_errc=self.x_err, y_errc=self.bg_err[1])
-            if self.bg_err
-            else DataArray(self.x, y1, x_errc=self.x_err)
-        )
-        ds = Dataset({"y0": da0, "y1": da1}, is_ph=self.is_ph)
-        # bg_err is a better weight that residuals from single fit
+        data_arrays_dict = {
+            f"y{i}": self._create_data_array(key, i) for i in range(len(self.data))
+        }
+        ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
+        # Apply multi-dataset weighting if bg_err is not provided
         if not self.bg_err:
             weight_multi_ds_titration(ds)
         return ds

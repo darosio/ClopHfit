@@ -551,7 +551,6 @@ class TestTitration:
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            # TODO: move into 140220
             Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", True)
 
     def test_data_bg_and_nrm(self, tit1: Titration) -> None:
