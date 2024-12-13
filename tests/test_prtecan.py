@@ -225,10 +225,10 @@ class TestTecanfile:
 
     def test_labelblocks(self) -> None:
         """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert self.tf.labelblocks[0].metadata["Temperature"].value == 25.3
-        assert self.tf.labelblocks[1].metadata["Temperature"].value == 25.7
-        assert self.tf.labelblocks[0].data["A01"] == 17260
-        assert self.tf.labelblocks[1].data["H12"] == 4196
+        assert self.tf.labelblocks[1].metadata["Temperature"].value == 25.3
+        assert self.tf.labelblocks[2].metadata["Temperature"].value == 25.7
+        assert self.tf.labelblocks[1].data["A01"] == 17260
+        assert self.tf.labelblocks[2].data["H12"] == 4196
 
     def test_eq(self) -> None:
         """A Tecanfile is equal to itself and not equal to a different Tecanfile."""
@@ -269,41 +269,39 @@ class TestLabelblocksGroup:
         ]
 
     @pytest.fixture(autouse=True, scope="class")
-    def lbgs(self, tfs: list[Tecanfile]) -> tuple[LabelblocksGroup, LabelblocksGroup]:
-        """Set up LabelblocksGroup 0 and 1."""
-        lbg0 = LabelblocksGroup([tfs[0].labelblocks[0], tfs[1].labelblocks[0]])
-        lbg1 = LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[1]])
-        return lbg0, lbg1
+    def lbgd(self, tfs: list[Tecanfile]) -> dict[int, LabelblocksGroup]:
+        """Set up LabelblocksGroup 1 and 2."""
+        lbg1 = LabelblocksGroup([tfs[0].labelblocks[1], tfs[1].labelblocks[1]])
+        lbg2 = LabelblocksGroup([tfs[1].labelblocks[2], tfs[2].labelblocks[2]])
+        return {1: lbg1, 2: lbg2}
 
-    def test_metadata(self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]) -> None:
+    def test_metadata(self, lbgd: dict[int, LabelblocksGroup]) -> None:
         """Merge only shared metadata."""
-        assert lbgs[0].metadata.get("Temperature") is None
-        assert lbgs[1].metadata.get("Temperature") is None
-        assert lbgs[1].metadata.get("Gain") is None
-        assert lbgs[1].labelblocks[0].metadata["Gain"].value == 98
-        assert lbgs[1].labelblocks[1].metadata["Gain"].value == 99
+        assert lbgd[1].metadata.get("Temperature") is None
+        assert lbgd[2].metadata.get("Temperature") is None
+        assert lbgd[2].metadata.get("Gain") is None
+        assert lbgd[2].labelblocks[0].metadata["Gain"].value == 98
+        assert lbgd[2].labelblocks[1].metadata["Gain"].value == 99
         # Common metadata.
-        assert lbgs[0].metadata["Gain"].value == 94
-        assert lbgs[0].metadata["Number of Flashes"].value == 10
+        assert lbgd[1].metadata["Gain"].value == 94
+        assert lbgd[1].metadata["Number of Flashes"].value == 10
 
-    def test_data(self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]) -> None:
+    def test_data(self, lbgd: dict[int, LabelblocksGroup]) -> None:
         """Merge data."""
-        assert lbgs[0].data is not None
-        assert lbgs[0].data["A01"] == [18713, 17088]
-        assert lbgs[0].data["H12"] == [28596, 25771]
-        assert lbgs[1].data == {}
+        assert lbgd[1].data is not None
+        assert lbgd[1].data["A01"] == [18713, 17088]
+        assert lbgd[1].data["H12"] == [28596, 25771]
+        assert lbgd[2].data == {}
 
-    def test_data_normalized(
-        self, lbgs: tuple[LabelblocksGroup, LabelblocksGroup]
-    ) -> None:
+    def test_data_normalized(self, lbgd: dict[int, LabelblocksGroup]) -> None:
         """Merge data_normalized."""
-        assert_almost_equal(lbgs[1].data_nrm["H12"], [693.980, 714.495], 3)
-        assert_almost_equal(lbgs[0].data_nrm["A01"], [995.372, 908.936], 3)
+        assert_almost_equal(lbgd[2].data_nrm["H12"], [693.980, 714.495], 3)
+        assert_almost_equal(lbgd[1].data_nrm["A01"], [995.372, 908.936], 3)
 
     def test_notequal_labelblocks(self, tfs: list[Tecanfile]) -> None:
         """Raise Exception when concatenating unequal labelblocks."""
         with pytest.raises(ValueError, match="Creation of labelblock group failed."):
-            prtecan.LabelblocksGroup([tfs[1].labelblocks[0], tfs[2].labelblocks[1]])
+            prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[2]])
 
 
 class TestTecanfilesGroup:
@@ -326,19 +324,19 @@ class TestTecanfilesGroup:
 
         def test_labelblocksgroups(self, tfg: TecanfilesGroup) -> None:
             """Generate 2 LbG with .data and .metadata."""
-            lbg0 = tfg.labelblocksgroups[0]
             lbg1 = tfg.labelblocksgroups[1]
+            lbg2 = tfg.labelblocksgroups[2]
             # metadata
-            assert lbg0.metadata["Number of Flashes"].value == 10.0
-            assert lbg1.metadata["Gain"].value == 98.0
+            assert lbg1.metadata["Number of Flashes"].value == 10.0
+            assert lbg2.metadata["Gain"].value == 98.0
             # data normalized ... enough in lbg
             # data
-            assert lbg0.data is not None
-            assert lbg0.data["A01"] == [18713, 17088]
-            assert lbg0.data["H12"] == [28596, 25771]
             assert lbg1.data is not None
-            assert lbg1.data["A01"] == [7878, 8761]
-            assert lbg1.data["H12"] == [14226, 13602]
+            assert lbg1.data["A01"] == [18713, 17088]
+            assert lbg1.data["H12"] == [28596, 25771]
+            assert lbg2.data is not None
+            assert lbg2.data["A01"] == [7878, 8761]
+            assert lbg2.data["H12"] == [14226, 13602]
 
     class TestAlmostEqLbgs:
         """Test TfG when 1 LbG equal and a second with almost equal labelblocks."""
@@ -373,28 +371,28 @@ class TestTecanfilesGroup:
             self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
         ) -> None:
             """Generate 1 LbG with .data and .metadata."""
-            lbg0 = tfg_warn[0].labelblocksgroups[0]
+            lbg1 = tfg_warn[0].labelblocksgroups[1]
             # metadata
-            assert lbg0.metadata["Number of Flashes"].value == 10.0
-            assert lbg0.metadata["Gain"].value == 94
+            assert lbg1.metadata["Number of Flashes"].value == 10.0
+            assert lbg1.metadata["Gain"].value == 94
             # data
-            assert lbg0.data is not None
-            assert lbg0.data["A01"] == [18713.0, 17088.0, 17123.0]
-            assert lbg0.data["H12"] == [28596.0, 25771.0, 28309.0]
+            assert lbg1.data is not None
+            assert lbg1.data["A01"] == [18713.0, 17088.0, 17123.0]
+            assert lbg1.data["H12"] == [28596.0, 25771.0, 28309.0]
 
         def test_mergeable_labelblocksgroups(
             self, tfg_warn: tuple[TecanfilesGroup, list[logging.LogRecord]]
         ) -> None:
             """Generate 1 Lbg only with .data_normalized and only common .metadata."""
-            lbg1 = tfg_warn[0].labelblocksgroups[1]
+            lbg2 = tfg_warn[0].labelblocksgroups[2]
             # metadata
-            assert lbg1.metadata["Number of Flashes"].value == 10.0
-            assert lbg1.metadata.get("Gain") is None
-            assert lbg1.data == {}
+            assert lbg2.metadata["Number of Flashes"].value == 10.0
+            assert lbg2.metadata.get("Gain") is None
+            assert lbg2.data == {}
             # data_normalized
-            assert_almost_equal(lbg1.data_nrm["A01"], [401.9387755, 446.9897959, 450.0])
+            assert_almost_equal(lbg2.data_nrm["A01"], [401.9387755, 446.9897959, 450.0])
             assert_almost_equal(
-                lbg1.data_nrm["H12"], [725.8163265, 693.9795918, 714.4949494]
+                lbg2.data_nrm["H12"], [725.8163265, 693.9795918, 714.4949494]
             )
 
     class TestOnly1commonLbg:
@@ -431,14 +429,14 @@ class TestTecanfilesGroup:
         ) -> None:
             """Generates 1 LbG with .data and .metadata."""
             tfg, _ = tfg_warn
-            lbg = tfg.labelblocksgroups[0]
+            lbg2 = tfg.labelblocksgroups[2]
             # metadata
-            assert lbg.metadata["Number of Flashes"].value == 10.0
-            assert lbg.metadata["Gain"].value == 93.0
+            assert lbg2.metadata["Number of Flashes"].value == 10.0
+            assert lbg2.metadata["Gain"].value == 93.0
             # data
-            assert lbg.data is not None
-            assert lbg.data["A01"] == [6289, 6462, 6465]
-            assert lbg.data["H12"] == [4477, 4705, 4918]
+            assert lbg2.data is not None
+            assert lbg2.data["A01"] == [6289, 6462, 6465]
+            assert lbg2.data["H12"] == [4477, 4705, 4918]
 
     class TestFailToMerge:
         """Test TfG without mergeable labelblocks."""
@@ -485,18 +483,18 @@ class TestTitration:
 
     def test_labelblocksgroups(self, tit_ph: Titration) -> None:
         """It reads labelblocksgroups data and metadata."""
-        lbg0 = tit_ph.labelblocksgroups[0]
         lbg1 = tit_ph.labelblocksgroups[1]
+        lbg2 = tit_ph.labelblocksgroups[2]
         # metadata
-        assert lbg0.metadata["Number of Flashes"].value == 10.0
-        assert lbg1.metadata["Gain"] == prtecan.Metadata(56.0)
+        assert lbg1.metadata["Number of Flashes"].value == 10.0
+        assert lbg2.metadata["Gain"] == prtecan.Metadata(56.0)
         # data
-        assert lbg0.data is not None
         assert lbg1.data is not None
-        assert lbg0.data["A01"][::2] == [14798.0, 20142.0, 22915.0, 22060.0]
-        assert lbg1.data["A01"][1::2] == [3761.0, 835.0, 347.0]
-        assert lbg0.data["H12"][1::2] == [16345.0, 21719.0, 23532.0]
-        assert lbg1.data["H12"] == [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0]
+        assert lbg2.data is not None
+        assert lbg1.data["A01"][::2] == [14798.0, 20142.0, 22915.0, 22060.0]
+        assert lbg2.data["A01"][1::2] == [3761.0, 835.0, 347.0]
+        assert lbg1.data["H12"][1::2] == [16345.0, 21719.0, 23532.0]
+        assert lbg2.data["H12"] == [5372.0, 4196.0, 2390.0, 1031.0, 543.0, 427.0, 371.0]
 
     def test_export_data(self, tit_ph: Titration, tmp_path: Path) -> None:
         """It exports titrations data to files e.g. "A01.dat"."""
@@ -523,25 +521,25 @@ class TestTitration:
         """Check data after normalization and bg subtraction."""
         tit.buffer.wells = ["C12", "D01", "D12", "E01", "E12", "F01"]
         tit.params.nrm = False
-        assert tit.data[0]
-        assert tit.data[1] == {}
-        sliced_values = tit.data[0]["B07"][-1::-3][:2]
+        assert tit.data[1]
+        assert tit.data[2] == {}
+        sliced_values = tit.data[1]["B07"][-1::-3][:2]
         assert_almost_equal(sliced_values, [7069, 5716.7], 1)
         # normalization
         tit.params.nrm = True
-        sliced_values0 = tit.data[0]["B07"][-1::-3][:2]
-        sliced_values1 = tit.data[1]["B07"][-4::-3]
+        sliced_values0 = tit.data[1]["B07"][-1::-3][:2]
+        sliced_values1 = tit.data[2]["B07"][-4::-3]
         assert_almost_equal(sliced_values0, [376.01, 304.08], 2)
         assert_almost_equal(sliced_values1, [355.16, 348.57], 2)
 
     def test_labelblocksgroups_cl(self, tit_cl: Titration) -> None:
         """It reads labelblocksgroups data for Cl too."""
-        lbg0 = tit_cl.labelblocksgroups[0]
         lbg1 = tit_cl.labelblocksgroups[1]
-        assert lbg0.data is not None
-        assert lbg0.data["A01"][1::2] == [16908.0, 14719.0, 14358.0, 14520.0]
-        assert lbg1.data["A01"][1::2] == [167.0, 109.0, 87.0, 81.0]
-        assert lbg1.data["H12"][1::2] == [223.0, 141.0, 120.0, 100.0]
+        lbg2 = tit_cl.labelblocksgroups[2]
+        assert lbg1.data is not None
+        assert lbg1.data["A01"][1::2] == [16908.0, 14719.0, 14358.0, 14520.0]
+        assert lbg2.data["A01"][1::2] == [167.0, 109.0, 87.0, 81.0]
+        assert lbg2.data["H12"][1::2] == [223.0, 141.0, 120.0, 100.0]
 
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
@@ -559,34 +557,33 @@ class TestTitration:
         tit1.params.nrm = False
         tit1.params.dil = False
         tit1.params.bg = False
-        tit1.bg = [np.array([11889.25]), np.array([56.75])]
-        assert tit1.buffer.dataframes[0]["sem"][0] == pytest.approx(259.9514)
-        assert tit1.buffer.dataframes[1]["sem"][0] == pytest.approx(2.561738)
+        assert tit1.buffer.dataframes[1]["sem"][0] == pytest.approx(259.9514)
+        assert tit1.buffer.dataframes[2]["sem"][0] == pytest.approx(2.561738)
         tit1.params.bg = True
-        assert tit1.data[0]["F06"][0] == pytest.approx(7661.75)
-        assert tit1.data[1]["H12"][0] == pytest.approx(486.25)
+        assert tit1.data[1]["F06"][0] == pytest.approx(7661.75)
+        assert tit1.data[2]["H12"][0] == pytest.approx(486.25)
         # Can also assign a buffer value.
-        tit1.bg = [np.array([1.0]), np.array([2.9])]
-        assert tit1.data[0]["F06"][0] == 19550
-        assert tit1.data[1]["H12"][0] == 540.1
+        tit1.bg = {1: np.array([1.0]), 2: np.array([2.9])}
+        assert tit1.data[1]["F06"][0] == 19550
+        assert tit1.data[2]["H12"][0] == 540.1
         # nrm
-        assert tit1.buffer.dataframes_nrm[0]["fit"][0] == pytest.approx(639.20699)
-        assert tit1.buffer.dataframes_nrm[0]["mean"][0] == pytest.approx(639.20699)
-        assert tit1.buffer.dataframes_nrm[1]["fit"][0] == pytest.approx(5.06696)
-        assert tit1.buffer.dataframes_nrm[0]["sem"][0] == pytest.approx(13.97588)
-        assert tit1.buffer.dataframes_nrm[1]["sem"][0] == pytest.approx(0.2287266)
+        assert tit1.buffer.dataframes_nrm[1]["fit"][0] == pytest.approx(639.20699)
+        assert tit1.buffer.dataframes_nrm[1]["mean"][0] == pytest.approx(639.20699)
+        assert tit1.buffer.dataframes_nrm[2]["fit"][0] == pytest.approx(5.06696)
+        assert tit1.buffer.dataframes_nrm[1]["sem"][0] == pytest.approx(13.97588)
+        assert tit1.buffer.dataframes_nrm[2]["sem"][0] == pytest.approx(0.2287266)
         # also bg duplicates data in buffers_nrm
         tit1.params.nrm = True
         tit1.buffer.wells = ["D01", "D12", "E01", "E12"]
-        assert tit1.bg[0][0] == pytest.approx(639.20699)
-        assert tit1.bg[1] == pytest.approx(5.06696)
+        assert tit1.bg[1][0] == pytest.approx(639.20699)
+        assert tit1.bg[2] == pytest.approx(5.06696)
         # nrm data
-        assert tit1.data[0]["F06"] == pytest.approx(411.922)
-        assert tit1.data[1]["H12"] == pytest.approx(43.4152)
+        assert tit1.data[1]["F06"] == pytest.approx(411.922)
+        assert tit1.data[2]["H12"] == pytest.approx(43.4152)
         # Can also assign a buffer_norm value.
-        tit1.bg = [np.array([1.0]), np.array([0.4821])]
-        assert tit1.data[0]["F06"] == pytest.approx(1050.13)
-        assert tit1.data[1]["H12"] == pytest.approx(48.0)
+        tit1.bg = {1: np.array([1.0]), 2: np.array([0.4821])}
+        assert tit1.data[1]["F06"] == pytest.approx(1050.13)
+        assert tit1.data[2]["H12"] == pytest.approx(48.0)
 
     # Buffer
     def test_plot_buffer_1lbg(self, tit: Titration) -> None:
@@ -674,8 +671,8 @@ class TestTitrationAnalysis:
 
     def test_subtract_bg(self, titan: Titration) -> None:
         """It subtracts buffer average values."""
-        lbg0 = titan.labelblocksgroups[0]
-        lbg1 = titan.labelblocksgroups[1]
+        lbg0 = titan.labelblocksgroups[1]
+        lbg1 = titan.labelblocksgroups[2]
         assert_almost_equal(
             lbg0.data_nrm["E01"][::2], [601.72, 641.505, 674.355, 706.774], 3
         )
@@ -685,9 +682,9 @@ class TestTitrationAnalysis:
         titan.params.bg = True
         titan.params.nrm = False
         titan.params.dil = False
-        assert_array_equal(titan.data[0]["A12"][::3], [8084.5, 16621.75, 13775.0])
+        assert_array_equal(titan.data[1]["A12"][::3], [8084.5, 16621.75, 13775.0])
         assert lbg1.data is not None
-        assert_array_equal(titan.data[1]["A12"][::3], [9758.25, 1334.0, 283.5])
+        assert_array_equal(titan.data[2]["A12"][::3], [9758.25, 1334.0, 283.5])
 
     def test_dilution_correction(self, titan: Titration) -> None:
         """It applies dilution correction read from file listing additions."""
@@ -698,7 +695,7 @@ class TestTitrationAnalysis:
         assert titan.data is not None
         assert titan.data[1] is not None
         assert_almost_equal(
-            titan.data[1]["A12"],
+            titan.data[2]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
@@ -709,12 +706,12 @@ class TestTitrationAnalysis:
         titan.params.dil = True
 
         assert_almost_equal(
-            titan.data[0]["A12"][::2],
+            titan.data[1]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         assert_almost_equal(
-            titan.data[1]["A12"][::2],
+            titan.data[2]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
@@ -729,15 +726,15 @@ class TestTitrationAnalysis:
         """It fits each label separately."""
         fres = titan.results
         # Check that the first fit result dictionary has 92 elements
-        fres[0].compute_all()
-        assert len(fres[0]) == 92
+        fres[1].compute_all()
+        assert len(fres[1]) == 92
         # Check that the first fit result for 'H02' is None
-        assert fres[0]["H02"] == FitResult(None, None, None)
+        assert fres[1]["H02"] == FitResult(None, None, None)
         # Check that the second fit result for 'H02' is not None
-        assert fres[1]["H02"].is_valid()
+        assert fres[2]["H02"].is_valid()
         # Check 'K' and std error for 'H02' in the second fit result
-        assert fres[1]["H02"].result is not None
-        k_h02 = fres[1]["H02"].result.params["K"]
+        assert fres[2]["H02"].result is not None
+        k_h02 = fres[2]["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.890, abs=1e-3)
         assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
         # Check 'K' and std error for 'H02' in the third fit result
@@ -746,8 +743,8 @@ class TestTitrationAnalysis:
         assert k_h02.value == pytest.approx(7.890, abs=1e-3)
         assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
         # Check 'K' and std error for 'E02' in the second fit result
-        assert fres[1]["E02"].result is not None
-        k_e02 = fres[1]["E02"].result.params["K"]
+        assert fres[2]["E02"].result is not None
+        k_e02 = fres[2]["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.984, abs=1e-3)
         assert k_e02.stderr == pytest.approx(0.022, abs=1e-3)
         # Check 'K' and std error for 'E02' in the third fit result

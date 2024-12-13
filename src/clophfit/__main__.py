@@ -142,7 +142,7 @@ def tecan(  # noqa: PLR0913
         f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
-        for lbg in tit.labelblocksgroups:
+        for lbg in tit.labelblocksgroups.values():
             pprint.pprint(lbg.metadata, stream=fp)
     f = tit.plot_temperature(title=title)
     f.savefig(out_fp / "temperatures.png")
