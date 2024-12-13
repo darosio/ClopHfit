@@ -100,7 +100,6 @@ def tecan(  # noqa: PLR0913
 
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
-    verbose: int = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
     out_fp.mkdir(parents=True, exist_ok=True)
@@ -119,7 +118,7 @@ def tecan(  # noqa: PLR0913
         msg = "All combinations requires --bg and --dil to be specified."
         raise click.UsageError(msg)
     # Config
-    tecan_config = TecanConfig(out_fp, verbose, comb, lim, title, fit, png)
+    tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png)
     # Load titration
     list_fp = Path(list_file)
     click.secho(f"** File: {list_fp.resolve()}", fg="green")

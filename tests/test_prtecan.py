@@ -505,7 +505,6 @@ class TestTitration:
         tit_ph.params.nrm = False
         tecan_config = prtecan.TecanConfig(
             tmp_path,
-            verbose=False,
             comb=False,
             lim=None,
             title="",

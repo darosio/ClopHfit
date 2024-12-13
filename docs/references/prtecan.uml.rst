@@ -61,7 +61,6 @@
 
    class TecanConfig{
      #out_fp: Path
-     #verbose: int
      #comb: bool
      #lim: tuple[]|None
      #title: str
