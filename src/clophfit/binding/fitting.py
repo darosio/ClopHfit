@@ -766,7 +766,6 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
         da.y_err = da.y_errc * shot_factor if da.y_errc.size > 0 else 1.0 * shot_factor
     # Collect dataset lengths
     dataset_lengths = [len(da.y) for da in ds.values()]
-    # # TODO: drop outlier     masks = [da._mask for da in ds.values()]
     x_data, y_data, x_err, y_err = ds.concatenate_data()
     data = odr.RealData(x_data, y_data, sx=x_err, sy=y_err)
     # Initial parameters setup

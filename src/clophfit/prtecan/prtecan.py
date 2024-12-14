@@ -850,7 +850,6 @@ class Buffer:
     def bg(self, value: dict[int, ArrayF]) -> None:
         """Set the buffer values and reset SEM."""
         self._bg = value
-        # TODO: self._bg_err = {}
 
     @property
     def bg_err(self) -> dict[int, ArrayF]:
@@ -1116,7 +1115,6 @@ class TitrationResults:
     # MAYBE: Test plots
     def plot_k(
         self,
-        hue_column: str,
         xlim: tuple[float, float] | None = None,
         title: str = "",
     ) -> figure.Figure:
@@ -1124,8 +1122,6 @@ class TitrationResults:
 
         Parameters
         ----------
-        hue_column: str
-            Result dataframe column for stripplot hue.
         xlim : tuple[float, float] | None, optional
             Range.
         title : str, optional
@@ -1137,46 +1133,45 @@ class TitrationResults:
             The figure.
         """
         dataframe = self.dataframe
-        sns.set(style="whitegrid")
-        fig = plt.figure(figsize=(12, 16))
-        keys_unk = list(set(dataframe.index))
-        if self.scheme.names:
-            keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
-            df_ctr = dataframe.loc[self.scheme.ctrl]
-            for name, wells in self.scheme.names.items():
-                for well in wells:
-                    df_ctr.loc[well, "ctrl"] = name
-            df_ctr = df_ctr.sort_values("ctrl")
-            ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
-            x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
-            sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
-            ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
-            ax1.legend(loc="upper left", frameon=False)
-            ax1.grid(True, axis="both")
-            ax1.set_xticklabels([])
-            ax1.set_xlabel("")
-        ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
-        df_unk = dataframe.loc[keys_unk].sort_index(ascending=False)
-        # Sort by 'K - 2 * sK'.
-        df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
-        df_unk = df_unk.sort_values(by="sort_val", ascending=True)
-        x, y, hue = df_unk["K"], df_unk.index, df_unk[hue_column]
-        sns.stripplot(x=x, y=y, size=12, orient="h", palette="Blues", hue=hue, ax=ax2)
-        ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
-        ax2.legend(loc="upper left", frameon=False)
-        ax2.grid(True, axis="both")
-        ax2.set_yticks(range(len(df_unk)))
-        ax2.set_yticklabels([str(label) for label in df_unk.index])
-        ax2.set_ylim(-1, len(df_unk))
-        # Set x-limits
-        xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
-        if self.scheme.ctrl:
-            ax1.set_xlim(xlim)
-        ax2.set_xlim(xlim)
-        # Set title
-        fig.suptitle(title, fontsize=16)
-        fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
-        # Close the figure after returning it to avoid memory issues
+        with sns.plotting_context("paper"):  # axes_style("whitegrid"):
+            fig = plt.figure(figsize=(12, 16))
+            keys_unk = list(set(dataframe.index))
+            if self.scheme.names:
+                keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
+                df_ctr = dataframe.loc[self.scheme.ctrl]
+                for name, wells in self.scheme.names.items():
+                    for well in wells:
+                        df_ctr.loc[well, "ctrl"] = name
+                df_ctr = df_ctr.sort_values("ctrl")
+                ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
+                x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
+                sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
+                ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
+                ax1.legend(loc="upper left", frameon=False)
+                ax1.grid(True, axis="both")
+                ax1.set_xticklabels([])
+                ax1.set_xlabel("")
+            ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
+            df_unk = dataframe.loc[keys_unk].sort_index(ascending=False)
+            # Sort by 'K - 2 * sK'.
+            df_unk["sort_val"] = df_unk["K"] - 2 * df_unk["sK"]
+            df_unk = df_unk.sort_values(by="sort_val", ascending=True)
+            x, y = df_unk["K"], df_unk.index
+            sns.stripplot(x=x, y=y, size=9, orient="h", ax=ax2)
+            ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
+            ax2.grid(True, axis="both")
+            ax2.set_yticks(range(len(df_unk)))
+            ax2.set_yticklabels([str(label) for label in df_unk.index])
+            ax2.set_ylim(-1, len(df_unk))
+            # Set x-limits
+            xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+            if self.scheme.ctrl:
+                ax1.set_xlim(xlim)
+            ax2.set_xlim(xlim)
+            # Set title
+            fig.suptitle(title, fontsize=16)
+            fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
+            # Close the figure after returning it to avoid memory issues
         plt.close(fig)
         return fig
 
@@ -1305,6 +1300,9 @@ class Titration(TecanfilesGroup):
             f"\tx_err={list(self.x_err)!r},\n"
             f"\tlabels={self.labelblocksgroups.keys()},\n"
             f"\tparams={self.params!r}"
+            f"\tpH={self.is_ph}"
+            f"\tadditions={self.additions}"
+            f"\n\tscheme={self.scheme})"
         )
 
     @classmethod
@@ -1484,22 +1482,11 @@ class Titration(TecanfilesGroup):
             fit = results.dataframe
             # CSV tables
             fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
-            # TODO: test without this complicated order
-            if "S1_y1" in fit.columns:
-                order = ["ctrl", "K", "sK", "S0_y0", "sS0_y0", "S1_y0"]
-                order.extend(["sS1_y0", "S0_y1", "sS0_y1", "S1_y1", "sS1_y1"])
-                ebar_y = "S1_y1"
-            else:
-                order = ["ctrl", "K", "sK", "S0_default", "sS0_default"]
-                order.extend(["S1_default", "sS1_default"])
-                ebar_y = "S1_default"
-            out_df = fit.reindex(order, axis=1).sort_index()
-            out_df.to_csv(outfit / f"fit{i}.csv", float_format="%.3g")
             if config.png:
                 results.export_pngs(outfit / f"lb{i}")
                 results.export_data(outfit / f"lb{i}")
             title = config.title + f"lb:{i}"
-            f = results.plot_k(hue_column=ebar_y, xlim=config.lim, title=title)
+            f = results.plot_k(xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
