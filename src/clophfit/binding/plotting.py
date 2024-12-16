@@ -208,7 +208,7 @@ def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:
     # Add a colorbar for reference
     sm = cm.ScalarMappable(cmap=color_map, norm=normalize)
     sm.set_array([])
-    if ax.figure:
+    if ax.figure is not None:
         ax.figure.colorbar(sm, ax=ax, label=pp.kind)
 
 
