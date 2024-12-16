@@ -1657,8 +1657,9 @@ class Titration(TecanfilesGroup):
     @cached_property
     def result_mcmc(self) -> TitrationResults:
         """Perform global MCMC fitting."""
-        n_sd = self.result_odr.n_sd(par="K", expected_sd=0.15)
-        logger.info(f"n_sd[ODR] estimated for MCMC fitting: {n_sd:.3f}")
+        # FIXME: 0.15 vs. 0.05
+        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
         return TitrationResults(
             self.scheme, self.fit_keys, partial(self._compute_mcmc_fit, n_sd=n_sd)
         )
@@ -1667,8 +1668,8 @@ class Titration(TecanfilesGroup):
         """Compute global MCMC fit for a single key."""
         # Calculate n_sd from the previous global fitting results
         logger.info(f"Starting PyMC sampling for key: {key}")
-        try:
-            result_pymc = fit_binding_pymc(self.result_odr[key], n_sd=n_sd, n_xerr=1)
+        try:  # FIXME: Global vs. ODR
+            result_pymc = fit_binding_pymc(self.result_global[key], n_sd=n_sd, n_xerr=1)
         except Exception:
             logger.exception(f"Error during MCMC sampling for key: {key}")
         finally:

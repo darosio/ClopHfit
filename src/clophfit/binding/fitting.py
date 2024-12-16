@@ -36,7 +36,7 @@ from clophfit.binding.plotting import (
 )
 
 if typing.TYPE_CHECKING:
-    from clophfit.prtecan import PlateScheme
+    from clophfit.prtecan import PlateScheme, TitrationResults
     from clophfit.types import ArrayDict, ArrayF
 
 ArrayMask = np.typing.NDArray[np.bool_]
@@ -953,7 +953,7 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
     return FitResult(fig, _Result(pars), samples, None)
 
 
-def fit_binding_pymc(  # noqa: PLR0912,C901
+def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
     fr: FitResult, mth: str = "norm", n_sd: float = 10.0, n_xerr: float = 1.0
 ) -> FitResult:
     """Analyze multi-label titration datasets using emcee."""
@@ -989,7 +989,20 @@ def fit_binding_pymc(  # noqa: PLR0912,C901
         xc = next(iter(ds.values())).xc
         if n_xerr:
             x_errc = next(iter(ds.values())).x_errc * n_xerr
-            x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+            ## TODO:  x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+            xd = -np.diff(xc)
+            xd_err = (x_errc[:-1] ** 2 + x_errc[1:] ** 2) ** 0.5
+            lower = xd.min() - 2.5 * xd_err[np.argmin(xd)]  # FIXME: min 0.05
+            print(f"min pH distance: {lower}")
+            x_diff = pm.TruncatedNormal(
+                "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
+            )
+            x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc[0])
+            # Calculate cumulative sum of x_diff within PyMC
+            x_cumsum = pm.math.cumsum(x_diff)  # PyMC-compatible cumsum
+            x_true = pm.Deterministic(
+                "x_true", pm.math.concatenate([[x_start], -x_cumsum + x_start])
+            )
         else:
             x_true = xc
 
@@ -1109,30 +1122,35 @@ def fit_binding_pymc_many(
 
 
 def fit_binding_pymc_many_scheme(
-    result: dict[str, FitResult],
+    result: TitrationResults,
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
 ) -> ArrayF:
     """Analyze multi-label titration datasets using shared control parameters."""
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
-    ds = next(iter(result.values())).dataset
+    ds = next(iter(result.results.values())).dataset
     while ds is None:
-        ds = next(iter(result.values())).dataset
+        ds = next(iter(result.results.values())).dataset
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
+
+    xd = -np.diff(xc)
+    xd_err = (x_errc[:-1] ** 2 + x_errc[1:] ** 2) ** 0.5
+    lower = xd.min() - xd_err[np.argmin(xd)]
+    print(f"min pH distance: {lower}")
 
     values = {}
     stderr = {}
     for name, wells in scheme.names.items():
         values[name] = [
             v.result.params["K"].value
-            for well, v in result.items()
+            for well, v in result.results.items()
             if v.result and well in wells
         ]
         stderr[name] = [
             v.result.params["K"].stderr
-            for well, v in result.items()
+            for well, v in result.results.items()
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
@@ -1140,8 +1158,18 @@ def fit_binding_pymc_many_scheme(
 
     with pm.Model() as _:
         # Priors for global parameters
-        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
+        ## FIXME:  x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         ye_mag = pm.HalfNormal("ye_mag", sigma=10)
+
+        x_diff = pm.TruncatedNormal(
+            "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
+        )
+        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc[0])
+        # Calculate cumulative sum of x_diff within PyMC
+        x_cumsum = pm.math.cumsum(x_diff)  # PyMC-compatible cumsum
+        x_true = pm.Deterministic(
+            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
+        )
 
         # Create shared K parameters for each control group
         k_params = {
@@ -1151,11 +1179,11 @@ def fit_binding_pymc_many_scheme(
             for control_name in scheme.names
         }
 
-        for key, r in result.items():
+        for key, r in result.results.items():
             if r.result and r.dataset:
                 ds = r.dataset
-                da0 = ds["y0"]
                 da1 = ds["y1"]
+                da2 = ds["y2"]
                 pars = r.result.params
 
                 # Determine if the well is associated with a control group
@@ -1172,16 +1200,6 @@ def fit_binding_pymc_many_scheme(
                     )
 
                 # Per-well S0 and S1 parameters
-                S0_y0 = pm.Normal(  # noqa: N806
-                    f"S0_y0_{key}",
-                    mu=pars["S0_y0"].value,
-                    sigma=pars["S0_y0"].stderr * n_sd,
-                )
-                S1_y0 = pm.Normal(  # noqa: N806
-                    f"S1_y0_{key}",
-                    mu=pars["S1_y0"].value,
-                    sigma=pars["S1_y0"].stderr * n_sd,
-                )
                 S0_y1 = pm.Normal(  # noqa: N806
                     f"S0_y1_{key}",
                     mu=pars["S0_y1"].value,
@@ -1192,6 +1210,16 @@ def fit_binding_pymc_many_scheme(
                     mu=pars["S1_y1"].value,
                     sigma=pars["S1_y1"].stderr * n_sd,
                 )
+                S0_y2 = pm.Normal(  # noqa: N806
+                    f"S0_y2_{key}",
+                    mu=pars["S0_y2"].value,
+                    sigma=pars["S0_y2"].stderr * n_sd,
+                )
+                S1_y2 = pm.Normal(  # noqa: N806
+                    f"S1_y2_{key}",
+                    mu=pars["S1_y2"].value,
+                    sigma=pars["S1_y2"].stderr * n_sd,
+                )
 
                 """# mask_da0 = np.asarray(da0.mask).astype(bool)
                 # mask_da1 = np.asarray(da1.mask).astype(bool)
@@ -1199,21 +1227,21 @@ def fit_binding_pymc_many_scheme(
                 # y1_model = binding_1site(x_true[mask_da1], K, S0_y1, S1_y1, ds.is_ph)
                 """
                 # Model equations
-                y0_model = binding_1site(x_true[da0.mask], K, S0_y0, S1_y0, ds.is_ph)
                 y1_model = binding_1site(x_true[da1.mask], K, S0_y1, S1_y1, ds.is_ph)
+                y2_model = binding_1site(x_true[da2.mask], K, S0_y2, S1_y2, ds.is_ph)
 
                 # Likelihoods
                 pm.Normal(
                     f"y0_likelihood_{key}",
-                    mu=y0_model,
-                    sigma=da0.y_err * ye_mag,
-                    observed=da0.y,
-                )
-                pm.Normal(
-                    f"y1_likelihood_{key}",
                     mu=y1_model,
                     sigma=da1.y_err * ye_mag,
                     observed=da1.y,
+                )
+                pm.Normal(
+                    f"y1_likelihood_{key}",
+                    mu=y2_model,
+                    sigma=da2.y_err * ye_mag,
+                    observed=da2.y,
                 )
         # Inference
         trace: ArrayF = pm.sample(
