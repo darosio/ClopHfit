@@ -6,9 +6,11 @@ import copy
 import typing
 import warnings
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from sys import float_info
 
+import arviz
 import arviz as az
 import emcee  # type: ignore[import-untyped]
 import lmfit  # type: ignore[import-untyped]
@@ -22,6 +24,7 @@ from matplotlib import axes, figure
 from scipy import odr  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
+import clophfit
 from clophfit.binding.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -34,9 +37,10 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
+from clophfit.prtecan import TitrationResults
 
 if typing.TYPE_CHECKING:
-    from clophfit.prtecan import PlateScheme, TitrationResults
+    from clophfit.prtecan import PlateScheme
     from clophfit.types import ArrayDict, ArrayF
 
 ArrayMask = np.typing.NDArray[np.bool_]
@@ -1126,7 +1130,7 @@ def fit_binding_pymc_many_scheme(
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
-) -> ArrayF:
+) -> tuple[arviz.data.inference_data.InferenceData, TitrationResults]:
     """Analyze multi-label titration datasets using shared control parameters."""
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next(iter(result.results.values())).dataset
@@ -1244,11 +1248,45 @@ def fit_binding_pymc_many_scheme(
                     observed=da2.y,
                 )
         # Inference
-        trace: ArrayF = pm.sample(
-            2000, target_accept=0.9, cores=6, return_inferencedata=True
+        trace = pm.sample(2000, target_accept=0.9, cores=6, return_inferencedata=True)
+
+    resultd = TitrationResults(
+        scheme,
+        result.results.keys() - scheme.ctrl,
+        partial(extract_params, trace=trace),
+    )
+    """Resultd = {}.
+
+    for key in result.results.keys() - scheme.ctrl:
+        rdf = df_trace[df_trace.index.str.endswith(key)]
+        rpars = Parameters()
+        for name, row in rdf.iterrows():
+            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
+            rpars[name].stderr = row["sd"]
+            rpars[name].init_value = row["r_hat"]
+        resultd[key] = clophfit.binding.fitting._Result(rpars)  # noqa: SLF001
+    """
+    return trace, resultd
+
+
+def extract_params(
+    key: str, trace: arviz.data.inference_data.InferenceData
+) -> FitResult:
+    """Compute individual dataset fit for a single key."""
+    try:
+        df_trace = az.summary(trace)
+        rdf = df_trace[df_trace.index.str.endswith(key)]
+        rpars = Parameters()
+        for name, row in rdf.iterrows():
+            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
+            rpars[name].stderr = row["sd"]
+            rpars[name].init_value = row["r_hat"]
+        return clophfit.binding.fitting.FitResult(
+            result=clophfit.binding.fitting._Result(rpars)  # noqa: SLF001
         )
 
-    return trace
+    except InsufficientDataError:
+        return FitResult()
 
 
 def weighted_stats(
