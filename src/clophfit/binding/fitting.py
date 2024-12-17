@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import typing
 import warnings
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ from matplotlib import axes, figure
 from scipy import odr  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-import clophfit
+from clophfit import prtecan
 from clophfit.binding.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -37,11 +38,14 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-from clophfit.prtecan import TitrationResults
 
 if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
     from clophfit.types import ArrayDict, ArrayF
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 ArrayMask = np.typing.NDArray[np.bool_]
 N_BOOT = 20  # To compute fill_between uncertainty.
@@ -957,60 +961,114 @@ def fit_binding_emcee(fit_result: FitResult, n_sd: int = 10) -> FitResult:  # no
     return FitResult(fig, _Result(pars), samples, None)
 
 
-def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
-    fr: FitResult, mth: str = "norm", n_sd: float = 10.0, n_xerr: float = 1.0
+def create_x_true(
+    xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
+) -> ArrayF | pm.Deterministic:
+    """Create x_true priors."""
+    if n_xerr:
+        x_errc_scaled = x_errc * n_xerr
+        xd = -np.diff(xc)
+        xd_err = np.sqrt(x_errc_scaled[:-1] ** 2 + x_errc_scaled[1:] ** 2)
+        lower = xd.min() - lower_nsd * xd_err[np.argmin(xd)]
+        logger.info(f"min pH distance: {lower}")
+        x_diff = pm.TruncatedNormal(
+            "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
+        )
+        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc_scaled[0])
+        x_cumsum = pm.math.cumsum(x_diff)
+        return pm.Deterministic(
+            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
+        )
+    return xc
+
+
+def create_parameter_priors(
+    params: Parameters, n_sd: float
+) -> dict[str, pm.Distribution]:
+    """Create parameter priors."""
+    return {
+        p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
+        for p in params.values()
+    }
+
+
+def process_trace(
+    trace: az.InferenceData, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
 ) -> FitResult:
-    """Analyze multi-label titration datasets using emcee."""
+    """Process the trace to extract parameter estimates and update datasets.
+
+    Parameters
+    ----------
+    trace : az.InferenceData
+        The posterior samples from PyMC sampling.
+    p_names: typing.KeysView[str]
+        Parameter names.
+    ds : Dataset
+        The dataset containing titration data.
+    n_xerr : float
+        Scaling factor for `x_errc`.
+
+    Returns
+    -------
+    FitResult
+        The updated fit result with extracted parameter values and datasets.
+    """
+    # Extract summary statistics for parameters
+    rdf = az.summary(trace)
+    rpars = Parameters()
+    for name, row in rdf.iterrows():
+        if name in p_names:
+            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
+            rpars[name].stderr = row["sd"]
+            rpars[name].init_value = row["r_hat"]
+
+    # Process x_true and x_errc
+    nxc = []  # New x_true values
+    nx_errc = []  # New x_errc values
+    for name, row in rdf.iterrows():
+        if name.startswith("x_true"):
+            nxc.append(row["mean"])
+            nx_errc.append(row["sd"])
+
+    for da in ds.values():
+        da.xc = np.array(nxc)  # Update x_true values in the dataset
+        da.x_errc = np.array(nx_errc) * n_xerr  # Scale the errors
+
+    # Extract magnitude for error scaling
+    mag = rdf.loc["ye_mag", "mean"]  # noqa: type: ignore
+    for da in ds.values():
+        da.y_errc *= mag  # Scale y errors by the magnitude
+
+    # Optionally, create diagnostic plots
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    print(rpars)
+    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+
+    # Return the fit result
+    return FitResult(fig, _Result(rpars), trace, ds)
+
+
+def fit_binding_pymc(
+    fr: FitResult,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    ye_scaling: float = 10.0,
+    n_samples: int = 2000,
+) -> FitResult:
+    """Analyze multi-label titration datasets using pymc."""
     if fr.result is None or fr.dataset is None:
         return FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
-    p_names = ["K"]
-    for lbl in ds:
-        p_names.append(f"S0_{lbl}")
-        p_names.append(f"S1_{lbl}")
-    init_pars = [params["K"].value]
-    for lbl in ds:
-        init_pars.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
-
     with pm.Model() as _:
-        if mth == "norm":
-            pars = {
-                p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
-                for p in params.values()
-            }
-        elif mth == "cov":
-            if hasattr(fr.result, "covar"):
-                cov = fr.result.covar
-            elif fr.mini:
-                cov = fr.mini.cov_beta
-            parameters = pm.MvNormal(
-                "parameters", mu=init_pars, cov=cov * n_sd, shape=len(p_names)
-            )
-            pars = dict(zip(p_names, parameters, strict=True))
-
-        # Loop over datasets and create the likelihood for each
+        pars = create_parameter_priors(params, n_sd)
+        # Create x_true
         xc = next(iter(ds.values())).xc
-        if n_xerr:
-            x_errc = next(iter(ds.values())).x_errc * n_xerr
-            ## TODO:  x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
-            xd = -np.diff(xc)
-            xd_err = (x_errc[:-1] ** 2 + x_errc[1:] ** 2) ** 0.5
-            lower = xd.min() - 2.5 * xd_err[np.argmin(xd)]  # FIXME: min 0.05
-            print(f"min pH distance: {lower}")
-            x_diff = pm.TruncatedNormal(
-                "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
-            )
-            x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc[0])
-            # Calculate cumulative sum of x_diff within PyMC
-            x_cumsum = pm.math.cumsum(x_diff)  # PyMC-compatible cumsum
-            x_true = pm.Deterministic(
-                "x_true", pm.math.concatenate([[x_start], -x_cumsum + x_start])
-            )
-        else:
-            x_true = xc
-
-        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
+        x_errc = next(iter(ds.values())).x_errc
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # Add likelihoods for each dataset
+        ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
         for lbl, da in ds.items():
             y_model = binding_1site(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
@@ -1022,39 +1080,11 @@ def fit_binding_pymc(  # noqa: PLR0912,C901,PLR0915
                 observed=da.y,
             )
         # Inference
-        trace: ArrayF = pm.sample(
-            2000, tune=2000, target_accept=0.9, cores=4, return_inferencedata=True
+        tune = n_samples // 2
+        trace = pm.sample(
+            n_samples, tune=tune, target_accept=0.9, cores=4, return_inferencedata=True
         )
-
-    rdf = az.summary(trace)
-    rpars = Parameters()
-    # Loop through each row in the dataframe and extract necessary values
-    for name, row in rdf.iterrows():
-        if name in p_names:
-            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
-            rpars[name].stderr = row["sd"]
-            rpars[name].init_value = row["r_hat"]
-    if n_xerr:
-        # Initialize lists to store xc and x_errc values
-        nxc = []
-        nx_errc = []
-        # Loop through the dataframe rows corresponding to x_true[?]
-        for name, row in rdf.iterrows():
-            if isinstance(name, str) and name.startswith("x_true"):
-                nxc.append(row["mean"])
-                nx_errc.append(row["sd"])
-        for da in ds.values():
-            da.xc = np.array(nxc)
-            da.x_errc = np.array(nx_errc)
-    mag: float = rdf.loc["ye_mag", "mean"]  # type: ignore[assignment, index]
-    for da in ds.values():
-        da.y_errc *= mag
-
-    fig = figure.Figure()
-    ax = fig.add_subplot(111)
-    if mth == "norm":
-        plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-    return FitResult(fig, _Result(rpars), trace, ds)
+    return process_trace(trace, params.keys(), ds, n_xerr)
 
 
 def fit_binding_pymc_many(
@@ -1126,11 +1156,11 @@ def fit_binding_pymc_many(
 
 
 def fit_binding_pymc_many_scheme(
-    result: TitrationResults,
+    result: prtecan.TitrationResults,
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
-) -> tuple[arviz.data.inference_data.InferenceData, TitrationResults]:
+) -> tuple[arviz.data.inference_data.InferenceData, prtecan.TitrationResults]:
     """Analyze multi-label titration datasets using shared control parameters."""
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next(iter(result.results.values())).dataset
@@ -1142,7 +1172,7 @@ def fit_binding_pymc_many_scheme(
     xd = -np.diff(xc)
     xd_err = (x_errc[:-1] ** 2 + x_errc[1:] ** 2) ** 0.5
     lower = xd.min() - xd_err[np.argmin(xd)]
-    print(f"min pH distance: {lower}")
+    logger.info(f"min pH distance: {lower}")
 
     values = {}
     stderr = {}
@@ -1250,10 +1280,11 @@ def fit_binding_pymc_many_scheme(
         # Inference
         trace = pm.sample(2000, target_accept=0.9, cores=6, return_inferencedata=True)
 
-    resultd = TitrationResults(
+    df_trace = az.summary(trace)
+    resultd = prtecan.TitrationResults(
         scheme,
         result.results.keys() - scheme.ctrl,
-        partial(extract_params, trace=trace),
+        partial(extract_params, df_trace=df_trace),
     )
     """Resultd = {}.
 
@@ -1269,24 +1300,16 @@ def fit_binding_pymc_many_scheme(
     return trace, resultd
 
 
-def extract_params(
-    key: str, trace: arviz.data.inference_data.InferenceData
-) -> FitResult:
+def extract_params(key: str, df_trace: pd.DataFrame) -> FitResult:
     """Compute individual dataset fit for a single key."""
-    try:
-        df_trace = az.summary(trace)
-        rdf = df_trace[df_trace.index.str.endswith(key)]
-        rpars = Parameters()
-        for name, row in rdf.iterrows():
-            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
-            rpars[name].stderr = row["sd"]
-            rpars[name].init_value = row["r_hat"]
-        return clophfit.binding.fitting.FitResult(
-            result=clophfit.binding.fitting._Result(rpars)  # noqa: SLF001
-        )
-
-    except InsufficientDataError:
-        return FitResult()
+    rdf = df_trace[df_trace.index.str.endswith(key)]
+    rpars = Parameters()
+    for name, row in rdf.iterrows():
+        rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
+        rpars[name].stderr = row["sd"]
+        rpars[name].init_value = row["r_hat"]
+    print(name, rpars)
+    return FitResult(result=_Result(rpars))
 
 
 def weighted_stats(
