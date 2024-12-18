@@ -18,9 +18,8 @@ import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 
+from clophfit.binding.data import DataArray, Dataset
 from clophfit.binding.fitting import (
-    DataArray,
-    Dataset,
     FitResult,
     InsufficientDataError,
     fit_binding_glob,

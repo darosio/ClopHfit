@@ -16,7 +16,7 @@ import pandas as pd
 from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding
-from clophfit.binding.fitting import DataArray, Dataset
+from clophfit.binding.data import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 

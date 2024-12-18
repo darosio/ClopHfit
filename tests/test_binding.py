@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from clophfit import binding
-from clophfit.binding.fitting import DataArray, Dataset, fit_binding_glob
+from clophfit.binding.data import DataArray, Dataset
+from clophfit.binding.fitting import fit_binding_glob
 
 
 def test_kd() -> None:

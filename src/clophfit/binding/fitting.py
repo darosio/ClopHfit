@@ -5,10 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import typing
-import warnings
 from dataclasses import dataclass, field
-from functools import partial
-from pathlib import Path
 from sys import float_info
 
 import arviz
@@ -25,7 +22,7 @@ from matplotlib import axes, figure
 from scipy import odr  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit import prtecan
+from clophfit.binding.data import DataArray, Dataset
 from clophfit.binding.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -41,234 +38,14 @@ from clophfit.binding.plotting import (
 
 if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
-    from clophfit.types import ArrayDict, ArrayF
+    from clophfit.types import ArrayDict, ArrayF, ArrayMask
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-ArrayMask = np.typing.NDArray[np.bool_]
 N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800
-
-
-@dataclass
-class DataArray:
-    """A collection of matching x, y, and optional w data arrays."""
-
-    #: x at creation
-    xc: ArrayF
-    #: y at creation
-    yc: ArrayF
-    #: x_err at creation
-    x_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
-    #: y_err at creation
-    y_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
-    _mask: ArrayMask = field(init=False)
-
-    def __post_init__(self) -> None:
-        """Ensure the x and y arrays are of equal length after initialization."""
-        self._validate_lengths()
-        self._validate_yerrc_lengths()
-        self._validate_xerrc_lengths()
-        self._mask = ~np.isnan(self.yc)
-
-    def _validate_lengths(self) -> None:
-        """Validate that xc and yc have the same length."""
-        if len(self.xc) != len(self.yc):
-            msg = "Length of 'xc' and 'yc' must be equal."
-            raise ValueError(msg)
-
-    def _validate_yerrc_lengths(self) -> None:
-        """Validate that xc and wc have the same length."""
-        if self.y_errc.size > 0 and len(self.xc) != len(self.y_errc):
-            msg = "Length of 'xc' and 'y_errc' must be equal."
-            raise ValueError(msg)
-
-    def _validate_xerrc_lengths(self) -> None:
-        """Validate that xc and wc have the same length."""
-        if self.x_errc.size > 0 and len(self.xc) != len(self.x_errc):
-            msg = "Length of 'xc' and 'x_errc' must be equal."
-            raise ValueError(msg)
-
-    @property
-    def mask(self) -> ArrayMask:
-        """Mask."""
-        return self._mask
-
-    @mask.setter
-    def mask(self, mask: ArrayMask) -> None:
-        """Only boolean where yc is not nan are considered."""
-        self._mask = mask & ~np.isnan(self.yc)
-
-    @property
-    def x(self) -> ArrayF:
-        """Masked x."""
-        return self.xc[self.mask]
-
-    @property
-    def y(self) -> ArrayF:
-        """Masked y."""
-        return self.yc[self.mask]
-
-    @property
-    def y_err(self) -> ArrayF:
-        """Masked y_err."""
-        if self.y_errc.size == 0:
-            self.y_errc = np.ones_like(self.xc)
-        return self.y_errc[self.mask]
-
-    @y_err.setter
-    def y_err(self, y_errc: ArrayF) -> None:
-        """Set y_err and validate its length."""
-        if y_errc.ndim == 0:
-            y_errc = np.ones_like(self.xc) * y_errc
-        self.y_errc = y_errc
-        self._validate_yerrc_lengths()
-
-    @property
-    def x_err(self) -> ArrayF:
-        """Masked x_err."""
-        if self.x_errc.size == 0:
-            self.x_errc = np.ones_like(self.xc)
-        return self.x_errc[self.mask]
-
-    @x_err.setter
-    def x_err(self, x_errc: ArrayF) -> None:
-        """Set x_err and validate its length."""
-        if x_errc.ndim == 0:
-            x_errc = np.ones_like(self.xc) * x_errc
-        self.x_errc = x_errc
-        self._validate_xerrc_lengths()
-
-
-class Dataset(dict[str, DataArray]):
-    """Holds datasets as key-value pairs of strings and `DataArray` objects.
-
-    Parameters
-    ----------
-    data : dict[str, DataArray]
-        Dictionary mapping string keys to `DataArray` instances.
-    is_ph : bool, optional
-        Indicate if x values represent pH (default is False).
-    """
-
-    is_ph: bool = False
-
-    def __init__(self, data: dict[str, DataArray], is_ph: bool = False) -> None:
-        super().__init__(data or {})
-        self.is_ph = is_ph
-
-    @classmethod
-    def from_da(cls, da: DataArray | list[DataArray], is_ph: bool = False) -> Dataset:
-        """Alternative constructor to create Dataset from a list of DataArray.
-
-        Parameters
-        ----------
-        da : DataArray | list[DataArray]
-            The DataArray objects to populate the dataset.
-        is_ph : bool, optional
-            Indicate if x values represent pH (default is False).
-
-        Returns
-        -------
-        Dataset
-            The constructed Dataset object.
-        """
-        if not da:
-            return cls({})
-        if isinstance(da, list):
-            data = {f"y{i}": da_item for i, da_item in enumerate(da)}
-        elif isinstance(da, DataArray):
-            data = {"default": da}
-        return cls(data, is_ph)
-
-    def apply_mask(self, combined_mask: ArrayMask) -> None:
-        """Correctly distribute and apply the combined mask across all DataArrays.
-
-        Parameters
-        ----------
-        combined_mask : ArrayMask
-            Boolean array where True keeps the data point, and False masks it out.
-
-        Raises
-        ------
-        ValueError
-            If the length of the combined_mask does not match the total number of data points.
-        """
-        if combined_mask.size != sum(len(da.y) for da in self.values()):
-            msg = "Length of combined_mask must match the total number of data points."
-            raise ValueError(msg)
-        start_idx = 0
-        for da in self.values():
-            end_idx = start_idx + len(da.y)
-            da.mask[da.mask] &= combined_mask[start_idx:end_idx]
-            start_idx = end_idx
-
-    def copy(self, keys: list[str] | set[str] | None = None) -> Dataset:
-        """Return a copy of the Dataset.
-
-        If keys are provided, only data associated with those keys are copied.
-
-        Parameters
-        ----------
-        keys : list[str] | set[str] | None, optional
-            List of keys to include in the copied dataset. If None (default),
-            copies all data.
-
-        Returns
-        -------
-        Dataset
-            A copy of the dataset.
-
-        Raises
-        ------
-        KeyError
-            If a provided key does not exist in the Dataset.
-        """
-        if keys is None:
-            return copy.deepcopy(self)
-        copied = Dataset({}, is_ph=self.is_ph)
-        for key in keys:
-            if key in self:
-                copied[key] = copy.deepcopy(self[key])
-            else:
-                msg = f"No such key: '{key}' in the Dataset."
-                raise KeyError(msg)
-        return copied
-
-    def clean_data(self, n_params: int) -> None:
-        """Remove too small datasets."""
-        for key in list(
-            self.keys()
-        ):  # list() is used to avoid modifying dict during iteration
-            if n_params > len(self[key].y):
-                warnings.warn(
-                    f"Removing key '{key}' from Dataset: number of parameters "
-                    f"({n_params}) exceeds number of data points ({len(self[key].y)}).",
-                    stacklevel=2,
-                )
-                del self[key]
-
-    def concatenate_data(self) -> tuple[ArrayF, ArrayF, ArrayF, ArrayF]:
-        """Concatenate x, y, x_err, and y_err across all datasets."""
-        x_data = np.concatenate([v.x for v in self.values()])
-        y_data = np.concatenate([v.y for v in self.values()])
-        x_err = np.concatenate([v.x_err for v in self.values()])
-        y_err = np.concatenate([v.y_err for v in self.values()])
-        return x_data, y_data, x_err, y_err
-
-    def export(self, filep: str | Path) -> None:
-        """Export this dataset into a csv file."""
-        fp = Path(filep)
-        for lbl, da in self.items():
-            data: dict[str, ArrayF | ArrayMask] = {"xc": da.xc, "yc": da.yc}
-            if da.x_errc.size > 0:
-                data["x_errc"] = da.x_errc
-            if da.y_errc.size > 0:
-                data["y_errc"] = da.y_errc
-            data["mask"] = da.mask
-            pd.DataFrame(data).to_csv(fp.with_stem(f"{fp.stem}_{lbl}"), index=False)
 
 
 # fmt: off
@@ -983,11 +760,18 @@ def create_x_true(
 
 
 def create_parameter_priors(
-    params: Parameters, n_sd: float
+    params: Parameters, n_sd: float, key: str = ""
 ) -> dict[str, pm.Distribution]:
     """Create parameter priors."""
+    if not key:
+        return {
+            p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
+            for p in params.values()
+        }
     return {
-        p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
+        f"{p.name}_{key}": pm.Normal(
+            f"{p.name}_{key}", mu=p.value, sigma=p.stderr * n_sd
+        )
         for p in params.values()
     }
 
@@ -1021,25 +805,22 @@ def process_trace(
             rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
             rpars[name].stderr = row["sd"]
             rpars[name].init_value = row["r_hat"]
-
     # Process x_true and x_errc
     nxc = []  # New x_true values
     nx_errc = []  # New x_errc values
     for name, row in rdf.iterrows():
-        if name.startswith("x_true"):
+        if isinstance(name, str) and name.startswith("x_true"):
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
-
     for da in ds.values():
         da.xc = np.array(nxc)  # Update x_true values in the dataset
         da.x_errc = np.array(nx_errc) * n_xerr  # Scale the errors
-
     # Extract magnitude for error scaling
-    mag = rdf.loc["ye_mag", "mean"]  # noqa: type: ignore
+    mag = rdf.loc["ye_mag", "mean"]  # type: ignore[index]
+    mag = float(mag) if isinstance(mag, int | float) else 1.0
     for da in ds.values():
         da.y_errc *= mag  # Scale y errors by the magnitude
-
-    # Optionally, create diagnostic plots
+    # Create diagnostic plots
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     print(rpars)
@@ -1061,11 +842,10 @@ def fit_binding_pymc(
         return FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
+    xc = next(iter(ds.values())).xc  # # TODO: move up out
+    x_errc = next(iter(ds.values())).x_errc
     with pm.Model() as _:
         pars = create_parameter_priors(params, n_sd)
-        # Create x_true
-        xc = next(iter(ds.values())).xc
-        x_errc = next(iter(ds.values())).x_errc
         x_true = create_x_true(xc, x_errc, n_xerr)
         # Add likelihoods for each dataset
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
@@ -1074,7 +854,7 @@ def fit_binding_pymc(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
             )
             pm.Normal(
-                f"y_obs_{lbl}",
+                f"y_likelihood_{lbl}",
                 mu=y_model[da.mask],
                 sigma=ye_mag * da.y_err,
                 observed=da.y,
@@ -1087,104 +867,31 @@ def fit_binding_pymc(
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
-def fit_binding_pymc_many(
-    result: dict[str, FitResult], n_sd: float = 5, n_xerr: float = 5
-) -> ArrayF:
-    """Analyze multi-label titration datasets using emcee."""
-    ds = next(iter(result.values())).dataset
-    while ds is None:
-        ds = next(iter(result.values())).dataset
-    xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc * n_xerr
-
-    with pm.Model() as _:
-        x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
-        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
-
-        for key, r in result.items():
-            if r.result and r.dataset:
-                ds = r.dataset
-                da0 = ds["y0"]
-                da1 = ds["y1"]
-                pars = r.result.params
-                K = pm.Normal(  # noqa: N806
-                    f"K_{key}", mu=pars["K"].value, sigma=pars["K"].stderr * n_sd
-                )
-                S0_y0 = pm.Normal(  # noqa: N806
-                    f"S0_y0_{key}",
-                    mu=pars["S0_y0"].value,
-                    sigma=pars["S0_y0"].stderr * n_sd,
-                )
-                S1_y0 = pm.Normal(  # noqa: N806
-                    f"S1_y0_{key}",
-                    mu=pars["S1_y0"].value,
-                    sigma=pars["S1_y0"].stderr * n_sd,
-                )
-                S0_y1 = pm.Normal(  # noqa: N806
-                    f"S0_y1_{key}",
-                    mu=pars["S0_y1"].value,
-                    sigma=pars["S0_y1"].stderr * n_sd,
-                )
-                S1_y1 = pm.Normal(  # noqa: N806
-                    f"S1_y1_{key}",
-                    mu=pars["S1_y1"].value,
-                    sigma=pars["S1_y1"].stderr * n_sd,
-                )
-
-                # Model equations
-                y0_model = binding_1site(x_true[da0.mask], K, S0_y0, S1_y0, ds.is_ph)
-                y1_model = binding_1site(x_true[da1.mask], K, S0_y1, S1_y1, ds.is_ph)
-
-                # Likelihood
-                pm.Normal(
-                    f"y0_likelihood_{key}",
-                    mu=y0_model,
-                    sigma=da0.y_err * ye_mag,
-                    observed=da0.y,
-                )
-                pm.Normal(
-                    f"y1_likelihood_{key}",
-                    mu=y1_model,
-                    sigma=da1.y_err * ye_mag,
-                    observed=da1.y,
-                )
-
-        # Inference
-        trace: ArrayF = pm.sample(2000, return_inferencedata=True)
-
-    return trace
-
-
 def fit_binding_pymc_many_scheme(
-    result: prtecan.TitrationResults,
+    results: dict[str, FitResult],
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
-) -> tuple[arviz.data.inference_data.InferenceData, prtecan.TitrationResults]:
+) -> arviz.data.inference_data.InferenceData:
     """Analyze multi-label titration datasets using shared control parameters."""
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
-    ds = next(iter(result.results.values())).dataset
+    ds = next(iter(results.values())).dataset
     while ds is None:
-        ds = next(iter(result.results.values())).dataset
+        ds = next(iter(results.values())).dataset
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
-
-    xd = -np.diff(xc)
-    xd_err = (x_errc[:-1] ** 2 + x_errc[1:] ** 2) ** 0.5
-    lower = xd.min() - xd_err[np.argmin(xd)]
-    logger.info(f"min pH distance: {lower}")
 
     values = {}
     stderr = {}
     for name, wells in scheme.names.items():
         values[name] = [
             v.result.params["K"].value
-            for well, v in result.results.items()
+            for well, v in results.items()
             if v.result and well in wells
         ]
         stderr[name] = [
             v.result.params["K"].stderr
-            for well, v in result.results.items()
+            for well, v in results.items()
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
@@ -1195,15 +902,8 @@ def fit_binding_pymc_many_scheme(
         ## FIXME:  x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
         ye_mag = pm.HalfNormal("ye_mag", sigma=10)
 
-        x_diff = pm.TruncatedNormal(
-            "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
-        )
-        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc[0])
-        # Calculate cumulative sum of x_diff within PyMC
-        x_cumsum = pm.math.cumsum(x_diff)  # PyMC-compatible cumsum
-        x_true = pm.Deterministic(
-            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
-        )
+        # Create x_true
+        x_true = create_x_true(xc, x_errc, n_xerr)
 
         # Create shared K parameters for each control group
         k_params = {
@@ -1213,7 +913,7 @@ def fit_binding_pymc_many_scheme(
             for control_name in scheme.names
         }
 
-        for key, r in result.results.items():
+        for key, r in results.items():
             if r.result and r.dataset:
                 ds = r.dataset
                 da1 = ds["y1"]
@@ -1228,6 +928,7 @@ def fit_binding_pymc_many_scheme(
                 if ctr_name:
                     K = k_params[ctr_name]  # noqa: N806 # Shared K for this control group
                 else:
+                    # FIXME: pars = create_parameter_priors(r.result.params, n_sd, key)
                     # If not part of any control group, create an individual K
                     K = pm.Normal(  # noqa: N806
                         f"K_{key}", mu=pars["K"].value, sigma=pars["K"].stderr * n_sd
@@ -1277,16 +978,34 @@ def fit_binding_pymc_many_scheme(
                     sigma=da2.y_err * ye_mag,
                     observed=da2.y,
                 )
+                """
+                For lbl, da in ds.items():
+                    y_model = binding_1site(
+                        x_true,
+                        pars[f"K_{key}"],
+                        pars[f"S0_{lbl}_{key}"],
+                        pars[f"S1_{lbl}_{key}"],
+                        ds.is_ph,
+                    )
+                    pm.Normal(
+                        f"y_likelihood_{lbl}_{key}",
+                        mu=y_model[da.mask],
+                        sigma=ye_mag * da.y_err,
+                        observed=da.y,
+                    )
+                """
         # Inference
-        trace = pm.sample(2000, target_accept=0.9, cores=6, return_inferencedata=True)
-
-    df_trace = az.summary(trace)
-    resultd = prtecan.TitrationResults(
-        scheme,
-        result.results.keys() - scheme.ctrl,
-        partial(extract_params, df_trace=df_trace),
-    )
-    """Resultd = {}.
+        trace: az.InferenceData = pm.sample(
+            2000, target_accept=0.9, cores=6, return_inferencedata=True
+        )
+    """
+    # df_trace = az.summary(trace)
+    # resultd = prtecan.TitrationResults(
+    #     scheme,
+    #     result.results.keys() - scheme.ctrl,
+    #     partial(extract_params, df_trace=df_trace),
+    # )
+    Resultd = {}.
 
     for key in result.results.keys() - scheme.ctrl:
         rdf = df_trace[df_trace.index.str.endswith(key)]
@@ -1297,7 +1016,7 @@ def fit_binding_pymc_many_scheme(
             rpars[name].init_value = row["r_hat"]
         resultd[key] = clophfit.binding.fitting._Result(rpars)  # noqa: SLF001
     """
-    return trace, resultd
+    return trace
 
 
 def extract_params(key: str, df_trace: pd.DataFrame) -> FitResult:
