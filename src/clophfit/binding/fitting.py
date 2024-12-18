@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import logging
 import typing
 from dataclasses import dataclass, field
 from sys import float_info
@@ -34,17 +33,17 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
+from clophfit.logging_config import setup_logger
 
 if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
     from clophfit.types import ArrayDict, ArrayF, ArrayMask
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-
 N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800
+
+logger = setup_logger(__name__)
+logger.info("Plotting module started")
 
 
 # fmt: off
