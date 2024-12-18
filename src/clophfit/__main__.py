@@ -356,7 +356,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
         if is_ph:  # ratio between protonated un-protonated states
             ratios = {lbl: samples[f"S0_{lbl}"] / samples[f"S1_{lbl}"] for lbl in ds}
             # Combine ratio and K samples into a DataFrame for corner plot
-            samples_ratios = pd.DataFrame({**ratios, **{"K": samples["K"]}})
+            samples_ratios = pd.DataFrame({**ratios, "K": samples["K"]})
             fig_ratio = binding.plotting.plot_emcee(samples_ratios)
             fig_ratio.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emc-ratios"))
             for lbl in ds:

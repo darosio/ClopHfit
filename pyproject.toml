@@ -279,9 +279,9 @@ target-version = "py312"
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["ANN101", "ANN102", "ANN201", "E501", "ISC001"]
+ignore = ["ANN201", "E501", "ISC001"]
 select = [
-  "A",  # builtins
+  "A",  # builtins shadowing
   "AIR",  # airflow
   "ANN",  # typing annotation
   "ARG",  # unused arguments
@@ -291,22 +291,30 @@ select = [
   "C4",  # comprehensions
   "C90",  # mccabe
   "D",  # pydocstyle
+  # "DOC",
   "DTZ",  # dates
   "E",  # pycodestyle
   "EM",  # exceptions
   "ERA",  # eradicate
   "F",  # pyflakes
+  "FA",  # future annotations
   # "FBT",  # boolean-trap
   "FLY",  # flyntp
   "FURB",  # refurbishing and modernizing
+  # "G",     # logging
   "I",  # isort
   "ICN",  # import conventions (opinionated)
+  # "INP",
+  "INT",
   "ISC",  # implicit-str-concat
+  "LOG",  # logging
   "N",  # pep8-naming
   "NPY",
   "PD",  # pandas-vet
   "PERF",  # performance anti pattern
   "PGH",  # pygrep WAIT
+  # "PYI",
+  "PIE",
   "PL",  # pylint see PLR2004...
   "PT",  # pytest-style
   "PTH",  # use-pathlib
@@ -318,7 +326,9 @@ select = [
   "SIM",  # simplify
   "SLF",  # private self
   "SLOT",  # __slot__
-  "TCH",  # TYPE_CHECKING
+  "T10",  # debugger
+  # "T20",   # print
+  "TC",  # TYPE_CHECKING
   # "TD",  # TODOs
   # "FIX",  # no fixme
   "TID",  # tidy-imports
