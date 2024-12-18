@@ -822,9 +822,7 @@ def fit_binding_pymc_many_scheme(
         for key, r in results.items():
             if r.result and r.dataset:
                 ds = r.dataset
-                da1 = ds["y1"]
-                da2 = ds["y2"]
-                pars = r.result.params
+                pars = create_parameter_priors(r.result.params, n_sd, key)
 
                 # Determine if the well is associated with a control group
                 ctr_name = next(
@@ -832,60 +830,13 @@ def fit_binding_pymc_many_scheme(
                 )
 
                 if ctr_name:
-                    K = k_params[ctr_name]  # noqa: N806 # Shared K for this control group
-                else:
-                    # FIXME: pars = create_parameter_priors(r.result.params, n_sd, key)
-                    # If not part of any control group, create an individual K
-                    K = pm.Normal(  # noqa: N806
-                        f"K_{key}", mu=pars["K"].value, sigma=pars["K"].stderr * n_sd
-                    )
+                    # # FIXME: K = k_params[ctr_name]   # Shared K for this control group
+                    # If part of a control group, superimpose the shared K
+                    pars[f"K_{key}"] = k_params[
+                        ctr_name
+                    ]  # Shared K for this control group
 
-                # Per-well S0 and S1 parameters
-                S0_y1 = pm.Normal(  # noqa: N806
-                    f"S0_y1_{key}",
-                    mu=pars["S0_y1"].value,
-                    sigma=pars["S0_y1"].stderr * n_sd,
-                )
-                S1_y1 = pm.Normal(  # noqa: N806
-                    f"S1_y1_{key}",
-                    mu=pars["S1_y1"].value,
-                    sigma=pars["S1_y1"].stderr * n_sd,
-                )
-                S0_y2 = pm.Normal(  # noqa: N806
-                    f"S0_y2_{key}",
-                    mu=pars["S0_y2"].value,
-                    sigma=pars["S0_y2"].stderr * n_sd,
-                )
-                S1_y2 = pm.Normal(  # noqa: N806
-                    f"S1_y2_{key}",
-                    mu=pars["S1_y2"].value,
-                    sigma=pars["S1_y2"].stderr * n_sd,
-                )
-
-                """# mask_da0 = np.asarray(da0.mask).astype(bool)
-                # mask_da1 = np.asarray(da1.mask).astype(bool)
-                # y0_model = binding_1site(x_true[mask_da0], K, S0_y0, S1_y0, ds.is_ph)
-                # y1_model = binding_1site(x_true[mask_da1], K, S0_y1, S1_y1, ds.is_ph)
-                """
-                # Model equations
-                y1_model = binding_1site(x_true[da1.mask], K, S0_y1, S1_y1, ds.is_ph)
-                y2_model = binding_1site(x_true[da2.mask], K, S0_y2, S1_y2, ds.is_ph)
-
-                # Likelihoods
-                pm.Normal(
-                    f"y0_likelihood_{key}",
-                    mu=y1_model,
-                    sigma=da1.y_err * ye_mag,
-                    observed=da1.y,
-                )
-                pm.Normal(
-                    f"y1_likelihood_{key}",
-                    mu=y2_model,
-                    sigma=da2.y_err * ye_mag,
-                    observed=da2.y,
-                )
-                """
-                For lbl, da in ds.items():
+                for lbl, da in ds.items():
                     y_model = binding_1site(
                         x_true,
                         pars[f"K_{key}"],
@@ -899,7 +850,6 @@ def fit_binding_pymc_many_scheme(
                         sigma=ye_mag * da.y_err,
                         observed=da.y,
                     )
-                """
         # Inference
         trace: az.InferenceData = pm.sample(
             2000, target_accept=0.9, cores=6, return_inferencedata=True
