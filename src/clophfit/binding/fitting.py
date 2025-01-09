@@ -788,23 +788,22 @@ def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
 def fit_binding_pymc_odr(
     fr: FitResult,
     n_sd: float = 10.0,
-    n_xerr: float = 1.0,
+    xe_scaling: float = 1.0,
     ye_scaling: float = 10.0,
     n_samples: int = 2000,
-) -> FitResult:
+) -> arviz.InferenceData:
     """Analyze multi-label titration datasets using pymc."""
-    if fr.result is None or fr.dataset is None:
-        return FitResult()
+    # TODO: if fr.result is None or fr.dataset is None:
+    # TODO: return FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     with pm.Model() as _:
         pars = create_parameter_priors(params, n_sd)
-        x_true = create_x_true(xc, x_errc, n_xerr)
         # Add likelihoods for each dataset
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
-        xe_mag = pm.HalfNormal("xe_mag", sigma=1.0)
+        xe_mag = pm.HalfNormal("xe_mag", sigma=xe_scaling)
 
         for lbl, da in ds.items():
 
@@ -823,22 +822,24 @@ def fit_binding_pymc_odr(
                             x_obs,
                             y_obs,
                         )
-                        for x_obs, y_obs in zip(x_true.eval(), da.y, strict=True)  # type: ignore[union-attr]
+                        for x_obs, y_obs in zip(xc, da.y, strict=True)
                     ]
                 ),
             )
+
             y_prime = pm.Deterministic(
                 f"y_prime_{lbl}",
                 pm.math.stack([_y_model(x) for x in x_prime.eval()]),  # noqa: PD013
             )
-
             y_model = pm.Deterministic(
                 f"y_model_{lbl}",
-                pm.math.stack([_y_model(x) for x in x_true.eval()]),  # type: ignore[union-attr] #noqa: PD013
+                pm.math.stack([_y_model(x) for x in xc]),  # noqa: PD013
             )
+            ## TODO:  y_model = as_tensor_variable([_y_model(x) for x in xc])
+
             mask = as_tensor_variable(da.mask)
             # Orthogonal distance likelihood
-            distances = ((x_prime - x_true) / (xe_mag * da.x_err)) ** 2 + (
+            distances = ((x_prime - xc) / (xe_mag * x_errc)) ** 2 + (
                 (y_prime - y_model) / (ye_mag * da.y_err)
             ) ** 2
             pm.Normal(
@@ -848,8 +849,8 @@ def fit_binding_pymc_odr(
                 observed=np.zeros(len(distances[mask].eval())),
             )
         # Inference
-        trace = pm.sample(n_samples, cores=4, return_inferencedata=True)
-    return process_trace(trace, params.keys(), ds, n_xerr)
+        return pm.sample(n_samples, cores=4, return_inferencedata=True)
+    ## TODO:  return process_trace(trace, params.keys(), ds, 0)
 
 
 def fit_binding_pymc_many_scheme(
