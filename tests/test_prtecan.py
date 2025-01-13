@@ -175,9 +175,9 @@ class TestLabelblock:
             " OVER value in Label1: H02 of tecanfile ",
         ]
         for expected_message in expected_messages:
-            assert any(
-                log.message == expected_message for log in caplog.records
-            ), f"Expected log message '{expected_message}' not found"
+            assert any(log.message == expected_message for log in caplog.records), (
+                f"Expected log message '{expected_message}' not found"
+            )
         assert np.nansum(lb.data["A06"]) == np.nansum(np.nan)
         assert np.nansum(lb.data["H02"]) == np.nansum(np.nan)
 

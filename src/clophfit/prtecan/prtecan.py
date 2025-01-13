@@ -1412,7 +1412,7 @@ class Titration(TecanfilesGroup):
             if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
                 logger.warning(
-                    f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
+                    f"Buffer for '{key}:{label}' was adjusted by {delta / sd:.2f} SD."
                 )
                 return y + float(delta)
             return y  # never used if properly called?
