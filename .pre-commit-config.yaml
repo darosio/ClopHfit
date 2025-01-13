@@ -41,7 +41,7 @@ repos:
         args: [--autofix]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: v0.9.1
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -66,7 +66,7 @@ repos:
       - id: rst-inline-touching-normal
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.0
+    rev: 1.8.2
     hooks:
       - id: bandit
         args: ["-c", "pyproject.toml"]
@@ -78,7 +78,7 @@ repos:
       - id: pydocstringformatter
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.5.14
+    rev: 0.6.0
     hooks:
       - id: pydoclint
 
