@@ -460,7 +460,7 @@ def plot_fit(
     if params["K"].stderr:  # Can be None in case of critical fitting
         k = ufloat(params["K"].value, params["K"].stderr)
     else:
-        k = f'{params["K"].value:.3g}' if params["K"].value else None
+        k = f"{params['K'].value:.3g}" if params["K"].value else None
     title = "=".join(["K", str(k).replace("+/-", "±")])
     xlabel = "pH" if ds.is_ph else "Cl"
     _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
@@ -791,10 +791,10 @@ def fit_binding_pymc_odr(
     xe_scaling: float = 1.0,
     ye_scaling: float = 10.0,
     n_samples: int = 2000,
-) -> arviz.InferenceData:
+) -> arviz.InferenceData | pm.backends.base.MultiTrace:
     """Analyze multi-label titration datasets using pymc."""
-    # TODO: if fr.result is None or fr.dataset is None:
-    # TODO: return FitResult()
+    if fr.result is None or fr.dataset is None:
+        return az.InferenceData()  # FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc
