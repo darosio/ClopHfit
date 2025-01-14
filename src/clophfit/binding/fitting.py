@@ -37,8 +37,8 @@ from clophfit.binding.plotting import (
 from clophfit.logging_config import setup_logger
 
 if typing.TYPE_CHECKING:
+    from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask, FloatFunc
     from clophfit.prtecan import PlateScheme
-    from clophfit.types import ArrayDict, ArrayF, ArrayMask, FloatFunc
 
 
 N_BOOT = 20  # To compute fill_between uncertainty.

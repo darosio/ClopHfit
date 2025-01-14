@@ -34,7 +34,7 @@ from clophfit.binding.plotting import PlotParameters
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from clophfit.types import ArrayF
+    from clophfit.clophfit_types import ArrayF
 
 # TODO: Add tqdm progress bar
 
@@ -374,25 +374,28 @@ class Labelblock:
             raise ValueError(msg)
 
     def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
-        """Extract data into a dictionary.
+        """Extract data from a list of lines into a dictionary.
 
-        {'A01' : value}
-        :
-        {'H12' : value}
+        This function validates the 96-well format, processes each cell, and
+        converts its content to a float value. Cells with invalid or saturated
+        signals are replaced with `np.nan`, and a warning is logged.
 
         Parameters
         ----------
         lines : list[list[str | int | float]]
-            xls file read into lines (list_of_lines).
+            Input data read from an xls file, organized as rows and columns.
 
         Returns
         -------
         dict[str, float]
-            Data from a label block.
+            A dictionary where keys are well identifiers (e.g., 'A01', 'B02')
+            and values are the corresponding numeric data. Invalid or saturated
+            signals are stored as `np.nan` and a warn is logged.
 
-        Warns
+        Notes
         -----
-            When a cell contains saturated signal (converted into np.nan).
+        - Assumes the input `lines` corresponds to a 96-well plate format.
+        - Rows are labeled 'A' through 'H'; columns are numbered 1 through 12.
         """
         data = {}
         self._validate_96_well_format(lines)
@@ -1412,7 +1415,7 @@ class Titration(TecanfilesGroup):
             if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
                 logger.warning(
-                    f"Buffer for '{key}:{label}' was adjusted by {delta/sd:.2f} SD."
+                    f"Buffer for '{key}:{label}' was adjusted by {delta / sd:.2f} SD."
                 )
                 return y + float(delta)
             return y  # never used if properly called?
