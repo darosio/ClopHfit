@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
 
-    from clophfit.types import ArrayF
+    from clophfit.clophfit_types import ArrayF
 
 COLOR_MAP = colormaps["Set1"]  # To color PCA components and LM fit.
 N_AUTOVALS = 4

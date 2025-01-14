@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from clophfit.types import ArrayF, ArrayMask
+from clophfit.clophfit_types import ArrayF, ArrayMask
 
 
 @dataclass
