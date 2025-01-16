@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import typing
 from dataclasses import dataclass, field
+from functools import partial
 from sys import float_info
 
 import arviz
@@ -38,10 +39,11 @@ from clophfit.logging_config import setup_logger
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask, FloatFunc
-    from clophfit.prtecan import PlateScheme
+    from clophfit.prtecan import PlateScheme, TitrationResults
 
 
 N_BOOT = 20  # To compute fill_between uncertainty.
+
 EMCEE_STEPS = 1800
 
 logger = setup_logger(__name__)
@@ -668,20 +670,23 @@ def create_x_true(
 
 
 def create_parameter_priors(
-    params: Parameters, n_sd: float, key: str = ""
+    params: Parameters, n_sd: float, key: str = "", ctr_name: str = ""
 ) -> dict[str, pm.Distribution]:
     """Create parameter priors."""
-    if not key:
-        return {
-            p.name: pm.Normal(p.name, mu=p.value, sigma=p.stderr * n_sd)
-            for p in params.values()
-        }
-    return {
-        f"{p.name}_{key}": pm.Normal(
-            f"{p.name}_{key}", mu=p.value, sigma=p.stderr * n_sd
-        )
-        for p in params.values()
-    }
+    priors = {}
+
+    # Helper function for naming parameters
+    def param_name(p_name: str) -> str:
+        return f"{p_name}_{key}"
+
+    for name, p in params.items():
+        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
+        # Skip creating `K_{key}` if this belongs to a control group
+        if ctr_name and name == "K":
+            continue
+        # Create prior distribution
+        priors[param_name(name)] = pm.Normal(param_name(name), mu=p.value, sigma=sigma)
+    return priors
 
 
 def process_trace(
@@ -732,10 +737,30 @@ def process_trace(
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     print(rpars)
-    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+    renamed = rename_keys(rpars)
+    print(renamed)
+    plot_fit(ax, ds, renamed, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
     # Return the fit result
     return FitResult(fig, _Result(rpars), trace, ds)
+
+
+def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
+    """Rename dictionary keys."""
+    renamed_dict = {}
+    for key, value in data.items():
+        # Rule 1: Rename "K_*" → "K"
+        if key.startswith("K_"):
+            new_key = "K"
+        # Rule 2: Remove "_{key}" suffix (keep only the first part before "_")
+        elif key.rfind("_") > 1:
+            idx = key.rfind("_")
+            new_key = key[:idx]
+        else:
+            new_key = key
+        renamed_dict[new_key] = value
+
+    return renamed_dict
 
 
 def fit_binding_pymc(
@@ -853,17 +878,22 @@ def fit_binding_pymc_odr(
     ## TODO:  return process_trace(trace, params.keys(), ds, 0)
 
 
-def fit_binding_pymc_many_scheme(
+def fit_binding_pymc_multi(  # noqa: PLR0913
     results: dict[str, FitResult],
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
-) -> arviz.data.inference_data.InferenceData:
-    """Analyze multi-label titration datasets using shared control parameters."""
+    ye_scaling: float = 10.0,
+    n_samples: int = 2000,
+) -> tuple[TitrationResults, arviz.data.inference_data.InferenceData]:
+    """Analyze multiple titration datasets with shared parameters for controls."""
+    from clophfit.prtecan import TitrationResults
+
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
-    ds = next(iter(results.values())).dataset
-    while ds is None:
-        ds = next(iter(results.values())).dataset
+    ds = next((result.dataset for result in results.values() if result.dataset), None)
+    if ds is None:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
 
@@ -884,17 +914,15 @@ def fit_binding_pymc_many_scheme(
     print(ctr_ks)
 
     with pm.Model() as _:
-        # Priors for global parameters
-        ## FIXME:  x_true = pm.Normal("x_true", mu=xc, sigma=x_errc, shape=len(xc))
-        ye_mag = pm.HalfNormal("ye_mag", sigma=10)
-
-        # Create x_true
+        ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
         x_true = create_x_true(xc, x_errc, n_xerr)
 
         # Create shared K parameters for each control group
         k_params = {
             control_name: pm.Normal(
-                f"K_{control_name}", mu=ctr_ks[control_name][0], sigma=0.2
+                f"K_{control_name}",
+                mu=ctr_ks[control_name][0],
+                sigma=0.2,  # FIXME: use var
             )
             for control_name in scheme.names
         }
@@ -902,24 +930,18 @@ def fit_binding_pymc_many_scheme(
         for key, r in results.items():
             if r.result and r.dataset:
                 ds = r.dataset
-                pars = create_parameter_priors(r.result.params, n_sd, key)
-
                 # Determine if the well is associated with a control group
                 ctr_name = next(
-                    (name for name, wells in scheme.names.items() if key in wells), None
+                    (name for name, wells in scheme.names.items() if key in wells), ""
                 )
-
-                if ctr_name:
-                    # # FIXME: K = k_params[ctr_name]   # Shared K for this control group
-                    # If part of a control group, superimpose the shared K
-                    pars[f"K_{key}"] = k_params[
-                        ctr_name
-                    ]  # Shared K for this control group
+                pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+                # Use shared K for control group wells or create a unique K otherwise
+                K = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]  # noqa: N806
 
                 for lbl, da in ds.items():
                     y_model = binding_1site(
                         x_true,
-                        pars[f"K_{key}"],
+                        K,
                         pars[f"S0_{lbl}_{key}"],
                         pars[f"S1_{lbl}_{key}"],
                         ds.is_ph,
@@ -930,34 +952,27 @@ def fit_binding_pymc_many_scheme(
                         sigma=ye_mag * da.y_err,
                         observed=da.y,
                     )
-        # Inference
-        trace: az.InferenceData = pm.sample(
-            2000, target_accept=0.9, cores=6, return_inferencedata=True
-        )
-    """
-    # df_trace = az.summary(trace)
-    # resultd = prtecan.TitrationResults(
-    #     scheme,
-    #     result.results.keys() - scheme.ctrl,
-    #     partial(extract_params, df_trace=df_trace),
-    # )
-    Resultd = {}.
 
-    for key in result.results.keys() - scheme.ctrl:
-        rdf = df_trace[df_trace.index.str.endswith(key)]
-        rpars = Parameters()
-        for name, row in rdf.iterrows():
-            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
-            rpars[name].stderr = row["sd"]
-            rpars[name].init_value = row["r_hat"]
-        resultd[key] = clophfit.binding.fitting._Result(rpars)  # noqa: SLF001
-    """
-    return trace
+        trace: az.InferenceData = pm.sample(
+            n_samples, target_accept=0.9, cores=6, return_inferencedata=True
+        )
+
+    # Extract results into FitResult objects
+    df_trace = typing.cast(pd.DataFrame, az.summary(trace, fmt="wide"))
+
+    titration_results = TitrationResults(
+        scheme=scheme,
+        fit_keys=set(results.keys()),
+        compute_func=partial(extract_params, df_trace=df_trace),
+    )
+    titration_results.compute_all()
+    return titration_results, trace
 
 
 def extract_params(key: str, df_trace: pd.DataFrame) -> FitResult:
     """Compute individual dataset fit for a single key."""
     rdf = df_trace[df_trace.index.str.endswith(key)]
+    print(key, rdf)
     rpars = Parameters()
     for name, row in rdf.iterrows():
         rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
