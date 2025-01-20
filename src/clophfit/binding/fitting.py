@@ -677,7 +677,9 @@ def create_parameter_priors(
 
     # Helper function for naming parameters
     def param_name(p_name: str) -> str:
-        return f"{p_name}_{key}"
+        if key:
+            return f"{p_name}_{key}"
+        return p_name
 
     for name, p in params.items():
         sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
@@ -736,10 +738,11 @@ def process_trace(
     # Create diagnostic plots
     fig = figure.Figure()
     ax = fig.add_subplot(111)
+    # FIXME: multi need this renaming quite surely
     print(rpars)
     renamed = rename_keys(rpars)
     print(renamed)
-    plot_fit(ax, ds, renamed, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
     # Return the fit result
     return FitResult(fig, _Result(rpars), trace, ds)
@@ -826,6 +829,7 @@ def fit_binding_pymc_odr(
     x_errc = next(iter(ds.values())).x_errc
     with pm.Model() as _:
         pars = create_parameter_priors(params, n_sd)
+        print(pars)
         # Add likelihoods for each dataset
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
         xe_mag = pm.HalfNormal("xe_mag", sigma=xe_scaling)
