@@ -57,8 +57,7 @@ dev = [
   "jupyterlab",
   "ruff <= 0.9.6",
   "pre-commit <= 4.1.0",
-  "pylsp-mypy",
-  "ruff-lsp"
+  "pylsp-mypy"
 ]
 docs = [
   "autodocsumm <= 0.2.14",
