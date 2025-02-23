@@ -35,6 +35,15 @@ jobs:
         with:
           python-version: ${{ env.STABLE_PYTHON_VERSION }}
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # cache: "npm" # Cache npm dependencies for faster builds
+
+      - name: Install npm dependencies
+        run: npm install --save-dev prettier
+
       - name: Cache pip
         id: cache-pip
         uses: actions/cache@v4
