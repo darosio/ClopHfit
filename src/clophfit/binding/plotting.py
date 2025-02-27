@@ -185,7 +185,7 @@ def plot_pca(ax: Axes, v: ArrayF, conc: ArrayF, pp: PlotParameters) -> None:
     ax.set_xlabel("Second Principal Component", color=COLOR_MAP(1))
     # Add labels.
     for x, y, w in zip(v[1], v[0], conc, strict=False):
-        ax.text(x, y, w)
+        ax.text(x, y, str(w))
 
 
 def plot_spectra(ax: Axes, spectra: pd.DataFrame, pp: PlotParameters) -> None:

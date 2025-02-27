@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import pyparsing
 
@@ -421,7 +420,7 @@ class Note:
             sample_data = file.read(1024)  # Read a sample of the CSV data
         dialect = cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
         self._note = pd.read_csv(self.fpath, dialect=dialect)
-        self.wells: list[str] = np.array(self._note)[:, 0].tolist()
+        self.wells = self._note.iloc[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
 
     # MAYBE: Add buffer subtraction logic to prenspire Note.
