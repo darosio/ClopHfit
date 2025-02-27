@@ -155,7 +155,10 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     >>> kd(10, 8.4, np.array([7.4, 8.4]))
     array([11., 20.])
     """
-    return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)
+    if isinstance(ph, (float | int)):  # Check if ph is a scalar
+        return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)  # Return float
+    ph_array = np.asarray(ph, dtype=np.float64)
+    return kd1 * (1 + 10 ** (pka - ph_array)) / 10 ** (pka - ph_array)  # Return ArrayF
 
 
 def _build_params_1site(ds: Dataset) -> Parameters:

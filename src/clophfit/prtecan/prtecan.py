@@ -83,11 +83,11 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
     list[list[str | int | float]]
         Lines as list_of_lines.
     """
-    sheet = pd.read_excel(path)
+    sheet = pd.read_excel(path, dtype=object)  # Keep original types
+    # Add empty row and replace NaN
     n0 = pd.DataFrame([[np.nan] * len(sheet.columns)], columns=sheet.columns)
-    sheet = pd.concat([n0, sheet], ignore_index=True)
-    sheet = sheet.fillna("")
-    return list(sheet.to_numpy().tolist())
+    sheet = pd.concat([n0, sheet], ignore_index=True).fillna("")
+    return typing.cast(list[list[str | int | float]], sheet.to_numpy().tolist())
 
 
 @typing.overload
@@ -1686,7 +1686,7 @@ class Titration(TecanfilesGroup):
                 lb.metadata["Temperature"].value for lb in lbg.labelblocks
             ]
         pp = PlotParameters(is_ph=self.is_ph)
-        temperatures[pp.kind] = self.x.tolist()
+        temperatures[pp.kind] = [float(x) for x in self.x.ravel().tolist()]
         data = pd.DataFrame(temperatures)
         data = data.melt(id_vars=pp.kind, var_name="Label", value_name="Temperature")
         g = sns.lineplot(
