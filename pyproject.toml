@@ -19,7 +19,7 @@ classifiers = [
   "Development Status :: 3 - Alpha"
 ]
 dependencies = [
-  'arviz <= 0.20.0',
+  'arviz <= 0.21.0',
   'click <= 8.1.8',
   'corner <= 2.2.3',
   'emcee <= 3.1.6',
