@@ -1140,7 +1140,7 @@ class TitrationResults:
             keys_unk = list(set(dataframe.index))
             if self.scheme.names:
                 keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
-                df_ctr = dataframe.loc[self.scheme.ctrl]
+                df_ctr = dataframe.loc[dataframe.index.intersection(self.scheme.ctrl)]
                 for name, wells in self.scheme.names.items():
                     for well in wells:
                         df_ctr.loc[well, "ctrl"] = name
