@@ -32,7 +32,7 @@ def create_temp_tsv_file(content: str) -> IO[str]:
     ) as temp_file:
         temp_file.write(content)
         temp_file.seek(0)
-        return cast(IO[str], temp_file)
+        return cast("IO[str]", temp_file)
 
 
 def test_default_case(runner: CliRunner) -> None:

@@ -965,7 +965,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
         )
 
     # Extract results into FitResult objects
-    df_trace = typing.cast(pd.DataFrame, az.summary(trace, fmt="wide"))
+    df_trace = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
 
     titration_results = TitrationResults(
         scheme=scheme,

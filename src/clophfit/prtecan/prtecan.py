@@ -87,7 +87,7 @@ def read_xls(path: Path) -> list[list[str | int | float]]:
     # Add empty row and replace NaN
     n0 = pd.DataFrame([[np.nan] * len(sheet.columns)], columns=sheet.columns)
     sheet = pd.concat([n0, sheet], ignore_index=True).fillna("")
-    return typing.cast(list[list[str | int | float]], sheet.to_numpy().tolist())
+    return typing.cast("list[list[str | int | float]]", sheet.to_numpy().tolist())
 
 
 @typing.overload
@@ -1723,7 +1723,7 @@ class Titration(TecanfilesGroup):
         # Add a legend
         plt.legend(title="Label")
         plt.close()
-        return typing.cast(figure.Figure, g.get_figure())
+        return typing.cast("figure.Figure", g.get_figure())
 
 
 @dataclass

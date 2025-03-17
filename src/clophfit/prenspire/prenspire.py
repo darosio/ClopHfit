@@ -418,7 +418,7 @@ class Note:
         verboseprint = verbose_print(self.verbose)
         with Path(self.fpath).open("r", newline="", encoding="utf-8") as file:
             sample_data = file.read(1024)  # Read a sample of the CSV data
-        dialect = cast(csv.Dialect, csv.Sniffer().sniff(sample_data))
+        dialect = cast("csv.Dialect", csv.Sniffer().sniff(sample_data))
         self._note = pd.read_csv(self.fpath, dialect=dialect)
         self.wells = self._note.iloc[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
