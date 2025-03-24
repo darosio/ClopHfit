@@ -317,7 +317,7 @@ class EnspireFile:
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> pyparsing.ParserElement:
-            EOL = pyparsing.LineEnd().suppress()  # type: ignore[no-untyped-call] # noqa: N806
+            EOL = pyparsing.LineEnd().suppress()  # noqa: N806
             w = pyparsing.Word(pyparsing.alphanums + ".\u00b0%")  # . | deg | %
             return (
                 pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()
