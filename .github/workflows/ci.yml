@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload coverage report
         if: matrix.tests == 'pytest'
-        uses: codecov/codecov-action@v5.4.0
+        uses: codecov/codecov-action@v5.4.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
