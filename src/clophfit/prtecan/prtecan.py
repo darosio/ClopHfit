@@ -1674,6 +1674,7 @@ class Titration(TecanfilesGroup):
             result_pymc = fit_binding_pymc(self.result_global[key], n_sd=n_sd, n_xerr=1)
         except Exception:
             logger.exception(f"Error during MCMC sampling for key: {key}")
+            result_pymc = FitResult()  # empty result
         finally:
             logger.info(f"MCMC fitting completed for well: {key}")
         return result_pymc
