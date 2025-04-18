@@ -175,6 +175,7 @@ source = ["clophfit", "tests"]
 [tool.hatch.envs.default]
 features = ["dev", "tests", "docs"]
 installer = "uv"
+path = ".venv"
 python = "3.12"  # Explicit default version
 
 [tool.hatch.envs.default.scripts]

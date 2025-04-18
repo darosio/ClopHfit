@@ -1,0 +1,35 @@
+name: Update uv.lock for Dependabot PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+
+jobs:
+  update-uv-lock:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Sync uv.lock with pyproject.toml
+        run: uv pip sync --all-extras
+
+      - name: Commit updated uv.lock
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add uv.lock
+          git diff --cached --quiet || git commit -m "chore(dependabot): update uv.lock"
+          git push
