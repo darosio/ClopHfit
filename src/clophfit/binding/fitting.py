@@ -648,7 +648,7 @@ def outlier(
     return outliers
 
 
-def fit_binding_glob_reweighted(ds: Dataset, threshold: float = 2.1) -> FitResult:
+def fit_binding_glob_reweighted(ds: Dataset, threshold: float = 2.05) -> FitResult:
     """RLS and outlier removal for multi-label titration datasets."""
     # Initial fit
     r = fit_binding_glob(ds)
@@ -660,7 +660,7 @@ def fit_binding_glob_reweighted(ds: Dataset, threshold: float = 2.1) -> FitResul
             da.y_errc[da.mask] = np.abs(residual) * da0.y_err
             mask = outlier_glob(residual, threshold=threshold)
             if mask.any():
-                logger.warning("Outlier(s) in well Label:.")
+                logger.info("Outlier(s) in well Label:.")
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
@@ -977,6 +977,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
         raise ValueError(msg)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
+    labels = ds.keys()
 
     values = {}
     stderr = {}
@@ -995,7 +996,9 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     print(ctr_ks)
 
     with pm.Model() as _:
-        ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
+        ye_mag = {}
+        for label in labels:
+            ye_mag[label] = pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
         x_true = create_x_true(xc, x_errc, n_xerr)
 
         # Create shared K parameters for each control group
@@ -1030,7 +1033,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
                     pm.Normal(
                         f"y_likelihood_{lbl}_{key}",
                         mu=y_model[da.mask],
-                        sigma=ye_mag * da.y_err,
+                        sigma=ye_mag[lbl] * da.y_err,
                         observed=da.y,
                     )
 
