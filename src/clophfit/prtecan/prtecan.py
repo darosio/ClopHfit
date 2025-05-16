@@ -23,6 +23,7 @@ from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
     fit_binding_glob,
+    fit_binding_glob_reweighted,
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     format_estimate,
@@ -1600,7 +1601,7 @@ class Titration(TecanfilesGroup):
         """Compute global fit for a single key."""
         try:
             ds = self._create_global_ds(key)
-            return fit_binding_glob(ds)
+            return fit_binding_glob_reweighted(ds)
         except InsufficientDataError:
             logger.warning(f"Skipping global fit for well {key}.")
             return FitResult()

@@ -639,7 +639,83 @@ def outlier(
     residuals_x = output.delta
     residuals_y = output.eps
     residuals = np.sqrt(residuals_x**2 + residuals_y**2)
-    residuals = np.sqrt(residuals_y**2)
+    z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
+    if plot_z_scores:
+        plt.scatter(range(len(z_scores)), z_scores)
+        plt.axhline(y=threshold, color="r", linestyle="-")
+        plt.title("Z-scores")
+    outliers: ArrayMask = z_scores > threshold
+    return outliers
+
+
+def fit_binding_glob_reweighted(ds: Dataset, threshold: float = 2.1) -> FitResult:
+    """RLS and outlier removal for multi-label titration datasets."""
+    # Initial fit
+    r = fit_binding_glob(ds)
+    if r.dataset and r.result:
+        start_idx = 0
+        for da0, da in zip(ds.values(), r.dataset.values(), strict=True):
+            end_idx = start_idx + len(da.y)
+            residual = r.result.residual[start_idx:end_idx]  # reduced residues
+            da.y_errc[da.mask] = np.abs(residual) * da0.y_err
+            mask = outlier_glob(residual, threshold=threshold)
+            if mask.any():
+                logger.warning("Outlier(s) in well Label:.")
+            da.mask[da.mask] = ~mask
+            start_idx = end_idx
+        return fit_binding_glob(r.dataset)
+    return FitResult()
+
+
+def fit_binding_glob_recursive(
+    ds: Dataset, max_iterations: int = 15, tol: float = 0.1
+) -> FitResult:
+    """Analyze multi-label titration datasets using ODR."""
+    # Initial fit
+    r = fit_binding_glob(ds)
+    residual_variance = r.result.redchi if r.result else 0.0
+
+    for _ in range(max_iterations):
+        if r.dataset and r.result:
+            start_idx = 0
+            for da in r.dataset.values():
+                end_idx = start_idx + len(da.y)
+                da.y_errc[da.mask] = np.maximum(
+                    np.abs(r.result.residual[start_idx:end_idx]), 0.01
+                )
+                start_idx = end_idx
+            rn = fit_binding_glob(r.dataset)
+        if rn.mini and rn.mini.minimize().redchi == 0:
+            rn = r
+            break
+        # Check convergence
+        if rn.result and residual_variance - rn.result.redchi < tol:
+            break
+        residual_variance = r.result.redchi if r.result else 0.0
+        r = rn
+    return rn
+
+
+def fit_binding_glob_recursive_outlier(
+    ds: Dataset, tol: float = 0.01, threshold: float = 3.0
+) -> FitResult:
+    """Analyze multi-label titration datasets using IRLS."""
+    # Initial fit
+    r = fit_binding_glob_recursive(ds, tol=tol)
+    if r.result:
+        mask = outlier_glob(r.result.residual, threshold)
+    while mask.any() and r.dataset:
+        ds.apply_mask(~mask)
+        r = fit_binding_glob_recursive(ds, tol=tol)
+        if r.result:
+            mask = outlier_glob(r.result.residual, threshold)
+    return r
+
+
+def outlier_glob(
+    residuals: float, threshold: float = 2.0, plot_z_scores: bool = False
+) -> ArrayMask:
+    """Identify outliers."""
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
     if plot_z_scores:
         plt.scatter(range(len(z_scores)), z_scores)
@@ -771,7 +847,7 @@ def fit_binding_pymc(
     fr: FitResult,
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
-    ye_scaling: float = 10.0,
+    ye_scaling: float = 1.0,
     n_samples: int = 2000,
 ) -> FitResult:
     """Analyze multi-label titration datasets using pymc."""
