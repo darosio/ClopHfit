@@ -320,7 +320,7 @@ def fit_binding_glob(ds: Dataset) -> FitResult:
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, result.params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-    return FitResult(fig, result, mini, ds)
+    return FitResult(fig, result, mini, copy.deepcopy(ds))
 
 
 # TODO: remove the print statements use logging
@@ -612,7 +612,6 @@ def fit_binding_odr_recursive(
             break
         residual_variance = rn.mini.res_var if rn.mini else 0.0
         ro = rn
-    rn.dataset = result.dataset
     return rn
 
 
@@ -630,7 +629,6 @@ def fit_binding_odr_recursive_outlier(
         result.dataset.apply_mask(~omask)
         ro = fit_binding_odr_recursive(result, tol=tol)
         omask = outlier(ro.mini, 3.0)
-    ro.dataset = result.dataset
     return ro
 
 
