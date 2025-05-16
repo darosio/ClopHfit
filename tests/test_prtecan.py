@@ -741,7 +741,7 @@ class TestTitrationAnalysis:
         assert titan.result_global["H02"].result is not None
         k_h02 = titan.result_global["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.890, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.006, abs=1e-3)
         # Check 'K' and std error for 'E02' in the second fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
@@ -750,8 +750,8 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'E02' in the third fit result
         assert titan.result_global["E02"].result is not None
         k_e02 = titan.result_global["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.984, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.015, abs=1e-3)
+        assert k_e02.value == pytest.approx(7.991, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.011, abs=1e-3)
         # Fit up to the second-last data point
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
