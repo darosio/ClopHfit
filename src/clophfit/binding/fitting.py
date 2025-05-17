@@ -971,7 +971,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 5.0,
-    ye_scaling: float = 10.0,
+    ye_scaling: float = 1.0,
     n_samples: int = 2000,
 ) -> tuple[TitrationResults, arviz.data.inference_data.InferenceData]:
     """Analyze multiple titration datasets with shared parameters for controls."""

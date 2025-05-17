@@ -26,6 +26,7 @@ from clophfit.binding.fitting import (
     fit_binding_glob_reweighted,
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
+    fit_binding_pymc_multi,
     format_estimate,
     weight_da,
     weight_multi_ds_titration,
@@ -34,6 +35,8 @@ from clophfit.binding.plotting import PlotParameters
 
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    import arviz as az
 
     from clophfit.clophfit_types import ArrayF
 
@@ -750,7 +753,7 @@ class TitrationConfig:
     dil: bool = True
     nrm: bool = True
     bg_mth: str = "mean"
-    mcmc: bool = False
+    mcmc: str = "None"
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -1482,8 +1485,10 @@ class Titration(TecanfilesGroup):
             self.result_global,
             self.result_odr,
         ]
-        if self.params.mcmc:
+        if self.params.mcmc == "single":
             export_list.append(self.result_mcmc)
+        elif self.params.mcmc == "multi":
+            export_list.append(self.result_multi)
         for i, results in enumerate(export_list):
             results.compute_all()
             fit = results.dataframe
@@ -1683,6 +1688,15 @@ class Titration(TecanfilesGroup):
         finally:
             logger.info(f"MCMC fitting completed for well: {key}")
         return result_pymc
+
+    @cached_property
+    def result_multi(self) -> tuple[TitrationResults, az.InferenceData]:
+        """Perform global MCMC fitting and x_true."""
+        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        return fit_binding_pymc_multi(
+            self.result_global.results, self.scheme, n_sd=n_sd, n_xerr=1
+        )
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""
