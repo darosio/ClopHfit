@@ -75,7 +75,7 @@ tests = [
   "pandas-stubs <= 2.2.3.250308",
   "pytest <= 8.3.5",
   "types-click <= 7.1.8",
-  "types-setuptools <= 80.7.0.20250516",
+  "types-setuptools <= 80.8.0.20250521",
   "xdoctest <= 1.2.0"
 ]
 
