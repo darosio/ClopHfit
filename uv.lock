@@ -489,8 +489,8 @@ requires-dist = [
     { name = "sympy", specifier = ">=1.13.3" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "types-click", marker = "extra == 'tests'", specifier = "<=7.1.8" },
-    { name = "types-setuptools", marker = "extra == 'tests'", specifier = "<=80.7.0.20250516" },
-    { name = "xdoctest", marker = "extra == 'tests'", specifier = ">=1.2.0" },
+    { name = "types-setuptools", marker = "extra == 'tests'", specifier = "<=80.8.0.20250521" },
+    { name = "xdoctest", marker = "extra == 'tests'", specifier = "<=1.2.0" },
     { name = "xlrd", specifier = ">=2.0.1" },
 ]
 provides-extras = ["dev", "docs", "lint", "tests", "hatch"]

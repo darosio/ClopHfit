@@ -2,7 +2,9 @@ exclude: ^src/clophfit/old/.
 default_install_hook_types:
   - pre-commit
   - commit-msg
+
 repos:
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -31,14 +33,17 @@ repos:
       - id: pretty-format-json
         args: [--autofix, --indent, "4", --no-sort-keys]
         exclude: \.ipynb$
+
   - repo: https://github.com/google/yamlfmt
     rev: v0.16.0
     hooks:
       - id: yamlfmt
+
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.7
     hooks:
       - id: actionlint
+
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.22
     hooks:
@@ -46,13 +51,15 @@ repos:
         additional_dependencies:
           - mdformat-gfm
         exclude: CHANGELOG\.md$
+
   - repo: https://github.com/ComPWA/taplo-pre-commit
     rev: v0.9.3
     hooks:
       - id: taplo-format
         # - id: taplo-lint
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.9
+    rev: v0.11.10
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -60,6 +67,7 @@ repos:
       # Run the formatter.
       - id: ruff-format
         types_or: [python, pyi, jupyter]
+
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.10.0
     hooks:
@@ -67,10 +75,12 @@ repos:
       - id: rst-backticks
       - id: rst-directive-colons
       - id: rst-inline-touching-normal
+
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.6.6
+    rev: 0.6.7
     hooks:
       - id: pydoclint
+
   - repo: https://github.com/crate-ci/typos
     rev: v1.32.0
     hooks:
@@ -80,16 +90,19 @@ repos:
       - id: typos
         name: commit-msg-typos
         stages: [commit-msg]
+
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
         args: [-x]
+
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.7.6
     hooks:
       - id: uv-lock
         stages: [pre-commit]
+
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.2.0
     hooks:
