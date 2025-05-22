@@ -3,9 +3,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [project]
-authors = [
-  {name = "daniele arosio", email = "daniele.arosio@cnr.it"}
-]
+authors = [{name = "daniele arosio", email = "daniele.arosio@cnr.it"}]
 classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
@@ -35,13 +33,7 @@ dependencies = [
   'xlrd <= 2.0.1'
 ]
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
-keywords = [
-  "svd",
-  "ClopHensor",
-  "data fitting",
-  "pH",
-  "macromolecule binding"
-]
+keywords = ["svd", "ClopHensor", "data fitting", "pH", "macromolecule binding"]
 license = "BSD-3-Clause"
 name = "clophfit"
 readme = "README.md"
@@ -111,7 +103,17 @@ version_files = [
 bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
 bump_pattern = "^(BREAKING CHANGE|feat|fix|perf|refactor)"
 change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
-change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
+change_type_order = [
+  "BREAKING CHANGE",
+  "Feat",
+  "Fix",
+  "Docs",
+  "Style",
+  "Perf",
+  "Test",
+  "Build",
+  "CI/CD"
+]
 changelog_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci)?(\\(.*\\))?(!)?"
 commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
 example = """fix(parser): correct minor typos in code\n
@@ -162,9 +164,7 @@ tests = ["tests", "*/tests"]
 
 [tool.coverage.report]
 # fail_under = 100
-exclude_lines = [
-  "pragma: no cover"
-]
+exclude_lines = ["pragma: no cover"]
 show_missing = true
 
 [tool.coverage.run]
@@ -204,15 +204,15 @@ installer = "uv"
 template = "tests"
 
 [[tool.hatch.envs.tests.matrix]]
-python = ["3.12", "3.11", "3.10"]  # reverse order to ensure the presence in older python of module included in newer versions
+python = [
+  "3.12",
+  "3.11",
+  "3.10"
+]  # reverse order to ensure the presence in older python of module included in newer versions
 
 [tool.hatch.envs.tests.scripts]
 all = ["test", "type", "xdoc", "cov"]
-cov = [
-  "coverage combine",
-  "coverage report",
-  "coverage xml"
-]
+cov = ["coverage combine", "coverage report", "coverage xml"]
 test = "coverage run -p -m pytest -v"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
@@ -243,11 +243,7 @@ jobs = 0
 py-version = "3.12"
 
 [tool.pylint.messages_control]
-disable = [
-  "invalid-name",
-  "design",
-  "fixme"
-]
+disable = ["invalid-name", "design", "fixme"]
 
 [tool.pylint.refactoring]
 # Maximum number of nested blocks for function / method body
@@ -272,60 +268,61 @@ target-version = "py312"
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["ANN201", "E501", "ISC001"]
+ignore = ["ANN201", "E501", "ISC001", "T20", "INP", "G", "FBT", "PYI"]
 select = [
-  "A",  # builtins shadowing
+  "A",  # builtins
   "AIR",  # airflow
   "ANN",  # typing annotation
   "ARG",  # unused arguments
+  "ASYNC",
   "B",  # bugbear
   "BLE",  # blind-except
   "C",
   "C4",  # comprehensions
   "C90",  # mccabe
   "D",  # pydocstyle
-  # "DOC",
+  "DOC",
   "DTZ",  # dates
   "E",  # pycodestyle
   "EM",  # exceptions
   "ERA",  # eradicate
+  "EXE",
   "F",  # pyflakes
   "FA",  # future annotations
-  # "FBT",  # boolean-trap
+  "FBT",  # boolean-trap
   "FLY",  # flyntp
   "FURB",  # refurbishing and modernizing
-  # "G",     # logging
+  "G",  # logging
   "I",  # isort
   "ICN",  # import conventions (opinionated)
-  # "INP",
-  "INT",
+  "INP",  # inplict namespace
+  "INT",  # gettext
   "ISC",  # implicit-str-concat
   "LOG",  # logging
   "N",  # pep8-naming
   "NPY",
   "PD",  # pandas-vet
-  "PERF",  # performance anti pattern
+  "PERF",  # pperformance anti pattern
   "PGH",  # pygrep WAIT
-  # "PYI",
   "PIE",
   "PL",  # pylint see PLR2004...
   "PT",  # pytest-style
   "PTH",  # use-pathlib
+  "PYI",  # lint typeshed
   "Q",  # quotes
   "RET",  # Return
   "RSE",  # Raise
   "RUF",  # Ruff
-  "S",  # bandit XXX
+  "S",  # bandit
   "SIM",  # simplify
   "SLF",  # private self
   "SLOT",  # __slot__
   "T10",  # debugger
-  # "T20",   # print
+  "T20",  # print
   "TC",  # TYPE_CHECKING
-  # "TD",  # TODOs
-  # "FIX",  # no fixme
+  "TCH",  # TYPE_CHECKING
   "TID",  # tidy-imports
-  "TRY",  # exceptions
+  "TRY",  # tryceratops
   "UP",  # pyupgrade
   "W",  # pycodestyle
   "YTT"  # 2020
@@ -356,13 +353,11 @@ mccabe.max-complexity = 12
   "SLF001"
 ]
 "__init__.py" = ["I002"]  # don't need annotations
+"docs/*" = ["INP"]
 "src/clophfit/__main__.py" = [
   "ANN001"  # params are annotated using click
 ]
-"tests/*" = [
-  "PLR2004",
-  "S101"
-]
+"tests/*" = ["PLR2004", "S101"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
