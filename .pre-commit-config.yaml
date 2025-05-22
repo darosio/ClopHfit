@@ -59,7 +59,7 @@ repos:
         # - id: taplo-lint
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.10
+    rev: v0.11.11
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -98,7 +98,7 @@ repos:
         args: [-x]
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.7.6
+    rev: 0.7.7
     hooks:
       - id: uv-lock
         stages: [pre-commit]
