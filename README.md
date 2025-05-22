@@ -17,22 +17,30 @@ tool, users can easily analyze their data and obtain accurate fitting results.
 You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/)
 using `pip`:
 
-    pip install clophfit
+```
+pip install clophfit
+```
 
 Alternatively, you can use [pipx](https://pypa.github.io/pipx/) to install it in
 an isolated environment:
 
-    pipx install clophfit
+```
+pipx install clophfit
+```
 
 To enable auto completion for the `clop` command, follow these steps:
 
-1.  Generate the completion script by running the following command:
+1. Generate the completion script by running the following command:
 
-        _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
+   ```
+   _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
+   ```
 
-2.  Source the generated completion script to enable auto completion:
+1. Source the generated completion script to enable auto completion:
 
-        source ~/.local/bin/clop-complete.bash
+   ```
+   source ~/.local/bin/clop-complete.bash
+   ```
 
 ## Usage
 
@@ -49,8 +57,10 @@ processing data.
 Extract and fit titrations from a list of Tecan files collected at various pH or
 chloride concentrations:
 
-    ppr -o prova2 --is-ph tecan list.pH --scheme ../scheme.txt --norm
-        --dil additions.pH --Klim 6.8,8.4
+```
+ppr -o prova2 --is-ph tecan list.pH --scheme ../scheme.txt --norm
+    --dil additions.pH --Klim 6.8,8.4
+```
 
 Use the --no-weight option to reproduce an older pr.tecan version.
 
@@ -58,22 +68,28 @@ Use the --no-weight option to reproduce an older pr.tecan version.
 
 Predict chloride dissociation constant K_d at a given pH:
 
-    clop eq1 --help
+```
+clop eq1 --help
+```
 
 #### prenspire
 
 Parser for EnSpire (PerkinElmer) file:
 
-    ppr -o folder enspire file.csv
+```
+ppr -o folder enspire file.csv
+```
 
 Destination folder (default: "./Meas-${version}") will contain for each Measurement:
 
-- a table (csv) in wide tabular form e.g. <lambda, A01, ..., H12>;
+- a table (csv) in wide tabular form e.g. \<lambda, A01, ..., H12>;
 - corresponding graphical (png) representation of spectra from all wells.
 
 By adding a note.csv file:
 
-    ppr -o folder enspire file.csv note.csv
+```
+ppr -o folder enspire file.csv note.csv
+```
 
 destination folder (default: "./Meas-${version}") will also contain:
 
@@ -83,22 +99,28 @@ destination folder (default: "./Meas-${version}") will also contain:
 
 #### note_to_csv
 
-    note_to_csv -t 37.0 -l "B E F" -o 37 NTT-G03-Cl_note
-    note_to_csv -t 20.0 -l "A C D" -o 20 NTT-G03-Cl_note
-    cat 20 37 > G03_Cl_note.csv
+```
+note_to_csv -t 37.0 -l "B E F" -o 37 NTT-G03-Cl_note
+note_to_csv -t 20.0 -l "A C D" -o 20 NTT-G03-Cl_note
+cat 20 37 > G03_Cl_note.csv
+```
 
 ### Python
 
 ClopHfit can be imported and used as a Python package. The following modules are
 available:
 
-    clophfit.prenspire - parser for EnSpire (PerkinElmer) files
-    clophfit.prtecan - perform fitting of pH titration or binding assay data
-    clophfit.binding - perform fitting of macromolecule binding assay data
+```
+clophfit.prenspire - parser for EnSpire (PerkinElmer) files
+clophfit.prtecan - perform fitting of pH titration or binding assay data
+clophfit.binding - perform fitting of macromolecule binding assay data
+```
 
 To use clophfit in your python:
 
-    from clophfit import prenspire, prtecan, binding
+```
+from clophfit import prenspire, prtecan, binding
+```
 
 ## Features
 
