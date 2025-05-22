@@ -1,0 +1,75 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:recommended",
+        ":dependencyDashboard"
+    ],
+    "prHourlyLimit": 0,
+    "prConcurrentLimit": 0,
+    "prFooter": " (#{{prNumber}})",
+    "automerge": false,
+    "rangeStrategy": "bump",
+    "commitMessagePrefix": "build(deps):",
+    "commitMessageAction": "bump",
+    "commitMessageTopic": "{{depName}}",
+    "commitMessageExtra": "from {{currentVersion}} to {{newVersion}}",
+    "labels": [
+        "dependencies"
+    ],
+    "pre-commit": {
+        "enabled": true,
+        "fileMatch": [
+            "^\\.pre-commit-config\\.yaml$"
+        ],
+        "commitMessagePrefix": "build(hooks):",
+        "groupName": "pre-commit hooks"
+    },
+    "packageRules": [
+        {
+            "matchPackageNames": [
+                "sphinx"
+            ],
+            "allowedVersions": "<8.2",
+            "rangeStrategy": "update-lockfile",
+            "enabled": false
+        },
+        {
+            "matchPackageNames": [
+                "sphinx-autodoc-typehints"
+            ],
+            "allowedVersions": "<3.2",
+            "rangeStrategy": "update-lockfile",
+            "enabled": false
+        },
+        {
+            "matchDepTypes": [
+                "project.optional-dependencies"
+            ],
+            "groupName": "optional dependencies",
+            "labels": [
+                "dependencies",
+                "optional"
+            ],
+            "commitMessagePrefix": "chore(dep):"
+        },
+        {
+            "matchManagers": [
+                "pre-commit"
+            ],
+            "labels": [
+                "dependencies",
+                "pre-commit"
+            ],
+            "commitMessagePrefix": "chore(hooks):"
+        },
+        {
+            "matchFiles": [
+                "pyproject.toml"
+            ],
+            "matchDepNames": [
+                "python"
+            ],
+            "enabled": false
+        }
+    ]
+}
