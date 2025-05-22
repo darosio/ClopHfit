@@ -71,12 +71,12 @@ tests = [
   "pandas-stubs>=2.2.3.250308",
   "pygments>=2.19.1", # color xdoctest
   "pytest>=8.3.5",
-  "types-click <=7.1.8",
-  "types-setuptools <=80.8.0.20250521",
-  "xdoctest <=1.2.0",
+  "types-click>=7.1.8",
+  "types-setuptools>=80.8.0.20250521",
+  "xdoctest>=1.2.0",
 ]
 hatch = [
-  "hatch>=1.14.1",
+  "hatch==1.14.1",
 ]
 
 
