@@ -3,9 +3,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [project]
-authors = [
-  {name = "daniele arosio", email = "daniele.arosio@cnr.it"}
-]
+authors = [{ name = "daniele arosio", email = "daniele.arosio@cnr.it" }]
 classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
@@ -16,32 +14,26 @@ classifiers = [
   "Programming Language :: Unix Shell",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
-  "Development Status :: 3 - Alpha"
+  "Development Status :: 3 - Alpha",
 ]
 dependencies = [
-  'arviz <= 0.21.0',
-  'click <= 8.2.1',
-  'corner <= 2.2.3',
-  'emcee <= 3.1.6',
-  'lmfit <= 1.3.3',
-  'matplotlib <= 3.10.3',
-  'openpyxl <= 3.1.5',
-  'pandas <= 2.2.3',
-  'pymc <= 5.22.0',  # pytensor will load numpy < 2
-  'scipy <= 1.15.3',
-  'seaborn <= 0.13.2',
-  'sympy <= 1.13.3',
-  'tqdm <= 4.67.1',
-  'xlrd <= 2.0.1'
+  "arviz>=0.21.0",
+  "click>=8.2.0",
+  "corner>=2.2.3",
+  "emcee>=3.1.6",
+  "lmfit>=1.3.3",
+  "matplotlib>=3.10.3",
+  "openpyxl>=3.1.5",
+  "pandas>=2.2.3",
+  "pymc>=5.22.0", # pytensor will load numpy < 2
+  "scipy>=1.15.3",
+  "seaborn>=0.13.2",
+  "sympy>=1.13.3",
+  "tqdm>=4.67.1",
+  "xlrd>=2.0.1",
 ]
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
-keywords = [
-  "svd",
-  "ClopHensor",
-  "data fitting",
-  "pH",
-  "macromolecule binding"
-]
+keywords = ["svd", "ClopHensor", "data fitting", "pH", "macromolecule binding"]
 license = "BSD-3-Clause"
 name = "clophfit"
 readme = "README.md"
@@ -50,34 +42,43 @@ version = "0.12.0"
 
 [project.optional-dependencies]
 dev = [
-  "commitizen <= 4.8.1",
-  "ipykernel",
-  "jupyter",
-  "jupyterlab",
-  "ruff <= 0.11.10",
-  "pre-commit <= 4.2.0",
-  "pylsp-mypy"
+  "git-cliff==2.8.0",
+  "mdformat==0.7.22",
+  "mdformat-gfm==0.4.1",
+  "pylsp-mypy==0.7.0",
+  "ruff==0.11.10",
+  "ruff-lsp==0.0.62",
 ]
 docs = [
-  "autodocsumm <= 0.2.14",
-  "nbsphinx <= 0.9.7",
-  "pydata-sphinx-theme <= 0.16.1",
-  "Sphinx <= 8.2.3",
-  "sphinx-click <= 6.0.0",
-  "sphinx_autodoc_typehints <= 3.1.0",
-  "sphinxcontrib-plantuml <= 0.30",
-  "graphviz"
+  "autodocsumm==0.2.14",
+  "graphviz==0.20.3",
+  "ipykernel==6.29.5",
+  "jupyter==1.1.1",
+  "nbsphinx==0.9.7",
+  "pydata-sphinx-theme==0.16.1",
+  "pygments==2.19.1",
+  "sphinx-autodoc-typehints<3.2", # TODO: wait nbsphinx
+  "sphinx-click==6.0.0",
+  "sphinx<8.2", # TODO: wait nbsphinx
+  "sphinxcontrib-plantuml==0.30",
+]
+lint = [
+  "pre-commit==4.2.0",
 ]
 tests = [
-  "Pygments <= 2.19.1",
-  "coverage[toml] <= 7.8.1",
-  "mypy <= 1.15.0",
-  "pandas-stubs <= 2.2.3.250308",
-  "pytest <= 8.3.5",
+  "coverage[toml]>=7.8.0",
+  "mypy>=1.15.0",
+  "pandas-stubs>=2.2.3.250308",
+  "pygments>=2.19.1", # color xdoctest
+  "pytest>=8.3.5",
   "types-click <= 7.1.8",
   "types-setuptools <= 80.8.0.20250521",
-  "xdoctest <= 1.2.0"
+  "xdoctest <= 1.2.0",
 ]
+hatch = [
+  "hatch>=1.14.1",
+]
+
 
 [project.scripts]
 "clop" = "clophfit.__main__:clop"
@@ -93,129 +94,90 @@ Documentation = "https://clophfit.readthedocs.io"
 "Github releases" = "https://github.com/darosio/ClopHfit/releases"
 Homepage = "https://github.com/darosio/ClopHfit"
 
-[tool.bandit]
-# skips = ["B101", "B603"]
-exclude_dirs = ["*/test_*.py"]
-
-[tool.commitizen]
-name = "cz_customize"
-tag_format = "v$version"
-version = "0.12.0"
-version_files = [
-  "pyproject.toml:version",
-  "docs/conf.py:release",
-  "README.md:Version"
-]
-
-[tool.commitizen.customize]
-bump_map = {"^.+!:" = "MAJOR", "BREAKING CHANGE" = "MAJOR", "feat" = "MINOR", "fix" = "PATCH", "perf" = "PATCH", "refactor" = "PATCH"}
-bump_pattern = "^(BREAKING CHANGE|feat|fix|perf|refactor)"
-change_type_map = {"feat" = "Feat", "fix" = "Fix", "docs" = "Docs", "build" = "Build", "style" = "Style", "refactor" = "Refactor", "perf" = "Perf", "test" = "Test", "ci" = "CI/CD"}
-change_type_order = ["BREAKING CHANGE", "Feat", "Fix", "Docs", "Style", "Perf", "Test", "Build", "CI/CD"]
-changelog_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci)?(\\(.*\\))?(!)?"
-commit_parser = "^(?P<change_type>feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\\((?P<scope>[^()\r\n]*)\\)|\\()?(?P<breaking>!)?:\\s(?P<message>.*)?"
-example = """fix(parser): correct minor typos in code\n
-see the issue for details on the typos fixed\n
-closes issue #12
-"""
-info_path = "cz_customize_info.txt"
-message_template = "{{change_type}}:{% if show_message %} {{message}}{% endif %}"
-schema = """
-<type>(<scope>): <subject>
-<BLANK LINE>
-<body>
-<BLANK LINE>
-(BREAKING CHANGE: )<footer>
-"""
-schema_pattern = "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|bump)(?:\\(([^()\r\n]*)\\)|\\()?(!)?:\\s(.*)?"
-
-[[tool.commitizen.customize.questions]]
-choices = [
-  {value = "feat", name = "feat: A new feature. Correlates with MINOR in SemVer"},
-  {value = "fix", name = "fix: A bug fix. Correlates with PATCH in SemVer"},
-  {value = "perf", name = "perf: A code change that improves performance. Correlates with PATCH in SemVer"},
-  {value = "docs", name = "docs: Documentation only changes"},
-  {value = "style", name = "style: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)"},
-  {value = "refactor", name = "refactor: A code change that neither fixes a bug nor adds a feature"},
-  {value = "test", name = "test: Adding missing or correcting existing tests"},
-  {value = "build", name = "build: Changes that update the build system, development tools or external dependencies"},
-  {value = "ci", name = "ci: Changes to our CI configuration files and scripts (example scopes: GitLabCI)"},
-  {value = "revert", name = "revert: Reverting to previous commit(s)."}
-]
-message = "Select the type of change you are committing"
-name = "change_type"
-type = "list"
-
-[[tool.commitizen.customize.questions]]
-message = "Body."
-name = "message"
-type = "input"
-
-[[tool.commitizen.customize.questions]]
-message = "Do you want to add body message in commit?"
-name = "show_message"
-type = "confirm"
+# version_files = [
+#   "pyproject.toml:version",
+#   "docs/conf.py:release",
+#   "README.md:Version"
+# ]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
-tests = ["tests", "*/tests"]
 
 [tool.coverage.report]
 # fail_under = 100
 exclude_lines = [
-  "pragma: no cover"
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
 ]
 show_missing = true
+skip_covered = true
 
 [tool.coverage.run]
 branch = true
 omit = ["*__init__.py", "*/old/*", "types.py"]
-source = ["clophfit", "tests"]
+source = ["clophfit"]
 
 [tool.hatch.envs.default]
-features = ["dev", "tests", "docs"]
+features = ["dev", "docs", "lint", "tests"] # separate docs and lint
 installer = "uv"
 path = ".venv"
-python = "3.12"  # Explicit default version
 
 [tool.hatch.envs.default.scripts]
-bump = [
-  "cz bump --major-version-zero -ch {args}",  # e.g. "--increment PATCH"
-  "hatch build",
-  "export TEST_PYPI_TOKEN=$(pass show cloud/test_pypi | head -n 1) && hatch publish -r test -u __token__ -a $TEST_PYPI_TOKEN"
-]
-ch = "cz ch --incremental --unreleased-version HEAD"
-clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__"
-docs = "sphinx-build docs docs/_build"
-docserve = "python -m http.server 8000 -d docs/_build"
-init = [
-  "pre-commit --version",
-  "pre-commit install",
-  "pre-commit install --hook-type commit-msg --hook-type pre-push"
-]
-lint = [
-  "pre-commit --version",
-  "pre-commit run --all-files --hook-stage=manual --show-diff-on-failure {args}"
-]
+ch = "git cliff --bump --unreleased --prepend CHANGELOG.md"
+bump = """
+NEXT_VERSION=$(git cliff --bumped-version)
+uv version $NEXT_VERSION
+uv sync --all-extras
+git add .
+git commit -m "chore: release $NEXT_VERSION"
+git tag $NEXT_VERSION
+git push
+git push --tags
+"""
+clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/nima/__pycache__"
+
+[tool.hatch.envs.docs]
+type = "virtual"
+features = ["docs"]
+installer = "uv"
+
+[tool.hatch.envs.docs.scripts]
+build = "sphinx-build docs docs/_build"
+serve = "python -m http.server 8000 -d docs/_build"
+
+[tool.hatch.envs.lint]
+type = "virtual"
+features = ["lint"]
+installer = "uv"
+
+[tool.hatch.envs.lint.scripts]
+init = "pre-commit install"
+lint = "pre-commit run --all-files --show-diff-on-failure {args}"
 
 [tool.hatch.envs.tests]
+type = "virtual"
 features = ["tests"]
 installer = "uv"
-template = "tests"
-
-[[tool.hatch.envs.tests.matrix]]
-python = ["3.12", "3.11", "3.10"]  # reverse order to ensure the presence in older python of module included in newer versions
+matrix = [{ python = ["3.13", "3.12", "3.11"] }]
+template = "tests" #built-in test template
 
 [tool.hatch.envs.tests.scripts]
 all = ["test", "type", "xdoc", "cov"]
-cov = [
-  "coverage combine",
-  "coverage report",
-  "coverage xml"
-]
+cov = ["coverage combine", "coverage report", "coverage xml"]
 test = "coverage run -p -m pytest -v"
 type = "mypy src tests docs/conf.py"
 xdoc = "python -m xdoctest clophfit all"
+
+[tool.isort]
+combine_as_imports = true
+force_single_line = false
+include_trailing_comma = true
+known_first_party = "nima"
+line_length = 88 # to match black's default line length
+multi_line_output = 3
+profile = "black"
 
 [tool.mypy]
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
@@ -229,32 +191,9 @@ strict = true
 warn_unreachable = true
 warn_unused_configs = true
 
+# TODO: check
 [tool.pydoclint]
 check-class-attributes = false
-
-[tool.pylint.format]
-ignore-long-lines = "^\\s*(# )?<?https?://\\S+>?$|# type: ignore|# noqa:"
-max-line-length = 88
-max-module-lines = 1600
-
-[tool.pylint.main]
-ignore-paths = ["src/clophfit/old"]
-jobs = 0
-py-version = "3.12"
-
-[tool.pylint.messages_control]
-disable = [
-  "invalid-name",
-  "design",
-  "fixme"
-]
-
-[tool.pylint.refactoring]
-# Maximum number of nested blocks for function / method body
-max-nested-blocks = 8  # default 5
-
-[tool.pylint.reports]
-output-format = "colorized"
 
 [tool.pylsp-mypy]
 dmypy = false
@@ -264,71 +203,77 @@ strict = true
 
 [tool.ruff]
 extend-exclude = ["src/clophfit/old/"]
+extend-include = ["*.ipynb"]
+fix = true
 force-exclude = true
 line-length = 88
-target-version = "py312"
+target-version = "py311"
+unsafe-fixes = true
+# Enable preview mode
+preview = false
 
 [tool.ruff.format]
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["ANN201", "E501", "ISC001"]
+ignore = ["ANN201", "E501", "ISC001", "T20", "INP", "G", "FBT", "PYI"]
 select = [
-  "A",  # builtins shadowing
-  "AIR",  # airflow
-  "ANN",  # typing annotation
-  "ARG",  # unused arguments
-  "B",  # bugbear
-  "BLE",  # blind-except
+  "A", # builtins
+  "AIR", # airflow
+  "ANN", # typing annotation
+  "ARG", # unused arguments
+  "ASYNC",
+  "B", # bugbear
+  "BLE", # blind-except
   "C",
-  "C4",  # comprehensions
-  "C90",  # mccabe
-  "D",  # pydocstyle
-  # "DOC",
-  "DTZ",  # dates
-  "E",  # pycodestyle
-  "EM",  # exceptions
-  "ERA",  # eradicate
-  "F",  # pyflakes
-  "FA",  # future annotations
-  # "FBT",  # boolean-trap
-  "FLY",  # flyntp
-  "FURB",  # refurbishing and modernizing
-  # "G",     # logging
-  "I",  # isort
-  "ICN",  # import conventions (opinionated)
-  # "INP",
-  "INT",
-  "ISC",  # implicit-str-concat
-  "LOG",  # logging
-  "N",  # pep8-naming
+  "C4", # comprehensions
+  "C90", # mccabe
+  "D", # pydocstyle
+  "DOC",
+  "DTZ", # dates
+  "E", # pycodestyle
+  "EM", # exceptions
+  "ERA", # eradicate
+  "EXE",
+  "F", # pyflakes
+  "FA", # future annotations
+  "FBT", # boolean-trap
+  "FLY", # flyntp
+  "FURB", # refurbishing and modernizing
+  "G", # logging
+  "I", # isort
+  "ICN", # import conventions (opinionated)
+  "INP", # inplict namespace
+  "INT", # gettext
+  "ISC", # implicit-str-concat
+  "LOG", # logging
+  "N", # pep8-naming
   "NPY",
-  "PD",  # pandas-vet
-  "PERF",  # performance anti pattern
-  "PGH",  # pygrep WAIT
-  # "PYI",
+  "PD", # pandas-vet
+  "PERF", # pperformance anti pattern
+  "PGH", # pygrep WAIT
   "PIE",
-  "PL",  # pylint see PLR2004...
-  "PT",  # pytest-style
-  "PTH",  # use-pathlib
-  "Q",  # quotes
-  "RET",  # Return
-  "RSE",  # Raise
-  "RUF",  # Ruff
-  "S",  # bandit XXX
-  "SIM",  # simplify
-  "SLF",  # private self
-  "SLOT",  # __slot__
-  "T10",  # debugger
-  # "T20",   # print
-  "TC",  # TYPE_CHECKING
-  # "TD",  # TODOs
-  # "FIX",  # no fixme
-  "TID",  # tidy-imports
-  "TRY",  # exceptions
-  "UP",  # pyupgrade
-  "W",  # pycodestyle
-  "YTT"  # 2020
+  "PL", # pylint see PLR2004...
+  "PT", # pytest-style
+  "PTH", # use-pathlib
+  "PYI", # lint typeshed
+  "Q", # quotes
+  "RET", # Return
+  "RSE", # Raise
+  "RUF", # Ruff
+  "S", # bandit
+  "SIM", # simplify
+  "SLF", # private self
+  "SLOT", # __slot__
+  "T10", # debugger
+  "T20", # print
+  "TC", # TYPE_CHECKING
+  "TCH", # TYPE_CHECKING
+  "TID", # tidy-imports
+  "TRY", # tryceratops
+  "UP", # pyupgrade
+  "W", # pycodestyle
+  "YTT", # 2020
 ]
 isort.combine-as-imports = true
 isort.force-single-line = false
@@ -353,16 +298,14 @@ mccabe.max-complexity = 12
   "PD901",
   "PLR0913",
   "PLR2004",
-  "SLF001"
+  "SLF001",
 ]
-"__init__.py" = ["I002"]  # don't need annotations
+"__init__.py" = ["I002"] # don't need annotations
+"docs/*" = ["INP"]
 "src/clophfit/__main__.py" = [
-  "ANN001"  # params are annotated using click
+  "ANN001", # params are annotated using click
 ]
-"tests/*" = [
-  "PLR2004",
-  "S101"
-]
+"tests/*" = ["PLR2004", "S101"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

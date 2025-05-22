@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build-publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for git cliff
+          fetch-tags: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.6"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+      - name: Install base and hatch
+        run: uv sync --locked --extra hatch
+      - name: Build and publish
+        run: |
+          uv run hatch build
+          uv run hatch publish --user=__token__ --auth=${{ secrets.PYPI_TOKEN }}
+      - name: Install git-cliff
+        uses: taiki-e/install-action@git-cliff
+      - name: Generate Release Notes
+        run: |
+          git cliff --latest -o RELEASE.md
+          tail -n +4 RELEASE.md > RELEASE_CLEANED.md
+          echo "Generated release notes for ${GITHUB_REF#refs/tags/}"
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          bodyFile: RELEASE_CLEANED.md

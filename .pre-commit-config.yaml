@@ -1,16 +1,15 @@
 exclude: ^src/clophfit/old/.
-ci:
-  autoupdate_commit_msg: "build(pre-commit): update hooks"
-  autofix_commit_msg: "style: pre-commit fixes"
-
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
 
 repos:
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: check-added-large-files
-        exclude: "^tests/EnSpire/"
+        exclude: "^tests/EnSpire/|uv.lock"
       - id: check-case-conflict
       - id: check-docstring-first
       - id: check-executables-have-shebangs
@@ -31,14 +30,33 @@ repos:
       - id: detect-private-key
       - id: trailing-whitespace
         exclude: "^tests/EnSpire/|^tests/data/tmp/"
+      - id: pretty-format-json
+        args: [--autofix, --indent, "4", --no-sort-keys]
+        exclude: \.ipynb$
 
-  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-    rev: v2.14.0
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.16.0
     hooks:
-      - id: pretty-format-ini
-        args: [--autofix]
-      - id: pretty-format-toml
-        args: [--autofix]
+      - id: yamlfmt
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+        exclude: CHANGELOG\.md$
+
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-format
+        # - id: taplo-lint
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.10
@@ -50,15 +68,6 @@ repos:
       - id: ruff-format
         types_or: [python, pyi, jupyter]
 
-  - repo: local
-    hooks:
-      - id: prettier
-        name: prettier (YAML, Markdown, JSON, etc.)
-        entry: npx prettier --write
-        language: node
-        types: [yaml, markdown, html, css, scss, javascript, json]
-        args: [--prose-wrap=preserve]
-
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.10.0
     hooks:
@@ -67,25 +76,13 @@ repos:
       - id: rst-directive-colons
       - id: rst-inline-touching-normal
 
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.3
-    hooks:
-      - id: bandit
-        args: ["-c", "pyproject.toml"]
-        additional_dependencies: ["bandit[toml]"]
-
-  - repo: https://github.com/DanielNoord/pydocstringformatter
-    rev: v0.7.3
-    hooks:
-      - id: pydocstringformatter
-
   - repo: https://github.com/jsh9/pydoclint
     rev: 0.6.7
     hooks:
       - id: pydoclint
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1
+    rev: v1.32.0
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
@@ -100,10 +97,15 @@ repos:
       - id: shellcheck
         args: [-x]
 
-  - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.7.2
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.7.6
     hooks:
-      - id: commitizen
-      - id: commitizen-branch
-        stages:
-          - pre-push
+      - id: uv-lock
+        stages: [pre-commit]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.2.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []

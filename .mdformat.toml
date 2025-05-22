@@ -1,0 +1,6 @@
+number = false # Prevent renumbering ordered lists
+extensions = [
+  "gfm", # Enable GitHub Flavored Markdown extensions
+]
+# Configure line wrapping (e.g., match your Apheleia arg --wrap "keep")
+wrap = "keep"
