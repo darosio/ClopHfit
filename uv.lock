@@ -453,7 +453,7 @@ tests = [
 requires-dist = [
     { name = "arviz", specifier = ">=0.21.0" },
     { name = "autodocsumm", marker = "extra == 'docs'", specifier = "==0.2.14" },
-    { name = "click", specifier = ">=8.2.0" },
+    { name = "click", specifier = ">=8.2.1" },
     { name = "corner", specifier = ">=2.2.3" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'tests'", specifier = ">=7.8.0" },
     { name = "emcee", specifier = ">=3.1.6" },
