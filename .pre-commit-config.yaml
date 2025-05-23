@@ -95,7 +95,7 @@ repos:
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
-        args: [-x]
+        args: [-x, --severity=style] # Show errors, warnings, info and style
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.7.7
