@@ -46,7 +46,7 @@ dev = [
   "mdformat==0.7.22",
   "mdformat-gfm==0.4.1",
   "pylsp-mypy==0.7.0",
-  "ruff==0.11.11",
+  "ruff==0.11.12",
   "ruff-lsp==0.0.62",
 ]
 docs = [
@@ -67,7 +67,7 @@ lint = [
 ]
 tests = [
   "coverage[toml]>=7.8.2",
-  "mypy>=1.15.0",
+  "mypy>=1.16.0",
   "pandas-stubs>=2.2.3.250527",
   "pygments>=2.19.1", # color xdoctest
   "pytest>=8.3.5",
