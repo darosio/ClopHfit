@@ -41,7 +41,7 @@ def test_fit_binding_glob() -> None:
     x = np.array([3.0, 5, 7, 9, 11.0])
     y = np.array([1.9991, 1.991, 1.5, 1.009, 1.0009])
     f_res = fit_binding_glob(Dataset({"default": DataArray(x, y)}, is_ph=True))
-    assert f_res is not None
+    assert f_res.result is not None
     result = f_res.result
     assert result.success is True
     assert np.isclose(result.params["K"].value, 7, 1e-5)
@@ -51,7 +51,7 @@ def test_fit_binding_glob() -> None:
     x = np.array([0, 5.0, 10, 40, 160, 1000])
     y = np.array([2.0, 1.33333333, 1.0, 0.4, 0.11764706, 0.01980198])
     f_res = fit_binding_glob(Dataset({"default": DataArray(x, y)}, is_ph=False))
-    assert f_res is not None
+    assert f_res.result is not None
     result = f_res.result
     assert result.success is True
     assert np.isclose(result.params["K"].value, 10, 1e-5)
