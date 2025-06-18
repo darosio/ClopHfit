@@ -450,6 +450,10 @@ class Labelblock:
         """Check if two Labelblocks are almost equal (same excitation and emission)."""
         return all(self.metadata[k] == other.metadata[k] for k in Labelblock._KEYS[:5])
 
+    def __hash__(self) -> int:
+        """Return a hash value based Labelblock metadata."""
+        return hash(self.metadata)
+
 
 @dataclass
 class Tecanfile:

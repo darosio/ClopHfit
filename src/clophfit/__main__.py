@@ -391,5 +391,5 @@ def note2csv(note: str, output: str, labels: str, temp: str) -> None:
         with output_path.open("a", encoding="utf-8") as f:
             writer = csv.writer(f, lineterminator="\n")
             for row in reader:
-                new_row = row[:4] + [temp, labels]
+                new_row = [*row[:4], temp, labels]
                 writer.writerow(new_row)
