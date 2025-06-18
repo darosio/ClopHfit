@@ -968,7 +968,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     n_samples: int = 2000,
 ) -> tuple[TitrationResults, arviz.data.inference_data.InferenceData]:
     """Analyze multiple titration datasets with shared parameters for controls."""
-    from clophfit.prtecan import TitrationResults
+    from clophfit.prtecan import TitrationResults  # noqa: PLC0415
 
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next((result.dataset for result in results.values() if result.dataset), None)
