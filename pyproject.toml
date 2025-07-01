@@ -314,3 +314,4 @@ convention = "numpy"
 [tool.typos.default.extend-words]
 arange = "arange"
 arosio = "Arosio"
+setp = "setp"
