@@ -85,7 +85,7 @@ def tecan(  # noqa: PLR0913
     title: str,
     fit: bool,
     png: bool,
-    mcmc: bool,
+    mcmc: str,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
