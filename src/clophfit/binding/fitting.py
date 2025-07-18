@@ -648,19 +648,26 @@ def outlier(
     return outliers
 
 
-def fit_binding_glob_reweighted(ds: Dataset, threshold: float = 2.05) -> FitResult:
+def fit_binding_glob_reweighted(
+    ds: Dataset, key: str, threshold: float = 2.05
+) -> FitResult:
     """RLS and outlier removal for multi-label titration datasets."""
     # Initial fit
     r = fit_binding_glob(ds)
     if r.dataset and r.result:
         start_idx = 0
-        for da0, da in zip(ds.values(), r.dataset.values(), strict=True):
+        for lbl, (da0, da) in enumerate(
+            zip(ds.values(), r.dataset.values(), strict=True), start=1
+        ):
             end_idx = start_idx + len(da.y)
             residual = r.result.residual[start_idx:end_idx]  # reduced residues
             da.y_errc[da.mask] = np.abs(residual) * da0.y_err
             mask = outlier_glob(residual, threshold=threshold)
-            if mask.any():
-                logger.info("Outlier(s) in well Label:.")
+            n_outliers = mask.tolist().count(True)
+            if n_outliers == 1:
+                logger.info(f"{n_outliers} outlier in {key}:y{lbl}.")
+            elif n_outliers > 1:
+                logger.info(f"{n_outliers} outliers in {key}:y{lbl}.")
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
