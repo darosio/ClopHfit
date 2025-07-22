@@ -11,6 +11,7 @@ from dataclasses import InitVar, dataclass, field
 from functools import cached_property, partial
 from pathlib import Path
 
+import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -22,13 +23,16 @@ from clophfit.binding.data import DataArray, Dataset
 from clophfit.binding.fitting import (
     FitResult,
     InsufficientDataError,
+    extract_fit,
     fit_binding_glob,
     fit_binding_glob_reweighted,
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
+    fit_binding_pymc_multi,
     format_estimate,
     weight_da,
     weight_multi_ds_titration,
+    x_true_from_trace_df,
 )
 from clophfit.binding.plotting import PlotParameters
 
@@ -750,7 +754,7 @@ class TitrationConfig:
     dil: bool = True
     nrm: bool = True
     bg_mth: str = "mean"
-    mcmc: bool = False
+    mcmc: str = "None"
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -1482,8 +1486,10 @@ class Titration(TecanfilesGroup):
             self.result_global,
             self.result_odr,
         ]
-        if self.params.mcmc:
+        if self.params.mcmc == "single":
             export_list.append(self.result_mcmc)
+        elif self.params.mcmc == "multi":
+            export_list.append(self.result_multi_mcmc)
         for i, results in enumerate(export_list):
             results.compute_all()
             fit = results.dataframe
@@ -1683,6 +1689,49 @@ class Titration(TecanfilesGroup):
         finally:
             logger.info(f"MCMC fitting completed for well: {key}")
         return result_pymc
+
+    @cached_property
+    def result_multi_trace(self) -> tuple[az.InferenceData, pd.DataFrame]:
+        """Perform global MCMC fitting and x_true."""
+        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        results = self.result_global.results
+        trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
+        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+
+        da_true = x_true_from_trace_df(trace_df)
+
+        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
+
+        pd.DataFrame(
+            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
+        ).to_csv("list_x_true.csv", index=False, header=False)
+
+        return trace, trace_df
+
+    @cached_property
+    def result_multi_mcmc(self) -> TitrationResults:
+        """Perform global MCMC fitting and x_true."""
+        return TitrationResults(
+            scheme=self.scheme,
+            fit_keys=self.fit_keys,
+            compute_func=partial(self._compute_multi_mcmc_fit),
+        )
+
+    def _compute_multi_mcmc_fit(self, key: str) -> FitResult:
+        """Compute individual dataset fit for a single key."""
+        ctr = self.get_scheme_name(key, self.scheme.names)
+        ds = self.result_global[key].dataset
+        if ds:
+            return extract_fit(key, ctr, self.result_multi_trace[1], ds)
+        return FitResult()
+
+    def get_scheme_name(self, key: str, scheme_map: dict[str, set[str]]) -> str:
+        """Extract ctr name."""
+        for scheme, keys in scheme_map.items():
+            if key in keys:
+                return scheme
+        return ""
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups."""

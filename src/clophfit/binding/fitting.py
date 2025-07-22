@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import typing
 from dataclasses import dataclass, field
-from functools import partial
 from sys import float_info
 
 import arviz
@@ -39,7 +38,7 @@ from clophfit.logging_config import setup_logger
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask, FloatFunc
-    from clophfit.prtecan import PlateScheme, TitrationResults
+    from clophfit.prtecan import PlateScheme
 
 
 N_BOOT = 20  # To compute fill_between uncertainty.
@@ -813,13 +812,15 @@ def process_trace(
             nx_errc.append(row["sd"])
     for da in ds.values():
         da.xc = np.array(nxc)  # Update x_true values in the dataset
-        da.x_errc = np.array(nx_errc) * n_xerr  # Scale the errors
+        da.x_errc = (
+            np.array(nx_errc) * n_xerr
+        )  # Scale the errors FIXME: n_xerr not needed
     # Extract magnitude for error scaling
     mag = rdf.loc["ye_mag", "mean"]  # type: ignore[index]
     mag = float(mag) if isinstance(mag, int | float) else 1.0
     for da in ds.values():
         da.y_errc *= mag  # Scale y errors by the magnitude
-    # Create diagnostic plots
+    # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     # FIXME: multi need this renaming quite surely
@@ -830,6 +831,54 @@ def process_trace(
 
     # Return the fit result
     return FitResult(fig, _Result(rpars), trace, ds)
+
+
+def extract_fit(key: str, ctr: str, trace_df: pd.DataFrame, ds: Dataset) -> FitResult:
+    """Compute individual dataset fit for a single key."""
+    rpars = Parameters()
+    rdf = trace_df[trace_df.index.str.endswith(key)]
+    for name, row in rdf.iterrows():
+        extracted_name = str(name).replace(f"_{key}", "")
+        rpars.add(
+            extracted_name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"]
+        )
+        rpars[extracted_name].stderr = row["sd"]
+        rpars[extracted_name].init_value = row["r_hat"]
+    if ctr:
+        rdf = trace_df[trace_df.index.str.endswith(ctr)]
+        for name, row in rdf.iterrows():
+            extracted_name = str(name).replace(f"_{ctr}", "")
+            rpars.add(
+                extracted_name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"]
+            )
+            rpars[extracted_name].stderr = row["sd"]
+            rpars[extracted_name].init_value = row["r_hat"]
+    # Process x_true and x_errc
+    nxc = []  # New x_true values
+    nx_errc = []  # New x_errc values
+    for name, row in trace_df.iterrows():
+        if isinstance(name, str) and name.startswith("x_true"):
+            nxc.append(row["mean"])
+            nx_errc.append(row["sd"])
+    for da in ds.values():
+        da.xc = np.array(nxc)
+        da.x_errc = np.array(nx_errc)
+    # Create figure
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+    return FitResult(fig, _Result(rpars), az.InferenceData(), ds)
+
+
+def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
+    """Extract x_true from a trace dataframe."""
+    nxc = []  # New x_true values
+    nx_errc = []  # New x_errc values
+    for name, row in trace_df.iterrows():
+        if isinstance(name, str) and name.startswith("x_true"):
+            nxc.append(row["mean"])
+            nx_errc.append(row["sd"])
+    return DataArray(xc=np.array(nxc), yc=np.ones_like(nxc), x_errc=np.array(nx_errc))
 
 
 def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
@@ -970,13 +1019,11 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     results: dict[str, FitResult],
     scheme: PlateScheme,
     n_sd: float = 5.0,
-    n_xerr: float = 5.0,
-    ye_scaling: float = 10.0,
+    n_xerr: float = 1.0,
+    ye_scaling: float = 1.0,
     n_samples: int = 2000,
-) -> tuple[TitrationResults, arviz.data.inference_data.InferenceData]:
+) -> arviz.data.inference_data.InferenceData:
     """Analyze multiple titration datasets with shared parameters for controls."""
-    from clophfit.prtecan import TitrationResults  # noqa: PLC0415
-
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next((result.dataset for result in results.values() if result.dataset), None)
     if ds is None:
@@ -1045,32 +1092,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
                     )
 
         trace: az.InferenceData = pm.sample(
-            n_samples, target_accept=0.9, cores=6, return_inferencedata=True
+            n_samples, target_accept=0.9, return_inferencedata=True
         )
 
-    # Extract results into FitResult objects
-    df_trace = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-
-    titration_results = TitrationResults(
-        scheme=scheme,
-        fit_keys=set(results.keys()),
-        compute_func=partial(extract_params, df_trace=df_trace),
-    )
-    titration_results.compute_all()
-    return titration_results, trace
-
-
-def extract_params(key: str, df_trace: pd.DataFrame) -> FitResult:
-    """Compute individual dataset fit for a single key."""
-    rdf = df_trace[df_trace.index.str.endswith(key)]
-    print(key, rdf)
-    rpars = Parameters()
-    for name, row in rdf.iterrows():
-        rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
-        rpars[name].stderr = row["sd"]
-        rpars[name].init_value = row["r_hat"]
-    print(name, rpars)
-    return FitResult(result=_Result(rpars))
+    return trace
 
 
 def weighted_stats(
