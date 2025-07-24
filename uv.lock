@@ -444,7 +444,7 @@ requires-dist = [
     { name = "pygments", marker = "extra == 'docs'", specifier = "==2.19.2" },
     { name = "pygments", marker = "extra == 'tests'", specifier = ">=2.19.2" },
     { name = "pylsp-mypy", marker = "extra == 'dev'", specifier = "==0.7.0" },
-    { name = "pymc", specifier = ">=5.25.0" },
+    { name = "pymc", specifier = ">=5.25.1" },
     { name = "pytest", marker = "extra == 'tests'", specifier = ">=8.4.1" },
     { name = "python-lsp-ruff", marker = "extra == 'dev'", specifier = "==2.2.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.12.4" },
@@ -2342,7 +2342,7 @@ wheels = [
 
 [[package]]
 name = "pymc"
-version = "5.25.0"
+version = "5.25.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arviz" },
@@ -2356,9 +2356,9 @@ dependencies = [
     { name = "threadpoolctl" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/d8/f678e21fb005cbb1424ed4d6d7a27488fbde695966ed1b9e38ab20aee438/pymc-5.25.0.tar.gz", hash = "sha256:ff1e454b3e1ff2e36c10513c07e0732cd86af62e020a3791ec8f68bcf95d878a", size = 487823, upload-time = "2025-07-22T20:22:17.989Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4d/f4/30ae01e539b7b1dc83578e1aedbc04567f76b48ba287fb31be6de0e0684d/pymc-5.25.1.tar.gz", hash = "sha256:9e739315c0547336b4c11127aae8b3750145b29cdd8e21609196594aa29c21f8", size = 487746, upload-time = "2025-07-24T11:57:04.107Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/f2/cd61e378cb45f5c6e46e80d4b672d16c9030a2151a1967f4848bc371213d/pymc-5.25.0-py3-none-any.whl", hash = "sha256:12a559c6411b4c8eff17603cb24d9360080107fecf580e8026a582ed6a785590", size = 535520, upload-time = "2025-07-22T20:22:16.446Z" },
+    { url = "https://files.pythonhosted.org/packages/00/62/1e973f657ffc91a0ca5a22723f3d7f4a3df946cb3832e23d8f29eb33647f/pymc-5.25.1-py3-none-any.whl", hash = "sha256:4e1185cf20052b9be44f2ac8705dc6c77ff7b8d347d920d5e28719d970d9fa15", size = 535526, upload-time = "2025-07-24T11:57:02.149Z" },
 ]
 
 [[package]]
