@@ -27,7 +27,7 @@ from clophfit.prtecan import (
 # By defining csvl, lb0, and lb1 as class attributes, they are created only once
 # per test session. Use fixture to capture UserWarning "OVER"
 
-data_tests = Path(__file__).parent / "Tecan"
+data_tests = Path(__file__).parent / "Tecan"  # Test data paths
 pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 
 

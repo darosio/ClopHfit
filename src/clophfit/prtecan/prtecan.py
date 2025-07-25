@@ -1370,6 +1370,7 @@ class Titration(TecanfilesGroup):
     # def _get_normalized_or_raw_data(self) -> list[dict[str, ArrayF]]:
     def _get_normalized_or_raw_data(self) -> dict[int, dict[str, ArrayF]]:
         """Fetch raw or normalized data, transforming into arrays."""
+        print("operating get nrm")
         if self.params.nrm:
             return {
                 label: {k: np.array(v) for k, v in lbg.data_nrm.items()}
@@ -1605,7 +1606,7 @@ class Titration(TecanfilesGroup):
     def _create_ds(self, key: str, label: int) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
-        ds = Dataset({"default": da}, is_ph=self.is_ph)
+        ds = Dataset({f"{label}": da}, is_ph=self.is_ph)
         # Apply weighting if bg_err is not provided
         if not self.bg_err:
             weight_da(da, ds.is_ph)
