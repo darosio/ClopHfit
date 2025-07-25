@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import typing
 from dataclasses import dataclass, field
 from sys import float_info
@@ -34,7 +35,7 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-from clophfit.logging_config import setup_logger
+from clophfit.clophfit_types import ArrayF
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask, FloatFunc
@@ -45,8 +46,7 @@ N_BOOT = 20  # To compute fill_between uncertainty.
 
 EMCEE_STEPS = 1800
 
-logger = setup_logger(__name__)
-logger.info("Plotting module started")
+logger = logging.getLogger(__name__)
 
 
 # fmt: off
@@ -664,9 +664,9 @@ def fit_binding_glob_reweighted(
             mask = outlier_glob(residual, threshold=threshold)
             n_outliers = mask.tolist().count(True)
             if n_outliers == 1:
-                logger.info(f"{n_outliers} outlier in {key}:y{lbl}.")
+                logger.warn(f"{n_outliers} outlier in {key}:y{lbl}.")
             elif n_outliers > 1:
-                logger.info(f"{n_outliers} outliers in {key}:y{lbl}.")
+                logger.warn(f"{n_outliers} outliers in {key}:y{lbl}.")
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)

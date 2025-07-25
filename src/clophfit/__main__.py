@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import logging
 import pprint
 from collections import namedtuple
 from pathlib import Path
@@ -15,7 +16,7 @@ import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
 
-from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding
+from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, configure_logging
 from clophfit.binding.data import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
@@ -101,6 +102,10 @@ def tecan(  # noqa: PLR0913
     Note: Buffer is always subtracted if scheme indicates buffer well positions.
     """
     out = ctx.obj.get("OUT", __tecan_out_dir__)
+    verbose = ctx.obj.get("VERBOSE", 0)
+    configure_logging(verbose=verbose, log_file="ppr_tecan_cli.log")
+    logger = logging.getLogger("clophfit.cli.ppr_tecan")
+    logger.debug("CLI started")
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
     out_fp.mkdir(parents=True, exist_ok=True)
     # Options validation.

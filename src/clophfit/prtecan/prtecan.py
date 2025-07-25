@@ -49,30 +49,7 @@ STD_MD_LINE_LENGTH = 2
 NUM_COLS_96WELL = 12
 ROW_NAMES = tuple("ABCDEFGH")
 
-
-# Redirect warnings to the logging system
-logging.captureWarnings(True)
-
-# Set up logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)  # Global log level for the logger
-# File handler (logs warnings and above, overwriting each time)
-file_handler = logging.FileHandler("tecan.log", mode="w")
-file_handler.setLevel(logging.INFO)
-# Console handler (logs warnings and above to console)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-# Formatter for both handlers
-formatter = logging.Formatter("%(levelname)s - %(message)s")
-file_handler.setFormatter(formatter)
-console_handler.setFormatter(formatter)
-# Attach handlers if not already added to prevent duplicates
-if not logger.hasHandlers():
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-
-# Set up warnings to show each RuntimeWarning only once
-warnings.simplefilter("once", RuntimeWarning)
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
