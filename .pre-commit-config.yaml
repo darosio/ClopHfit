@@ -21,15 +21,15 @@ repos:
       - id: check-toml
       - id: debug-statements
       - id: end-of-file-fixer
-        exclude: "^tests/EnSpire/"
+        exclude: "^tests/EnSpire/|^tests/Tecan/"
       - id: mixed-line-ending
-        exclude: "^tests/EnSpire/"
+        exclude: "^tests/EnSpire/|^tests/Tecan/"
       - id: name-tests-test
         args: [--pytest-test-first]
       - id: requirements-txt-fixer
       - id: detect-private-key
       - id: trailing-whitespace
-        exclude: "^tests/EnSpire/|^tests/data/tmp/"
+        exclude: "^tests/EnSpire/|^tests/data/tmp/|^tests/Tecan/"
       - id: pretty-format-json
         args: [--autofix, --indent, "4", --no-sort-keys]
         exclude: \.ipynb$
