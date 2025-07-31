@@ -1434,7 +1434,7 @@ class Titration(TecanfilesGroup):
     def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
         """Apply a combination of parameters to the Titration."""
         (bg, adj, dil, nrm), method = combination
-        print(f"Params are: ........... {(bg, adj, dil, nrm), method}")
+        logger.info(f"Params are: ........... {(bg, adj, dil, nrm), method}")
         self.params.bg = bg
         self.params.bg_adj = adj
         self.params.dil = dil

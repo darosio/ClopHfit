@@ -40,12 +40,14 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.group()
 @click.pass_context
 @click.version_option(message="%(version)s")
-@click.option("--verbose", "-v", count=True, help="Verbosity of messages.")
+@click.option("--verbose", "-v", count=True, help="Increase verbosity: -v for INFO, -vv for DEBUG. Default is WARNING.")  # fmt: skip
+@click.option("--quiet", "-q", is_flag=True, help="Silence terminal output; show only ERROR messages.")  # fmt: skip
 @click.option("--out", "-o", type=cPath(), help="Output folder.")
-def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
+def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: no cover
     """Parse Plate Reader `ppr` group command."""
     ctx.ensure_object(dict)
     ctx.obj["VERBOSE"] = verbose
+    ctx.obj["QUIET"] = quiet
     if out:
         ctx.obj["OUT"] = out
 
@@ -70,7 +72,7 @@ def ppr(ctx: Context, verbose: int, out: str) -> None:  # pragma: no cover
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
 @click.option("--mcmc",type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None",show_default=True,help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
-def tecan(  # noqa: PLR0913
+def tecan(  # noqa: PLR0913,PLR0915
     ctx: Context,
     list_file: str,
     cl: float,
@@ -103,7 +105,8 @@ def tecan(  # noqa: PLR0913
     """
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     verbose = ctx.obj.get("VERBOSE", 0)
-    configure_logging(verbose=verbose, log_file="ppr_tecan_cli.log")
+    quiet = ctx.obj.get("QUIET", 0)
+    configure_logging(verbose=verbose, quiet=quiet, log_file="ppr_tecan_cli.log")
     logger = logging.getLogger("clophfit.cli.ppr_tecan")
     logger.debug("CLI started")
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
@@ -126,8 +129,8 @@ def tecan(  # noqa: PLR0913
     tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png)
     # Load titration
     list_fp = Path(list_file)
-    click.secho(f"** File: {list_fp.resolve()}", fg="green")
-    click.echo(tecan_config)
+    logger.info(f"Titration list: {list_fp.resolve()}")
+    logger.info(f"{tecan_config}")
     tit = Titration.fromlistfile(list_fp, not cl)
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj
@@ -135,17 +138,20 @@ def tecan(  # noqa: PLR0913
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
     tit.params.mcmc = mcmc
-    click.echo(tit.params)
+    logger.info(f"{tit.params}")
     if add:
         tit.load_additions(Path(add))
+        logger.info(f"Additions: {tit.additions}")
     if cl and tit.additions:
         tit.x = calculate_conc(tit.additions, cl)
+        logger.info(f"{tit.x}")
     if sch:
         tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)
         f.savefig(out_fp / "buffer.png")
         f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
+        logger.info(f"{tit.scheme}")
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in tit.labelblocksgroups.values():
             pprint.pprint(lbg.metadata, stream=fp)

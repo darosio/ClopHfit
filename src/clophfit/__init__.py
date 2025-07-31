@@ -14,13 +14,17 @@ __enspire_out_dir__ = f"Meas-{__version__}"
 __tecan_out_dir__ = f"out-{__version__}"
 
 
-def configure_logging(verbose: int = 0, log_file: str = "") -> None:
+def configure_logging(
+    verbose: int = 0, quiet: bool = False, log_file: str = ""
+) -> None:
     """Centralized logging configuration for both library and CLI.
 
     Parameters
     ----------
     verbose : int
         Verbosity level (0=ERROR, 1=WARNING, 2=INFO, 3=DEBUG). Default 0.
+    quiet : bool
+        Silence terminal output; show only ERROR messages.
     log_file : str
         Path to log file. Default "clophfit.log".
     """
@@ -28,9 +32,7 @@ def configure_logging(verbose: int = 0, log_file: str = "") -> None:
         fmt="%(asctime)s [%(levelname)-8s] %(name)-20s : %(message)s",
         datefmt="%Y-%m-%d %H:%M",
     )
-    console_formatter = logging.Formatter(
-        fmt="[%(levelname)-8s] %(name)-20s : %(message)s"
-    )
+    console_formatter = logging.Formatter(fmt="[%(levelname)-8s]  %(message)s")
     # Map verbosity levels to logging levels
     level_mapping = {
         0: logging.ERROR,
@@ -39,7 +41,7 @@ def configure_logging(verbose: int = 0, log_file: str = "") -> None:
         3: logging.DEBUG,
     }
     # Get appropriate log level
-    verbosity = min(max(verbose, 0), 3)
+    verbosity = min(max(verbose + 1, 0), 3) if not quiet else 0
     log_level = level_mapping.get(verbosity, logging.ERROR)
     # Configure root logger
     root_logger = logging.getLogger()
