@@ -718,7 +718,7 @@ class TestTitrationAnalysis:
 
     def test_keys(self, titan: Titration) -> None:
         """It gets well positions for ctrl and unknown samples."""
-        assert set(titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
+        assert set(titan.scheme.names) == {"NTT", "GO3", "V224Q", "S202N"}
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
         assert set(titan.scheme.ctrl) - {"A01", "A12"} == x
 
