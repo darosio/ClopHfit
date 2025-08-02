@@ -936,6 +936,44 @@ def fit_binding_pymc(
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
+def fit_binding_pymc2(
+    fr: FitResult,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+) -> FitResult:
+    """Analyze multi-label titration datasets using pymc."""
+    if fr.result is None or fr.dataset is None:
+        return FitResult()
+    params = fr.result.params
+    ds = copy.deepcopy(fr.dataset)
+    xc = next(iter(ds.values())).xc  # # TODO: move up out
+    x_errc = next(iter(ds.values())).x_errc
+    with pm.Model() as _:
+        pars = create_parameter_priors(params, n_sd)
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # Add likelihoods for each dataset
+        ye_mag = {}
+        ye_mag["y1"] = pm.HalfNormal("ye_mag1", sigma=100)
+        ye_mag["y2"] = pm.HalfNormal("ye_mag2", sigma=10)
+        for lbl, da in ds.items():
+            y_model = binding_1site(
+                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+            )
+            pm.Normal(
+                f"y_likelihood_{lbl}",
+                mu=y_model[da.mask],
+                sigma=ye_mag[lbl] * np.ones_like(da.y_err),
+                observed=da.y,
+            )
+        # Inference
+        tune = n_samples // 2
+        trace = pm.sample(
+            n_samples, tune=tune, target_accept=0.9, cores=4, return_inferencedata=True
+        )
+    return process_trace(trace, params.keys(), ds, n_xerr)
+
+
 def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
     """Find the closest point on the model curve."""
 
