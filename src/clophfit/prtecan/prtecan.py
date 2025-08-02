@@ -29,6 +29,7 @@ from clophfit.binding.fitting import (
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     fit_binding_pymc_multi,
+    fit_binding_pymc_multi2,
     format_estimate,
     weight_da,
     weight_multi_ds_titration,
@@ -617,7 +618,7 @@ class TecanfilesGroup:
             msg = f"No common labelblocks in files: {[tf.path.name for tf in self.tecanfiles]}."
             raise ValueError(msg)
         logger.warning(
-            f"Different LabelblocksGroup across files: {[tf.path for tf in self.tecanfiles]}."
+            f"Different LabelblocksGroup across files: {[str(tf.path) for tf in self.tecanfiles]}."
         )
 
 
@@ -1676,15 +1677,28 @@ class Titration(TecanfilesGroup):
         results = self.result_global.results
         trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-
         da_true = x_true_from_trace_df(trace_df)
-
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-
         pd.DataFrame(
             {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
         ).to_csv("list_x_true.csv", index=False, header=False)
+        return trace, trace_df
 
+    @cached_property
+    def result_multi_trace2(self) -> tuple[az.InferenceData, pd.DataFrame]:
+        """Perform global MCMC fitting and x_true."""
+        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        results = self.result_global.results
+        trace = fit_binding_pymc_multi2(
+            results, self.scheme, self.buffer.bg_err, n_sd=n_sd
+        )
+        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        da_true = x_true_from_trace_df(trace_df)
+        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
+        pd.DataFrame(
+            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
+        ).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property

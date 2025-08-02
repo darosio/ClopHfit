@@ -18,6 +18,7 @@ import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
+from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy import odr, optimize  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
@@ -322,22 +323,21 @@ def fit_binding_glob(ds: Dataset) -> FitResult:
     return FitResult(fig, result, mini, copy.deepcopy(ds))
 
 
-# TODO: remove the print statements use logging
 def weight_da(da: DataArray, is_ph: bool) -> bool:
     """Assign weights to each label based on individual label fitting."""
-    failed = False
+    success = True
     ds = Dataset.from_da(da, is_ph=is_ph)
     params = _build_params_1site(ds)
+    # Too few data points (compared to number of parameters).
     if len(params) > len(da.y):
-        print("failed")
-        failed = True
+        success = False
         sem = 1.0 * np.ones_like(da.xc)
     else:
         res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
         # Calculate residuals SEM
         sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
     da.y_err = sem
-    return failed
+    return success
 
 
 def weight_multi_ds_titration(ds: Dataset) -> None:
@@ -1110,3 +1110,152 @@ def weighted_stats(
         weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
         results[sample] = (weighted_mean, weighted_stderr)
     return results
+
+
+# If you also have x_errc (uncertainty in pH measurement):
+# This would involve modeling `x_true` as a latent variable
+# And then using `x_true` in the `pred_y_signal` calculations above.
+
+
+def fit_binding_pymc_multi2(  # noqa: PLR0913
+    results: dict[str, FitResult],
+    scheme: PlateScheme,
+    bg_err: dict[int, ArrayF],
+    n_sd: float = 5.0,
+    n_xerr: float = 1.0,
+    # Ponder this: ye_scaling: float = 1.0, # This parameter is no longer needed in the same way
+    n_samples: int = 2000,
+) -> arviz.data.inference_data.InferenceData:
+    """Analyze multiple titration datasets with shared parameters for controls."""
+    ds_example = next(
+        (result.dataset for result in results.values() if result.dataset), None
+    )
+    ds = next((result.dataset for result in results.values() if result.dataset), None)
+
+    if ds_example is None:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
+    # Extract common data once
+    xc = next(iter(ds_example.values())).xc
+    x_errc = next(iter(ds_example.values())).x_errc * n_xerr
+    labels = list(ds_example.keys())  # e.g., ['y1', 'y2']
+    # --- Pre-calculate weighted stats for K priors (remains the same) ---
+    values = {}
+    stderr = {}
+    for name, wells in scheme.names.items():
+        values[name] = [
+            v.result.params["K"].value
+            for well, v in results.items()
+            if v.result
+            and well in wells  # and "K" in v.result.params._params # Check if K exists
+        ]
+        stderr[name] = [
+            v.result.params["K"].stderr
+            for well, v in results.items()
+            if v.result and well in wells  #  and "K" in v.result.params._params
+        ]
+    ctr_ks = weighted_stats(values, stderr)
+    logger.info(f"Weighted K stats for control groups: {ctr_ks}")
+
+    with pm.Model() as _:
+        # --- Common Priors / Variables for the entire model ---
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # Global scaling factors for the signal-dependent noise for each label (band)
+        # `sigma` prior for HalfNormal should be set considering the expected scale of your signal values.
+        # If your fluorescence values are thousands, a sigma of 10-100 might be reasonable for the scaling factor.
+        sigma_signal_scale = {}
+        for i, lbl in enumerate(labels, start=1):
+            # Dynamically determine the variable name based on the label, e.g., 'sigma_signal_scale_y1'
+            sigma_signal_scale[lbl] = pm.HalfNormal(
+                f"sigma_signal_scale_{lbl}", sigma=10.0
+            )  # TODO: Adjust sigma based on data scale
+            # --- Model the true buffer mean (as a latent variable) ---
+            true_buffer_mean = pm.Normal(
+                f"true_buffer_{lbl}",
+                mu=0,
+                sigma=bg_err[i],
+            )
+            variance_buffer_contrib = bg_err[i] ** 2
+
+        # Degrees of freedom for Student's T distribution (for robustness)
+        # Can be shared or per-label. Shared is often fine for similar data types.
+        # this was for student: nu_common = pm.Gamma("nu_common", alpha=2, beta=0.1)
+
+        # Create shared K parameters for each control group
+        k_params = {
+            control_name: pm.Normal(
+                f"K_{control_name}",
+                mu=ctr_ks[control_name][0],
+                # if ctr_ks[control_name][0] is not np.nan
+                # else 7.0,  # Handle case where no K values found
+                sigma=0.2,  # FIXME: consider using ctr_ks[control_name][1] for sigma
+                # TODO: sigma=ctr_ks[control_name][1] if ctr_ks[control_name][1] is not np.nan else 0.5, # Default sigma for K if no stderr
+            )
+            for control_name in scheme.names
+        }
+        print(k_params)
+        # --- Loop through each well (key) and its data ---
+        for key, r in results.items():
+            if r.result and r.dataset:
+                ds = r.dataset
+                # Determine if the well is associated with a control group
+                ctr_name = next(
+                    (name for name, wells in scheme.names.items() if key in wells), ""
+                )
+                # Parameters for S0, S1 (unique to each well and label)
+                # `create_parameter_priors` should return a dict of PyMC distributions for S0, S1 for this key/well
+                pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+                # Use shared K for control group wells or create a unique K otherwise
+                k_param_for_well = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]
+                # --- Loop through each fluorescence label (e.g., 'y1', 'y2') within the current well ---
+                for lbl, da in ds.items():
+                    # --- Predicted signal from the binding model ---
+                    y_model_signal = binding_1site(
+                        x_true,
+                        k_param_for_well,
+                        pars[f"S0_{lbl}_{key}"],
+                        pars[f"S1_{lbl}_{key}"],
+                        ds.is_ph,
+                    )
+                    # Predicted Total Fluorescence (Signal + Buffer) for the likelihood mu
+                    mu_total_pred = pm.Deterministic(
+                        f"mu_total_pred_{lbl}_{key}", y_model_signal + true_buffer_mean
+                    )
+                    # --- Model the Noise ---
+                    # A common model for fluorescence noise is that standard deviation scales with sqrt(mean)
+                    # or that variance scales linearly with mean (similar to Poisson, but continuous/scaled).
+                    # Let's use a simpler and common power-law for noise (SD = a * mu^b)
+                    # Here, we'll assume `b=0.5` (sqrt) and `a` is our `sigma_signal_scale`.
+                    # Calculate the variance for the signal component (excluding buffer noise)
+                    # Ensuring non-negativity for sqrt
+                    # Variance from signal itself (heteroscedastic: proportional to predicted signal mean)
+                    # Use pm_math.maximum to avoid issues with negative predicted signals for variance
+                    variance_signal_contrib = sigma_signal_scale[lbl] * pm_math.maximum(
+                        1e-6, y_model_signal
+                    )
+                    # Total variance is the sum of independent variances
+                    total_variance_obs = pm.Deterministic(
+                        f"total_variance_obs_{lbl}_{key}",
+                        variance_buffer_contrib + variance_signal_contrib,
+                    )
+                    # Total standard deviation for the likelihood
+                    sigma_obs = pm.Deterministic(
+                        f"sigma_obs_{lbl}_{key}", pm_math.sqrt(total_variance_obs)
+                    )
+                    # --- Likelihood ---
+                    # Use Student's T distribution for robustness against outliers
+                    # Apply mask to observed data and corresponding mu/sigma
+                    # This is the learned, heteroscedastic SD
+                    pm.Normal(
+                        f"y_likelihood_{lbl}_{key}",
+                        # this was for student: nu=nu_common,  # Use the shared nu_common
+                        mu=mu_total_pred[da.mask],
+                        sigma=sigma_obs[da.mask],
+                        observed=da.y,
+                    )
+
+        trace: az.InferenceData = pm.sample(
+            n_samples, target_accept=0.9, return_inferencedata=True
+        )
+
+    return trace
