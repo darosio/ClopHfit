@@ -20,7 +20,7 @@ from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-un
 from matplotlib import axes, figure
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
-from scipy import odr, optimize  # type: ignore[import-untyped]
+from scipy import odr, optimize, stats  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.data import DataArray, Dataset
@@ -310,13 +310,17 @@ class InsufficientDataError(Exception):
     """Raised to prevent fitting failure for too few data points."""
 
 
-def fit_binding_glob(ds: Dataset) -> FitResult:
+def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult:
     """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
         raise InsufficientDataError
-    mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
-    result = mini.minimize()
+    mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True)
+    if robust:
+        # Use Huber loss for robust fitting to reduce the influence of outliers
+        result = mini.minimize(method="least_squares", loss="huber")
+    else:
+        result = mini.minimize()
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, result.params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
@@ -333,9 +337,9 @@ def weight_da(da: DataArray, is_ph: bool) -> bool:
         success = False
         sem = 1.0 * np.ones_like(da.xc)
     else:
-        res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
+        mr = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
         # Calculate residuals SEM
-        sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
+        sem = np.std(mr.residual, ddof=1) / np.sqrt(len(mr.residual))
     da.y_err = sem
     return success
 
@@ -344,7 +348,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
     """Assign weights to each label based on individual label fitting."""
     failed_fit_labels = []
     for lbl, da in ds.items():
-        if weight_da(da, ds.is_ph):
+        if not weight_da(da, ds.is_ph):
             failed_fit_labels.append(lbl)
     if failed_fit_labels:
         max_yerr = -np.inf
@@ -647,6 +651,64 @@ def outlier(
     return outliers
 
 
+def outlier2(
+    ds: Dataset, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
+) -> FitResult:
+    """Remove outliers and reassign weights."""
+    # Re-weight dataset
+    fr = fit_binding_glob(ds, robust=True)
+    if not fr.result:
+        return FitResult()
+    weighted_residuals = fr.result.residual
+    weights = np.concatenate([1.0 / da.y_err for da in ds.values()])
+    residuals = weighted_residuals / weights
+    reweighted_ds = copy.deepcopy(ds)
+    start_idx = 0
+    for da in reweighted_ds.values():
+        end_idx = start_idx + len(da.y)
+        reduced_residual = fr.result.residual[start_idx:end_idx]
+        residual = np.abs(reduced_residual) * da.y_err
+        sigma = np.mean(np.abs(residual))
+        sigma = max(sigma, 1e-3)  # Avoid division by zero
+        da.y_errc = sigma * np.ones_like(da.xc)
+
+    # Find outliers
+    fr = fit_binding_glob(reweighted_ds, robust=True)
+    if not fr.result:
+        return FitResult()
+    weighted_residuals = fr.result.residual
+    weights = np.concatenate([1.0 / da.y_err for da in reweighted_ds.values()])
+    # Calculate the absolute residuals
+    residuals = weighted_residuals / weights
+    z_scores = stats.zscore(residuals)
+    if plot_z_scores:
+        plt.scatter(range(len(z_scores)), z_scores)
+        plt.axhline(y=threshold, color="r", linestyle="-")
+        plt.axhline(y=-threshold, color="r", linestyle="-")
+        plt.title("Z-scores")
+    mask = np.abs(z_scores) < threshold
+    n_outliers = mask.tolist().count(False)
+    if n_outliers > 0:
+        reweighted_ds.apply_mask(mask)
+        logger.warn(f"outlier in {key}: {mask.astype(int)}.")
+    return fit_binding_glob(reweighted_ds, robust=False)
+
+
+def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
+    """Update y_err from residuals mean."""
+    print("ciao")
+    updated_ds = copy.deepcopy(ds)
+    for i, da in enumerate(updated_ds.values()):
+        len_x = len(da.y)
+        label_residuals = residuals[i * len_x : (i + 1) * len_x]
+        # residuals not masked to reduce weight of dataset with outliers
+        sigma = np.mean(np.abs(label_residuals))
+        # Avoid division by zero if all residuals are 0
+        sigma = max(sigma, 1e-3)
+        da.y_err = np.full(da.y.shape, sigma)
+    return updated_ds
+
+
 def fit_binding_glob_reweighted(
     ds: Dataset, key: str, threshold: float = 2.05
 ) -> FitResult:
@@ -818,6 +880,7 @@ def process_trace(
     # Extract magnitude for error scaling
     mag = rdf.loc["ye_mag", "mean"]  # type: ignore[index]
     mag = float(mag) if isinstance(mag, int | float) else 1.0
+    # TODO: mag = 1
     for da in ds.values():
         da.y_errc *= mag  # Scale y errors by the magnitude
     # Create figure

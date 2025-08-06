@@ -25,12 +25,12 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     extract_fit,
     fit_binding_glob,
-    fit_binding_glob_reweighted,
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     fit_binding_pymc_multi,
     fit_binding_pymc_multi2,
     format_estimate,
+    outlier2,
     weight_da,
     weight_multi_ds_titration,
     x_true_from_trace_df,
@@ -1590,7 +1590,8 @@ class Titration(TecanfilesGroup):
         """Compute global fit for a single key."""
         try:
             ds = self._create_global_ds(key)
-            return fit_binding_glob_reweighted(ds, key)
+            # FIXME: return fit_binding_glob_reweighted(ds, key)
+            return outlier2(ds, key)
         except InsufficientDataError:
             logger.warning(f"Skipping global fit for well {key}.")
             return FitResult()
@@ -1598,11 +1599,14 @@ class Titration(TecanfilesGroup):
     def _create_data_array(self, key: str, label: int) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
-        return (
-            DataArray(self.x, y, x_errc=self.x_err, y_errc=self.bg_err[label])
-            if self.bg_err
-            else DataArray(self.x, y, x_errc=self.x_err)
-        )
+        alpha = 1
+        beta = 1
+        signal = np.maximum(1.0, alpha * y**beta)  # avoid Sqrt of negative values
+        if self.bg_err:
+            y_errc = np.sqrt(signal + self.bg_err[label] ** 2)
+        else:
+            y_errc = np.sqrt(signal)
+        return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def _create_ds(self, key: str, label: int) -> Dataset:
         """Create a dataset for the given key."""
