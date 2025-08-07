@@ -1037,6 +1037,96 @@ def fit_binding_pymc2(
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
+def fit_binding_pymc_compare(
+    fr: FitResult,
+    learn_separate_y_mag: bool = False,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+) -> az.InferenceData:
+    """
+    Fits a Bayesian binding model with two different noise models for comparison.
+
+    Parameters
+    ----------
+    fr : FitResult
+        The fit result from a previous run, providing initial parameters and dataset.
+    learn_separate_y_mag : bool
+        If True, learns a unique noise scaling factor for each dataset label.
+        If False, learns a single scaling factor for all pre-weighted data.
+    n_sd : float
+        Prior width for parameters in create_parameter_priors.
+    n_xerr : float
+        Scaling factor for x_errc in create_x_true.
+    n_samples : int
+        Number of MCMC samples to draw.
+
+    Returns
+    -------
+    az.InferenceData
+        The posterior samples from PyMC for the specified noise model.
+    """
+    if fr.result is None or fr.dataset is None:
+        raise ValueError("Input FitResult object must contain a result and a dataset.")
+
+    params = fr.result.params
+    ds = copy.deepcopy(fr.dataset)
+
+    # Use the first dataset's x values. Assumes all datasets have same x points.
+    xc = next(iter(ds.values())).xc
+    x_errc = next(iter(ds.values())).x_errc
+
+    with pm.Model() as model:
+        # Create priors for all parameters (K, S0_y1, S1_y1, etc.)
+        pars = create_parameter_priors(params, n_sd)
+
+        # Model the x-values with their uncertainties
+        x_true = create_x_true(xc, x_errc, n_xerr)
+
+        # ---------------------------------------------------------------------
+        # Core conditional logic for the noise model
+        if learn_separate_y_mag:
+            # Model 1: Learn a unique noise scaling factor for each label
+            # This is robust when you don't trust the initial y_err values
+            ye_mag = {}
+            print(ye_mag)
+            for lbl, da in ds.items():
+                print(da.y_err.mean())
+                ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean() / 10)
+                y_model = binding_1site(
+                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                )
+                pm.Normal(
+                    f"y_likelihood_{lbl}",
+                    mu=y_model[da.mask],
+                    sigma=ye_mag[lbl] * np.ones_like(da.y_err),
+                    # Noise is learned from scratch and shot noise model
+                    # * np.ones_like(da.y_err),# Noise is learned from scratch
+                    observed=da.y,
+                )
+        else:
+            # Model 2: Learn a single noise scaling factor for all data
+            # This is appropriate when you trust the relative y_err values
+            # ye_mag = pm.HalfNormal("ye_mag", sigma=10.0)
+            for lbl, da in ds.items():
+                y_model = binding_1site(
+                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                )
+                pm.Normal(
+                    f"y_likelihood_{lbl}",
+                    mu=y_model[da.mask],
+                    # sigma=ye_mag * da.y_err[da.mask],  # Apply a single scaling factor
+                    sigma=da.y_err,  # Apply a single scaling factor
+                    observed=da.y,
+                )
+        # ---------------------------------------------------------------------
+        # Run MCMC sampling
+        trace = pm.sample(
+            n_samples, cores=4, return_inferencedata=True, target_accept=0.9
+        )
+    return trace
+
+
 def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
     """Find the closest point on the model curve."""
 
