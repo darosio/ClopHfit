@@ -1037,8 +1037,9 @@ def fit_binding_pymc2(
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
-def fit_binding_pymc_compare(
+def fit_binding_pymc_compare(  # noqa: PLR0913
     fr: FitResult,
+    buffer_sd: dict[str, float],
     learn_separate_y_mag: bool = False,
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
@@ -1051,6 +1052,8 @@ def fit_binding_pymc_compare(
     ----------
     fr : FitResult
         The fit result from a previous run, providing initial parameters and dataset.
+    buffer_sd : dict[str, float]
+        bg_err
     learn_separate_y_mag : bool
         If True, learns a unique noise scaling factor for each dataset label.
         If False, learns a single scaling factor for all pre-weighted data.
@@ -1066,9 +1069,11 @@ def fit_binding_pymc_compare(
     az.InferenceData
         The posterior samples from PyMC for the specified noise model.
     """
+    """
     if fr.result is None or fr.dataset is None:
-        raise ValueError("Input FitResult object must contain a result and a dataset.")
-
+        msg = "Input FitResult object must contain a result and a dataset."
+        raise ValueError(msg)
+    """
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
 
@@ -1076,38 +1081,46 @@ def fit_binding_pymc_compare(
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
 
-    with pm.Model() as model:
+    with pm.Model():
         # Create priors for all parameters (K, S0_y1, S1_y1, etc.)
         pars = create_parameter_priors(params, n_sd)
-
         # Model the x-values with their uncertainties
         x_true = create_x_true(xc, x_errc, n_xerr)
-
         # ---------------------------------------------------------------------
         # Core conditional logic for the noise model
+
         if learn_separate_y_mag:
             # Model 1: Learn a unique noise scaling factor for each label
             # This is robust when you don't trust the initial y_err values
             ye_mag = {}
+            true_buffer = {}
             print(ye_mag)
             for lbl, da in ds.items():
                 print(da.y_err.mean())
-                ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean() / 10)
+                ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean())
                 y_model = binding_1site(
                     x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
                 )
+                true_buffer[lbl] = pm.Normal(
+                    f"true_buffer_{lbl}", mu=0, sigma=da.y_err.mean()
+                )
+                sigma = 10 * pm.math.sqrt(
+                    (ye_mag[lbl] * np.ones_like(da.y_err)) ** 2 + buffer_sd[lbl] ** 2
+                    # Alternatively use: ye_mag[lbl] ** 2 * da.y + buffer_sd[lbl] ** 2
+                )
+
                 pm.Normal(
                     f"y_likelihood_{lbl}",
-                    mu=y_model[da.mask],
-                    sigma=ye_mag[lbl] * np.ones_like(da.y_err),
+                    mu=y_model[da.mask] + true_buffer[lbl],
+                    sigma=sigma,
                     # Noise is learned from scratch and shot noise model
-                    # * np.ones_like(da.y_err),# Noise is learned from scratch
+                    # Alternatively use: * np.ones_like(da.y_err),# Noise is learned from scratch
                     observed=da.y,
                 )
         else:
             # Model 2: Learn a single noise scaling factor for all data
             # This is appropriate when you trust the relative y_err values
-            # ye_mag = pm.HalfNormal("ye_mag", sigma=10.0)
+            ye_mag0 = pm.HalfNormal("ye_mag", sigma=10.0)
             for lbl, da in ds.items():
                 y_model = binding_1site(
                     x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
@@ -1115,13 +1128,13 @@ def fit_binding_pymc_compare(
                 pm.Normal(
                     f"y_likelihood_{lbl}",
                     mu=y_model[da.mask],
-                    # sigma=ye_mag * da.y_err[da.mask],  # Apply a single scaling factor
-                    sigma=da.y_err,  # Apply a single scaling factor
+                    sigma=ye_mag0 * da.y_err,  # Apply a single scaling factor
+                    # Alternatively use:  sigma=da.y_err,  # Apply a single scaling factor
                     observed=da.y,
                 )
         # ---------------------------------------------------------------------
         # Run MCMC sampling
-        trace = pm.sample(
+        trace: az.InferenceData = pm.sample(
             n_samples, cores=4, return_inferencedata=True, target_accept=0.9
         )
     return trace
@@ -1289,10 +1302,13 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     return trace
 
 
+# ------------------------------------------------------------------
+# Helper: weighted statistics
+# ------------------------------------------------------------------
 def weighted_stats(
     values: dict[str, list[float]], stderr: dict[str, list[float]]
 ) -> dict[str, tuple[float, float]]:
-    """Weighted average."""
+    """Return weighted mean ± sigma."""
     results = {}
     for sample in values:  # noqa:PLC0206
         x = np.array(values[sample])
@@ -1301,11 +1317,6 @@ def weighted_stats(
         weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
         results[sample] = (weighted_mean, weighted_stderr)
     return results
-
-
-# If you also have x_errc (uncertainty in pH measurement):
-# This would involve modeling `x_true` as a latent variable
-# And then using `x_true` in the `pred_y_signal` calculations above.
 
 
 def fit_binding_pymc_multi2(  # noqa: PLR0913
@@ -1450,3 +1461,102 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913
         )
 
     return trace
+
+
+# ------------------------------------------------------------------
+# 2.3  Posterior-predictive helper - visualise one well at a time
+# ------------------------------------------------------------------
+def plot_ppc_well(
+    trace: az.InferenceData,
+    key: str,
+    labels: list[str] | None = None,
+    figsize: tuple[float, float] = (8, 4),
+) -> figure.Figure:
+    """Draw posterior predictive samples for a particular well (and all its labels).
+
+    The returned figure can be displayed with matplotlib.
+
+    Parameters
+    ----------
+    trace   : az.InferenceData
+        Trace produced by ``fit_binding_pymc_advanced``.
+    key     : str
+        Well identifier (e.g. 'A01').
+    labels  : list[str] | None
+        Names of the bands to show.  If *None* the function will
+        automatically look for all variables starting with
+        ``'y_'`` that contain this key.
+    figsize: tuple[float, float]
+        size?
+
+    Return
+    ------
+    figure.Figure
+        Plot
+    """
+    if labels is None:
+        labels = [
+            var.split("_")[1]
+            for var in trace.posterior.data_vars
+            if f"{key}" in var and var.startswith("y_")
+        ]
+
+    fig, axes = plt.subplots(
+        len(labels), 1, figsize=(figsize[0], figsize[1] * len(labels)), sharex=True
+    )
+    if len(labels) == 1:
+        axes = [axes]
+
+    for ax, lbl in zip(axes, labels, strict=True):
+        var_name = f"y_{lbl}_{key}"
+        az.plot_ppc(  # type: ignore[no-untyped-call]
+            az.from_dict(
+                {"posterior_predictive": trace.posterior_predictive[var_name]},
+                coords={"y": [lbl]},
+                dims={"y": 0},
+            ),
+            ax=ax,
+        )
+        ax.set_title(f"Well {key} - band {lbl}")
+        ax.set_xlabel("Observed y")
+        ax.set_ylabel("Posterior predictive")
+
+    plt.tight_layout()
+    return fig
+
+
+# ------------------------------------------------------------------
+# 2.4  Comparison of posteriors with deterministic fits
+# ------------------------------------------------------------------
+def compare_posteriors(trace: az.InferenceData, results: dict[str, FitResult]) -> None:
+    """Print posterior mean ± 95 % C.I.
+
+    For the K parameter for each well, and juxtapose it with the deterministic K
+    (from fit_binding_pymc).
+
+    Parameters
+    ----------
+    trace   : az.InferenceData
+        Output of ``fit_binding_pymc_advanced``.
+    results : dict[str, FitResult]
+        Deterministic fits produced by the old pipeline.
+    """
+    # Summarise the trace
+    summary = az.summary(trace, var_names=["K_*"], round_to=3)
+    print("\nPosterior for K (averaged over all draws)")
+    print(summary[["mean", "hdi_2.5%", "hdi_97.5%"]])
+
+    # Add deterministic K to the table for easy comparison
+    deterministic = {}
+    for k, fr in results.items():
+        if fr.result and "K" in fr.result.params:
+            deterministic[k] = fr.result.params["K"].value
+
+    print("\nDeterministic K  (fit_binding_pymc)")
+    for k, v in deterministic.items():
+        print(f"  {k:6s}  {v:0.3f}")
+
+    # Align rows
+    table = summary.join(pd.Series(deterministic, name="deterministic_K"))
+    print("\nCombined table")
+    print(table[["mean", "hdi_2.5%", "hdi_97.5%", "deterministic_K"]])
