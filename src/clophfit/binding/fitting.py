@@ -18,8 +18,9 @@ import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import axes, figure
+from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
-from scipy import odr, optimize  # type: ignore[import-untyped]
+from scipy import odr, optimize, stats  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.binding.data import DataArray, Dataset
@@ -309,42 +310,45 @@ class InsufficientDataError(Exception):
     """Raised to prevent fitting failure for too few data points."""
 
 
-def fit_binding_glob(ds: Dataset) -> FitResult:
+def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult:
     """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
         raise InsufficientDataError
-    mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,))
-    result = mini.minimize()
+    mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True)
+    if robust:
+        # Use Huber loss for robust fitting to reduce the influence of outliers
+        result = mini.minimize(method="least_squares", loss="huber")
+    else:
+        result = mini.minimize()
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, result.params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     return FitResult(fig, result, mini, copy.deepcopy(ds))
 
 
-# TODO: remove the print statements use logging
 def weight_da(da: DataArray, is_ph: bool) -> bool:
     """Assign weights to each label based on individual label fitting."""
-    failed = False
+    success = True
     ds = Dataset.from_da(da, is_ph=is_ph)
     params = _build_params_1site(ds)
+    # Too few data points (compared to number of parameters).
     if len(params) > len(da.y):
-        print("failed")
-        failed = True
+        success = False
         sem = 1.0 * np.ones_like(da.xc)
     else:
-        res = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
+        mr = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
         # Calculate residuals SEM
-        sem = np.std(res.residual, ddof=1) / np.sqrt(len(res.residual))
+        sem = np.std(mr.residual, ddof=1) / np.sqrt(len(mr.residual))
     da.y_err = sem
-    return failed
+    return success
 
 
 def weight_multi_ds_titration(ds: Dataset) -> None:
     """Assign weights to each label based on individual label fitting."""
     failed_fit_labels = []
     for lbl, da in ds.items():
-        if weight_da(da, ds.is_ph):
+        if not weight_da(da, ds.is_ph):
             failed_fit_labels.append(lbl)
     if failed_fit_labels:
         max_yerr = -np.inf
@@ -384,7 +388,8 @@ def analyze_spectra_glob(
         svd, gsvd = None, None
     if len(labels_bands) > 1:
         ds_bands = ds.copy(labels_bands)
-        weight_multi_ds_titration(ds)
+        # FIX: Weight the dataset we are about to fit
+        weight_multi_ds_titration(ds_bands)
         f_res = fit_binding_glob(ds_bands)
         fig = _plot_spectra_glob_emcee(titration, ds_bands, f_res, dbands)
         bands = FitResult(fig, f_res.result, f_res.mini)
@@ -647,6 +652,64 @@ def outlier(
     return outliers
 
 
+def outlier2(
+    ds: Dataset, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
+) -> FitResult:
+    """Remove outliers and reassign weights."""
+    # Re-weight dataset
+    fr = fit_binding_glob(ds, robust=True)
+    if not fr.result:
+        return FitResult()
+    weighted_residuals = fr.result.residual
+    weights = np.concatenate([1.0 / da.y_err for da in ds.values()])
+    residuals = weighted_residuals / weights
+    reweighted_ds = copy.deepcopy(ds)
+    start_idx = 0
+    for da in reweighted_ds.values():
+        end_idx = start_idx + len(da.y)
+        reduced_residual = fr.result.residual[start_idx:end_idx]
+        residual = np.abs(reduced_residual) * da.y_err
+        sigma = np.mean(np.abs(residual))
+        sigma = max(sigma, 1e-3)  # Avoid division by zero
+        da.y_errc = sigma * np.ones_like(da.xc)
+
+    # Find outliers
+    fr = fit_binding_glob(reweighted_ds, robust=True)
+    if not fr.result:
+        return FitResult()
+    weighted_residuals = fr.result.residual
+    weights = np.concatenate([1.0 / da.y_err for da in reweighted_ds.values()])
+    # Calculate the absolute residuals
+    residuals = weighted_residuals / weights
+    z_scores = stats.zscore(residuals)
+    if plot_z_scores:
+        plt.scatter(range(len(z_scores)), z_scores)
+        plt.axhline(y=threshold, color="r", linestyle="-")
+        plt.axhline(y=-threshold, color="r", linestyle="-")
+        plt.title("Z-scores")
+    mask = np.abs(z_scores) < threshold
+    n_outliers = mask.tolist().count(False)
+    if n_outliers > 0:
+        reweighted_ds.apply_mask(mask)
+        logger.warning(f"outlier in {key}: {mask.astype(int)}.")
+    return fit_binding_glob(reweighted_ds, robust=False)
+
+
+def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
+    """Update y_err from residuals mean."""
+    print("ciao")
+    updated_ds = copy.deepcopy(ds)
+    for i, da in enumerate(updated_ds.values()):
+        len_x = len(da.y)
+        label_residuals = residuals[i * len_x : (i + 1) * len_x]
+        # residuals not masked to reduce weight of dataset with outliers
+        sigma = np.mean(np.abs(label_residuals))
+        # Avoid division by zero if all residuals are 0
+        sigma = max(sigma, 1e-3)
+        da.y_err = np.full(da.y.shape, sigma)
+    return updated_ds
+
+
 def fit_binding_glob_reweighted(
     ds: Dataset, key: str, threshold: float = 2.05
 ) -> FitResult:
@@ -664,9 +727,9 @@ def fit_binding_glob_reweighted(
             mask = outlier_glob(residual, threshold=threshold)
             n_outliers = mask.tolist().count(True)
             if n_outliers == 1:
-                logger.warn(f"{n_outliers} outlier in {key}:y{lbl}.")
+                logger.warning(f"{n_outliers} outlier in {key}:y{lbl}.")
             elif n_outliers > 1:
-                logger.warn(f"{n_outliers} outliers in {key}:y{lbl}.")
+                logger.warning(f"{n_outliers} outliers in {key}:y{lbl}.")
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
@@ -818,6 +881,7 @@ def process_trace(
     # Extract magnitude for error scaling
     mag = rdf.loc["ye_mag", "mean"]  # type: ignore[index]
     mag = float(mag) if isinstance(mag, int | float) else 1.0
+    # TODO: mag = 1
     for da in ds.values():
         da.y_errc *= mag  # Scale y errors by the magnitude
     # Create figure
@@ -934,6 +998,149 @@ def fit_binding_pymc(
             n_samples, tune=tune, target_accept=0.9, cores=4, return_inferencedata=True
         )
     return process_trace(trace, params.keys(), ds, n_xerr)
+
+
+def fit_binding_pymc2(
+    fr: FitResult,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+) -> FitResult:
+    """Analyze multi-label titration datasets using pymc."""
+    if fr.result is None or fr.dataset is None:
+        return FitResult()
+    params = fr.result.params
+    ds = copy.deepcopy(fr.dataset)
+    xc = next(iter(ds.values())).xc  # # TODO: move up out
+    x_errc = next(iter(ds.values())).x_errc
+    with pm.Model() as _:
+        pars = create_parameter_priors(params, n_sd)
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # Add likelihoods for each dataset
+        ye_mag = {}
+        ye_mag["y1"] = pm.HalfNormal("ye_mag1", sigma=100)
+        ye_mag["y2"] = pm.HalfNormal("ye_mag2", sigma=10)
+        for lbl, da in ds.items():
+            y_model = binding_1site(
+                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+            )
+            pm.Normal(
+                f"y_likelihood_{lbl}",
+                mu=y_model[da.mask],
+                sigma=ye_mag[lbl] * np.ones_like(da.y_err),
+                observed=da.y,
+            )
+        # Inference
+        tune = n_samples // 2
+        trace = pm.sample(
+            n_samples, tune=tune, target_accept=0.9, cores=4, return_inferencedata=True
+        )
+    return process_trace(trace, params.keys(), ds, n_xerr)
+
+
+def fit_binding_pymc_compare(  # noqa: PLR0913
+    fr: FitResult,
+    buffer_sd: dict[str, float],
+    learn_separate_y_mag: bool = False,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+) -> az.InferenceData:
+    """
+    Fits a Bayesian binding model with two different noise models for comparison.
+
+    Parameters
+    ----------
+    fr : FitResult
+        The fit result from a previous run, providing initial parameters and dataset.
+    buffer_sd : dict[str, float]
+        bg_err
+    learn_separate_y_mag : bool
+        If True, learns a unique noise scaling factor for each dataset label.
+        If False, learns a single scaling factor for all pre-weighted data.
+    n_sd : float
+        Prior width for parameters in create_parameter_priors.
+    n_xerr : float
+        Scaling factor for x_errc in create_x_true.
+    n_samples : int
+        Number of MCMC samples to draw.
+
+    Returns
+    -------
+    az.InferenceData
+        The posterior samples from PyMC for the specified noise model.
+    """
+    """
+    if fr.result is None or fr.dataset is None:
+        msg = "Input FitResult object must contain a result and a dataset."
+        raise ValueError(msg)
+    """
+    if fr.result:
+        params = fr.result.params
+    if fr.dataset:
+        ds = copy.deepcopy(fr.dataset)
+
+    # Use the first dataset's x values. Assumes all datasets have same x points.
+    xc = next(iter(ds.values())).xc
+    x_errc = next(iter(ds.values())).x_errc
+
+    with pm.Model():
+        # Create priors for all parameters (K, S0_y1, S1_y1, etc.)
+        pars = create_parameter_priors(params, n_sd)
+        # Model the x-values with their uncertainties
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # ---------------------------------------------------------------------
+        # Core conditional logic for the noise model
+
+        if learn_separate_y_mag:
+            # Model 1: Learn a unique noise scaling factor for each label
+            # This is robust when you don't trust the initial y_err values
+            ye_mag: dict[str | int, float] = {}
+            true_buffer = {}
+            print(ye_mag)
+            for lbl, da in ds.items():
+                print(da.y_err.mean())
+                ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean())
+                y_model = binding_1site(
+                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                )
+                true_buffer[lbl] = pm.Normal(
+                    f"true_buffer_{lbl}", mu=0, sigma=da.y_err.mean()
+                )
+                sigma = 10 * pm.math.sqrt(
+                    (ye_mag[lbl] * np.ones_like(da.y_err)) ** 2 + buffer_sd[lbl] ** 2
+                    # Alternatively use: ye_mag[lbl] ** 2 * da.y + buffer_sd[lbl] ** 2
+                )
+
+                pm.Normal(
+                    f"y_likelihood_{lbl}",
+                    mu=y_model[da.mask] + true_buffer[lbl],
+                    sigma=sigma,
+                    # Noise is learned from scratch and shot noise model
+                    # Alternatively use: * np.ones_like(da.y_err),# Noise is learned from scratch
+                    observed=da.y,
+                )
+        else:
+            # Model 2: Learn a single noise scaling factor for all data
+            # This is appropriate when you trust the relative y_err values
+            ye_mag0 = pm.HalfNormal("ye_mag", sigma=10.0)
+            for lbl, da in ds.items():
+                y_model = binding_1site(
+                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                )
+                pm.Normal(
+                    f"y_likelihood_{lbl}",
+                    mu=y_model[da.mask],
+                    sigma=ye_mag0 * da.y_err,  # Apply a single scaling factor
+                    # Alternatively use:  sigma=da.y_err,  # Apply a single scaling factor
+                    observed=da.y,
+                )
+        # ---------------------------------------------------------------------
+        # Run MCMC sampling
+        trace: az.InferenceData = pm.sample(
+            n_samples, cores=4, return_inferencedata=True, target_accept=0.9
+        )
+    return trace
 
 
 def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
@@ -1098,10 +1305,13 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     return trace
 
 
+# ------------------------------------------------------------------
+# Helper: weighted statistics
+# ------------------------------------------------------------------
 def weighted_stats(
     values: dict[str, list[float]], stderr: dict[str, list[float]]
 ) -> dict[str, tuple[float, float]]:
-    """Weighted average."""
+    """Return weighted mean ± sigma."""
     results = {}
     for sample in values:  # noqa:PLC0206
         x = np.array(values[sample])
@@ -1110,3 +1320,246 @@ def weighted_stats(
         weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
         results[sample] = (weighted_mean, weighted_stderr)
     return results
+
+
+def fit_binding_pymc_multi2(  # noqa: PLR0913
+    results: dict[str, FitResult],
+    scheme: PlateScheme,
+    bg_err: dict[int, ArrayF],
+    n_sd: float = 5.0,
+    n_xerr: float = 1.0,
+    # Ponder this: ye_scaling: float = 1.0, # This parameter is no longer needed in the same way
+    n_samples: int = 2000,
+) -> arviz.data.inference_data.InferenceData:
+    """Analyze multiple titration datasets with shared parameters for controls."""
+    ds_example = next(
+        (result.dataset for result in results.values() if result.dataset), None
+    )
+    ds = next((result.dataset for result in results.values() if result.dataset), None)
+
+    if ds_example is None:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
+    # Extract common data once
+    xc = next(iter(ds_example.values())).xc
+    x_errc = next(iter(ds_example.values())).x_errc * n_xerr
+    labels = list(ds_example.keys())  # e.g., ['y1', 'y2']
+    # --- Pre-calculate weighted stats for K priors (remains the same) ---
+    values = {}
+    stderr = {}
+    for name, wells in scheme.names.items():
+        values[name] = [
+            v.result.params["K"].value
+            for well, v in results.items()
+            if v.result
+            and well in wells  # and "K" in v.result.params._params # Check if K exists
+        ]
+        stderr[name] = [
+            v.result.params["K"].stderr
+            for well, v in results.items()
+            if v.result and well in wells  #  and "K" in v.result.params._params
+        ]
+    ctr_ks = weighted_stats(values, stderr)
+    logger.info(f"Weighted K stats for control groups: {ctr_ks}")
+
+    with pm.Model() as _:
+        # --- Common Priors / Variables for the entire model ---
+        x_true = create_x_true(xc, x_errc, n_xerr)
+        # Global scaling factors for the signal-dependent noise for each label (band)
+        # `sigma` prior for HalfNormal should be set considering the expected scale of your signal values.
+        # If your fluorescence values are thousands, a sigma of 10-100 might be reasonable for the scaling factor.
+        sigma_signal_scale = {}
+        for i, lbl in enumerate(labels, start=1):
+            # Dynamically determine the variable name based on the label, e.g., 'sigma_signal_scale_y1'
+            sigma_signal_scale[lbl] = pm.HalfNormal(
+                f"sigma_signal_scale_{lbl}", sigma=10.0
+            )  # TODO: Adjust sigma based on data scale
+            # --- Model the true buffer mean (as a latent variable) ---
+            true_buffer_mean = pm.Normal(
+                f"true_buffer_{lbl}",
+                mu=0,
+                sigma=bg_err[i],
+            )
+            variance_buffer_contrib = bg_err[i] ** 2
+
+        # Degrees of freedom for Student's T distribution (for robustness)
+        # Can be shared or per-label. Shared is often fine for similar data types.
+        # this was for student: nu_common = pm.Gamma("nu_common", alpha=2, beta=0.1)
+
+        # Create shared K parameters for each control group
+        k_params = {
+            control_name: pm.Normal(
+                f"K_{control_name}",
+                mu=ctr_ks[control_name][0],
+                # if ctr_ks[control_name][0] is not np.nan
+                # else 7.0,  # Handle case where no K values found
+                sigma=0.2,  # FIXME: consider using ctr_ks[control_name][1] for sigma
+                # TODO: sigma=ctr_ks[control_name][1] if ctr_ks[control_name][1] is not np.nan else 0.5, # Default sigma for K if no stderr
+            )
+            for control_name in scheme.names
+        }
+        print(k_params)
+        # --- Loop through each well (key) and its data ---
+        for key, r in results.items():
+            if r.result and r.dataset:
+                ds = r.dataset
+                # Determine if the well is associated with a control group
+                ctr_name = next(
+                    (name for name, wells in scheme.names.items() if key in wells), ""
+                )
+                # Parameters for S0, S1 (unique to each well and label)
+                # `create_parameter_priors` should return a dict of PyMC distributions for S0, S1 for this key/well
+                pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+                # Use shared K for control group wells or create a unique K otherwise
+                k_param_for_well = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]
+                # --- Loop through each fluorescence label (e.g., 'y1', 'y2') within the current well ---
+                for lbl, da in ds.items():
+                    # --- Predicted signal from the binding model ---
+                    y_model_signal = binding_1site(
+                        x_true,
+                        k_param_for_well,
+                        pars[f"S0_{lbl}_{key}"],
+                        pars[f"S1_{lbl}_{key}"],
+                        ds.is_ph,
+                    )
+                    # Predicted Total Fluorescence (Signal + Buffer) for the likelihood mu
+                    mu_total_pred = pm.Deterministic(
+                        f"mu_total_pred_{lbl}_{key}", y_model_signal + true_buffer_mean
+                    )
+                    # --- Model the Noise ---
+                    # A common model for fluorescence noise is that standard deviation scales with sqrt(mean)
+                    # or that variance scales linearly with mean (similar to Poisson, but continuous/scaled).
+                    # Let's use a simpler and common power-law for noise (SD = a * mu^b)
+                    # Here, we'll assume `b=0.5` (sqrt) and `a` is our `sigma_signal_scale`.
+                    # Calculate the variance for the signal component (excluding buffer noise)
+                    # Ensuring non-negativity for sqrt
+                    # Variance from signal itself (heteroscedastic: proportional to predicted signal mean)
+                    # Use pm_math.maximum to avoid issues with negative predicted signals for variance
+                    variance_signal_contrib = sigma_signal_scale[lbl] * pm_math.maximum(
+                        1e-6, y_model_signal
+                    )
+                    # Total variance is the sum of independent variances
+                    total_variance_obs = pm.Deterministic(
+                        f"total_variance_obs_{lbl}_{key}",
+                        variance_buffer_contrib + variance_signal_contrib,
+                    )
+                    # Total standard deviation for the likelihood
+                    sigma_obs = pm.Deterministic(
+                        f"sigma_obs_{lbl}_{key}", pm_math.sqrt(total_variance_obs)
+                    )
+                    # --- Likelihood ---
+                    # Use Student's T distribution for robustness against outliers
+                    # Apply mask to observed data and corresponding mu/sigma
+                    # This is the learned, heteroscedastic SD
+                    pm.Normal(
+                        f"y_likelihood_{lbl}_{key}",
+                        # this was for student: nu=nu_common,  # Use the shared nu_common
+                        mu=mu_total_pred[da.mask],
+                        sigma=sigma_obs[da.mask],
+                        observed=da.y,
+                    )
+
+        trace: az.InferenceData = pm.sample(
+            n_samples, target_accept=0.9, return_inferencedata=True
+        )
+
+    return trace
+
+
+# ------------------------------------------------------------------
+# 2.3  Posterior-predictive helper - visualise one well at a time
+# ------------------------------------------------------------------
+def plot_ppc_well(
+    trace: az.InferenceData,
+    key: str,
+    labels: list[str] | None = None,
+    figsize: tuple[float, float] = (8, 4),
+) -> figure.Figure:
+    """Draw posterior predictive samples for a particular well (and all its labels).
+
+    The returned figure can be displayed with matplotlib.
+
+    Parameters
+    ----------
+    trace   : az.InferenceData
+        Trace produced by ``fit_binding_pymc_advanced``.
+    key     : str
+        Well identifier (e.g. 'A01').
+    labels  : list[str] | None
+        Names of the bands to show.  If *None* the function will
+        automatically look for all variables starting with
+        ``'y_'`` that contain this key.
+    figsize: tuple[float, float]
+        size?
+
+    Return
+    ------
+    figure.Figure
+        Plot
+    """
+    if labels is None:
+        labels = [
+            var.split("_")[1]
+            for var in trace.posterior.data_vars  # type: ignore[attr-defined]
+            if f"{key}" in var and var.startswith("y_")
+        ]
+
+    fig, axes = plt.subplots(
+        len(labels), 1, figsize=(figsize[0], figsize[1] * len(labels)), sharex=True
+    )
+    if len(labels) == 1:
+        axes = [axes]
+
+    for ax, lbl in zip(axes, labels, strict=True):
+        var_name = f"y_{lbl}_{key}"
+        az.plot_ppc(  # type: ignore[no-untyped-call]
+            az.from_dict(
+                {"posterior_predictive": trace.posterior_predictive[var_name]},  # type: ignore[attr-defined]
+                coords={"y": [lbl]},
+                dims={"y": 0},
+            ),
+            ax=ax,
+        )
+        ax.set_title(f"Well {key} - band {lbl}")
+        ax.set_xlabel("Observed y")
+        ax.set_ylabel("Posterior predictive")
+
+    plt.tight_layout()
+    return fig
+
+
+# ------------------------------------------------------------------
+# 2.4  Comparison of posteriors with deterministic fits
+# ------------------------------------------------------------------
+def compare_posteriors(trace: az.InferenceData, results: dict[str, FitResult]) -> None:
+    """Print posterior mean ± 95 % C.I.
+
+    For the K parameter for each well, and juxtapose it with the deterministic K
+    (from fit_binding_pymc).
+
+    Parameters
+    ----------
+    trace   : az.InferenceData
+        Output of ``fit_binding_pymc_advanced``.
+    results : dict[str, FitResult]
+        Deterministic fits produced by the old pipeline.
+    """
+    # Summarise the trace
+    summary = az.summary(trace, var_names=["K_*"], round_to=3)
+    print("\nPosterior for K (averaged over all draws)")
+    print(summary[["mean", "hdi_2.5%", "hdi_97.5%"]])
+
+    # Add deterministic K to the table for easy comparison
+    deterministic = {}
+    for k, fr in results.items():
+        if fr.result and "K" in fr.result.params:
+            deterministic[k] = fr.result.params["K"].value
+
+    print("\nDeterministic K  (fit_binding_pymc)")
+    for k, v in deterministic.items():
+        print(f"  {k:6s}  {v:0.3f}")
+
+    # Align rows
+    table = summary.join(pd.Series(deterministic, name="deterministic_K"))
+    print("\nCombined table")
+    print(table[["mean", "hdi_2.5%", "hdi_97.5%", "deterministic_K"]])

@@ -16,6 +16,7 @@ from numpy.testing import assert_almost_equal, assert_array_equal
 from clophfit import prtecan
 from clophfit.binding.fitting import FitResult
 from clophfit.prtecan import (
+    BufferFit,
     Labelblock,
     LabelblocksGroup,
     PlateScheme,
@@ -27,7 +28,7 @@ from clophfit.prtecan import (
 # By defining csvl, lb0, and lb1 as class attributes, they are created only once
 # per test session. Use fixture to capture UserWarning "OVER"
 
-data_tests = Path(__file__).parent / "Tecan"
+data_tests = Path(__file__).parent / "Tecan"  # Test data paths
 pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 
 
@@ -735,23 +736,23 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'H02' in the second fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.890, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.014, abs=1e-3)
+        assert k_h02.value == pytest.approx(7.898, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.026, abs=1e-3)
         # Check 'K' and std error for 'H02' in the third fit result
         assert titan.result_global["H02"].result is not None
         k_h02 = titan.result_global["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.890, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.006, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.017, abs=1e-3)
         # Check 'K' and std error for 'E02' in the second fit result
         assert fres[2]["E02"].result is not None
         k_e02 = fres[2]["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.984, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.022, abs=1e-3)
+        assert k_e02.value == pytest.approx(7.978, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.038, abs=1e-3)
         # Check 'K' and std error for 'E02' in the third fit result
         assert titan.result_global["E02"].result is not None
         k_e02 = titan.result_global["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.991, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.011, abs=1e-3)
+        assert k_e02.value == pytest.approx(7.978, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.017, abs=1e-3)
         # Fit up to the second-last data point
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
@@ -766,3 +767,91 @@ class TestTitrationAnalysis:
         g = titan.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
+
+
+#########
+# Extra #
+#########
+def test_dilution_correction_standard() -> None:
+    """Test dilution correction function returns cumulative volume ratio."""
+    additions = [100.0, 50.0, 50.0]
+    # volumes = [100,150,200] -> corrections = [1.0,1.5,2.0]
+    corr = prtecan.dilution_correction(additions)
+    assert_array_equal(corr, np.array([1.0, 1.5, 2.0]))
+
+
+def test_plate_scheme_discard_and_nofit_keys() -> None:
+    """Test discard setter and nofit_keys property of PlateScheme."""
+    ps = prtecan.PlateScheme()
+    ps.buffer = ["A01", "B01"]
+    ps.discard = ["C01"]
+    # nofit_keys is union of buffer and discard
+    assert set(ps.nofit_keys) == {"A01", "B01", "C01"}
+    with pytest.raises(TypeError):
+        #  non-str entries
+        ps.discard = [1, 2]  # type: ignore[list-item]
+
+
+def test_titration_config_callback_trigger() -> None:
+    """Test that TitrationConfig triggers callback on attribute change."""
+    cfg = prtecan.TitrationConfig()
+    events = []
+    cfg.set_callback(lambda: events.append(True))
+    # change boolean attribute
+    cfg.bg = not cfg.bg
+    assert events == [True]
+    # setting same value does not re-trigger
+    cfg.bg = cfg.bg
+    assert events == [True]
+    # change string attribute
+    cfg.bg_mth = "fit"
+    assert len(events) == 2
+
+
+def test_bufferfit_empty_flag() -> None:
+    """Test BufferFit.empty property for NaN and non-NaN values."""
+    bf = BufferFit()
+    assert bf.empty
+    bf2 = prtecan.BufferFit(m=1.0, q=0.0, m_err=0.1, q_err=0.2)
+    assert not bf2.empty
+
+
+def test_generate_combinations_and_prepare_folder(tmp_path: Path) -> None:
+    """Test generation of parameter combinations and output folder naming."""
+    data_tests = Path(__file__).parent / "Tecan"
+    # use existing list file for minimal Titration
+    tit = prtecan.Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    combos = tit._generate_combinations()  # noqa: SLF001
+    # 2^4 boolean flags times 3 methods
+    assert len(combos) == 16 * 3
+    flags, method = combos[0]
+    assert isinstance(flags, tuple)
+    assert len(flags) == 4
+    assert method in ("mean", "meansd", "fit")
+    # test prepare output folder naming
+    # set all flags to True and bg_mth to 'fit'
+    tit.params.bg = True
+    tit.params.bg_adj = True
+    tit.params.dil = True
+    tit.params.nrm = True
+    tit.params.bg_mth = "fit"
+    out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
+    name = out.name
+    assert "_bg" in name
+    assert "_adj" in name
+    assert "_dil" in name
+    assert "_nrm" in name
+    assert "_fit" in name
+
+
+def test_extract_xls_roundtrip(tmp_path: Path) -> None:
+    """Test read_xls and strip_lines integration with a temporary CSV file."""
+    # create a small Excel file
+    test_df = pd.DataFrame([[1, None, "a"], [None, 2, None]], columns=["x", "y", "z"])
+    path = tmp_path / "test.xls"
+    test_df.to_excel(path, index=False)
+    lines = prtecan.read_xls(path)
+    # strip_lines should remove blanks
+    stripped = prtecan.strip_lines(lines)
+    # each line has no empty elements
+    assert all(all(e != "" for e in row) for row in stripped)

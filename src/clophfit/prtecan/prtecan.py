@@ -25,11 +25,12 @@ from clophfit.binding.fitting import (
     InsufficientDataError,
     extract_fit,
     fit_binding_glob,
-    fit_binding_glob_reweighted,
     fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     fit_binding_pymc_multi,
+    fit_binding_pymc_multi2,
     format_estimate,
+    outlier2,
     weight_da,
     weight_multi_ds_titration,
     x_true_from_trace_df,
@@ -617,7 +618,7 @@ class TecanfilesGroup:
             msg = f"No common labelblocks in files: {[tf.path.name for tf in self.tecanfiles]}."
             raise ValueError(msg)
         logger.warning(
-            f"Different LabelblocksGroup across files: {[tf.path for tf in self.tecanfiles]}."
+            f"Different LabelblocksGroup across files: {[str(tf.path) for tf in self.tecanfiles]}."
         )
 
 
@@ -746,11 +747,14 @@ class TitrationConfig:
             self._callback()
 
     def __setattr__(self, name: str, value: bool | str) -> None:
-        """Override attribute setting to trigger callback on specific changes."""
-        current_value = getattr(self, name)
-        if current_value != value:
+        """Trigger callback when a tracked attribute value actually changes."""
+        if name == "_callback":
             super().__setattr__(name, value)
-            self._trigger_callback()
+        else:
+            current_value = getattr(self, name, None)
+            super().__setattr__(name, value)
+            if current_value != value:
+                self._trigger_callback()
 
 
 @dataclass
@@ -1588,7 +1592,8 @@ class Titration(TecanfilesGroup):
         """Compute global fit for a single key."""
         try:
             ds = self._create_global_ds(key)
-            return fit_binding_glob_reweighted(ds, key)
+            # FIXME: return fit_binding_glob_reweighted(ds, key)
+            return outlier2(ds, key)
         except InsufficientDataError:
             logger.warning(f"Skipping global fit for well {key}.")
             return FitResult()
@@ -1596,16 +1601,19 @@ class Titration(TecanfilesGroup):
     def _create_data_array(self, key: str, label: int) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
-        return (
-            DataArray(self.x, y, x_errc=self.x_err, y_errc=self.bg_err[label])
-            if self.bg_err
-            else DataArray(self.x, y, x_errc=self.x_err)
-        )
+        alpha = 1
+        beta = 1
+        signal = np.maximum(1.0, alpha * y**beta)  # avoid Sqrt of negative values
+        if self.bg_err:
+            y_errc = np.sqrt(signal + self.bg_err[label] ** 2)
+        else:
+            y_errc = np.sqrt(signal)
+        return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def _create_ds(self, key: str, label: int) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
-        ds = Dataset({"default": da}, is_ph=self.is_ph)
+        ds = Dataset({f"{label}": da}, is_ph=self.is_ph)
         # Apply weighting if bg_err is not provided
         if not self.bg_err:
             weight_da(da, ds.is_ph)
@@ -1675,15 +1683,28 @@ class Titration(TecanfilesGroup):
         results = self.result_global.results
         trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-
         da_true = x_true_from_trace_df(trace_df)
-
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-
         pd.DataFrame(
             {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
         ).to_csv("list_x_true.csv", index=False, header=False)
+        return trace, trace_df
 
+    @cached_property
+    def result_multi_trace2(self) -> tuple[az.InferenceData, pd.DataFrame]:
+        """Perform global MCMC fitting and x_true."""
+        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
+        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        results = self.result_global.results
+        trace = fit_binding_pymc_multi2(
+            results, self.scheme, self.buffer.bg_err, n_sd=n_sd
+        )
+        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        da_true = x_true_from_trace_df(trace_df)
+        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
+        pd.DataFrame(
+            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
+        ).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property
