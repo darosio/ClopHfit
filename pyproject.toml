@@ -201,7 +201,7 @@ live_mode = true
 strict = true
 
 [tool.ruff]
-extend-exclude = ["src/clophfit/old/", "docs/"]
+extend-exclude = ["src/clophfit/old/"]
 extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true
