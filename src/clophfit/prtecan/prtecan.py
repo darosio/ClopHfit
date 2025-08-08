@@ -1374,7 +1374,6 @@ class Titration(TecanfilesGroup):
     # def _get_normalized_or_raw_data(self) -> list[dict[str, ArrayF]]:
     def _get_normalized_or_raw_data(self) -> dict[int, dict[str, ArrayF]]:
         """Fetch raw or normalized data, transforming into arrays."""
-        print("operating get nrm")
         if self.params.nrm:
             return {
                 label: {k: np.array(v) for k, v in lbg.data_nrm.items()}
