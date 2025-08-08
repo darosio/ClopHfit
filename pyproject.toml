@@ -201,7 +201,7 @@ live_mode = true
 strict = true
 
 [tool.ruff]
-extend-exclude = ["src/clophfit/old/", "docs/", "test_prtecan_extra.py"]
+extend-exclude = ["src/clophfit/old/", "docs/"]
 extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true

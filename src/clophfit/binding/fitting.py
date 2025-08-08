@@ -388,7 +388,8 @@ def analyze_spectra_glob(
         svd, gsvd = None, None
     if len(labels_bands) > 1:
         ds_bands = ds.copy(labels_bands)
-        weight_multi_ds_titration(ds)
+        # FIX: Weight the dataset we are about to fit
+        weight_multi_ds_titration(ds_bands)
         f_res = fit_binding_glob(ds_bands)
         fig = _plot_spectra_glob_emcee(titration, ds_bands, f_res, dbands)
         bands = FitResult(fig, f_res.result, f_res.mini)
@@ -690,7 +691,7 @@ def outlier2(
     n_outliers = mask.tolist().count(False)
     if n_outliers > 0:
         reweighted_ds.apply_mask(mask)
-        logger.warn(f"outlier in {key}: {mask.astype(int)}.")
+        logger.warning(f"outlier in {key}: {mask.astype(int)}.")
     return fit_binding_glob(reweighted_ds, robust=False)
 
 
@@ -726,9 +727,9 @@ def fit_binding_glob_reweighted(
             mask = outlier_glob(residual, threshold=threshold)
             n_outliers = mask.tolist().count(True)
             if n_outliers == 1:
-                logger.warn(f"{n_outliers} outlier in {key}:y{lbl}.")
+                logger.warning(f"{n_outliers} outlier in {key}:y{lbl}.")
             elif n_outliers > 1:
-                logger.warn(f"{n_outliers} outliers in {key}:y{lbl}.")
+                logger.warning(f"{n_outliers} outliers in {key}:y{lbl}.")
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
@@ -1074,8 +1075,10 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
         msg = "Input FitResult object must contain a result and a dataset."
         raise ValueError(msg)
     """
-    params = fr.result.params
-    ds = copy.deepcopy(fr.dataset)
+    if fr.result:
+        params = fr.result.params
+    if fr.dataset:
+        ds = copy.deepcopy(fr.dataset)
 
     # Use the first dataset's x values. Assumes all datasets have same x points.
     xc = next(iter(ds.values())).xc
@@ -1092,7 +1095,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
         if learn_separate_y_mag:
             # Model 1: Learn a unique noise scaling factor for each label
             # This is robust when you don't trust the initial y_err values
-            ye_mag = {}
+            ye_mag: dict[str | int, float] = {}
             true_buffer = {}
             print(ye_mag)
             for lbl, da in ds.items():
@@ -1497,7 +1500,7 @@ def plot_ppc_well(
     if labels is None:
         labels = [
             var.split("_")[1]
-            for var in trace.posterior.data_vars
+            for var in trace.posterior.data_vars  # type: ignore[attr-defined]
             if f"{key}" in var and var.startswith("y_")
         ]
 
@@ -1511,7 +1514,7 @@ def plot_ppc_well(
         var_name = f"y_{lbl}_{key}"
         az.plot_ppc(  # type: ignore[no-untyped-call]
             az.from_dict(
-                {"posterior_predictive": trace.posterior_predictive[var_name]},
+                {"posterior_predictive": trace.posterior_predictive[var_name]},  # type: ignore[attr-defined]
                 coords={"y": [lbl]},
                 dims={"y": 0},
             ),

@@ -747,11 +747,14 @@ class TitrationConfig:
             self._callback()
 
     def __setattr__(self, name: str, value: bool | str) -> None:
-        """Override attribute setting to trigger callback on specific changes."""
-        current_value = getattr(self, name)
-        if current_value != value:
+        """Trigger callback when a tracked attribute value actually changes."""
+        if name == "_callback":
             super().__setattr__(name, value)
-            self._trigger_callback()
+        else:
+            current_value = getattr(self, name, None)
+            super().__setattr__(name, value)
+            if current_value != value:
+                self._trigger_callback()
 
 
 @dataclass
