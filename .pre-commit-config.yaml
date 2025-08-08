@@ -82,7 +82,7 @@ repos:
       - id: pydoclint
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.35.2
+    rev: v1.35.3
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
