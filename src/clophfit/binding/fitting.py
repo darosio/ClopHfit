@@ -306,8 +306,20 @@ def analyze_spectra(
     return FitResult(fig, result, mini, ds)
 
 
-class InsufficientDataError(Exception):
+class FitError(Exception):
+    """Base class for fitting errors."""
+
+
+class InsufficientDataError(FitError):
     """Raised to prevent fitting failure for too few data points."""
+
+
+class ConvergenceError(FitError):
+    """Raised when fitting fails to converge."""
+
+
+class InvalidDataError(FitError):
+    """Raised when input data is invalid."""
 
 
 def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult:
@@ -945,6 +957,10 @@ def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
     return DataArray(xc=np.array(nxc), yc=np.ones_like(nxc), x_errc=np.array(nx_errc))
 
 
+# TODO:
+# 🧪 Test posterior integrity (e.g., credible intervals contain true Kd)
+# 🧱 Replace repetitive for lbl in ds.items() logic using helper functions
+# 🔁 Use pm.MutableData (in newer PyMC versions) to avoid model recompilation
 def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
     """Rename dictionary keys."""
     renamed_dict = {}
