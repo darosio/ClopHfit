@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
 
-from clophfit import __enspire_out_dir__, __tecan_out_dir__, binding, configure_logging
-from clophfit.binding.data import DataArray, Dataset
+from clophfit import __enspire_out_dir__, __tecan_out_dir__, configure_logging, fitting
+from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 
@@ -34,7 +34,7 @@ def clop() -> None:  # pragma: no cover
 @click.argument("ph", type=float)
 def eq1(kd1: float, pka: float, ph: float) -> None:
     """Model Kd dependence on pH."""
-    click.echo(binding.fitting.kd(kd1=kd1, pka=pka, ph=ph))
+    click.echo(fitting.models.kd(kd1=kd1, pka=pka, ph=ph))
 
 
 @click.group()
@@ -212,7 +212,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band = dbands.get(label)
-                    fit_result = binding.fitting.analyze_spectra(data, is_ph, band)
+                    fit_result = fitting.fitting.analyze_spectra(data, is_ph, band)
                     if fit_result.is_valid() and fit_result.mini:
                         userargs = fit_result.mini.userargs[0]["default"]
                         ds_data[label] = DataArray(userargs.x, userargs.y)
@@ -226,7 +226,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
                     ds = Dataset(ds_data, is_ph)
-                    spectra_gres = binding.fitting.analyze_spectra_glob(
+                    spectra_gres = fitting.fitting.analyze_spectra_glob(
                         d_tit, ds, dbands
                     )
                     if spectra_gres.svd and spectra_gres.svd.is_valid():
@@ -250,7 +250,7 @@ def fit_enspire(  # noqa: C901,PLR0912
 
 
 def _print_result(
-    fit_result: binding.fitting.FitResult,
+    fit_result: fitting.fitting.FitResult,
     pdf_file: Path,
     band_str: str,
 ) -> None:
@@ -311,7 +311,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    fit_result = binding.fitting.analyze_spectra(spectra, is_ph, band)
+    fit_result = fitting.fitting.analyze_spectra(spectra, is_ph, band)
     # output
     out.mkdir(parents=True, exist_ok=True)
     pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
@@ -343,20 +343,20 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     }
     ds = Dataset(ds_data, is_ph)
     if weight:
-        binding.fitting.weight_multi_ds_titration(ds)
-    f_res = binding.fitting.fit_binding_glob(ds)
+        fitting.fitting.weight_multi_ds_titration(ds)
+    f_res = fitting.fitting.fit_binding_glob(ds)
     params = f_res.result.params if f_res.result else lmfit.Parameters()
     # Figure
     figure, ax = plt.subplots()
-    binding.fitting.plot_fit(
-        ax, ds, params, nboot=30, pp=binding.plotting.PlotParameters(is_ph)
+    fitting.fitting.plot_fit(
+        ax, ds, params, nboot=30, pp=fitting.plotting.PlotParameters(is_ph)
     )
     lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
     figure.savefig(Path(file).with_suffix(".png"))
     if boot and f_res.mini:
         # Emcee
         samples = f_res.mini.emcee(burn=burn, steps=boot).flatchain
-        fig = binding.plotting.plot_emcee(samples)
+        fig = fitting.plotting.plot_emcee(samples)
         fig.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emcee"))
         hdi = samples.quantile([0.025, 0.975])["K"].to_list()
         print(f"Quantiles for K: {[f'{q:.3g}' for q in hdi]}")
@@ -368,7 +368,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
             ratios = {lbl: samples[f"S0_{lbl}"] / samples[f"S1_{lbl}"] for lbl in ds}
             # Combine ratio and K samples into a DataFrame for corner plot
             samples_ratios = pd.DataFrame({**ratios, "K": samples["K"]})
-            fig_ratio = binding.plotting.plot_emcee(samples_ratios)
+            fig_ratio = fitting.plotting.plot_emcee(samples_ratios)
             fig_ratio.savefig(fp.with_suffix(".png").with_stem(fp.stem + "-emc-ratios"))
             for lbl in ds:
                 hdi = samples_ratios.quantile([0.025, 0.5, 0.975])[lbl].to_list()

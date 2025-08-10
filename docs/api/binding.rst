@@ -1,5 +1,5 @@
-clophfit.binding
+clophfit.fitting
 ----------------
 
-.. automodule:: clophfit.binding
+.. automodule:: clophfit.fitting
    :undoc-members:

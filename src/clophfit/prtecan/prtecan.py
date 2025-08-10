@@ -19,10 +19,10 @@ import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 
-from clophfit.binding.data import DataArray, Dataset
-from clophfit.binding.fitting import (
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.fitting import (
     FitResult,
-    InsufficientDataError,
     extract_fit,
     fit_binding_glob,
     fit_binding_odr_recursive_outlier,
@@ -35,7 +35,7 @@ from clophfit.binding.fitting import (
     weight_multi_ds_titration,
     x_true_from_trace_df,
 )
-from clophfit.binding.plotting import PlotParameters
+from clophfit.fitting.plotting import PlotParameters
 
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Sequence

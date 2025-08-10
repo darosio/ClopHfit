@@ -23,8 +23,11 @@ from pytensor.tensor import as_tensor_variable
 from scipy import odr, optimize, stats  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit.binding.data import DataArray, Dataset
-from clophfit.binding.plotting import (
+from clophfit.clophfit_types import ArrayF
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.models import binding_1site
+from clophfit.fitting.plotting import (
     COLOR_MAP,
     PlotParameters,
     _apply_common_plot_style,
@@ -36,7 +39,6 @@ from clophfit.binding.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
-from clophfit.clophfit_types import ArrayF
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask, FloatFunc
@@ -48,51 +50,6 @@ N_BOOT = 20  # To compute fill_between uncertainty.
 EMCEE_STEPS = 1800
 
 logger = logging.getLogger(__name__)
-
-
-# fmt: off
-@typing.overload
-def binding_1site(
-    x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> float: ...
-
-
-@typing.overload
-def binding_1site(
-    x: ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> ArrayF: ...
-
-# fmt: on
-def binding_1site(
-    x: float | ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
-) -> float | ArrayF:  # fmt: skip
-    """Single site binding model function.
-
-    Parameters
-    ----------
-    x : float | ArrayF
-        Concentration values.
-    K : float
-        Dissociation constant.
-    S0 : float
-        Plateau value for the unbound state.
-    S1 : float
-        Plateau value for the bound state.
-    is_ph : bool, optional
-        If True, use the pH model for binding. Default is False.
-
-    Returns
-    -------
-    float | ArrayF
-        Modeled binding values.
-
-    Notes
-    -----
-    The parameters K, S0 and S1 are in uppercase by convention as used in lmfit library.
-    """
-    if is_ph:
-        return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
-    return S0 + (S1 - S0) * x / K / (1 + x / K)
 
 
 ### helpers
@@ -126,39 +83,6 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     models = _binding_1site_models(params, x, is_ph)
     residuals: ArrayF = np.concatenate([(w[lbl] * (y[lbl] - models[lbl])) for lbl in x])
     return residuals
-
-
-def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
-    """Infinite cooperativity model.
-
-    It can describe pH-dependence for chloride dissociation constant.
-
-    Parameters
-    ----------
-    kd1 : float
-        Dissociation constant at pH <= 5.0 (fully protonated).
-    pka : float
-        Acid dissociation constant.
-    ph : ArrayF | float
-        pH value(s).
-
-    Returns
-    -------
-    ArrayF | float
-        Predicted Kd value(s).
-
-    Examples
-    --------
-    >>> kd(10, 8.4, 7.4)
-    11.0
-    >>> import numpy as np
-    >>> kd(10, 8.4, np.array([7.4, 8.4]))
-    array([11., 20.])
-    """
-    if isinstance(ph, (float | int)):  # Check if ph is a scalar
-        return kd1 * (1 + 10 ** (pka - ph)) / 10 ** (pka - ph)  # Return float
-    ph_array = np.asarray(ph, dtype=np.float64)
-    return kd1 * (1 + 10 ** (pka - ph_array)) / 10 ** (pka - ph_array)  # Return ArrayF
 
 
 def _build_params_1site(ds: Dataset) -> Parameters:
@@ -304,22 +228,6 @@ def analyze_spectra(
     plot_fit(ax4, ds, params, nboot=N_BOOT, pp=PlotParameters(is_ph))
     ax4.set_ylabel(ylabel, color=ylabel_color)
     return FitResult(fig, result, mini, ds)
-
-
-class FitError(Exception):
-    """Base class for fitting errors."""
-
-
-class InsufficientDataError(FitError):
-    """Raised to prevent fitting failure for too few data points."""
-
-
-class ConvergenceError(FitError):
-    """Raised when fitting fails to converge."""
-
-
-class InvalidDataError(FitError):
-    """Raised when input data is invalid."""
 
 
 def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult:
@@ -709,7 +617,6 @@ def outlier2(
 
 def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
     """Update y_err from residuals mean."""
-    print("ciao")
     updated_ds = copy.deepcopy(ds)
     for i, da in enumerate(updated_ds.values()):
         len_x = len(da.y)
@@ -756,6 +663,7 @@ def fit_binding_glob_recursive(
     r = fit_binding_glob(ds)
     residual_variance = r.result.redchi if r.result else 0.0
 
+    rn = r  # new
     for _ in range(max_iterations):
         if r.dataset and r.result:
             start_idx = 0
@@ -766,6 +674,8 @@ def fit_binding_glob_recursive(
                 )
                 start_idx = end_idx
             rn = fit_binding_glob(r.dataset)
+        else:  # new
+            break
         if rn.mini and rn.mini.minimize().redchi == 0:
             rn = r
             break
@@ -794,7 +704,7 @@ def fit_binding_glob_recursive_outlier(
 
 
 def outlier_glob(
-    residuals: float, threshold: float = 2.0, plot_z_scores: bool = False
+    residuals: ArrayF, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
@@ -900,9 +810,7 @@ def process_trace(
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     # FIXME: multi need this renaming quite surely
-    print(rpars)
-    renamed = rename_keys(rpars)
-    print(renamed)
+    rename_keys(rpars)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
     # Return the fit result
@@ -1113,9 +1021,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
             # This is robust when you don't trust the initial y_err values
             ye_mag: dict[str | int, float] = {}
             true_buffer = {}
-            print(ye_mag)
             for lbl, da in ds.items():
-                print(da.y_err.mean())
                 ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean())
                 y_model = binding_1site(
                     x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
@@ -1185,7 +1091,6 @@ def fit_binding_pymc_odr(
     x_errc = next(iter(ds.values())).x_errc
     with pm.Model() as _:
         pars = create_parameter_priors(params, n_sd)
-        print(pars)
         # Add likelihoods for each dataset
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
         xe_mag = pm.HalfNormal("xe_mag", sigma=xe_scaling)
@@ -1270,7 +1175,6 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
-    print(ctr_ks)
 
     with pm.Model() as _:
         ye_mag = {}
