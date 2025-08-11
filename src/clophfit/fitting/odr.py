@@ -14,7 +14,7 @@ from scipy import odr  # type: ignore[import-untyped]
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
-from .fitting import FitResult  # Local import to avoid cycle
+from .core import FitResult  # Local import to avoid cycle
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask

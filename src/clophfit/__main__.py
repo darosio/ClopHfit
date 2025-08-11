@@ -7,7 +7,7 @@ import logging
 import pprint
 from collections import namedtuple
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 import lmfit  # type: ignore[import-untyped]
@@ -20,6 +20,9 @@ from clophfit import __enspire_out_dir__, __tecan_out_dir__, configure_logging, 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
+
+if TYPE_CHECKING:
+    from clophfit.fitting.core import FitResult
 
 
 @click.group()
@@ -212,7 +215,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band = dbands.get(label)
-                    fit_result = fitting.fitting.analyze_spectra(data, is_ph, band)
+                    fit_result = fitting.core.analyze_spectra(data, is_ph, band)
                     if fit_result.is_valid() and fit_result.mini:
                         userargs = fit_result.mini.userargs[0]["default"]
                         ds_data[label] = DataArray(userargs.x, userargs.y)
@@ -226,9 +229,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
                     ds = Dataset(ds_data, is_ph)
-                    spectra_gres = fitting.fitting.analyze_spectra_glob(
-                        d_tit, ds, dbands
-                    )
+                    spectra_gres = fitting.core.analyze_spectra_glob(d_tit, ds, dbands)
                     if spectra_gres.svd and spectra_gres.svd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
                         if spectra_gres.svd.figure:
@@ -249,11 +250,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
-def _print_result(
-    fit_result: fitting.fitting.FitResult,
-    pdf_file: Path,
-    band_str: str,
-) -> None:
+def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:
     print(str(pdf_file))
     print(f"Best fit using '{band_str}' band:\n")
     ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
@@ -311,7 +308,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    fit_result = fitting.fitting.analyze_spectra(spectra, is_ph, band)
+    fit_result = fitting.core.analyze_spectra(spectra, is_ph, band)
     # output
     out.mkdir(parents=True, exist_ok=True)
     pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
@@ -343,8 +340,8 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     }
     ds = Dataset(ds_data, is_ph)
     if weight:
-        fitting.fitting.weight_multi_ds_titration(ds)
-    f_res = fitting.fitting.fit_binding_glob(ds)
+        fitting.core.weight_multi_ds_titration(ds)
+    f_res = fitting.core.fit_binding_glob(ds)
     params = f_res.result.params if f_res.result else lmfit.Parameters()
     # Figure
     figure, ax = plt.subplots()

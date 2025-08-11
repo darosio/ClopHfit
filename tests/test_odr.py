@@ -7,8 +7,8 @@ import types
 import numpy as np
 from matplotlib.figure import Figure
 
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset
-from clophfit.fitting.fitting import fit_binding_glob
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.odr import (
     fit_binding_odr,

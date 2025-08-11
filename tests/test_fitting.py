@@ -9,14 +9,14 @@ import pandas as pd
 import pytest
 from lmfit import Parameters  # type: ignore[import-untyped]
 
-from clophfit.fitting.data_structures import DataArray, Dataset
-from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.fitting import (
+from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
     weight_da,
     weight_multi_ds_titration,
 )
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.models import binding_1site, kd
 from clophfit.fitting.plotting import plot_fit
 

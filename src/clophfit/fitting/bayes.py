@@ -19,8 +19,8 @@ from scipy import optimize  # type: ignore[import-untyped]
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
+from .core import N_BOOT, FitResult, _Result  # local to avoid circular import
 from .data_structures import DataArray, Dataset
-from .fitting import N_BOOT, FitResult, _Result  # local to avoid circular import
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, FloatFunc

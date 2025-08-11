@@ -14,7 +14,7 @@ import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
-from clophfit.fitting.fitting import FitResult
+from clophfit.fitting.core import FitResult
 from clophfit.prtecan import (
     BufferFit,
     Labelblock,

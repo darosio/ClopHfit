@@ -26,15 +26,15 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc_multi2,
     x_true_from_trace_df,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset
-from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.fitting import (
+from clophfit.fitting.core import (
     FitResult,
     fit_binding_glob,
     outlier2,
     weight_da,
     weight_multi_ds_titration,
 )
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
