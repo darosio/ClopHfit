@@ -15,7 +15,7 @@ from pathlib import Path
 import arviz as az
 import numpy as np
 import pandas as pd
-from lmfit import MinimizerResult, Parameters
+from lmfit import MinimizerResult, Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy import odr
 from uncertainties import ufloat  # type: ignore[import-untyped]

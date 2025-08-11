@@ -57,7 +57,7 @@ import pandas as pd
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import stats  # type: ignore[import-untyped]
+from scipy import stats
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.data_structures import DataArray, Dataset

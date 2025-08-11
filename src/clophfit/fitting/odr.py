@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import odr  # type: ignore[import-untyped]
+from scipy import odr
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
@@ -92,7 +92,7 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
     def combined_model_odr(p: list[float], x: ArrayF) -> ArrayF:
         return generalized_combined_model(p, x, dataset_lengths)
 
-    combined_model = odr.Model(combined_model_odr)
+    combined_model = odr.Model(combined_model_odr)  # type: ignore[arg-type]
     odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
     output = odr_obj.run()
     # reassign x_err and y_err to ds
