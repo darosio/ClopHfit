@@ -14,11 +14,11 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.fitting import (
     analyze_spectra,
     fit_binding_glob,
-    plot_fit,
     weight_da,
     weight_multi_ds_titration,
 )
 from clophfit.fitting.models import binding_1site, kd
+from clophfit.fitting.plotting import plot_fit
 
 ###############################################################################
 # Fixtures

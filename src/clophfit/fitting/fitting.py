@@ -17,11 +17,10 @@ import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
-from matplotlib import axes, figure
+from matplotlib import figure
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy import odr, optimize, stats  # type: ignore[import-untyped]
-from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.data_structures import DataArray, Dataset
@@ -30,11 +29,11 @@ from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import (
     COLOR_MAP,
     PlotParameters,
-    _apply_common_plot_style,
     _create_spectra_canvas,
     plot_autovalues,
     plot_autovectors,
     plot_emcee_k_on_ax,
+    plot_fit,
     plot_pca,
     plot_spectra,
     plot_spectra_distributed,
@@ -105,16 +104,18 @@ def _build_params_1site(ds: Dataset) -> Parameters:
 
 @dataclass
 class FitResult:
-    """A dataclass representing the results of a fit.
+    """Result container for a deterministic fit.
 
     Attributes
     ----------
-    figure : mpl.figure.Figure
-        A matplotlib figure object representing the plot of the fit result.
-    result : MinimizerResult
-        The minimizer result object representing the outcome of the fit.
-    mini : Minimizer
-        The Minimizer object used for the fit.
+    figure : matplotlib.figure.Figure | None
+        Matplotlib figure containing the fit plot, if generated.
+    result : lmfit.minimizer.MinimizerResult | None
+        Result of the optimization produced by lmfit.
+    mini : lmfit.minimizer.Minimizer | None
+        Minimizer instance used to run the fit.
+    dataset : Dataset | None
+        Dataset used for the fit (typically a deep copy of the input dataset).
     """
 
     figure: figure.Figure | None = None
@@ -316,83 +317,6 @@ def analyze_spectra_glob(
     else:
         bands = None
     return SpectraGlobResults(svd, gsvd, bands)
-
-
-def plot_fit(
-    ax: axes.Axes,
-    ds: Dataset,
-    params: Parameters,
-    nboot: int = 0,
-    pp: PlotParameters | None = None,
-) -> None:
-    """Plot residuals for each dataset with uncertainty."""
-    _stretch = 0.05
-    xfit = {
-        k: np.linspace(da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100)
-        for k, da in ds.items()
-    }
-    yfit = _binding_1site_models(params, xfit, ds.is_ph)
-    # Create a color cycle
-    colors = [COLOR_MAP(i) for i in range(len(ds))]
-    for (lbl, da), clr in zip(ds.items(), colors, strict=False):
-        # Make sure a label will be displayed.
-        label = lbl if (da.y_err.size == 0 and nboot == 0) else None
-        # Plot data.
-        if pp:
-            ax.scatter(
-                da.x,
-                da.y,
-                c=list(da.x),
-                s=99,
-                edgecolors=clr,
-                label=label,
-                vmin=pp.hue_norm[0],
-                vmax=pp.hue_norm[1],
-                cmap=pp.palette,
-            )
-        else:
-            ax.plot(da.x, da.y, "o", color=clr, label=label)
-        # Plot fitting.
-        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
-        # Display label in error bar plot.
-        if da.y_err.size > 0:
-            xe = da.x_err if da.x_err.size > 0 else None
-            ax.errorbar(
-                da.x,
-                da.y,
-                yerr=da.y_err,
-                xerr=xe,
-                fmt=".",  # alternative to "none"
-                label=lbl,
-                color=clr,
-                alpha=0.4,
-                capsize=3,
-            )
-        if nboot:
-            # Calculate uncertainty using Monte Carlo method.
-            y_samples = np.empty((nboot, len(xfit[lbl])))
-            rng = np.random.default_rng()
-            for i in range(nboot):
-                p_sample = params.copy()
-                for param in p_sample.values():
-                    # Especially stderr can be None in case of critical fitting
-                    if param.value and param.stderr:
-                        param.value = rng.normal(param.value, param.stderr)
-                y_samples[i, :] = _binding_1site_models(p_sample, xfit, ds.is_ph)[lbl]
-            dy = y_samples.std(axis=0)
-            # Plot uncertainty.
-            # Display label in fill_between plot.
-            ax.fill_between(
-                xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, alpha=0.1, color=clr
-            )
-    ax.legend()  # UserWarning: No artists... in tests
-    if params["K"].stderr:  # Can be None in case of critical fitting
-        k = ufloat(params["K"].value, params["K"].stderr)
-    else:
-        k = f"{params['K'].value:.3g}" if params["K"].value else None
-    title = "=".join(["K", str(k).replace("+/-", "±")])
-    xlabel = "pH" if ds.is_ph else "Cl"
-    _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
 
 
 def _plot_spectra_glob_emcee(

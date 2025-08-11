@@ -38,13 +38,19 @@ import corner  # type: ignore[import-untyped]
 import numpy as np
 from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
+from uncertainties import ufloat  # type: ignore[import-untyped]
+
+from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
     import pandas as pd
+    from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
 
     from clophfit.clophfit_types import ArrayF
+
+    from .data_structures import Dataset
 
 COLOR_MAP = colormaps["Set1"]  # To color PCA components and LM fit.
 N_AUTOVALS = 4
@@ -263,6 +269,99 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     idata = az.from_dict(posterior=samples_dict)
     parameter_posterior = idata.posterior[p_name]  # pylint: disable=E1101
     az.plot_posterior(parameter_posterior, ax=ax)  # type: ignore[no-untyped-call]
+
+
+def plot_fit(
+    ax: Axes,
+    ds: Dataset,
+    params: Parameters,
+    nboot: int = 0,
+    pp: PlotParameters | None = None,
+) -> None:
+    """Plot residuals for each dataset with uncertainty."""
+    _stretch = 0.05
+    xfit = {
+        k: np.linspace(da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100)
+        for k, da in ds.items()
+    }
+    # Compute y-fit using the model directly to avoid circular imports
+    yfit = {
+        lbl: binding_1site(
+            xfit[lbl],
+            params["K"].value,
+            params[f"S0_{lbl}"].value,
+            params[f"S1_{lbl}"].value,
+            ds.is_ph,
+        )
+        for lbl in ds
+    }
+    # Create a color cycle
+    colors = [COLOR_MAP(i) for i in range(len(ds))]
+    for (lbl, da), clr in zip(ds.items(), colors, strict=False):
+        # Make sure a label will be displayed.
+        label = lbl if (da.y_err.size == 0 and nboot == 0) else None
+        # Plot data.
+        if pp:
+            ax.scatter(
+                da.x,
+                da.y,
+                c=list(da.x),
+                s=99,
+                edgecolors=clr,
+                label=label,
+                vmin=pp.hue_norm[0],
+                vmax=pp.hue_norm[1],
+                cmap=pp.palette,
+            )
+        else:
+            ax.plot(da.x, da.y, "o", color=clr, label=label)
+        # Plot fitting.
+        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
+        # Display label in error bar plot.
+        if da.y_err.size > 0:
+            xe = da.x_err if da.x_err.size > 0 else None
+            ax.errorbar(
+                da.x,
+                da.y,
+                yerr=da.y_err,
+                xerr=xe,
+                fmt=".",  # alternative to "none"
+                label=lbl,
+                color=clr,
+                alpha=0.4,
+                capsize=3,
+            )
+        if nboot:
+            # Calculate uncertainty using Monte Carlo method.
+            y_samples = np.empty((nboot, len(xfit[lbl])))
+            rng = np.random.default_rng()
+            for i in range(nboot):
+                p_sample = params.copy()
+                for param in p_sample.values():
+                    # Especially stderr can be None in case of critical fitting
+                    if param.value and param.stderr:
+                        param.value = rng.normal(param.value, param.stderr)
+                y_samples[i, :] = binding_1site(
+                    xfit[lbl],
+                    p_sample["K"].value,
+                    p_sample[f"S0_{lbl}"].value,
+                    p_sample[f"S1_{lbl}"].value,
+                    ds.is_ph,
+                )
+            dy = y_samples.std(axis=0)
+            # Plot uncertainty.
+            # Display label in fill_between plot.
+            ax.fill_between(
+                xfit[lbl], yfit[lbl] - dy, yfit[lbl] + dy, alpha=0.1, color=clr
+            )
+    ax.legend()  # UserWarning: No artists... in tests
+    if params["K"].stderr:  # Can be None in case of critical fitting
+        k = ufloat(params["K"].value, params["K"].stderr)
+    else:
+        k = f"{params['K'].value:.3g}" if params["K"].value else None
+    title = "=".join(["K", str(k).replace("+/-", "±")])
+    xlabel = "pH" if ds.is_ph else "Cl"
+    _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
 
 
 # TODO: Complete print emcee

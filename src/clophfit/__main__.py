@@ -348,7 +348,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     params = f_res.result.params if f_res.result else lmfit.Parameters()
     # Figure
     figure, ax = plt.subplots()
-    fitting.fitting.plot_fit(
+    fitting.plotting.plot_fit(
         ax, ds, params, nboot=30, pp=fitting.plotting.PlotParameters(is_ph)
     )
     lmfit.printfuncs.report_fit(f_res.result, min_correl=min_correl_to_print)
