@@ -1,4 +1,46 @@
-"""Fit Cl binding and pH titration."""
+"""
+Clophfit: Fitting of Cl- binding and pH titration curves.
+
+This module provides a comprehensive suite of tools for analyzing titration data,
+particularly for chloride binding and pH titration experiments common in biochemistry,
+such as those involving fluorescent probes.
+
+Core Functionality:
+-------------------
+1.  **Data Modeling**: Implements a 1-site binding model suitable for both
+    ligand concentration and pH titrations.
+
+2.  **Spectral Data Processing**:
+    -   Processes raw spectral data (e.g., from fluorescence spectroscopy).
+    -   Offers two methods for data reduction:
+        -   Singular Value Decomposition (SVD) to extract the most significant
+          spectral component.
+        -   Band integration over a specified wavelength range.
+
+3.  **Curve Fitting**: Provides three distinct fitting backends to determine the
+    dissociation constant (K) and other parameters:
+    -   **Least-Squares (LM)**: Utilizes the `lmfit` library for robust non-linear
+      least-squares minimization. Supports iterative reweighting and outlier
+      removal.
+    -   **Orthogonal Distance Regression (ODR)**: Employs `scipy.odr` to account
+      for uncertainties in both x and y variables, which is crucial when x-values
+      (e.g., pH measurements) have errors.
+    -   **Bayesian Modeling (PyMC)**: Implements a hierarchical Bayesian model
+      using `pymc`. This approach is powerful for:
+        -   Quantifying parameter uncertainties as full posterior distributions.
+        -   Modeling errors in x-values as latent variables.
+        -   Sharing information between multiple experiments (hierarchical fitting)
+          to obtain more robust parameter estimates.
+
+4.  **Result Visualization**: Includes extensive plotting functions to visualize:
+    -   Raw and processed spectra.
+    -   Fitted curves with confidence intervals.
+    -   Diagnostic plots for SVD and Bayesian analyses (e.g., corner plots).
+"""
+
+
+# --- Data Structures for Fit Results ---
+# TODO: from gemini
 
 from __future__ import annotations
 
@@ -38,6 +80,7 @@ if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask
 
 
+# --- Globals ---
 N_BOOT = 20  # To compute fill_between uncertainty.
 
 EMCEE_STEPS = 1800

@@ -12,8 +12,13 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import arviz as az
 import numpy as np
 import pandas as pd
+from lmfit import MinimizerResult, Parameters
+from matplotlib import figure
+from scipy import odr
+from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 
@@ -235,3 +240,40 @@ class Dataset(dict[str, DataArray]):
                 data["y_errc"] = da.y_errc
             data["mask"] = da.mask
             pd.DataFrame(data).to_csv(fp.with_stem(f"{fp.stem}_{lbl}"), index=False)
+
+
+# --- Data Structures for Fit Results ---
+@dataclass
+class FitResult:
+    """
+    A container for the results of a fitting procedure.
+
+    Attributes
+    ----------
+    figure : figure.Figure | None
+        A matplotlib Figure object visualizing the fit.
+    result : MinimizerResult | Parameters | az.InferenceData | odr.Output | None
+        The primary result object from the fitting backend (e.g., lmfit, pymc).
+    params : Parameters | None
+        The fitted parameters, typically as an `lmfit.Parameters` object for
+        easy access to values and uncertainties.
+    dataset : Dataset | None
+        The dataset that was used for the fitting.
+    """
+
+    figure: figure.Figure | None = None
+    result: MinimizerResult | Parameters | az.InferenceData | odr.Output | None = None
+    params: Parameters | None = None
+    dataset: Dataset | None = None
+
+    def summary(self) -> str:
+        """Provide a brief summary of the fit, focusing on the K value."""
+        if not self.params or "K" not in self.params:
+            return "Fit result is invalid or does not contain a 'K' parameter."
+        k_param = self.params["K"]
+        k_val = k_param.value
+        k_err = k_param.stderr
+        if k_err:
+            k_ufloat = ufloat(k_val, k_err)
+            return f"K = {k_ufloat:.2u}"
+        return f"K = {k_val:.3g} (no uncertainty available)"

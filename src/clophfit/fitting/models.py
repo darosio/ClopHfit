@@ -13,13 +13,13 @@ def binding_1site(
     x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
 ) -> float: ...
 
-
 @typing.overload
 def binding_1site(
     x: ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
 ) -> ArrayF: ...
-
 # fmt: on
+
+
 def binding_1site(
     x: float | ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
 ) -> float | ArrayF:  # fmt: skip
@@ -36,12 +36,21 @@ def binding_1site(
     S1 : float
         Plateau value for the bound state.
     is_ph : bool, optional
-        If True, use the pH model for binding. Default is False.
+        If True, uses the Henderson-Hasselbalch equation for pH titration.
+        If False (default), uses the standard binding isotherm.
 
     Returns
     -------
     float | ArrayF
         Modeled binding values.
+
+    Examples
+    --------
+    >>> binding_1site(1.0, 0.5, 0, 1)
+    0.6666666666666666
+    >>> import numpy as np
+    >>> binding_1site(np.array([0.5, 1.0, 2.0]), 1.0, 0, 1)
+    array([0.33333333, 0.5 , 0.66666667])
 
     Notes
     -----
@@ -53,14 +62,12 @@ def binding_1site(
 
 
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
-    """Infinite cooperativity model.
-
-    It can describe pH-dependence for chloride dissociation constant.
+    """Infinite cooperativity model for pH-dependent chloride dissociation.
 
     Parameters
     ----------
     kd1 : float
-        Dissociation constant at pH <= 5.0 (fully protonated).
+        Dissociation constant at low pH (fully protonated).
     pka : float
         Acid dissociation constant.
     ph : ArrayF | float
@@ -69,7 +76,7 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     Returns
     -------
     ArrayF | float
-        Predicted Kd value(s).
+        Predicted Kd value(s) at the given pH.
 
     Examples
     --------
