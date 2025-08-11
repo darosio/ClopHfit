@@ -25,16 +25,15 @@ from clophfit.fitting.fitting import (
     FitResult,
     extract_fit,
     fit_binding_glob,
-    fit_binding_odr_recursive_outlier,
     fit_binding_pymc,
     fit_binding_pymc_multi,
     fit_binding_pymc_multi2,
-    format_estimate,
     outlier2,
     weight_da,
     weight_multi_ds_titration,
     x_true_from_trace_df,
 )
+from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
 if typing.TYPE_CHECKING:
