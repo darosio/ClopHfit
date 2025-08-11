@@ -19,19 +19,21 @@ import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
 
+from clophfit.fitting.bayes import (
+    extract_fit,
+    fit_binding_pymc,
+    fit_binding_pymc_multi,
+    fit_binding_pymc_multi2,
+    x_true_from_trace_df,
+)
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.fitting import (
     FitResult,
-    extract_fit,
     fit_binding_glob,
-    fit_binding_pymc,
-    fit_binding_pymc_multi,
-    fit_binding_pymc_multi2,
     outlier2,
     weight_da,
     weight_multi_ds_titration,
-    x_true_from_trace_df,
 )
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
