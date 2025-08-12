@@ -11,12 +11,14 @@ import copy
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 import arviz as az
 import numpy as np
 import pandas as pd
-from lmfit import MinimizerResult, Parameters  # type: ignore[import-untyped]
-from matplotlib import figure
+from lmfit import Parameters  # type: ignore[import-untyped]
+from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
+from matplotlib.figure import Figure
 from scipy import odr
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
@@ -244,36 +246,86 @@ class Dataset(dict[str, DataArray]):
 
 # --- Data Structures for Fit Results ---
 @dataclass
-class FitResult:
-    """
-    A container for the results of a fitting procedure.
+class _Result:
+    """Expose lmfit-like attributes."""
+
+    params: Parameters
+    residual: ArrayF = field(default_factory=lambda: np.array([]))
+    redchi: float = 0.0
+    success: bool = True
+
+
+@runtime_checkable
+class MiniProtocol(Protocol):
+    """A very small common interface for all minimizers / backends."""
+
+
+MiniType = TypeVar("MiniType", bound=MiniProtocol)
+MiniT = Minimizer | odr.Output | az.InferenceData
+
+
+@dataclass
+class FitResult(Generic[MiniType]):
+    """Result container of a fitting procedure.
 
     Attributes
     ----------
-    figure : figure.Figure | None
-        A matplotlib Figure object visualizing the fit.
-    result : MinimizerResult | Parameters | az.InferenceData | odr.Output | None
-        The primary result object from the fitting backend (e.g., lmfit, pymc).
-    params : Parameters | None
-        The fitted parameters, typically as an `lmfit.Parameters` object for
-        easy access to values and uncertainties.
+    figure : Figure | None
+        Matplotlib figure visualizing the fit, if generated.
+    result : MinimizerResult | _Result | None
+        Backend-agnostic fit result exposing a .params attribute along with
+        residual, redchi, and success fields (as in lmfit). For lmfit this is a
+        MinimizerResult.
+    mini : MiniT | None
+        The primary backend object (e.g., lmfit.Minimizer, scipy.odr.Output, or
+        az.InferenceData for PyMC).
     dataset : Dataset | None
-        The dataset that was used for the fitting.
+        Dataset used for the fit (typically a deep copy of the input dataset).
     """
 
-    figure: figure.Figure | None = None
-    result: MinimizerResult | Parameters | az.InferenceData | odr.Output | None = None
-    params: Parameters | None = None
+    figure: Figure | None = None
+    result: MinimizerResult | _Result | None = None
+    mini: MiniType | None = None
     dataset: Dataset | None = None
 
-    def summary(self) -> str:
+    def pprint(self) -> str:
         """Provide a brief summary of the fit, focusing on the K value."""
-        if not self.params or "K" not in self.params:
+        if not self.result or "K" not in self.result.params:
             return "Fit result is invalid or does not contain a 'K' parameter."
-        k_param = self.params["K"]
+        k_param = self.result.params["K"]
         k_val = k_param.value
         k_err = k_param.stderr
         if k_err:
             k_ufloat = ufloat(k_val, k_err)
             return f"K = {k_ufloat:.2u}"
         return f"K = {k_val:.3g} (no uncertainty available)"
+
+    def is_valid(self) -> bool:
+        """Whether figure, result, and minimizer exist."""
+        return (
+            self.figure is not None
+            and self.result is not None
+            and self.mini is not None
+        )
+
+
+@dataclass
+class SpectraGlobResults:
+    """A dataclass representing the results of both svd and bands fits.
+
+    Attributes
+    ----------
+    svd : FitResult | None
+        The `FitResult` object representing the outcome of the concatenated svd
+        fit, or `None` if the svd fit was not performed.
+    gsvd : FitResult | None
+        The `FitResult` object representing the outcome of the svd fit, or
+        `None` if the svd fit was not performed.
+    bands : FitResult | None
+        The `FitResult` object representing the outcome of the bands fit, or
+        `None` if the bands fit was not performed.
+    """
+
+    svd: FitResult[Minimizer] | None = field(default=None)
+    gsvd: FitResult[Minimizer] | None = field(default=None)
+    bands: FitResult[Minimizer] | None = field(default=None)
