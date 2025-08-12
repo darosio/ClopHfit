@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import typing
+from typing import Literal, TypedDict
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -12,6 +13,7 @@ import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
+from pydantic import BaseModel
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy import optimize
@@ -30,8 +32,8 @@ if typing.TYPE_CHECKING:
 def create_x_true(
     xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
 ) -> ArrayF | pm.Deterministic:
-    """Create x_true priors."""
-    if n_xerr:
+    """Create latent variables for x-values with uncertainty."""
+    if n_xerr > 0 and np.any(x_errc > 0):
         x_errc_scaled = x_errc * n_xerr
         xd = -np.diff(xc)
         xd_err = np.sqrt(x_errc_scaled[:-1] ** 2 + x_errc_scaled[1:] ** 2)
@@ -787,3 +789,232 @@ def compare_posteriors(
     table = summary.join(pd.Series(deterministic, name="deterministic_K"))
     print("\nCombined table")
     print(table[["mean", "hdi_2.5%", "hdi_97.5%", "deterministic_K"]])
+
+
+def _create_pymc_priors(
+    params: Parameters, n_sd: float, key: str = "", ctr_name: str = ""
+) -> dict[str, pm.Distribution]:
+    """Create PyMC prior distributions from lmfit Parameters."""
+    priors = {}
+
+    def param_name(p_name: str) -> str:
+        return f"{p_name}_{key}" if key else p_name
+
+    for name, p in params.items():
+        # Use a small default sigma if stderr is not available
+        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1.0
+        # Skip creating a separate K prior if it belongs to a control group
+        if ctr_name and name == "K":
+            continue
+        priors[param_name(name)] = pm.Normal(param_name(name), mu=p.value, sigma=sigma)
+    return priors
+
+
+def _create_pymc_x_true(
+    xc: ArrayF, x_errc: ArrayF, n_xerr: float
+) -> ArrayF | pm.Deterministic:
+    """Create latent variables for x-values with uncertainty."""
+    if n_xerr > 0 and np.any(x_errc > 0):
+        x_err_scaled = x_errc * n_xerr
+        xd = -np.diff(xc)
+        xd_err = np.sqrt(x_err_scaled[:-1] ** 2 + x_err_scaled[1:] ** 2)
+        # Lower bound to prevent unphysical ordering
+        lower = xd.min() - 2.5 * xd_err[np.argmin(xd)]
+
+        x_diff = pm.TruncatedNormal("x_diff", mu=xd, sigma=xd_err, lower=lower)
+        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_err_scaled[0])
+        x_cumsum = pm.math.cumsum(x_diff)
+        return pm.Deterministic(
+            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
+        )
+    return xc  # Treat x as fixed if no error is provided
+
+
+class FitConfig(TypedDict):
+    """Store PyMC-fit setup parameters."""
+
+    n_sd: float
+    n_xerr: float
+    ye_scaling: float
+    n_samples: int
+
+
+FitMethod = Literal["bayesian", "frequentist", "robust"]
+
+
+class FitConfig2(BaseModel):
+    """Store PyMC-fit setup parameters."""
+
+    n_sd: float = 10.0
+    n_xerr: float = 1.0
+    ye_scaling: float = 1.0
+    n_samples: int = 2000
+    method: FitMethod = "bayesian"
+
+    class Config:
+        """Config."""
+
+        extra = "forbid"
+
+
+DEFAULT_CONFIG = None
+
+
+class Fitter:
+    """Adapter for all fit."""
+
+    def __init__(
+        self, method: FitMethod = "bayesian", config: FitConfig | None = None
+    ) -> None:
+        self.method = method
+        self.config = config or DEFAULT_CONFIG
+
+    def fit(self, dataset: Dataset) -> FitResult[MiniT]:
+        """Unified fitting interface."""
+        if self.method == "bayesian":
+            return self._fit_bayesian(dataset)
+        if self.method == "frequentist":
+            return self._fit_frequentist(dataset)
+        return FitResult()
+
+    def _fit_bayesian(self, dataset: Dataset) -> FitResult[MiniT]:
+        print(dataset)
+        return FitResult()
+
+    def _fit_frequentist(self, dataset: Dataset) -> FitResult[MiniT]:
+        print(dataset)
+        return FitResult()
+
+
+def fit_pymc_hierarchical(  # noqa: PLR0913
+    results: dict[str, FitResult[MiniT]],
+    scheme: PlateScheme,
+    bg_err: dict[int, ArrayF],
+    n_sd: float = 5.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+) -> az.InferenceData:
+    """
+    Analyze multiple titrations with a hierarchical Bayesian model.
+
+    This model shares information about the dissociation constant 'K' among
+    wells belonging to the same control group, leading to more robust estimates.
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        A dictionary mapping well IDs to their initial `FitResult` from a
+        prior `fit_lm` run.
+    scheme : PlateScheme
+        The plate scheme defining control groups.
+    bg_err : dict[int, ArrayF]
+        Background error for each signal band.
+    n_sd : float
+        The number of standard deviations for the prior width of S0/S1.
+    n_xerr : float
+        Scaling factor for x-value uncertainties.
+    n_samples : int
+        Number of MCMC samples.
+
+    Returns
+    -------
+    az.InferenceData
+        The PyMC trace containing the posterior distributions.
+
+    Raises
+    ------
+    ValueError
+        With invalid dataset.
+    """
+    ds_template = next(r.dataset for r in results.values() if r.dataset)
+    if not ds_template:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
+
+    xc = next(iter(ds_template.values())).xc
+    x_errc = next(iter(ds_template.values())).x_errc * n_xerr
+    labels = list(ds_template.keys())
+
+    # --- Pre-calculate weighted stats for K priors ---
+    k_values = {
+        name: [
+            r.result.params["K"].value
+            for well, r in results.items()
+            if r.result and well in wells
+        ]
+        for name, wells in scheme.names.items()
+    }
+    k_stderr = {
+        name: [
+            r.result.params["K"].stderr
+            for well, r in results.items()
+            if r.result and r.result.params["K"].stderr and well in wells
+        ]
+        for name, wells in scheme.names.items()
+    }
+    print(k_stderr)
+
+    with pm.Model():
+        x_true = _create_pymc_x_true(xc, x_errc, n_xerr)
+
+        # --- Priors for noise model ---
+        sigma_signal_scale = {
+            lbl: pm.HalfNormal(f"sigma_signal_scale_{lbl}", sigma=10.0)
+            for lbl in labels
+        }
+        true_buffer_mean = {
+            lbl: pm.Normal(f"true_buffer_{lbl}", mu=0, sigma=bg_err[i + 1])
+            for i, lbl in enumerate(labels)
+        }
+        variance_buffer_contrib = {
+            lbl: bg_err[i + 1] ** 2 for i, lbl in enumerate(labels)
+        }
+
+        # --- Priors for shared K values in control groups ---
+        k_params = {}
+        for name in scheme.names:
+            mean_k = np.mean(k_values[name]) if k_values[name] else 7.0
+            k_params[name] = pm.Normal(f"K_{name}", mu=mean_k, sigma=0.5)
+
+        # --- Loop through each well to define its model ---
+        for key, r in results.items():
+            if r.result and r.dataset:
+                ctr_name = next(
+                    (name for name, wells in scheme.names.items() if key in wells), ""
+                )
+                priors = _create_pymc_priors(r.result.params, n_sd, key, ctr_name)
+                k_param = k_params[ctr_name] if ctr_name else priors[f"K_{key}"]
+
+                for lbl, da in r.dataset.items():
+                    y_model_signal = binding_1site(
+                        x_true,
+                        k_param,
+                        priors[f"S0_{lbl}_{key}"],
+                        priors[f"S1_{lbl}_{key}"],
+                        r.dataset.is_ph,
+                    )
+                    mu_total = pm.Deterministic(
+                        f"mu_total_{lbl}_{key}", y_model_signal + true_buffer_mean[lbl]
+                    )
+                    var_signal = sigma_signal_scale[lbl] * pm_math.maximum(
+                        1e-6, y_model_signal
+                    )
+                    total_var = pm.Deterministic(
+                        f"total_var_{lbl}_{key}",
+                        variance_buffer_contrib[lbl] + var_signal,
+                    )
+                    sigma_obs = pm.Deterministic(
+                        f"sigma_obs_{lbl}_{key}", pm_math.sqrt(total_var)
+                    )
+
+                    pm.Normal(
+                        f"y_likelihood_{lbl}_{key}",
+                        mu=mu_total[da.mask],
+                        sigma=sigma_obs[da.mask],
+                        observed=da.y,
+                    )
+
+        trace: az.InferenceData = pm.sample(
+            n_samples, tune=n_samples // 2, target_accept=0.9, return_inferencedata=True
+        )
+    return trace

@@ -25,6 +25,7 @@ dependencies = [
   "matplotlib>=3.10.5",
   "openpyxl>=3.1.5",
   "pandas>=2.3.1",
+  "pydantic>=2.11.7",
   "pymc>=5.25.1", # pytensor will load numpy < 2
   "scipy>=1.16.1",
   "seaborn>=0.13.2",

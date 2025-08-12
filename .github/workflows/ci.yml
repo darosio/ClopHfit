@@ -10,8 +10,6 @@ on:
       - "docs/**"
       - "*.md"
   push:
-    branches:
-      - main
     paths-ignore:
       - "*.md"
 
@@ -85,6 +83,7 @@ jobs:
         run: uv run hatch run tests.py${{ matrix.python }}:${{ matrix.tests }}
 
   docs_build:
+    # if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Install binaries for docs

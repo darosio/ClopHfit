@@ -1,4 +1,4 @@
-"""Fit Error classes."""
+"""Custom Exceptions."""
 
 
 class FitError(Exception):
