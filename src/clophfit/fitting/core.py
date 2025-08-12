@@ -263,7 +263,8 @@ def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult[Minimizer]:
     """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
-        raise InsufficientDataError
+        msg = "Not enough data points for the number of parameters."
+        raise InsufficientDataError(msg)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True)
     if robust:
         # Use Huber loss for robust fitting to reduce the influence of outliers
