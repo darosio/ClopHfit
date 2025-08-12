@@ -591,7 +591,7 @@ def test_error_messages() -> None:
     with pytest.raises(InvalidDataError) as excinfo:
         DataArray(np.array([1, 2]), np.array([1]))  # Length mismatch
     assert "equal" in str(excinfo.value)
-
-    with pytest.raises(InsufficientDataError) as excinfo:
-        fit_binding_glob(Dataset({"tiny": DataArray(np.array([1]), np.array([1]))}))
-    assert "" in str(excinfo.value)
+    tiny = Dataset({"tiny": DataArray(np.array([1]), np.array([1]))})
+    with pytest.raises(InsufficientDataError) as excinfo2:
+        fit_binding_glob(tiny)
+    assert "Not enough" in str(excinfo2.value)
