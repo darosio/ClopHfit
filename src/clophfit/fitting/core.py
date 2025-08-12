@@ -1,11 +1,52 @@
-"""Fit Cl binding and pH titration."""
+"""
+Clophfit: Fitting of Cl- binding and pH titration curves.
+
+This module provides a comprehensive suite of tools for analyzing titration data,
+particularly for chloride binding and pH titration experiments common in biochemistry,
+such as those involving fluorescent probes.
+
+Core Functionality:
+-------------------
+1.  **Data Modeling**: Implements a 1-site binding model suitable for both
+    ligand concentration and pH titrations.
+
+2.  **Spectral Data Processing**:
+    -   Processes raw spectral data (e.g., from fluorescence spectroscopy).
+    -   Offers two methods for data reduction:
+        -   Singular Value Decomposition (SVD) to extract the most significant
+          spectral component.
+        -   Band integration over a specified wavelength range.
+
+3.  **Curve Fitting**: Provides three distinct fitting backends to determine the
+    dissociation constant (K) and other parameters:
+    -   **Least-Squares (LM)**: Utilizes the `lmfit` library for robust non-linear
+      least-squares minimization. Supports iterative reweighting and outlier
+      removal.
+    -   **Orthogonal Distance Regression (ODR)**: Employs `scipy.odr` to account
+      for uncertainties in both x and y variables, which is crucial when x-values
+      (e.g., pH measurements) have errors.
+    -   **Bayesian Modeling (PyMC)**: Implements a hierarchical Bayesian model
+      using `pymc`. This approach is powerful for:
+        -   Quantifying parameter uncertainties as full posterior distributions.
+        -   Modeling errors in x-values as latent variables.
+        -   Sharing information between multiple experiments (hierarchical fitting)
+          to obtain more robust parameter estimates.
+
+4.  **Result Visualization**: Includes extensive plotting functions to visualize:
+    -   Raw and processed spectra.
+    -   Fitted curves with confidence intervals.
+    -   Diagnostic plots for SVD and Bayesian analyses (e.g., corner plots).
+"""
+
+
+# --- Data Structures for Fit Results ---
+# TODO: from gemini
 
 from __future__ import annotations
 
 import copy
 import logging
 import typing
-from dataclasses import dataclass, field
 from sys import float_info
 
 import lmfit  # type: ignore[import-untyped]
@@ -13,9 +54,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
-from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
+from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import stats  # type: ignore[import-untyped]
+from scipy import stats
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.data_structures import DataArray, Dataset
@@ -34,10 +75,13 @@ from clophfit.fitting.plotting import (
     plot_spectra_distributed,
 )
 
+from .data_structures import FitResult, SpectraGlobResults
+
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask
 
 
+# --- Globals ---
 N_BOOT = 20  # To compute fill_between uncertainty.
 
 EMCEE_STEPS = 1800
@@ -96,61 +140,9 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     return params
 
 
-@dataclass
-class FitResult:
-    """Result container for a deterministic fit.
-
-    Attributes
-    ----------
-    figure : matplotlib.figure.Figure | None
-        Matplotlib figure containing the fit plot, if generated.
-    result : lmfit.minimizer.MinimizerResult | None
-        Result of the optimization produced by lmfit.
-    mini : lmfit.minimizer.Minimizer | None
-        Minimizer instance used to run the fit.
-    dataset : Dataset | None
-        Dataset used for the fit (typically a deep copy of the input dataset).
-    """
-
-    figure: figure.Figure | None = None
-    result: MinimizerResult | None = None
-    mini: Minimizer | None = None
-    dataset: Dataset | None = None
-
-    def is_valid(self) -> bool:
-        """Whether figure, result, and minimizer exist."""
-        return (
-            self.figure is not None
-            and self.result is not None
-            and self.mini is not None
-        )
-
-
-@dataclass
-class SpectraGlobResults:
-    """A dataclass representing the results of both svd and bands fits.
-
-    Attributes
-    ----------
-    svd : FitResult | None
-        The `FitResult` object representing the outcome of the concatenated svd
-        fit, or `None` if the svd fit was not performed.
-    gsvd : FitResult | None
-        The `FitResult` object representing the outcome of the svd fit, or
-        `None` if the svd fit was not performed.
-    bands : FitResult | None
-        The `FitResult` object representing the outcome of the bands fit, or
-        `None` if the bands fit was not performed.
-    """
-
-    svd: FitResult | None = field(default=None)
-    gsvd: FitResult | None = field(default=None)
-    bands: FitResult | None = field(default=None)
-
-
 def analyze_spectra(
     spectra: pd.DataFrame, is_ph: bool, band: tuple[int, int] | None = None
-) -> FitResult:
+) -> FitResult[Minimizer]:
     """Analyze spectra titration, create and plot fit results.
 
     This function performs either Singular Value Decomposition (SVD) or
@@ -170,7 +162,7 @@ def analyze_spectra(
 
     Returns
     -------
-    FitResult
+    FitResult[Minimizer]
         A FitResult object containing the figure, result, and mini.
 
     Raises
@@ -225,7 +217,7 @@ def analyze_spectra(
     return FitResult(fig, result, mini, ds)
 
 
-def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult:
+def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult[Minimizer]:
     """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
@@ -316,7 +308,7 @@ def analyze_spectra_glob(
 def _plot_spectra_glob_emcee(
     titration: dict[str, pd.DataFrame],
     ds: Dataset,
-    f_res: FitResult,
+    f_res: FitResult[Minimizer],
     dbands: dict[str, tuple[int, int]] | None = None,
 ) -> figure.Figure:
     fig, (ax1, ax2, ax3, ax4, ax5) = _create_spectra_canvas()
@@ -338,7 +330,7 @@ def _plot_spectra_glob_emcee(
 
 def outlier2(
     ds: Dataset, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
-) -> FitResult:
+) -> FitResult[Minimizer]:
     """Remove outliers and reassign weights."""
     # Re-weight dataset
     fr = fit_binding_glob(ds, robust=True)
@@ -395,7 +387,7 @@ def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
 
 def fit_binding_glob_reweighted(
     ds: Dataset, key: str, threshold: float = 2.05
-) -> FitResult:
+) -> FitResult[Minimizer]:
     """RLS and outlier removal for multi-label titration datasets."""
     # Initial fit
     r = fit_binding_glob(ds)
@@ -421,7 +413,7 @@ def fit_binding_glob_reweighted(
 
 def fit_binding_glob_recursive(
     ds: Dataset, max_iterations: int = 15, tol: float = 0.1
-) -> FitResult:
+) -> FitResult[Minimizer]:
     """Analyze multi-label titration datasets using ODR."""
     # Initial fit
     r = fit_binding_glob(ds)
@@ -453,7 +445,7 @@ def fit_binding_glob_recursive(
 
 def fit_binding_glob_recursive_outlier(
     ds: Dataset, tol: float = 0.01, threshold: float = 3.0
-) -> FitResult:
+) -> FitResult[Minimizer]:
     """Analyze multi-label titration datasets using IRLS."""
     # Initial fit
     r = fit_binding_glob_recursive(ds, tol=tol)
@@ -478,8 +470,3 @@ def outlier_glob(
         plt.title("Z-scores")
     outliers: ArrayMask = z_scores > threshold
     return outliers
-
-
-@dataclass
-class _Result:
-    params: Parameters

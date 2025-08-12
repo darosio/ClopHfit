@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy.odr import ODR, Model, RealData  # type: ignore[import-untyped]
+from scipy.odr import ODR, Model, RealData
 
 from clophfit.fitting.bayes import (
     extract_fit,
@@ -27,19 +27,21 @@ from clophfit.fitting.bayes import (
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import (
-    FitResult,
     fit_binding_glob,
     outlier2,
     weight_da,
     weight_multi_ds_titration,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
 if typing.TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
+    from scipy import odr
 
     from clophfit.clophfit_types import ArrayF
 
@@ -889,9 +891,9 @@ class Buffer:
     def _fit_buffer(self, dataframed: dict[int, pd.DataFrame]) -> dict[int, BufferFit]:
         """Fit buffers of all labelblocksgroups."""
 
-        def linear_model(pars: list[float], x: ArrayF) -> ArrayF:
+        def linear_model(pars: ArrayF, x: ArrayF) -> ArrayF:
             """Define linear model function."""
-            return pars[0] * x + pars[1]
+            return typing.cast("ArrayF", pars[0] * x + pars[1])
 
         def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
             x = x[:, np.newaxis]  # Ensure x is a 2D array
@@ -917,8 +919,10 @@ class Buffer:
                 # Extract the best-fit parameters and their standard errors
                 m_best, q_best = output.beta
                 m_err, q_err = output.sd_beta
-                cov_matrix = output.cov_beta
-                fit_resultd[label] = BufferFit(m_best, q_best, m_err, q_err)
+                cov_matrix = typing.cast("ArrayF", output.cov_beta)
+                fit_resultd[label] = BufferFit(
+                    float(m_best), float(q_best), float(m_err), float(q_err)
+                )
                 buf_df["Label"] = label
                 buf_df["fit"] = m_best * self.tit.x + q_best
                 buf_df["fit_err"] = fit_error(self.tit.x, cov_matrix)
@@ -1016,8 +1020,8 @@ class TitrationResults:
 
     scheme: PlateScheme
     fit_keys: set[str]
-    compute_func: Callable[[str], FitResult]
-    results: dict[str, FitResult] = field(default_factory=dict)
+    compute_func: Callable[[str], FitResult[MiniT]]
+    results: dict[str, FitResult[MiniT]] = field(default_factory=dict)
     _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
@@ -1045,7 +1049,7 @@ class TitrationResults:
         """Get or lazily compute a result for a given key."""
         return repr(self.results)
 
-    def __getitem__(self, key: str) -> FitResult:
+    def __getitem__(self, key: str) -> FitResult[MiniT]:
         """Get or lazily compute a result for a given key."""
         if key not in self.results:
             if key not in self.fit_keys:
@@ -1580,7 +1584,7 @@ class Titration(TecanfilesGroup):
         """Perform global ODR fitting."""
         return TitrationResults(self.scheme, self.fit_keys, self._compute_odr_fit)
 
-    def _compute_fit(self, key: str, label: int) -> FitResult:
+    def _compute_fit(self, key: str, label: int) -> FitResult[Minimizer]:
         """Compute individual dataset fit for a single key."""
         try:
             ds = self._create_ds(key, label)
@@ -1589,7 +1593,7 @@ class Titration(TecanfilesGroup):
             logger.warning(f"Skip fit for well {key} for Label:{label}.")
             return FitResult()
 
-    def _compute_global_fit(self, key: str) -> FitResult:
+    def _compute_global_fit(self, key: str) -> FitResult[Minimizer]:
         """Compute global fit for a single key."""
         try:
             ds = self._create_global_ds(key)
@@ -1629,7 +1633,7 @@ class Titration(TecanfilesGroup):
             weight_multi_ds_titration(ds)
         return ds
 
-    def _compute_odr_fit(self, key: str) -> FitResult:
+    def _compute_odr_fit(self, key: str) -> FitResult[odr.Output]:
         """Compute global ODR fit for a single key.
 
         if not self.result_global[key]:
@@ -1663,7 +1667,7 @@ class Titration(TecanfilesGroup):
             self.scheme, self.fit_keys, partial(self._compute_mcmc_fit, n_sd=n_sd)
         )
 
-    def _compute_mcmc_fit(self, key: str, n_sd: float) -> FitResult:
+    def _compute_mcmc_fit(self, key: str, n_sd: float) -> FitResult[az.InferenceData]:
         """Compute global MCMC fit for a single key."""
         # Calculate n_sd from the previous global fitting results
         logger.info(f"Starting PyMC sampling for key: {key}")
@@ -1717,7 +1721,7 @@ class Titration(TecanfilesGroup):
             compute_func=partial(self._compute_multi_mcmc_fit),
         )
 
-    def _compute_multi_mcmc_fit(self, key: str) -> FitResult:
+    def _compute_multi_mcmc_fit(self, key: str) -> FitResult[az.InferenceData]:
         """Compute individual dataset fit for a single key."""
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset

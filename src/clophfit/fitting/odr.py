@@ -9,12 +9,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import odr  # type: ignore[import-untyped]
+from scipy import odr
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
-from .core import FitResult  # Local import to avoid cycle
+from .data_structures import FitResult, MiniT, _Result  # Local import to avoid cycle
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask
@@ -64,12 +64,7 @@ def generalized_combined_model(
     return np.concatenate(results)
 
 
-class _Result:
-    def __init__(self, params: Parameters) -> None:
-        self.params = params
-
-
-def fit_binding_odr(fr: FitResult) -> FitResult:
+def fit_binding_odr(fr: FitResult[MiniT]) -> FitResult[odr.Output]:
     """Analyze multi-label titration datasets using ODR."""
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -92,15 +87,15 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
     def combined_model_odr(p: list[float], x: ArrayF) -> ArrayF:
         return generalized_combined_model(p, x, dataset_lengths)
 
-    combined_model = odr.Model(combined_model_odr)
+    combined_model = odr.Model(combined_model_odr)  # type: ignore[arg-type]
     odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
     output = odr_obj.run()
     # reassign x_err and y_err to ds
     start_idx = 0
     for da in ds.values():
         end_idx = start_idx + len(da.y)
-        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])
-        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
+        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])  # type: ignore[attr-defined]
+        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])  # type: ignore[attr-defined]
         start_idx = end_idx
     # Update the parameters with results from ODR
     p_names = ["K"]
@@ -118,24 +113,24 @@ def fit_binding_odr(fr: FitResult) -> FitResult:
 
 
 def fit_binding_odr_recursive(
-    fr: FitResult, max_iterations: int = 15, tol: float = 0.1
-) -> FitResult:
+    fr: FitResult[MiniT], max_iterations: int = 15, tol: float = 0.1
+) -> FitResult[odr.Output]:
     """Analyze multi-label titration datasets using ODR."""
     result = copy.deepcopy(fr)
     if result.result is None or result.dataset is None:
         return FitResult()
     # Initial fit
     ro = fit_binding_odr(result)
-    residual_variance = ro.mini.res_var if ro.mini else 0.0
+    residual_variance = ro.mini.res_var if isinstance(ro.mini, odr.Output) else 0.0  # type: ignore[attr-defined]
     for _ in range(max_iterations):
         rn = fit_binding_odr(ro)
-        if rn.mini and rn.mini.res_var == 0:
+        if rn.mini and rn.mini.res_var == 0:  # type: ignore[attr-defined]
             rn = ro
             break
         # Check convergence
-        if rn.mini and residual_variance - rn.mini.res_var < tol:
+        if rn.mini and residual_variance - rn.mini.res_var < tol:  # type: ignore[attr-defined]
             break
-        residual_variance = rn.mini.res_var if rn.mini else 0.0
+        residual_variance = rn.mini.res_var if rn.mini else 0.0  # type: ignore[attr-defined]
         ro = rn
     return rn
 
@@ -144,8 +139,8 @@ def outlier(
     output: odr.Output, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
-    residuals_x = output.delta
-    residuals_y = output.eps
+    residuals_x = output.delta  # type: ignore[attr-defined]
+    residuals_y = output.eps  # type: ignore[attr-defined]
     residuals = np.sqrt(residuals_x**2 + residuals_y**2)
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
     if plot_z_scores:
@@ -157,17 +152,19 @@ def outlier(
 
 
 def fit_binding_odr_recursive_outlier(
-    fr: FitResult, tol: float = 0.5, threshold: float = 2.0
-) -> FitResult:
+    fr: FitResult[MiniT], tol: float = 0.5, threshold: float = 2.0
+) -> FitResult[odr.Output]:
     """Analyze multi-label titration datasets using ODR."""
     result = copy.deepcopy(fr)
     if result.result is None or result.dataset is None:
         return FitResult()
     # Initial fit
     ro = fit_binding_odr_recursive(result, tol=tol)
-    omask = outlier(ro.mini, threshold)
+    if ro.mini:
+        omask = outlier(ro.mini, threshold)
     while omask.any() and ro.dataset:
         result.dataset.apply_mask(~omask)
         ro = fit_binding_odr_recursive(result, tol=tol)
-        omask = outlier(ro.mini, 3.0)
+        if ro.mini:
+            omask = outlier(ro.mini, 3.0)
     return ro

@@ -14,13 +14,13 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
-from scipy import optimize  # type: ignore[import-untyped]
+from scipy import optimize
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
-from .core import N_BOOT, FitResult, _Result  # local to avoid circular import
-from .data_structures import DataArray, Dataset
+from .core import N_BOOT  # local to avoid circular import
+from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, FloatFunc
@@ -85,7 +85,7 @@ def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
 
 def process_trace(
     trace: az.InferenceData, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
-) -> FitResult:
+) -> FitResult[az.InferenceData]:
     """Process the trace to extract parameter estimates and update datasets.
 
     Parameters
@@ -101,7 +101,7 @@ def process_trace(
 
     Returns
     -------
-    FitResult
+    FitResult[az.InferenceData]
         The updated fit result with extracted parameter values and datasets.
     """
     # Extract summary statistics for parameters
@@ -142,7 +142,9 @@ def process_trace(
     return FitResult(fig, _Result(rpars), trace, ds)
 
 
-def extract_fit(key: str, ctr: str, trace_df: pd.DataFrame, ds: Dataset) -> FitResult:
+def extract_fit(
+    key: str, ctr: str, trace_df: pd.DataFrame, ds: Dataset
+) -> FitResult[az.InferenceData]:
     """Compute individual dataset fit from a multi-well trace summary."""
     rpars = Parameters()
     rdf = trace_df[trace_df.index.str.endswith(key)]
@@ -190,12 +192,12 @@ def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
 
 
 def fit_binding_pymc(
-    fr: FitResult,
+    fr: FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
-) -> FitResult:
+) -> FitResult[az.InferenceData]:
     """Analyze multi-label titration datasets using PyMC (single model)."""
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -227,11 +229,11 @@ def fit_binding_pymc(
 
 
 def fit_binding_pymc2(
-    fr: FitResult,
+    fr: FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
-) -> FitResult:
+) -> FitResult[az.InferenceData]:
     """Analyze multi-label titration datasets using PyMC with separate ye_mag per label."""
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -265,7 +267,7 @@ def fit_binding_pymc2(
 
 
 def fit_binding_pymc_compare(  # noqa: PLR0913
-    fr: FitResult,
+    fr: FitResult[MiniT],
     buffer_sd: dict[str, float],
     learn_separate_y_mag: bool = False,
     n_sd: float = 10.0,
@@ -277,7 +279,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
 
     Parameters
     ----------
-    fr : FitResult
+    fr : FitResult[MiniT]
         The fit result from a previous run, providing initial parameters and dataset.
     buffer_sd : dict[str, float]
         bg_err
@@ -378,7 +380,7 @@ def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
 
 
 def fit_binding_pymc_odr(
-    fr: FitResult,
+    fr: FitResult[MiniT],
     n_sd: float = 10.0,
     xe_scaling: float = 1.0,
     ye_scaling: float = 10.0,
@@ -465,7 +467,7 @@ def weighted_stats(
 
 
 def fit_binding_pymc_multi(  # noqa: PLR0913
-    results: dict[str, FitResult],
+    results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
@@ -547,7 +549,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
 
 
 def fit_binding_pymc_multi2(  # noqa: PLR0913
-    results: dict[str, FitResult],
+    results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     bg_err: dict[int, ArrayF],
     n_sd: float = 5.0,
@@ -751,7 +753,9 @@ def plot_ppc_well(
 # ------------------------------------------------------------------
 # 2.4  Comparison of posteriors with deterministic fits
 # ------------------------------------------------------------------
-def compare_posteriors(trace: az.InferenceData, results: dict[str, FitResult]) -> None:
+def compare_posteriors(
+    trace: az.InferenceData, results: dict[str, FitResult[MiniT]]
+) -> None:
     """Print posterior mean ± 95 % C.I.
 
     For the K parameter for each well, and juxtapose it with the deterministic K
@@ -761,7 +765,7 @@ def compare_posteriors(trace: az.InferenceData, results: dict[str, FitResult]) -
     ----------
     trace   : az.InferenceData
         Output of ``fit_binding_pymc_advanced``.
-    results : dict[str, FitResult]
+    results : dict[str, FitResult[MiniT]]
         Deterministic fits produced by the old pipeline.
     """
     # Summarise the trace

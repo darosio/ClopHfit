@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -16,6 +17,9 @@ from clophfit.fitting.odr import (
     generalized_combined_model,
     outlier,
 )
+
+if TYPE_CHECKING:
+    from scipy import odr
 
 
 def test_format_estimate_fixed_and_scientific() -> None:
@@ -64,14 +68,12 @@ def test_fit_binding_odr_tiny_dataset() -> None:
 
 def test_outlier_threshold_behavior() -> None:
     """Ensure outlier mask flags extreme residual and none of the small ones."""
-    # Build a minimal odr.Output-like object with required attributes
-    output = types.SimpleNamespace()
     # Mostly small residuals, one big outlier
     delta = np.array([0.0, 0.0, 0.0, 10.0])
     eps = np.array([0.0, 0.0, 0.0, 0.0])
-    output.delta = delta
-    output.eps = eps
-    mask = outlier(output, threshold=1.5)
+    # Build a minimal odr.Output-like object with required attributes
+    output = types.SimpleNamespace(delta=delta, eps=eps)
+    mask = outlier(cast("odr.Output", output), threshold=1.5)
     assert mask.shape == delta.shape
     assert bool(mask[-1])
     assert mask[:3].sum() == 0

@@ -22,7 +22,7 @@ from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 
 if TYPE_CHECKING:
-    from clophfit.fitting.core import FitResult
+    from clophfit.fitting.data_structures import FitResult, MiniT
 
 
 @click.group()
@@ -202,7 +202,7 @@ def fit_enspire(  # noqa: C901,PLR0912
     note = Note(note_fp, verbose=verbose)
     note.build_titrations(ef)
     dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
-    ds_data = {}
+    ds_data: dict[str, DataArray] = {}
     for name, d_name in note.titrations.items():
         for temp, d_temp in d_name.items():
             for tit, d_tit in d_temp.items():
@@ -250,7 +250,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
-def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:
+def _print_result(fit_result: FitResult[MiniT], pdf_file: Path, band_str: str) -> None:
     print(str(pdf_file))
     print(f"Best fit using '{band_str}' band:\n")
     ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
