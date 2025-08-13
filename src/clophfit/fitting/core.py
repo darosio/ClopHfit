@@ -323,9 +323,10 @@ def fit_lm(
     minimizer = Minimizer(
         _binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True
     )
-    result = minimizer.minimize(
-        method="least_squares", loss="huber" if robust else "leastsq"
-    )
+    if robust:
+        result = minimizer.minimize(method="least_squares", loss="huber")
+    else:
+        result = minimizer.minimize()
 
     # --- Optional: Iterative Reweighting and Outlier Removal ---
     if iterative or outlier_threshold is not None:
