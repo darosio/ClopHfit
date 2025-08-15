@@ -134,6 +134,72 @@ class Dataset(dict[str, DataArray]):
         super().__init__(data or {})
         self.is_ph = is_ph
 
+    def __repr__(self) -> str:  # pragma: no cover - formatting utility
+        """Readable, concise summary of the dataset with rounded values."""
+
+        def _fmt_arr(
+            a: list[float] | np.ndarray, max_items: int = 6, prec: int = 3
+        ) -> str:
+            arr = np.asarray(a)
+            if arr.size == 0:
+                return "[]"
+            # Numeric rounding for float/int
+            if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(
+                arr.dtype, np.integer
+            ):
+                arr = np.round(arr.astype(float), prec)
+
+                def fmt(v: float) -> str:
+                    return f"{v:g}"
+
+            if arr.size <= max_items:
+                return "[" + ", ".join(fmt(v) for v in arr.tolist()) + "]"
+            head = arr[: max_items - 2].tolist()
+            tail = arr[-2:].tolist()
+            return (
+                "["
+                + ", ".join(fmt(v) for v in head)
+                + ", ..., "
+                + ", ".join(fmt(v) for v in tail)
+                + "]"
+            )
+
+        def _fmt_mask(m: ArrayMask, max_items: int = 12) -> str:
+            if m.size == 0:
+                return "[]"
+            arr = m.astype(int)
+            if arr.size <= max_items:
+                return "[" + ", ".join(str(int(v)) for v in arr.tolist()) + "]"
+            head = arr[: max_items - 2].tolist()
+            tail = arr[-2:].tolist()
+            return (
+                "["
+                + ", ".join(str(int(v)) for v in head)
+                + ", ..., "
+                + ", ".join(str(int(v)) for v in tail)
+                + "]"
+            )
+
+        header = f"Dataset(is_ph={self.is_ph})"
+        if len(self) == 0:
+            return header
+        lines = [header]
+        for lbl, da in self.items():
+            try:
+                lines.append(f"  - {lbl}:")
+                lines.append(f"        x={_fmt_arr(getattr(da, 'xc', np.array([])))}")
+                lines.append(f"        y={_fmt_arr(getattr(da, 'yc', np.array([])))}")
+                lines.append(f"        mask={_fmt_mask(da.mask)}")
+                lines.append(
+                    f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}"
+                )
+                lines.append(
+                    f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}"
+                )
+            except Exception:  # noqa: BLE001 - never crash on repr
+                lines.append(f"  - {lbl}: <unavailable>")
+        return "\n".join(lines)
+
     @classmethod
     def from_da(cls, da: DataArray | list[DataArray], is_ph: bool = False) -> "Dataset":
         """Alternative constructor to create Dataset from a list of DataArray.
