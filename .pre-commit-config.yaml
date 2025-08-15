@@ -77,7 +77,7 @@ repos:
       - id: rst-inline-touching-normal
 
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.6.8
+    rev: 0.6.10
     hooks:
       - id: pydoclint
 
