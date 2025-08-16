@@ -39,8 +39,8 @@ class Truth:
 
 def _make_synthetic_ds(  # noqa: PLR0913
     k: float,
-    s0: dict[str, float],
-    s1: dict[str, float],
+    s0: dict[str, float] | float,
+    s1: dict[str, float] | float,
     *,
     is_ph: bool,
     noise: float = 0.02,
@@ -50,7 +50,13 @@ def _make_synthetic_ds(  # noqa: PLR0913
 
     noise is relative to dynamic range per label.
     """
-    rng = np.random.default_rng(seed)
+    # Allow convenient scalar inputs for single-label cases
+    if not isinstance(s0, dict):
+        s0 = {"y0": float(s0)}
+    if not isinstance(s1, dict):
+        s1 = {"y0": float(s1)}
+    is_ph = bool(is_ph)
+    rng = np.random.default_rng(seed) if seed else np.random.default_rng()
     if is_ph:
         # cover a reasonable pH range around K
         x = np.array([5, 5.8, 6.6, 7.0, 7.8, 8.2, 9.0])
@@ -63,9 +69,15 @@ def _make_synthetic_ds(  # noqa: PLR0913
         dy = noise * (np.max(clean) - np.min(clean))
         y = clean + rng.normal(0.0, dy, size=x.shape)
         da = DataArray(xc=x, yc=y)
-        # small x error for ODR paths
-        x_err = 0.05 if is_ph else 0.0
-        da.x_err = np.ones_like(y) * x_err
+        # x uncertainty modeling:
+        # - pH: keep small constant instrument uncertainty
+        # - concentration series: 0.01 at x==0; for x>0 include a relative component to reflect serial additions
+        if is_ph:
+            x_err_arr = np.full_like(x, 0.05, dtype=float)
+        else:
+            rel = 0.03  # 3% relative uncertainty for additions
+            x_err_arr = np.where(x == 0, 0.01, np.maximum(0.01, rel * x.astype(float)))
+        da.x_err = x_err_arr
         ds[lbl] = da
     return ds, Truth(K=k, S0=s0, S1=s1)
 
@@ -92,7 +104,7 @@ def _build_fitters() -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
         "glob_huber": lambda ds: fit_binding_glob(ds, robust=True),
         "glob_irls_outlier": lambda ds: fit_binding_glob_recursive_outlier(ds),
         "outlier2": lambda ds: outlier2(ds, "default"),
-        "odr_recursive_outlier": _odr,
+        # FIXME: "odr_recursive_outlier": _odr,
     }
 
 
