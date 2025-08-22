@@ -110,7 +110,7 @@ jobs:
       - name: Run hatch
         run: uv run hatch run docs:build
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           name: github-pages
           path: "./docs/_build"
