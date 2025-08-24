@@ -111,6 +111,8 @@ repos:
     hooks:
       - id: uv-lock
         stages: [pre-commit]
+        always_run: true
+        pass_filenames: false
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.2.0
