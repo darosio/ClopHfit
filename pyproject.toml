@@ -60,7 +60,7 @@ docs = [
   "sphinx-autodoc-typehints<3.2", # TODO: wait nbsphinx
   "sphinx-click==6.0.0",
   "sphinx<8.2", # TODO: wait nbsphinx
-  "sphinxcontrib-plantuml==0.30",
+  "sphinxcontrib-plantuml==0.31",
 ]
 lint = [
   "pre-commit==4.3.0",
