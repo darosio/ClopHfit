@@ -415,7 +415,7 @@ def test_dataarray_initialization_failure() -> None:
     """Test for length mismatch error during DataArray initialization."""
     xc = np.array([1, 2, 3])
     yc = np.array([10, 20, 30, 40])  # Mismatched length
-    with pytest.raises(ValueError, match="Length of 'xc' and 'yc' must be equal."):
+    with pytest.raises(ValueError, match="Length of 'xc' and 'yc' must be equal"):
         DataArray(xc=xc, yc=yc)
 
 
@@ -424,13 +424,13 @@ def test_dataarray_error_length_mismatch() -> None:
     xc = np.array([1, 2, 3, 4])
     yc = np.array([10, 20, 30, 40])
     short_err = np.array([0.1, 0.2])  # Mismatched length
-    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal."):
+    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal"):
         DataArray(xc=xc, yc=yc, y_errc=short_err)
-    with pytest.raises(ValueError, match="Length of 'xc' and 'x_errc' must be equal."):
+    with pytest.raises(ValueError, match="Length of 'xc' and 'x_errc' must be equal"):
         DataArray(xc=xc, yc=yc, x_errc=short_err)
     da = DataArray(xc=xc, yc=yc)
     # MAYBE: match with "Length of 'y_err' must be 1 or same as 'y'."
-    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal."):
+    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal"):
         da.y_err = short_err
 
 
