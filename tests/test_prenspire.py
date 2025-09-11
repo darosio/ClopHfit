@@ -30,9 +30,9 @@ class TestEnspireFile:
         """Test some raised exceptions."""
         esf = (data_files_dir / "exceptions").joinpath
         # Test get_data_ini Exceptions
-        with pytest.raises(Exception, match=r"No line starting with \."):
+        with pytest.raises(Exception, match="No line starting with "):
             EnspireFile(esf("h148g-spettroC-idx0.csv"))
-        with pytest.raises(Exception, match=r"Multiple lines starting with \."):
+        with pytest.raises(Exception, match="Multiple lines starting with "):
             EnspireFile(esf("h148g-spettroC-idx2.csv"))
         # Test platemap
         with pytest.raises(Exception, match="stop: Platemap format unexpected"):
