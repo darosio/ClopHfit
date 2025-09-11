@@ -107,7 +107,7 @@ repos:
         args: [-x, --severity=style] # Show errors, warnings, info and style
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.16
+    rev: 0.8.17
     hooks:
       - id: uv-lock
         stages: [pre-commit]
