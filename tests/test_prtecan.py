@@ -253,7 +253,7 @@ class TestTecanfile:
 
     def test_missing_label(self) -> None:
         """It raises Exception when there is no Label pattern."""
-        with pytest.raises(ValueError, match="No Labelblock found."):
+        with pytest.raises(ValueError, match="No Labelblock found"):
             prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
@@ -301,7 +301,7 @@ class TestLabelblocksGroup:
 
     def test_notequal_labelblocks(self, tfs: list[Tecanfile]) -> None:
         """Raise Exception when concatenating unequal labelblocks."""
-        with pytest.raises(ValueError, match="Creation of labelblock group failed."):
+        with pytest.raises(ValueError, match="Creation of labelblock group failed"):
             prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[2]])
 
 
