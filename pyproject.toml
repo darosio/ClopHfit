@@ -40,7 +40,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 version = "0.12.0"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "git-cliff==2.10.0",
   "mdformat==0.7.22",
@@ -76,10 +76,6 @@ tests = [
   "types-setuptools>=80.9.0.20250822",
   "xdoctest>=1.3.0",
 ]
-hatch = [
-  "hatch==1.14.1",
-]
-
 
 [project.scripts]
 "clop" = "clophfit.__main__:clop"
@@ -120,57 +116,6 @@ branch = true
 omit = ["*__init__.py", "*/old/*", "types.py"]
 source = ["clophfit"]
 
-[tool.hatch.envs.default]
-features = ["dev", "docs", "lint", "tests"] # separate docs and lint
-installer = "uv"
-path = ".venv"
-
-[tool.hatch.envs.default.scripts]
-ch = "git cliff --bump --unreleased --prepend CHANGELOG.md"
-bump = """
-NEXT_VERSION=$(git cliff --bumped-version)
-uv version $NEXT_VERSION
-uv sync --all-extras
-git add .
-git commit -m "chore: release $NEXT_VERSION"
-git tag $NEXT_VERSION
-git push
-git push --tags
-"""
-clean = "rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/nima/__pycache__"
-
-[tool.hatch.envs.docs]
-type = "virtual"
-features = ["docs"]
-installer = "uv"
-
-[tool.hatch.envs.docs.scripts]
-build = "sphinx-build docs docs/_build"
-serve = "python -m http.server 8000 -d docs/_build"
-
-[tool.hatch.envs.lint]
-type = "virtual"
-features = ["lint"]
-installer = "uv"
-
-[tool.hatch.envs.lint.scripts]
-init = "pre-commit install"
-lint = "pre-commit run --all-files --show-diff-on-failure {args}"
-
-[tool.hatch.envs.tests]
-type = "virtual"
-features = ["tests"]
-installer = "uv"
-matrix = [{ python = ["3.13", "3.12", "3.11"] }]
-template = "tests" #built-in test template
-
-[tool.hatch.envs.tests.scripts]
-all = ["test", "type", "xdoc", "cov"]
-cov = ["coverage combine", "coverage report", "coverage xml"]
-test = "coverage run -p -m pytest -v"
-type = "mypy src tests docs/conf.py"
-xdoc = "python -m xdoctest clophfit all"
-
 [tool.isort]
 combine_as_imports = true
 force_single_line = false
@@ -201,7 +146,7 @@ live_mode = true
 strict = true
 
 [tool.ruff]
-extend-exclude = ["src/clophfit/old/"]
+extend-exclude = ["src/clophfit/old/", "scripts/"]
 extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true

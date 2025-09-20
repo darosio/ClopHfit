@@ -11,8 +11,6 @@ This package provides a command line interface for fitting pH titration or
 binding assay data for macromolecules, such as fluorescence spectra. With this
 tool, users can easily analyze their data and obtain accurate fitting results.
 
-- Version: "0.12.0"
-
 ## Installation
 
 You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/)
