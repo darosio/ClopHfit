@@ -36,10 +36,6 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: .python-version
       - name: Sync project with lint deps
         run: uv sync --locked --group lint
       - name: Cache pre-commit
@@ -108,10 +104,6 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: .python-version
       - name: Sync project with docs deps
         run: uv sync --locked --group docs
       - name: Build docs
