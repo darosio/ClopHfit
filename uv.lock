@@ -390,16 +390,7 @@ dependencies = [
     { name = "xlrd" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "cruft" },
-    { name = "git-cliff" },
-    { name = "mdformat" },
-    { name = "mdformat-gfm" },
-    { name = "pylsp-mypy" },
-    { name = "python-lsp-ruff" },
-    { name = "ruff" },
-]
+[package.optional-dependencies]
 docs = [
     { name = "autodocsumm" },
     { name = "graphviz" },
@@ -412,6 +403,17 @@ docs = [
     { name = "sphinx-autodoc-typehints", marker = "python_full_version < '3.14'" },
     { name = "sphinx-click" },
     { name = "sphinxcontrib-plantuml" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "cruft" },
+    { name = "git-cliff" },
+    { name = "mdformat" },
+    { name = "mdformat-gfm" },
+    { name = "pylsp-mypy" },
+    { name = "python-lsp-ruff" },
+    { name = "ruff" },
 ]
 lint = [
     { name = "pre-commit" },
@@ -431,20 +433,32 @@ tests = [
 [package.metadata]
 requires-dist = [
     { name = "arviz", specifier = ">=0.22.0" },
+    { name = "autodocsumm", marker = "extra == 'docs'", specifier = ">=0.2.14" },
     { name = "click", specifier = ">=8.3.0" },
     { name = "corner", specifier = ">=2.2.3" },
     { name = "emcee", specifier = ">=3.1.6" },
+    { name = "graphviz", marker = "extra == 'docs'", specifier = ">=0.21" },
+    { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=6.30.1" },
+    { name = "jupyter", marker = "extra == 'docs'", specifier = ">=1.1.1" },
     { name = "lmfit", specifier = ">=1.3.4" },
     { name = "matplotlib", specifier = ">=3.10.6" },
+    { name = "nbsphinx", marker = "extra == 'docs'", specifier = ">=0.9.7" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.3.2" },
+    { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.16.1" },
+    { name = "pygments", marker = "extra == 'docs'", specifier = ">=2.19.2" },
     { name = "pymc", specifier = ">=5.25.1" },
     { name = "scipy", specifier = ">=1.16.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "sphinx", marker = "python_full_version < '3.14' and extra == 'docs'", specifier = ">=8.1.3,<8.2" },
+    { name = "sphinx-autodoc-typehints", marker = "python_full_version < '3.14' and extra == 'docs'", specifier = ">=3.0.1,<3.2" },
+    { name = "sphinx-click", marker = "extra == 'docs'", specifier = ">=6.1.0" },
+    { name = "sphinxcontrib-plantuml", marker = "extra == 'docs'", specifier = ">=0.31" },
     { name = "sympy", specifier = ">=1.14.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "xlrd", specifier = ">=2.0.2" },
 ]
+provides-extras = ["docs"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -455,19 +469,6 @@ dev = [
     { name = "pylsp-mypy", specifier = ">=0.7.0" },
     { name = "python-lsp-ruff", specifier = ">=2.2.2" },
     { name = "ruff", specifier = ">=0.13.1" },
-]
-docs = [
-    { name = "autodocsumm", specifier = ">=0.2.14" },
-    { name = "graphviz", specifier = ">=0.21" },
-    { name = "ipykernel", specifier = ">=6.30.1" },
-    { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "nbsphinx", specifier = ">=0.9.7" },
-    { name = "pydata-sphinx-theme", specifier = ">=0.16.1" },
-    { name = "pygments", specifier = ">=2.19.2" },
-    { name = "sphinx", marker = "python_full_version < '3.14'", specifier = ">=8.1.3,<8.2" },
-    { name = "sphinx-autodoc-typehints", marker = "python_full_version < '3.14'", specifier = ">=3.0.1,<3.2" },
-    { name = "sphinx-click", specifier = ">=6.1.0" },
-    { name = "sphinxcontrib-plantuml", specifier = ">=0.31" },
 ]
 lint = [{ name = "pre-commit", specifier = "==4.3.0" }]
 tests = [

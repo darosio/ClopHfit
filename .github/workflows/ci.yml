@@ -107,7 +107,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Sync project with docs deps
-        run: uv sync --locked --group docs
+        run: uv sync --locked --extra docs
       - name: Build docs
         run: |
           make docs
