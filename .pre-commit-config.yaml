@@ -3,15 +3,6 @@ default_install_hook_types:
   - pre-commit
   - commit-msg
 
-ci:
-  autofix_commit_msg: "chore(pre-commit.ci): auto fixes"
-  autofix_prs: true
-  autoupdate_branch: null
-  autoupdate_commit_msg: "chore(pre-commit.ci): autoupdate"
-  autoupdate_schedule: quarterly
-  skip: []
-  submodules: false
-
 repos:
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -40,7 +31,7 @@ repos:
       - id: trailing-whitespace
         exclude: "^tests/EnSpire/|^tests/data/tmp/|^tests/Tecan/"
       - id: pretty-format-json
-        args: [--autofix, --indent, "4", --no-sort-keys]
+        args: [--autofix, --indent, "2", --no-sort-keys]
         exclude: \.ipynb$
 
   - repo: https://github.com/google/yamlfmt
@@ -80,11 +71,11 @@ repos:
   - repo: https://github.com/pre-commit/pygrep-hooks
     rev: v1.10.0
     hooks:
-      - id: python-use-type-annotations
       - id: rst-backticks
       - id: rst-directive-colons
       - id: rst-inline-touching-normal
 
+  # should be replaced in the future ref https://github.com/astral-sh/ruff/issues/458
   - repo: https://github.com/jsh9/pydoclint
     rev: 0.7.3
     hooks:
@@ -101,10 +92,16 @@ repos:
         stages: [commit-msg]
 
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
         args: [-x, --severity=style] # Show errors, warnings, info and style
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.11.0-1
+    hooks:
+      - id: shfmt # prebuilt upstream executable
+        args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.8.20

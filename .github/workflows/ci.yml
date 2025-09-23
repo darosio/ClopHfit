@@ -48,6 +48,7 @@ jobs:
         run: |
           make lint
 
+
   tests:
     name: ${{ matrix.tests }} py-${{ matrix.python }} on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
     runs-on: ${{ matrix.os }}
@@ -93,9 +94,10 @@ jobs:
       - name: Install binaries for docs
         run: |
           sudo apt-get update
-          sudo apt-get install -y pandoc
-          sudo apt-get install -y plantuml
-          sudo apt-get install -y libopenblas-dev
+          sudo apt-get install -y plantuml libopenblas-dev
+      - uses: r-lib/actions/setup-pandoc@v2
+        with:
+          pandoc-version: "3.1.12"
       - run: echo "# Test" | pandoc -t html
       - name: Checkout Repository
         uses: actions/checkout@v5

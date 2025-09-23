@@ -188,6 +188,18 @@ wheels = [
 ]
 
 [[package]]
+name = "binaryornot"
+version = "0.4.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "chardet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a7/fe/7ebfec74d49f97fc55cd38240c7a7d08134002b1e14be8c3897c0dd5e49b/binaryornot-0.4.4.tar.gz", hash = "sha256:359501dfc9d40632edc9fac890e19542db1a287bbcfa58175b66658392018061", size = 371054, upload-time = "2017-08-03T15:55:25.08Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/7e/f7b6f453e6481d1e233540262ccbfcf89adcd43606f44a028d7f5fae5eb2/binaryornot-0.4.4-py2.py3-none-any.whl", hash = "sha256:b8b71173c917bddcd2c16070412e369c3ed7f0528926f70cac18a6c97fd563e4", size = 9006, upload-time = "2017-08-03T15:55:31.23Z" },
+]
+
+[[package]]
 name = "bleach"
 version = "6.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -289,6 +301,15 @@ wheels = [
 ]
 
 [[package]]
+name = "chardet"
+version = "5.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/0d/f7b6ab21ec75897ed80c17d79b15951a719226b9fababf1e40ea74d69079/chardet-5.2.0.tar.gz", hash = "sha256:1b3b6ff479a8c414bc3fa2c0852995695c4a026dcd6d0633b2dd092ca39c1cf7", size = 2069618, upload-time = "2023-08-01T19:23:02.662Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970", size = 199385, upload-time = "2023-08-01T19:23:00.661Z" },
+]
+
+[[package]]
 name = "charset-normalizer"
 version = "3.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -371,6 +392,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "cruft" },
     { name = "git-cliff" },
     { name = "mdformat" },
     { name = "mdformat-gfm" },
@@ -386,8 +408,8 @@ docs = [
     { name = "nbsphinx" },
     { name = "pydata-sphinx-theme" },
     { name = "pygments" },
-    { name = "sphinx" },
-    { name = "sphinx-autodoc-typehints" },
+    { name = "sphinx", marker = "python_full_version < '3.14'" },
+    { name = "sphinx-autodoc-typehints", marker = "python_full_version < '3.14'" },
     { name = "sphinx-click" },
     { name = "sphinxcontrib-plantuml" },
 ]
@@ -426,25 +448,26 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "git-cliff", specifier = "==2.10.1" },
-    { name = "mdformat", specifier = "==0.7.22" },
-    { name = "mdformat-gfm", specifier = "==0.4.1" },
-    { name = "pylsp-mypy", specifier = "==0.7.0" },
-    { name = "python-lsp-ruff", specifier = "==2.2.2" },
-    { name = "ruff", specifier = "==0.13.1" },
+    { name = "cruft", specifier = ">=2.16.0" },
+    { name = "git-cliff", specifier = ">=2.10.1" },
+    { name = "mdformat", specifier = ">=0.7.22" },
+    { name = "mdformat-gfm", specifier = ">=0.4.1" },
+    { name = "pylsp-mypy", specifier = ">=0.7.0" },
+    { name = "python-lsp-ruff", specifier = ">=2.2.2" },
+    { name = "ruff", specifier = ">=0.13.1" },
 ]
 docs = [
-    { name = "autodocsumm", specifier = "==0.2.14" },
-    { name = "graphviz", specifier = "==0.21" },
-    { name = "ipykernel", specifier = "==6.30.1" },
-    { name = "jupyter", specifier = "==1.1.1" },
-    { name = "nbsphinx", specifier = "==0.9.7" },
-    { name = "pydata-sphinx-theme", specifier = "==0.16.1" },
-    { name = "pygments", specifier = "==2.19.2" },
-    { name = "sphinx", specifier = "<8.2" },
-    { name = "sphinx-autodoc-typehints", specifier = "<3.2" },
-    { name = "sphinx-click", specifier = "==6.1.0" },
-    { name = "sphinxcontrib-plantuml", specifier = "==0.31" },
+    { name = "autodocsumm", specifier = ">=0.2.14" },
+    { name = "graphviz", specifier = ">=0.21" },
+    { name = "ipykernel", specifier = ">=6.30.1" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "nbsphinx", specifier = ">=0.9.7" },
+    { name = "pydata-sphinx-theme", specifier = ">=0.16.1" },
+    { name = "pygments", specifier = ">=2.19.2" },
+    { name = "sphinx", marker = "python_full_version < '3.14'", specifier = ">=8.1.3,<8.2" },
+    { name = "sphinx-autodoc-typehints", marker = "python_full_version < '3.14'", specifier = ">=3.0.1,<3.2" },
+    { name = "sphinx-click", specifier = ">=6.1.0" },
+    { name = "sphinxcontrib-plantuml", specifier = ">=0.31" },
 ]
 lint = [{ name = "pre-commit", specifier = "==4.3.0" }]
 tests = [
@@ -553,6 +576,25 @@ wheels = [
 ]
 
 [[package]]
+name = "cookiecutter"
+version = "2.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "arrow" },
+    { name = "binaryornot" },
+    { name = "click" },
+    { name = "jinja2" },
+    { name = "python-slugify" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/52/17/9f2cd228eb949a91915acd38d3eecdc9d8893dde353b603f0db7e9f6be55/cookiecutter-2.6.0.tar.gz", hash = "sha256:db21f8169ea4f4fdc2408d48ca44859349de2647fbe494a9d6c3edfc0542c21c", size = 158767, upload-time = "2024-02-21T18:02:41.949Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/d9/0137658a353168ffa9d0fc14b812d3834772040858ddd1cb6eeaf09f7a44/cookiecutter-2.6.0-py3-none-any.whl", hash = "sha256:a54a8e37995e4ed963b3e82831072d1ad4b005af736bb17b99c2cbd9d41b6e2d", size = 39177, upload-time = "2024-02-21T18:02:39.569Z" },
+]
+
+[[package]]
 name = "corner"
 version = "2.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -654,6 +696,21 @@ wheels = [
 [package.optional-dependencies]
 toml = [
     { name = "tomli", marker = "python_full_version <= '3.11'" },
+]
+
+[[package]]
+name = "cruft"
+version = "2.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "cookiecutter" },
+    { name = "gitpython" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/7e/0e20012f2aa156e5d6a70483a8d90accb7ed4966dddb0c58987d9f6eba12/cruft-2.16.0.tar.gz", hash = "sha256:184662853fbc1c16c0137fe0e9444e0cbe95e40362f5ebb2d9fae33d9223e73f", size = 678333, upload-time = "2024-12-25T14:08:09.46Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/76/1e88cda6ba47b593fcea24acce8070bb7cc5780c49f828b7b47c212bf62c/cruft-2.16.0-py3-none-any.whl", hash = "sha256:96adb81f814300a9db0fca690eaa063547f5d3c25f486ac0a366cf8da5cdfb79", size = 26635, upload-time = "2024-12-25T14:08:07.395Z" },
 ]
 
 [[package]]
@@ -859,6 +916,30 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/50/946ae38005978fbd648167f60cbac4b18bb35e890ad552a341c3b4ab0e47/git_cliff-2.10.1-py3-none-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:56f54211a51a8ce3208f3871ee09899607ec539d62aba900b23a53b0be442591", size = 7315406, upload-time = "2025-09-21T16:37:04.988Z" },
     { url = "https://files.pythonhosted.org/packages/45/a0/e90f15be30947f02a154b77ce6fc61dca6369bda36fbe7f164462c58dfd4/git_cliff-2.10.1-py3-none-win32.whl", hash = "sha256:c121069d52136889c7e2f8a93ed878f5fdffe5707f76a0badc098c5b6b71fc97", size = 6201041, upload-time = "2025-09-21T16:37:06.532Z" },
     { url = "https://files.pythonhosted.org/packages/2e/a4/c74de9684cf779bae2c426eda684a11a1e8dc5c1b21191954843168a2d2d/git_cliff-2.10.1-py3-none-win_amd64.whl", hash = "sha256:893f595bfbea536668eaeb7959025982a577d37ccfab4f6cbc0b9d6e265da93f", size = 7002881, upload-time = "2025-09-21T16:37:07.85Z" },
+]
+
+[[package]]
+name = "gitdb"
+version = "4.0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "smmap" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/94/63b0fc47eb32792c7ba1fe1b694daec9a63620db1e313033d18140c2320a/gitdb-4.0.12.tar.gz", hash = "sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571", size = 394684, upload-time = "2025-01-02T07:20:46.413Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/61/5c78b91c3143ed5c14207f463aecfc8f9dbb5092fb2869baf37c273b2705/gitdb-4.0.12-py3-none-any.whl", hash = "sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf", size = 62794, upload-time = "2025-01-02T07:20:43.624Z" },
+]
+
+[[package]]
+name = "gitpython"
+version = "3.1.45"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "gitdb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/c8/dd58967d119baab745caec2f9d853297cec1989ec1d63f677d3880632b88/gitpython-3.1.45.tar.gz", hash = "sha256:85b0ee964ceddf211c41b9f27a49086010a190fd8132a24e21f362a4b36a791c", size = 215076, upload-time = "2025-07-24T03:45:54.871Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/61/d4b89fec821f72385526e1b9d9a3a0385dda4a72b206d28049e2c7cd39b8/gitpython-3.1.45-py3-none-any.whl", hash = "sha256:8908cb2e02fb3b93b7eb0f2827125cb699869470432cc885f019b8fd0fccff77", size = 208168, upload-time = "2025-07-24T03:45:52.517Z" },
 ]
 
 [[package]]
@@ -2443,6 +2524,18 @@ wheels = [
 ]
 
 [[package]]
+name = "python-slugify"
+version = "8.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "text-unidecode" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/87/c7/5e1547c44e31da50a460df93af11a535ace568ef89d7a811069ead340c4a/python-slugify-8.0.4.tar.gz", hash = "sha256:59202371d1d05b54a9e7720c5e038f928f45daaffe41dd10822f3907b937c856", size = 10921, upload-time = "2024-02-08T18:32:45.488Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/62/02da182e544a51a5c3ccf4b03ab79df279f9c60c5e82d5e8bec7ca26ac11/python_slugify-8.0.4-py2.py3-none-any.whl", hash = "sha256:276540b79961052b66b7d116620b36518847f52d5fd9e3a70164fc8c50faa6b8", size = 10051, upload-time = "2024-02-08T18:32:43.911Z" },
+]
+
+[[package]]
 name = "pytz"
 version = "2025.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2847,12 +2940,30 @@ wheels = [
 ]
 
 [[package]]
+name = "shellingham"
+version = "1.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "smmap"
+version = "5.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/cd/a040c4b3119bbe532e5b0732286f805445375489fceaec1f48306068ee3b/smmap-5.0.2.tar.gz", hash = "sha256:26ea65a03958fa0c8a1c7e8c7a58fdc77221b8910f6be2131affade476898ad5", size = 22329, upload-time = "2025-01-02T07:14:40.909Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/be/d09147ad1ec7934636ad912901c5fd7667e1c858e19d355237db0d0cd5e4/smmap-5.0.2-py3-none-any.whl", hash = "sha256:b30115f0def7d7531d22a0fb6502488d879e75b260a9db4d0819cfb25403af5e", size = 24303, upload-time = "2025-01-02T07:14:38.724Z" },
 ]
 
 [[package]]
@@ -3039,6 +3150,15 @@ wheels = [
 ]
 
 [[package]]
+name = "text-unidecode"
+version = "1.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/e2/e9a00f0ccb71718418230718b3d900e71a5d16e701a3dae079a21e9cd8f8/text-unidecode-1.3.tar.gz", hash = "sha256:bad6603bb14d279193107714b288be206cac565dfa49aa5b105294dd5c4aab93", size = 76885, upload-time = "2019-08-30T21:36:45.405Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/a5/c0b6468d3824fe3fde30dbb5e1f687b291608f9473681bbf7dabbf5a87d7/text_unidecode-1.3-py2.py3-none-any.whl", hash = "sha256:1311f10e8b895935241623731c2ba64f4c455287888b18189350b67134a822e8", size = 78154, upload-time = "2019-08-30T21:37:03.543Z" },
+]
+
+[[package]]
 name = "threadpoolctl"
 version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3144,6 +3264,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/eb/79/72064e6a701c2183016abbbfedaba506d81e30e232a68c9f0d6f6fcd1574/traitlets-5.14.3.tar.gz", hash = "sha256:9ed0579d3502c94b4b3732ac120375cda96f923114522847de4b3bb98b96b6b7", size = 161621, upload-time = "2024-04-19T11:11:49.746Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/c0/8f5d070730d7836adc9c9b6408dec68c6ced86b304a9b26a14df072a6e8c/traitlets-5.14.3-py3-none-any.whl", hash = "sha256:b74e89e397b1ed28cc831db7aea759ba6640cb3de13090ca145426688ff1ac4f", size = 85359, upload-time = "2024-04-19T11:11:46.763Z" },
+]
+
+[[package]]
+name = "typer"
+version = "0.19.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "rich" },
+    { name = "shellingham" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/21/ca/950278884e2ca20547ff3eb109478c6baf6b8cf219318e6bc4f666fad8e8/typer-0.19.2.tar.gz", hash = "sha256:9ad824308ded0ad06cc716434705f691d4ee0bfd0fb081839d2e426860e7fdca", size = 104755, upload-time = "2025-09-23T09:47:48.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/22/35617eee79080a5d071d0f14ad698d325ee6b3bf824fc0467c03b30e7fa8/typer-0.19.2-py3-none-any.whl", hash = "sha256:755e7e19670ffad8283db353267cb81ef252f595aa6834a0d1ca9312d9326cb9", size = 46748, upload-time = "2025-09-23T09:47:46.777Z" },
 ]
 
 [[package]]

@@ -1,28 +1,28 @@
 {
-    "template": "https://github.com/darosio/cookiecutter-python.git",
-    "commit": "0d0265e70a5a9d726091f0e1afb5193a0b6481b3",
-    "checkout": "0d0265e",
-    "context": {
-        "cookiecutter": {
-            "project_type": "Python Project",
-            "author_name": "Daniele Arosio",
-            "email": "darosio@duck.com",
-            "project_name": "ClopHfit",
-            "project_slug": "clophfit",
-            "project_short_description": "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra.",
-            "date": "2025-09-23",
-            "year": "2023",
-            "version": "0.12.0",
-            "cliname": "clop",
-            "_copy_without_render": [
-                "cliff.toml",
-                "renovate.json",
-                "**/*.j2",
-                "*.yml"
-            ],
-            "_template": "https://github.com/darosio/cookiecutter-python.git",
-            "_commit": "0d0265e70a5a9d726091f0e1afb5193a0b6481b3"
-        }
-    },
-    "directory": null
+  "template": "https://github.com/darosio/cookiecutter-python.git",
+  "commit": "6ee017f19403fafb98ba70e54e4ae85ca26381a6",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "project_type": "Python Project",
+      "author_name": "Daniele Arosio",
+      "email": "darosio@duck.com",
+      "project_name": "ClopHfit",
+      "project_slug": "clophfit",
+      "project_short_description": "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra.",
+      "date": "2025-09-23",
+      "year": "2023",
+      "version": "0.12.0",
+      "cliname": "clop",
+      "_copy_without_render": [
+        "cliff.toml",
+        "renovate.json",
+        "**/*.j2",
+        "*.yml"
+      ],
+      "_template": "https://github.com/darosio/cookiecutter-python.git",
+      "_commit": "6ee017f19403fafb98ba70e54e4ae85ca26381a6"
+    }
+  },
+  "directory": null
 }
