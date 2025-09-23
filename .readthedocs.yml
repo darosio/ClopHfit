@@ -7,9 +7,10 @@ build:
     - plantuml
 sphinx:
   configuration: docs/conf.py
+formats:
+  - htmlzip
 python:
   install:
+    - requirements: docs/requirements.txt
     - method: pip
       path: .
-      extra_requirements:
-        - docs
