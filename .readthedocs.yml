@@ -5,10 +5,15 @@ build:
     python: "3.13"
   apt_packages:
     - plantuml
+    - texlive-latex-recommended
+    - texlive-latex-extra
+    - texlive-fonts-recommended
 sphinx:
   configuration: docs/conf.py
 formats:
   - htmlzip
+  - pdf
+  - epub
 python:
   install:
     - requirements: docs/requirements.txt
