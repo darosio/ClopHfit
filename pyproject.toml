@@ -133,6 +133,7 @@ strict = true
 warn_unreachable = true
 warn_unused_configs = true
 
+# TODO: check
 [tool.pydoclint]
 check-class-attributes = false
 

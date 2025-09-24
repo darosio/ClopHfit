@@ -4,47 +4,58 @@
 [![CI](https://github.com/darosio/ClopHfit/actions/workflows/ci.yml/badge.svg)](https://github.com/darosio/ClopHfit/actions/workflows/ci.yml)
 [![pre-commit.ci status](https://results.pre-commit.ci/badge/github/darosio/ClopHfit/main.svg)](https://results.pre-commit.ci/latest/github/darosio/ClopHfit/main)
 [![codecov](https://codecov.io/gh/darosio/ClopHfit/branch/main/graph/badge.svg?token=OU6F9VFUQ6)](https://codecov.io/gh/darosio/ClopHfit)
-[![GitHub Pages](https://img.shields.io/badge/docs-GitHub%20Pages-blue?logo=github)](https://darosio.github.io/ClopHfit/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue?logo=github)](https://darosio.github.io/ClopHfit/)
+[![RtD](https://readthedocs.org/projects/clophfit/badge/)](https://clophfit.readthedocs.io/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6354111.svg)](https://doi.org/10.5281/zenodo.6354111)
 
 This package provides a command line interface for fitting pH titration or
 binding assay data for macromolecules, such as fluorescence spectra. With this
 tool, users can easily analyze their data and obtain accurate fitting results.
 
+## Features
+
+- Plate Reader data Parser.
+- Perform non-linear least square fitting.
+- Extract and fit pH and chloride titrations of GFP libraries.
+  - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
+  - Estimate uncertainty using bootstrap.
+  - Subtract buffer for each titration point.
+  - Report controls e.g. S202N, E2 and V224Q.
+  - Correct for dilution of titration additions.
+  - Plot data when fitting fails and save txt file anyway.
+
 ## Installation
 
-You can get the library directly from [PyPI](https://pypi.org/project/ClopHfit/)
-using `pip`:
+From PyPI with pip:
 
 ```
 pip install clophfit
 ```
 
-Alternatively, you can use [pipx](https://pypa.github.io/pipx/) to install it in
-an isolated environment:
+Or isolate with pipx:
 
 ```
 pipx install clophfit
 ```
 
-To enable auto completion for the `clop` command, follow these steps:
+Shell completion (Click/Typer):
 
-1. Generate the completion script by running the following command:
+- Bash:
 
-   ```
-   _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
-   ```
+  ```
+  _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
+  source ~/.local/bin/clop-complete.bash
+  ```
 
-1. Source the generated completion script to enable auto completion:
+- Fish:
 
-   ```
-   source ~/.local/bin/clop-complete.bash
-   ```
+```bash
+  _CLOP_COMPLETE=fish_source clop | source
+```
 
 ## Usage
 
-You can check out the documentation on <https://darosio.github.io/ClopHfit> for
-up to date usage information and examples.
+Docs: https://clophfit.readthedocs.io/
 
 ### CLI
 
@@ -121,17 +132,44 @@ To use clophfit in your python:
 from clophfit import prenspire, prtecan, binding
 ```
 
-## Features
+## Dependency updates (Renovate)
 
-- Plate Reader data Parser.
-- Perform non-linear least square fitting.
-- Extract and fit pH and chloride titrations of GFP libraries.
-  - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
-  - Estimate uncertainty using bootstrap.
-  - Subtract buffer for each titration point.
-  - Report controls e.g. S202N, E2 and V224Q.
-  - Correct for dilution of titration additions.
-  - Plot data when fitting fails and save txt file anyway.
+We use Renovate to keep dependencies current.
+
+Enable Renovate:
+
+1. Install the GitHub App: https://github.com/apps/renovate (Settings → Integrations → GitHub Apps → Configure → select this repo/org).
+1. This repo includes a `renovate.json` policy. Renovate will open a “Dependency Dashboard” issue and PRs accordingly.
+
+Notes:
+
+- Commit style: `build(deps): bump <dep> from <old> to <new>`
+- Pre-commit hooks are grouped and labeled; Python version bumps in `pyproject.toml` are disabled by policy.
+
+Migrating from Dependabot:
+
+- You may keep “Dependabot alerts” ON for vulnerability visibility, but disable Dependabot security PRs.
+
+## Template updates (Cruft)
+
+This project is linked to its Cookiecutter template with Cruft.
+
+- Check for updates: `cruft check`
+- Apply updates: `cruft update -y` (resolve conflicts, then commit)
+
+CI runs a weekly job to open a PR when template updates are available.
+
+First-time setup if you didn’t generate with Cruft:
+
+```bash
+pipx install cruft  # or: pip install --user cruft
+cruft link --checkout main https://github.com/darosio/cookiecutter-python.git
+```
+
+Notes:
+
+- The CI workflow skips if `.cruft.json` is absent.
+- If you maintain a stable template branch (e.g., `v1`), link with `--checkout v1`. You can also update within that line using `cruft update -y --checkout v1`.
 
 ## License
 
