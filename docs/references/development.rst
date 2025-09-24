@@ -18,7 +18,7 @@ You need the following requirements:
       hatch run init  # init repo with pre-commit hooks
 
       hatch run lint
-      hatch run tests.py3.11:all
+      hatch run tests.py3.13:all
 
    Hatch handles everything for you, including setting up an temporary
    virtual environment for each run.
@@ -65,7 +65,7 @@ development:
 
 ::
 
-   jupiter notebook
+   jupyter notebook
 
 And only in case you need a system wide easy accessible kernel:
 

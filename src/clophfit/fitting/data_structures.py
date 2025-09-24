@@ -11,7 +11,7 @@ import copy
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
 import arviz as az
 import numpy as np
@@ -265,7 +265,7 @@ MiniT = Minimizer | odr.Output | az.InferenceData
 
 
 @dataclass
-class FitResult(Generic[MiniType]):
+class FitResult[MiniType: MiniProtocol]:
     """Result container of a fitting procedure.
 
     Attributes
