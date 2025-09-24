@@ -8,7 +8,6 @@
   "prConcurrentLimit": 0,
   "prFooter": " (#{{prNumber}})",
   "automerge": false,
-  "rangeStrategy": "bump",
   "commitMessagePrefix": "build(deps):",
   "commitMessageAction": "bump",
   "commitMessageTopic": "{{depName}}",
@@ -30,10 +29,12 @@
       "matchManagers": [
         "pep621"
       ],
+      "matchCurrentVersion": ">=.*,<.*",
       "rangeStrategy": "update-lockfile"
     },
     {
       "matchDepTypes": [
+        "dependency-groups",
         "project.optional-dependencies"
       ],
       "groupName": "optional dependencies",
