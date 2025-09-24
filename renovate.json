@@ -27,14 +27,9 @@
   },
   "packageRules": [
     {
-      "matchManagers": [
-        "pep621"
-      ],
-      "rangeStrategy": "update-lockfile"
-    },
-    {
       "matchDepTypes": [
-        "project.optional-dependencies"
+        "project.optional-dependencies",
+        "dependency-groups"
       ],
       "groupName": "optional dependencies",
       "labels": [
@@ -62,6 +57,17 @@
         "python"
       ],
       "enabled": false
+    },
+    {
+      "matchDepNames": [
+        "sphinx",
+        "sphinx-autodoc-typehints"
+      ],
+      "enabled": false,
+      "labels": [
+        "dependencies",
+        "manual-update"
+      ]
     }
   ]
 }
