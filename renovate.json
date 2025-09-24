@@ -8,7 +8,6 @@
   "prConcurrentLimit": 0,
   "prFooter": " (#{{prNumber}})",
   "automerge": false,
-  "rangeStrategy": "bump",
   "commitMessagePrefix": "build(deps):",
   "commitMessageAction": "bump",
   "commitMessageTopic": "{{depName}}",
@@ -30,18 +29,26 @@
       "matchManagers": [
         "pep621"
       ],
-      "rangeStrategy": "update-lockfile"
-    },
-    {
       "matchDepTypes": [
+        "dependency-groups",
         "project.optional-dependencies"
       ],
+      "rangeStrategy": "update-lockfile",
       "groupName": "optional dependencies",
       "labels": [
         "dependencies",
         "optional"
       ],
       "commitMessagePrefix": "chore(dep):"
+    },
+    {
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchDepTypes": [
+        "project.dependencies"
+      ],
+      "rangeStrategy": "replace"
     },
     {
       "matchManagers": [
