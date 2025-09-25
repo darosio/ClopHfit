@@ -1,0 +1,211 @@
+"""
+"Looking at the test coverage and the code, I can identify several areas where test coverage can be improved. Here are the key opportunities:
+
+## 1. **Edge Cases in `read_xls` and `strip_lines`**
+The current tests don't cover:
+- Files with empty cells or NaN values
+- Files with mixed data types
+- Files with irregular formatting
+
+```python
+def test_read_xls_edge_cases(tmp_path: Path) -> None:
+    ""Test read_xls with edge cases."
+    # Test empty file
+    empty_file = tmp_path / "empty.xls"
+    pd.DataFrame().to_excel(empty_file, index=False)
+    result = prtecan.read_xls(empty_file)
+    assert result == [[""]]
+
+    # Test file with only NaN values
+    nan_df = pd.DataFrame([[np.nan, np.nan], [np.nan, np.nan]])
+    nan_file = tmp_path / "nan.xls"
+    nan_df.to_excel(nan_file, index=False)
+    result = prtecan.read_xls(nan_file)
+    assert len(result) > 0
+```
+
+## 2. **Metadata Extraction Edge Cases**
+```python
+def test_extract_metadata_edge_cases() -> None:
+    ""Test metadata extraction with edge cases.""
+    # Empty lines
+    assert prtecan.extract_metadata([]) == {}
+
+    # Lines with only whitespace
+    lines = [["   "], [""], ["\t"]]
+    result = prtecan.extract_metadata(lines)
+    assert "   " in result
+
+    # Mixed numeric and string metadata
+    lines = [["Test Key", 123, "unit1", "unit2"]]
+    result = prtecan.extract_metadata(lines)
+    assert result["Test Key"].value == 123
+    assert result["Test Key"].unit == ["unit1", "unit2"]
+```
+
+## 3. **Labelblock Error Conditions**
+```python
+def test_labelblock_invalid_data() -> None:
+    "Test Labelblock with invalid data formats.""
+    # Test with non-numeric values that can't be converted to float
+    invalid_lines = [
+        ["Label: Label1", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ["<>", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+        ["A", "valid", "OVER", "NaN", "inf", "-inf", "1.2.3", "", "123"],  # Invalid values
+        # ... continue with other rows
+    ]
+
+    with pytest.raises((ValueError, TypeError)):
+        prtecan.Labelblock(invalid_lines)
+```
+
+## 4. **Titration Data Preparation Edge Cases**
+```python
+def test_titration_empty_data() -> None:
+    "Test Titration with empty or missing data."
+    # Create a titration with no labelblocks
+    empty_tf = prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
+    # This should raise an error, test the error handling
+    with pytest.raises(ValueError):
+        prtecan.Titration([empty_tf], x=np.array([1.0]), is_ph=False)
+
+def test_titration_single_point() -> None:
+    "Test Titration with single data point."
+    tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+    # Use only first point
+    tit = prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    # Test that single-point titrations handle edge cases
+    assert len(tit.x) == 1
+    # Test that fitting methods handle single points gracefully
+```
+
+## 5. **Buffer Class Edge Cases**
+```python
+def test_buffer_empty_wells() -> None:
+    "Test Buffer with empty wells list."
+    tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+    tit = prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    # Test with empty buffer wells
+    tit.buffer.wells = []
+    assert tit.buffer.dataframes == {}
+    assert tit.buffer.dataframes_nrm == {}
+
+    # Test plot with empty buffers
+    g = tit.buffer.plot()
+    assert isinstance(g, sns.FacetGrid)
+
+def test_buffer_invalid_wells() -> None:
+    "Test Buffer with invalid well names."
+    tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+    tit = prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    # Test with non-existent wells
+    tit.buffer.wells = ["Z99", "AA1"]  # Invalid wells
+    # Should handle gracefully without crashing
+    dfs = tit.buffer.dataframes
+    assert all(df.empty for df in dfs.values() if isinstance(df, pd.DataFrame))
+```
+
+## 6. **PlateScheme Validation**
+```python
+def test_plate_scheme_validation() -> None:
+    "Test PlateScheme input validation.""
+    ps = prtecan.PlateScheme()
+
+    # Test invalid buffer assignment
+    with pytest.raises(TypeError):
+        ps.buffer = [1, 2, 3]  # type: ignore[list-item]
+
+    # Test invalid ctrl assignment
+    with pytest.raises(TypeError):
+        ps.ctrl = [1.0, 2.0]  # type: ignore[list-item]
+
+    # Test invalid names assignment
+    with pytest.raises(TypeError):
+        ps.names = {"test": [1, 2]}  # type: ignore[dict-item]
+```
+
+## 7. **TitrationResults Edge Cases**
+```python
+def test_titration_results_empty() -> None:
+    "Test TitrationResults with empty data."
+    scheme = prtecan.PlateScheme()
+    empty_results = prtecan.TitrationResults(
+        scheme=scheme,
+        fit_keys=set(),
+        compute_func=lambda x: prtecan.FitResult()
+    )
+
+    assert len(empty_results) == 0
+    assert empty_results.dataframe.empty
+
+    # Test accessing non-existent key
+    with pytest.raises(KeyError):
+        _ = empty_results["A01"]
+```
+
+## 8. **Concentration Calculation Edge Cases**
+```python
+def test_calculate_conc_edge_cases() -> None:
+    "Test concentration calculation with edge cases."
+    # Empty additions
+    with pytest.raises(ValueError):
+        prtecan.calculate_conc([], 1000)
+
+    # Single addition (only initial volume)
+    result = prtecan.calculate_conc([100], 1000)
+    assert_array_equal(result, [0.0])
+
+    # Zero stock concentration
+    result = prtecan.calculate_conc([100, 10], 0)
+    assert_array_equal(result, [0.0, 0.0])
+
+    # Negative values (should handle gracefully or raise)
+    with pytest.raises(ValueError):
+        prtecan.calculate_conc([-100, 10], 1000)
+```
+
+## 9. **Error Handling in File Operations**
+```python
+def test_file_operations_error_handling() -> None:
+    "Test error handling for file operations."
+    # Test with corrupted Excel file
+    corrupted_file = data_tests / "exceptions/corrupted.xls"
+    if corrupted_file.exists():
+        with pytest.raises((ValueError, pd.errors.EmptyDataError)):
+            prtecan.read_xls(corrupted_file)
+
+    # Test with non-Excel file
+    text_file = data_tests / "exceptions/not_excel.txt"
+    text_file.write_text("This is not an Excel file")
+    with pytest.raises((ValueError, pd.errors.ParserError)):
+        prtecan.read_xls(text_file)
+```
+
+## 10. **Type Validation Tests**
+```python
+def test_type_validation() -> None:
+    "Test type validation in various methods."
+    # Test lookup_listoflines with invalid inputs
+    with pytest.raises(TypeError):
+        prtecan.lookup_listoflines("not a list")  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError):
+        prtecan.lookup_listoflines([1, 2, 3])  # type: ignore[list-item]
+
+    # Test strip_lines with invalid inputs
+    with pytest.raises(TypeError):
+        prtecan.strip_lines("not a list")  # type: ignore[arg-type]
+```
+
+These additional tests would significantly improve the test coverage by focusing on:
+- **Error conditions** and exception handling
+- **Boundary cases** and edge inputs
+- **Type validation** and input sanitization
+- **Empty or invalid data** scenarios
+- **File operation failures**
+
+The key is to test not just the "happy path" but also how the code behaves when things go wrong or when it receives unexpected inputs.
+"""
