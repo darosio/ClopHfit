@@ -334,9 +334,10 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
     burn = 75
     if verbose:
         click.echo(file_df)
-    x = file_df["x"].to_numpy()
+    x = file_df["x"].to_numpy().astype(float)
     ds_data = {
-        lbl: DataArray(x, file_df[lbl].to_numpy()) for lbl in file_df.columns[1:]
+        lbl: DataArray(x, file_df[lbl].to_numpy().astype(float))
+        for lbl in file_df.columns[1:]
     }
     ds = Dataset(ds_data, is_ph)
     if weight:
