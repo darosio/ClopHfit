@@ -908,8 +908,8 @@ class Buffer:
             if buf_df.empty:
                 fit_resultd[label] = BufferFit()
             else:
-                mean = buf_df.mean(axis=1).to_numpy()
-                sem = buf_df.sem(axis=1).to_numpy()
+                mean = buf_df.mean(axis=1).to_numpy().astype(float)
+                sem = buf_df.sem(axis=1).to_numpy().astype(float)
                 # y_err estimate is important when using 2 ds and x_err for ODR
                 data = RealData(self.tit.x, mean, sy=sem, sx=self.tit.x_err)
                 model = Model(linear_model)
@@ -1322,8 +1322,8 @@ class Titration(TecanfilesGroup):
             msg = f"Check format [filenames x x_err] for listfile: {listfile}"
             raise ValueError(msg)
         tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
-        x = table["x"].to_numpy()
-        x_err = table["x_err"].to_numpy()
+        x = table["x"].to_numpy().astype(float)
+        x_err = table["x_err"].to_numpy().astype(float)
         return tecanfiles, x, x_err
 
     @property

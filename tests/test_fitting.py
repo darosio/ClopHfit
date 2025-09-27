@@ -488,5 +488,9 @@ def test_export_ds(multi_dataset: Dataset, tmp_path: Path) -> None:
     assert (tmp_path / "A01_y2.csv").exists()
     # Read back one file and check content
     read_df = pd.read_csv(tmp_path / "A01_y1.csv")
-    np.testing.assert_allclose(multi_dataset["y1"].y, read_df.yc.to_numpy())
-    np.testing.assert_allclose(multi_dataset["y1"].x, read_df.xc.to_numpy())
+    np.testing.assert_allclose(
+        multi_dataset["y1"].y, read_df.yc.to_numpy().astype(float)
+    )
+    np.testing.assert_allclose(
+        multi_dataset["y1"].x, read_df.xc.to_numpy().astype(float)
+    )
