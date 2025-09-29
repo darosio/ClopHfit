@@ -24,6 +24,8 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 
+from .errors import InvalidDataError
+
 
 @dataclass
 class DataArray:
@@ -50,19 +52,19 @@ class DataArray:
         """Validate that xc and yc have the same length."""
         if len(self.xc) != len(self.yc):
             msg = "Length of 'xc' and 'yc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     def _validate_yerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
         if self.y_errc.size > 0 and len(self.xc) != len(self.y_errc):
             msg = "Length of 'xc' and 'y_errc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     def _validate_xerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
         if self.x_errc.size > 0 and len(self.xc) != len(self.x_errc):
             msg = "Length of 'xc' and 'x_errc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     @property
     def mask(self) -> ArrayMask:

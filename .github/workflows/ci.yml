@@ -10,8 +10,6 @@ on:
       - "docs/**"
       - "*.md"
   push:
-    branches:
-      - main
     paths-ignore:
       - "*.md"
 
@@ -89,6 +87,7 @@ jobs:
           make xdoc
 
   docs_build:
+    # if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Install binaries for docs
