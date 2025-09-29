@@ -103,6 +103,36 @@ def test_calculate_conc() -> None:
     )
 
 
+def test_buffer_empty_wells() -> None:
+    """Test Buffer Class with empty wells list."""
+    tf = prtecan.Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+    tit = prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    # Test with empty buffer wells
+    tit.buffer.wells = []
+    assert tit.buffer.dataframes == {}
+    assert tit.buffer.dataframes_nrm == {}
+
+    # Test plot with empty buffers
+    g = tit.buffer.plot()
+    assert isinstance(g, sns.FacetGrid)
+
+
+def test_titration_results_empty() -> None:
+    """Test TitrationResults with empty data."""
+    scheme = prtecan.PlateScheme()
+    empty_results = prtecan.TitrationResults(
+        scheme=scheme, fit_keys=set(), compute_func=lambda _: FitResult()
+    )
+
+    assert len(empty_results) == 0
+    assert empty_results.dataframe.empty
+
+    # Test accessing non-existent key
+    with pytest.raises(KeyError):
+        _ = empty_results["A01"]
+
+
 class TestLabelblock:
     """Test labelblock class."""
 
