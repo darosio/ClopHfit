@@ -111,7 +111,7 @@ def lookup_listoflines(
     for i, line in enumerate(csvl):
         if isinstance(line, list) and col < len(line):
             element = line[col]
-            if isinstance(element, str | int | float) and pattern in str(element):
+            if isinstance(element, (str, int, float)) and pattern in str(element):
                 indexes.append(i)
     return indexes
 
