@@ -247,9 +247,6 @@ max-complexity = 12
 ]
 "__init__.py" = ["I002"] # don't need annotations
 "docs/*" = ["INP"]
-"src/clophfit/__main__.py" = [
-  "ANN001", # params are annotated using click
-]
 "tests/*" = ["PLR2004", "S101"]
 
 [tool.ruff.lint.pydocstyle]

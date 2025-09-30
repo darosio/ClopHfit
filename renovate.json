@@ -14,8 +14,7 @@
   "commitMessageTopic": "{{depName}}",
   "commitMessageExtra": "from {{currentVersion}} to {{newVersion}}",
   "labels": [
-    "dependencies",
-    "pre-commit.ci autofix"
+    "dependencies"
   ],
   "pre-commit": {
     "enabled": true,
@@ -44,8 +43,7 @@
       ],
       "labels": [
         "dependencies",
-        "pre-commit",
-        "pre-commit.ci autofix"
+        "pre-commit"
       ],
       "commitMessagePrefix": "chore(hooks):"
     },
