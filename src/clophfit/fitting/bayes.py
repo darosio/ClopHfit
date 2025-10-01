@@ -13,7 +13,7 @@ import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy import optimize
@@ -851,10 +851,7 @@ class FitConfig2(BaseModel):
     n_samples: int = 2000
     method: FitMethod = "bayesian"
 
-    class Config:
-        """Config."""
-
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 DEFAULT_CONFIG = None
