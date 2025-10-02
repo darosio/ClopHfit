@@ -7,105 +7,14 @@ that estimates are close to truth and broadly consistent across methods.
 
 from __future__ import annotations
 
-import typing
-from dataclasses import dataclass
-
 import numpy as np
 import pytest
 
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    fit_binding_glob_recursive_outlier,
-    outlier2,
+from clophfit.testing.fitter_test_utils import (
+    build_fitters,
+    k_from_result,
+    make_synthetic_ds,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
-from clophfit.fitting.models import binding_1site
-from clophfit.fitting.odr import fit_binding_odr_recursive_outlier
-
-if typing.TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from scipy import odr
-
-
-@dataclass
-class Truth:
-    """True parameters."""
-
-    K: float
-    S0: dict[str, float]
-    S1: dict[str, float]
-
-
-def _make_synthetic_ds(  # noqa: PLR0913
-    k: float,
-    s0: dict[str, float] | float,
-    s1: dict[str, float] | float,
-    *,
-    is_ph: bool,
-    noise: float = 0.02,
-    seed: int = 0,
-) -> tuple[Dataset, Truth]:
-    """Create a synthetic Dataset with optional Gaussian noise.
-
-    noise is relative to dynamic range per label.
-    """
-    # Allow convenient scalar inputs for single-label cases
-    if not isinstance(s0, dict):
-        s0 = {"y0": float(s0)}
-    if not isinstance(s1, dict):
-        s1 = {"y0": float(s1)}
-    is_ph = bool(is_ph)
-    rng = np.random.default_rng(seed) if seed else np.random.default_rng()
-    if is_ph:
-        # cover a reasonable pH range around K
-        x = np.array([5, 5.8, 6.6, 7.0, 7.8, 8.2, 9.0])
-    else:
-        x = np.array([0.01, 5, 10, 20, 40, 80, 150])  # geomspace(0.1, 100.0, n)
-
-    ds = Dataset({}, is_ph=is_ph)
-    for lbl in sorted(s0.keys()):
-        clean = binding_1site(x, k, s0[lbl], s1[lbl], is_ph)
-        dy = noise * (np.max(clean) - np.min(clean))
-        y = clean + rng.normal(0.0, dy, size=x.shape)
-        da = DataArray(xc=x, yc=y)
-        # x uncertainty modeling:
-        # - pH: keep small constant instrument uncertainty
-        # - concentration series: 0.01 at x==0; for x>0 include a relative component to reflect serial additions
-        if is_ph:
-            x_err_arr = np.full_like(x, 0.05, dtype=float)
-        else:
-            rel = 0.03  # 3% relative uncertainty for additions
-            x_err_arr = np.where(x == 0, 0.01, np.maximum(0.01, rel * x.astype(float)))
-        da.x_err = x_err_arr
-        ds[lbl] = da
-    return ds, Truth(K=k, S0=s0, S1=s1)
-
-
-def _k_from_result(fr: FitResult[MiniT]) -> tuple[float | None, float | None]:
-    if fr.result is None or not hasattr(fr.result, "params"):
-        return None, None
-    params = fr.result.params
-    k = params["K"].value if "K" in params else None
-    sk = params["K"].stderr if "K" in params else None
-    return float(k) if k is not None else None, (float(sk) if sk is not None else None)
-
-
-def _build_fitters() -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
-    """Adapters that normalize various fitting backends."""
-
-    def _odr(ds: Dataset) -> FitResult[odr.Output]:
-        # ODR path expects an initial LS fit
-        base = fit_binding_glob(ds)
-        return fit_binding_odr_recursive_outlier(base)
-
-    return {
-        "glob_ls": lambda ds: fit_binding_glob(ds),
-        "glob_huber": lambda ds: fit_binding_glob(ds, robust=True),
-        "glob_irls_outlier": lambda ds: fit_binding_glob_recursive_outlier(ds),
-        "outlier2": lambda ds: outlier2(ds, "default"),
-        # FIXME: "odr_recursive_outlier": _odr,
-    }
 
 
 @pytest.mark.parametrize("is_ph", [True, False])
@@ -117,13 +26,15 @@ def test_fitters_converge_and_agree(is_ph: bool, labels: int, noise: float) -> N
     k_true = 7.0 if is_ph else 10.0
     s0 = {f"y{i}": (2.0 + 0.2 * i) if is_ph else (1.5 + 0.2 * i) for i in range(labels)}
     s1 = {f"y{i}": (1.0 + 0.1 * i) if is_ph else (0.1 * i) for i in range(labels)}
-    ds, truth = _make_synthetic_ds(k_true, s0, s1, is_ph=is_ph, noise=noise, seed=42)
+    ds, truth = make_synthetic_ds(
+        k_true, s0, s1, is_ph=is_ph, noise=noise, seed=42, rel_x_err=0.03
+    )
 
-    fitters = _build_fitters()
+    fitters = build_fitters(include_odr=False)
     results: dict[str, tuple[float | None, float | None]] = {}
     for name, run in fitters.items():
         fr = run(ds.copy())  # pass a copy to avoid state coupling
-        k, sk = _k_from_result(fr)
+        k, sk = k_from_result(fr)
         results[name] = (k, sk)
 
     # Ensure at least a couple of methods return a value
@@ -147,7 +58,7 @@ def test_fitters_converge_and_agree(is_ph: bool, labels: int, noise: float) -> N
                 f"{name}: K deviates from truth (got {k}, want {truth.K})"
             )
 
-    # Pairwise agreement: within 3 max reported stderrs or within tolerance
+    # Pairwise agreement
     names = list(available.keys())
     for i in range(len(names)):
         for j in range(i + 1, len(names)):
