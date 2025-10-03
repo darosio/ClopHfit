@@ -80,8 +80,8 @@ class TestEnspireFile:
     #     self, ef1: EnspireFile, ef2: EnspireFile
     # ) -> None:
     #     \"Test locales.\"
-    #     assert ef1._metadata_post[31][4] == "300 µl"
-    #     assert ef2._metadata_post[31][4] == "300 µl"
+    #     assert ef1._metadata_post[31][4] == "300 μl"
+    #     assert ef2._metadata_post[31][4] == "300 μl"
 
     # def test_data_list(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
     #     \"Test data_list.\"
