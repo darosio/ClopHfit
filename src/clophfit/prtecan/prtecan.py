@@ -431,7 +431,7 @@ class Labelblock:
             and self.metadata["Gain"].value == other.metadata["Gain"].value
         )
 
-    def __almost_eq__(self, other: Labelblock) -> bool:
+    def almost_equal(self, other: Labelblock) -> bool:
         """Check if two Labelblocks are almost equal (same excitation and emission)."""
         return all(self.metadata[k] == other.metadata[k] for k in Labelblock._KEYS[:5])
 
@@ -537,7 +537,7 @@ class LabelblocksGroup:
         if self.allequal or all(labelblocks[0] == lb for lb in labelblocks[1:]):
             self.allequal = True
         # Check if all labelblocks are almost equal (requires normalization)
-        elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
+        elif all(labelblocks[0].almost_equal(lb) for lb in labelblocks[1:]):
             self.allequal = False
         else:
             msg = "Creation of labelblock group failed. Labelblocks are neither equal nor almost equal."
@@ -610,9 +610,9 @@ class TecanfilesGroup:
         rngs = tuple(tf.labelblocks.keys() for tf in self.tecanfiles)
         for idx in itertools.product(*rngs):
             try:
-                gr = LabelblocksGroup(
-                    [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
-                )
+                gr = LabelblocksGroup([
+                    tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)
+                ])
             except ValueError:
                 continue
             else:
@@ -722,7 +722,7 @@ class PlateScheme:
             self.names = {
                 str(k): set(v)
                 for k, v in scheme.items()
-                if k not in ("buffer", "discard")
+                if k not in {"buffer", "discard"}
             }
 
 
@@ -795,9 +795,9 @@ class Buffer:
         if not self.wells:
             return {}
         dfs = {
-            label: pd.DataFrame(
-                {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
-            )
+            label: pd.DataFrame({
+                k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data
+            })
             for label, lbg in self.tit.labelblocksgroups.items()
         }
         self.fit_results = self._fit_buffer(dfs)  # Perform fit
@@ -1081,9 +1081,9 @@ class TitrationResults:
         if not self.all_computed():
             self.compute_all()
         try:
-            n_sd: float = expected_sd / np.nanmedian(
-                [v.result.params[par].stderr for v in self.results.values() if v.result]
-            )
+            n_sd: float = expected_sd / np.nanmedian([
+                v.result.params[par].stderr for v in self.results.values() if v.result
+            ])
         except ZeroDivisionError:
             logger.warning("Unable to calculate n_sd; defaulting to 1.0")
             n_sd = 1.0  # Fallback if stderr values are missing
@@ -1161,7 +1161,7 @@ class TitrationResults:
             ax2.set_yticklabels([str(label) for label in df_unk.index])
             ax2.set_ylim(-1, len(df_unk))
             # Set x-limits
-            xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+            xlim = xlim or self._determine_xlim(df_ctr, df_unk)
             if self.scheme.ctrl:
                 ax1.set_xlim(xlim)
             ax2.set_xlim(xlim)
@@ -1690,9 +1690,11 @@ class Titration(TecanfilesGroup):
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame(
-            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
-        ).to_csv("list_x_true.csv", index=False, header=False)
+        pd.DataFrame({
+            "filenames": filenames,
+            "x": da_true.x,
+            "x_err": da_true.x_err,
+        }).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property
@@ -1707,9 +1709,11 @@ class Titration(TecanfilesGroup):
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame(
-            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
-        ).to_csv("list_x_true.csv", index=False, header=False)
+        pd.DataFrame({
+            "filenames": filenames,
+            "x": da_true.x,
+            "x_err": da_true.x_err,
+        }).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property

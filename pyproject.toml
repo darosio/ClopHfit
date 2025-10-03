@@ -10,6 +10,7 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Unix Shell",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
@@ -152,13 +153,31 @@ line-length = 88
 target-version = "py312"
 unsafe-fixes = true
 # Enable preview mode
-preview = false
+preview = true
 
 [tool.ruff.format]
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["ANN201", "E501", "ISC001", "T20", "INP", "G", "FBT", "PYI"]
+ignore = [
+  "ANN201",
+  "E501",
+  "ISC001",
+  "T20",
+  "INP",
+  "G",
+  "FBT",
+  "PYI",
+  "B903", # Class could be dataclass - often design choice
+  "DOC201", # Missing return section in docstring - too strict for scientific code
+  "DOC501", # Missing exception documentation - too strict
+  "PLR0914", # Too many local variables - common in scientific functions
+  "PLR0917", # Too many positional arguments - common in scientific functions
+  "PLR1702", # Too many nested blocks - common in data processing
+  "PLR6301", # Method could be function/static - often design choice
+  "PLR0904", # Too many public methods - acceptable for complex classes
+  "PLC2701", # Private name import - sometimes necessary for testing
+]
 select = [
   "A", # builtins
   "AIR", # airflow

@@ -295,11 +295,11 @@ def plot_fit(
         Plotting parameters for consistent styling.
 
     """
-    _stretch = 0.05
+    stretch = 0.05
     colors = [COLOR_MAP(i) for i in range(len(ds))]
 
     xfit = {
-        k: np.linspace(da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100)
+        k: np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
         for k, da in ds.items()
     }
     # Compute y-fit using the model directly to avoid circular imports
@@ -406,14 +406,12 @@ def plot_fit_gemini(
     pp : PlotParameters | None
         Plotting parameters for consistent styling.
     """
-    _stretch = 0.05
+    stretch = 0.05
     colors = [COLOR_MAP(i) for i in range(len(ds))]
 
     for (lbl, da), clr in zip(ds.items(), colors, strict=False):
         # Generate smooth x-values for the fitted curve
-        x_fit = np.linspace(
-            da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100
-        )
+        x_fit = np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
         y_fit = binding_1site(
             x_fit,
             params["K"].value,

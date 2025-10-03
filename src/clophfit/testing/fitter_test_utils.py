@@ -108,9 +108,9 @@ def build_fitters(
 ) -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
     """Builder of fitters."""
     fitters: dict[str, Callable[[Dataset], FitResult[MiniT]]] = {
-        "glob_ls": lambda ds: fit_binding_glob(ds),
+        "glob_ls": fit_binding_glob,
         "glob_huber": lambda ds: fit_binding_glob(ds, robust=True),
-        "glob_irls_outlier": lambda ds: fit_binding_glob_recursive_outlier(ds),
+        "glob_irls_outlier": fit_binding_glob_recursive_outlier,
         "outlier2": lambda ds: outlier2(ds, "default"),
     }
 

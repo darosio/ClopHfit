@@ -9,6 +9,7 @@ Classes:
 
 import copy
 import warnings
+from collections import UserDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, TypeVar, runtime_checkable
@@ -117,7 +118,7 @@ class DataArray:
         self._validate_xerrc_lengths()
 
 
-class Dataset(dict[str, DataArray]):
+class Dataset(UserDict[str, DataArray]):
     """A dictionary-like container for storing `DataArray`.
 
     Parameters
@@ -186,16 +187,14 @@ class Dataset(dict[str, DataArray]):
         lines = [header]
         for lbl, da in self.items():
             try:
-                lines.append(f"  - {lbl}:")
-                lines.append(f"        x={_fmt_arr(getattr(da, 'xc', np.array([])))}")
-                lines.append(f"        y={_fmt_arr(getattr(da, 'yc', np.array([])))}")
-                lines.append(f"        mask={_fmt_mask(da.mask)}")
-                lines.append(
-                    f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}"
-                )
-                lines.append(
-                    f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}"
-                )
+                lines.extend((
+                    f"  - {lbl}:",
+                    f"        x={_fmt_arr(getattr(da, 'xc', np.array([])))}",
+                    f"        y={_fmt_arr(getattr(da, 'yc', np.array([])))}",
+                    f"        mask={_fmt_mask(da.mask)}",
+                    f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}",
+                    f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}",
+                ))
             except Exception:  # noqa: BLE001 - never crash on repr
                 lines.append(f"  - {lbl}: <unavailable>")
         return "\n".join(lines)

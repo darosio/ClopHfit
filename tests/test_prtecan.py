@@ -178,7 +178,7 @@ class TestLabelblock:
             assert lb0 == 1
 
     def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """Test the __almost_eq__ method of the Labelblock class."""
+        """Test the almost_equal method of the Labelblock class."""
         lb0, _ = labelblocks
         file_path1 = Path(data_tests) / "L1" / "290513_7.2.xls"
         csvl1 = prtecan.read_xls(file_path1)  # Gain=98
@@ -189,8 +189,8 @@ class TestLabelblock:
         idxs2 = prtecan.lookup_listoflines(csvl2)
         lb12 = Labelblock(csvl2[idxs2[1] :])
         assert lb11 != lb12
-        assert lb11.__almost_eq__(lb12)
-        assert not lb11.__almost_eq__(lb0)
+        assert lb11.almost_equal(lb12)
+        assert not lb11.almost_equal(lb0)
 
     def test_overvalue(self, caplog: pytest.LogCaptureFixture) -> None:
         """It detects saturated data ("OVER")."""
@@ -857,7 +857,7 @@ def test_generate_combinations_and_prepare_folder(tmp_path: Path) -> None:
     flags, method = combos[0]
     assert isinstance(flags, tuple)
     assert len(flags) == 4
-    assert method in ("mean", "meansd", "fit")
+    assert method in {"mean", "meansd", "fit"}
     # test prepare output folder naming
     # set all flags to True and bg_mth to 'fit'
     tit.params.bg = True
@@ -884,4 +884,4 @@ def test_extract_xls_roundtrip(tmp_path: Path) -> None:
     # strip_lines should remove blanks
     stripped = prtecan.strip_lines(lines)
     # each line has no empty elements
-    assert all(all(e != "" for e in row) for row in stripped)
+    assert all(all(e for e in row) for row in stripped)

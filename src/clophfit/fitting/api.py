@@ -19,7 +19,7 @@ should be avoided in new code.
 from __future__ import annotations
 
 import warnings
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from .bayes import (
@@ -70,7 +70,7 @@ def _get_int(kwargs: dict[str, object], name: str, default: int) -> int:
     return default
 
 
-class FitMethod(str, Enum):
+class FitMethod(StrEnum):
     """Available unified fit methods."""
 
     LM = "lm"  # Least-squares global fit (lmfit)
@@ -106,7 +106,7 @@ def fit_binding(
         When a well key is not provided.
     """
     m = FitMethod(method) if not isinstance(method, FitMethod) else method
-    _err = f"Unknown fit method: {method}"
+    err = f"Unknown fit method: {method}"
 
     if m is FitMethod.LM:
         # Optional kwargs: robust: bool = False
@@ -159,7 +159,7 @@ def fit_binding(
             n_xerr=n_xerr2,
             n_samples=n_samples2,
         )
-    raise ValueError(_err)
+    raise ValueError(err)
 
 
 # Convenience named wrappers (stable API)
