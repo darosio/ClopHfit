@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # Typed helpers to extract optional parameters from kwargs safely
 
 
-def _get_bool(kwargs: dict[str, object], name: str, default: bool) -> bool:
+def _get_bool(kwargs: dict[str, object], name: str, *, default: bool) -> bool:
     value = kwargs.get(name, default)
     if isinstance(value, bool):
         return value
@@ -110,13 +110,13 @@ def fit_binding(
 
     if m is FitMethod.LM:
         # Optional kwargs: robust: bool = False
-        robust: bool = _get_bool(kwargs, "robust", False)
+        robust: bool = _get_bool(kwargs, "robust", default=False)
         return _fit_binding_glob(dataset, robust=robust)
     if m is FitMethod.LM_OUTLIER:
         # Optional kwargs: key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
         key: str = _get_str(kwargs, "key", "")
         threshold: float = _get_float(kwargs, "threshold", 3.0)
-        plot_z_scores: bool = _get_bool(kwargs, "plot_z_scores", False)
+        plot_z_scores: bool = _get_bool(kwargs, "plot_z_scores", default=False)
         return _fit_outlier2(
             dataset, key=key, threshold=threshold, plot_z_scores=plot_z_scores
         )
@@ -166,17 +166,56 @@ def fit_binding(
 
 
 def fit_binding_lm(dataset: Dataset, **kwargs: object) -> FitResult[Minimizer]:
-    """Least-squares global fit (lmfit)."""
+    """Least-squares global fit (lmfit).
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset to fit.
+    **kwargs : object
+        Additional keyword arguments passed to the fit method.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        Fitting results with lmfit minimizer.
+    """
     return fit_binding(dataset, method=FitMethod.LM, **kwargs)
 
 
 def fit_binding_lm_outlier(dataset: Dataset, **kwargs: object) -> FitResult[Minimizer]:
-    """Least-squares fit with robust reweighting and outlier removal."""
+    """Least-squares fit with robust reweighting and outlier removal.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset to fit.
+    **kwargs : object
+        Additional keyword arguments passed to the fit method.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        Fitting results with outlier detection and robust weighting.
+    """
     return fit_binding(dataset, method=FitMethod.LM_OUTLIER, **kwargs)
 
 
 def fit_binding_bayes(fr: FitResult[MiniT], **kwargs: object) -> FitResult[MiniT]:
-    """Bayesian single-ye_mag model (shared across labels)."""
+    """Bayesian single-ye_mag model (shared across labels).
+
+    Parameters
+    ----------
+    fr : FitResult[MiniT]
+        Initial deterministic fit result.
+    **kwargs : object
+        Additional keyword arguments passed to the fit method.
+
+    Returns
+    -------
+    FitResult[MiniT]
+        Bayesian fitting results with shared ye_mag across labels.
+    """
     # Note: requires an initial deterministic FitResult as input
     return fit_binding(
         fr.dataset or Dataset({}), method=FitMethod.BAYES, fr=fr, **kwargs
@@ -186,7 +225,20 @@ def fit_binding_bayes(fr: FitResult[MiniT], **kwargs: object) -> FitResult[MiniT
 def fit_binding_bayes_perlabel(
     fr: FitResult[MiniT], **kwargs: object
 ) -> FitResult[MiniT]:
-    """Bayesian model with per-label ye_mag."""
+    """Bayesian model with per-label ye_mag.
+
+    Parameters
+    ----------
+    fr : FitResult[MiniT]
+        Initial deterministic fit result.
+    **kwargs : object
+        Additional keyword arguments passed to the fit method.
+
+    Returns
+    -------
+    FitResult[MiniT]
+        Bayesian fitting results with separate ye_mag per label.
+    """
     return fit_binding(
         fr.dataset or Dataset({}), method=FitMethod.BAYES_PERLABEL, fr=fr, **kwargs
     )
@@ -198,7 +250,22 @@ def fit_binding_bayes_perlabel(
 def fit_binding_glob_reweighted(
     ds: Dataset, key: str, threshold: float = 2.05
 ) -> FitResult[Minimizer]:  # pragma: no cover
-    """Use fit_binding_lm_outlier instead (deprecated shim)."""
+    """Use fit_binding_lm_outlier instead (deprecated shim).
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset to fit.
+    key : str
+        Key identifier for the dataset.
+    threshold : float, optional
+        Outlier detection threshold, by default 2.05.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        Deprecated. Use fit_binding_lm_outlier() instead.
+    """
     warnings.warn(
         "fit_binding_glob_reweighted is deprecated. Use fit_binding_lm_outlier() instead.",
         DeprecationWarning,
@@ -210,7 +277,22 @@ def fit_binding_glob_reweighted(
 def fit_binding_glob_recursive(
     ds: Dataset, max_iterations: int = 15, tol: float = 0.1
 ) -> FitResult[Minimizer]:  # pragma: no cover
-    """Use fit_binding_lm_outlier instead (deprecated shim)."""
+    """Use fit_binding_lm_outlier instead (deprecated shim).
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset to fit.
+    max_iterations : int, optional
+        Maximum number of iterations, by default 15.
+    tol : float, optional
+        Tolerance for convergence, by default 0.1.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        Deprecated. Use fit_binding_lm_outlier() instead.
+    """
     warnings.warn(
         "fit_binding_glob_recursive is deprecated. Use fit_binding_lm_outlier() instead.",
         DeprecationWarning,
@@ -222,7 +304,22 @@ def fit_binding_glob_recursive(
 def fit_binding_glob_recursive_outlier(
     ds: Dataset, tol: float = 0.01, threshold: float = 3.0
 ) -> FitResult[Minimizer]:  # pragma: no cover
-    """Use fit_binding_lm_outlier instead (deprecated shim)."""
+    """Use fit_binding_lm_outlier instead (deprecated shim).
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset to fit.
+    tol : float, optional
+        Tolerance for convergence, by default 0.01.
+    threshold : float, optional
+        Outlier detection threshold, by default 3.0.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        Deprecated. Use fit_binding_lm_outlier() instead.
+    """
     warnings.warn(
         "fit_binding_glob_recursive_outlier is deprecated. Use fit_binding_lm_outlier() instead.",
         DeprecationWarning,

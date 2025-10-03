@@ -80,7 +80,7 @@ class PlotParameters:
 
 def _apply_common_plot_style(ax: Axes, title: str, xlabel: str, ylabel: str) -> None:
     """Add grid, title and x_y_labels."""
-    ax.grid(True)
+    ax.grid(visible=True)
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)

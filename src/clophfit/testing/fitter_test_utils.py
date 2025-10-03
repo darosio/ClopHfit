@@ -58,7 +58,7 @@ def make_synthetic_ds(  # noqa: PLR0913
 
     ds = Dataset({}, is_ph=is_ph)
     for lbl in sorted(s0.keys()):
-        clean = binding_1site(x, k, s0[lbl], s1[lbl], is_ph)
+        clean = binding_1site(x, k, s0[lbl], s1[lbl], is_ph=is_ph)
         dy = noise * (np.max(clean) - np.min(clean))
         y = clean + rng.normal(0.0, dy, size=x.shape)
         da = DataArray(xc=x, yc=y)
@@ -104,6 +104,7 @@ def s_from_result(fr: FitResult[MiniT], which: str) -> dict[str, float] | None:
 
 
 def build_fitters(
+    *,
     include_odr: bool = True,
 ) -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
     """Builder of fitters."""

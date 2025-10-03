@@ -5,9 +5,8 @@ from __future__ import annotations
 import csv
 import logging
 import pprint
-from collections import namedtuple
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import click
 import lmfit  # type: ignore[import-untyped]
@@ -46,7 +45,9 @@ def eq1(kd1: float, pka: float, ph: float) -> None:
 @click.option("--verbose", "-v", count=True, help="Increase verbosity: -v for INFO, -vv for DEBUG. Default is WARNING.")  # fmt: skip
 @click.option("--quiet", "-q", is_flag=True, help="Silence terminal output; show only ERROR messages.")  # fmt: skip
 @click.option("--out", "-o", type=cPath(), help="Output folder.")
-def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: no cover
+def ppr(
+    ctx: Context, verbose: int, *, quiet: bool, out: str
+) -> None:  # pragma: no cover
     """Parse Plate Reader `ppr` group command."""
     ctx.ensure_object(dict)
     ctx.obj["VERBOSE"] = verbose
@@ -79,6 +80,7 @@ def tecan(  # noqa: PLR0913,PLR0915
     ctx: Context,
     list_file: str,
     cl: float,
+    *,
     bg: bool,
     bg_adj: bool,
     dil: bool,
@@ -95,16 +97,55 @@ def tecan(  # noqa: PLR0913,PLR0915
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
-    LIST_FILE : List of Tecan files and concentration values.
+    Parameters
+    ----------
+    ctx : Context
+        Click context object.
+    list_file : str
+        Path to list file containing Tecan files and concentration values.
+    cl : float
+        Cl titration concentration (mM) of added aliquots.
+    bg : bool
+        Whether to subtract buffer.
+    bg_adj : bool
+        Whether to adjust background to avoid negative values.
+    dil : bool
+        Whether to apply dilution correction.
+    nrm : bool
+        Whether to normalize using metadata.
+    bg_mth : str
+        Method for background calculation.
+    sch : str | None
+        Path to plate scheme file (buffers and controls).
+    add : str | None
+        Path to additions file (initial volume and additions).
+    comb : bool
+        Whether to export all data combinations.
+    lim : tuple[float, float] | None
+        Range (MIN, MAX) for plot_K.
+    title : str
+        Title for plots.
+    fit : bool
+        Whether to perform fitting.
+    png : bool
+        Whether to export PNG files.
+    mcmc : str
+        MCMC sampling type: 'None', 'multi', or 'single'.
 
+    Notes
+    -----
     Saves titrations as .dat files and fits all wells using 2 labels. The
     function produces:
 
     - K plot
-
     - csv tables for all labelblocks and global fittings.
 
-    Note: Buffer is always subtracted if scheme indicates buffer well positions.
+    Buffer is always subtracted if scheme indicates buffer well positions.
+
+    Raises
+    ------
+    click.UsageError
+        For invalid command line option combinations.
     """
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -132,29 +173,29 @@ def tecan(  # noqa: PLR0913,PLR0915
     tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png)
     # Load titration
     list_fp = Path(list_file)
-    logger.info(f"Titration list: {list_fp.resolve()}")
-    logger.info(f"{tecan_config}")
-    tit = Titration.fromlistfile(list_fp, not cl)
+    logger.info("Titration list: %s", list_fp.resolve())
+    logger.info("%s", tecan_config)
+    tit = Titration.fromlistfile(list_fp, is_ph=not cl)
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
     tit.params.mcmc = mcmc
-    logger.info(f"{tit.params}")
+    logger.info("%s", tit.params)
     if add:
         tit.load_additions(Path(add))
-        logger.info(f"Additions: {tit.additions}")
+        logger.info("Additions: %s", tit.additions)
     if cl and tit.additions:
         tit.x = calculate_conc(tit.additions, cl)
-        logger.info(f"{tit.x}")
+        logger.info("%s", tit.x)
     if sch:
         tit.load_scheme(Path(sch))
         f = tit.buffer.plot(title=title)
         f.savefig(out_fp / "buffer.png")
         f = tit.buffer.plot(nrm=True, title=title)
         f.savefig(out_fp / "buffer_norm.png")
-        logger.info(f"{tit.scheme}")
+        logger.info("%s", tit.scheme)
     with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
         for lbg in tit.labelblocksgroups.values():
             pprint.pprint(lbg.metadata, stream=fp)
@@ -215,7 +256,9 @@ def fit_enspire(  # noqa: C901,PLR0912
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band = dbands.get(label)
-                    fit_result = fitting.core.analyze_spectra(data, is_ph, band)
+                    fit_result = fitting.core.analyze_spectra(
+                        data, is_ph=is_ph, band=band
+                    )
                     if fit_result.is_valid() and fit_result.mini:
                         userargs = fit_result.mini.userargs[0]["default"]
                         ds_data[label] = DataArray(userargs.x, userargs.y)
@@ -228,7 +271,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     len(d_tit.keys() - dbands.keys()) > 1  # svd > 1
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
-                    ds = Dataset(ds_data, is_ph)
+                    ds = Dataset(ds_data, is_ph=is_ph)
                     spectra_gres = fitting.core.analyze_spectra_glob(d_tit, ds, dbands)
                     if spectra_gres.svd and spectra_gres.svd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
@@ -270,7 +313,7 @@ def _print_result(fit_result: FitResult[MiniT], pdf_file: Path, band_str: str) -
     "--is-ph/--no-is-ph", default=True, show_default=True, help="Concentrations are pH."
 )
 def fit_titration(
-    ctx: Context, verbose: int, out: str, is_ph: bool
+    ctx: Context, verbose: int, out: str, *, is_ph: bool
 ) -> None:  # pragma: no cover
     """Fit Titration group command."""
     ctx.ensure_object(dict)
@@ -296,7 +339,11 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
     csv_df = pd.read_csv(csv_f)
     # Ignore buffer wells! SVD will use differences between spectra.
     note_df = note_df[note_df["mutant"] != "buffer"]
-    Notes = namedtuple("Notes", ["wells", "conc"])
+
+    class Notes(NamedTuple):
+        wells: list[str]
+        conc: list[float]
+
     titration_type = "pH" if is_ph else "Cl"
     note = Notes(list(note_df["well"]), list(note_df[titration_type]))
     spectra = csv_df[note.wells]
@@ -308,7 +355,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    fit_result = fitting.core.analyze_spectra(spectra, is_ph, band)
+    fit_result = fitting.core.analyze_spectra(spectra, is_ph=is_ph, band=band)
     # output
     out.mkdir(parents=True, exist_ok=True)
     pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
@@ -324,7 +371,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
 @click.option(
     "--weight/--no-weight", default=True, show_default=True, help="Use residue weights."
 )
-def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
+def glob(ctx: Context, file: str, boot: int, *, weight: bool) -> None:
     """Update old glob fit of multiple datasets."""
     verbose = ctx.obj.get("VERBOSE", 0)
     is_ph = ctx.obj.get("IS_PH", True)
@@ -339,7 +386,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
         lbl: DataArray(x, file_df[lbl].to_numpy().astype(float))
         for lbl in file_df.columns[1:]
     }
-    ds = Dataset(ds_data, is_ph)
+    ds = Dataset(ds_data, is_ph=is_ph)
     if weight:
         fitting.core.weight_multi_ds_titration(ds)
     f_res = fitting.core.fit_binding_glob(ds)

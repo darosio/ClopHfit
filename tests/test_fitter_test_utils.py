@@ -81,7 +81,7 @@ class TestSyntheticDataGeneration:
         ds_high, _ = make_synthetic_ds(k, s0, s1, is_ph=True, noise=0.1, seed=43)
 
         # Compare standard deviation of residuals from clean model
-        clean_y = binding_1site(ds_low["y0"].x, k, s0, s1, True)
+        clean_y = binding_1site(ds_low["y0"].x, k, s0, s1, is_ph=True)
 
         residuals_low = np.abs(ds_low["y0"].y - clean_y)
         residuals_high = np.abs(ds_high["y0"].y - clean_y)

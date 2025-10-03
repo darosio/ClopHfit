@@ -131,7 +131,7 @@ class Dataset(UserDict[str, DataArray]):
 
     is_ph: bool = False
 
-    def __init__(self, data: dict[str, DataArray], is_ph: bool = False) -> None:
+    def __init__(self, data: dict[str, DataArray], *, is_ph: bool = False) -> None:
         super().__init__(data or {})
         self.is_ph = is_ph
 
@@ -200,7 +200,9 @@ class Dataset(UserDict[str, DataArray]):
         return "\n".join(lines)
 
     @classmethod
-    def from_da(cls, da: DataArray | list[DataArray], is_ph: bool = False) -> "Dataset":
+    def from_da(
+        cls, da: DataArray | list[DataArray], *, is_ph: bool = False
+    ) -> "Dataset":
         """Alternative constructor to create Dataset from a list of DataArray.
 
         Parameters

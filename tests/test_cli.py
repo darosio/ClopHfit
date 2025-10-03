@@ -13,7 +13,12 @@ from click.testing import CliRunner
 from matplotlib.testing.compare import compare_images
 from matplotlib.testing.exceptions import ImageComparisonFailure
 
-from clophfit.__main__ import clop, fit_titration, note2csv, ppr
+import clophfit.__main__ as cli_main  # noqa: PLC2701
+
+clop = cli_main.clop
+fit_titration = cli_main.fit_titration
+note2csv = cli_main.note2csv
+ppr = cli_main.ppr
 
 # tests path
 tpath = Path(__file__).parent

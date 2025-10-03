@@ -20,7 +20,7 @@ from clophfit.testing.fitter_test_utils import (
 @pytest.mark.parametrize("is_ph", [True, False])
 @pytest.mark.parametrize("labels", [1, 2])
 @pytest.mark.parametrize("noise", [0.0, 0.02, 0.05])
-def test_fitters_converge_and_agree(is_ph: bool, labels: int, noise: float) -> None:
+def test_fitters_converge_and_agree(*, is_ph: bool, labels: int, noise: float) -> None:
     """Test convergence and agreement to truth."""
     # Truth and per-label plateaus
     k_true = 7.0 if is_ph else 10.0

@@ -575,12 +575,12 @@ class TestTitration:
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
-            Titration.fromlistfile(Path("aax"), True)
+            Titration.fromlistfile(Path("aax"), is_ph=True)
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", True)
+            Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", is_ph=True)
 
     def test_data_bg_and_nrm(self, tit1: Titration) -> None:
         """Calculate buffer value from average of buffer wells and subtract."""

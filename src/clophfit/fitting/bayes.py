@@ -271,6 +271,7 @@ def fit_binding_pymc2(
 def fit_binding_pymc_compare(  # noqa: PLR0913
     fr: FitResult[MiniT],
     buffer_sd: dict[str, float],
+    *,
     learn_separate_y_mag: bool = False,
     n_sd: float = 10.0,
     n_xerr: float = 1.0,

@@ -8,7 +8,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -270,7 +270,13 @@ class EnspireFile:
         # Monochromator is expected to be either Exc or Ems
         for k, measurement in measurements.items():
             label = f"Meas{k}"
-            heading = collections.namedtuple("heading", "ex em res")
+
+            class Heading(NamedTuple):
+                ex: str
+                em: str
+                res: str
+
+            heading = Heading
             head = heading(
                 f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
             )

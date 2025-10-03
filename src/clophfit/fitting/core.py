@@ -107,7 +107,7 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
         S1 = params[f"S1_{lbl}"].value  # noqa: N806
 
         # Compute model and residuals in one go
-        model = binding_1site(da.x, K, S0, S1, is_ph)
+        model = binding_1site(da.x, K, S0, S1, is_ph=is_ph)
         weight = 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
         residuals_list.append(weight * (da.y - model))
 
@@ -141,7 +141,7 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     return params
 
 
-def weight_da(da: DataArray, is_ph: bool) -> bool:
+def weight_da(da: DataArray, *, is_ph: bool) -> bool:
     """Estimate initial weights for a DataArray by fitting it individually.
 
     The standard error of the residuals from this initial fit is used as
@@ -187,7 +187,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
 
     # Single pass: weight and track failures/successes
     for lbl, da in ds.items():
-        if not weight_da(da, ds.is_ph):
+        if not weight_da(da, is_ph=ds.is_ph):
             failed_labels.append(lbl)
         else:
             # Track maximum error from successful fits
@@ -203,7 +203,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
 
 # --- Spectral Data Processing ---
 def analyze_spectra(
-    spectra: pd.DataFrame, is_ph: bool, band: tuple[int, int] | None = None
+    spectra: pd.DataFrame, *, is_ph: bool, band: tuple[int, int] | None = None
 ) -> FitResult[Minimizer]:
     """Analyze spectra titration, fit the data, and plot the results.
 
@@ -246,7 +246,7 @@ def analyze_spectra(
         spectra = spectra.dropna(axis=0)
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
-        ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph)
+        ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph=is_ph)
         plot_autovectors(ax2, spectra.index, u)
         plot_autovalues(ax3, s[:])  # don't plot last auto-values?
         plot_pca(ax5, v, x, PlotParameters(is_ph))
@@ -263,7 +263,7 @@ def analyze_spectra(
         ])
         # rescale y
         y /= np.abs(y).max() / 10
-        ds = Dataset.from_da(DataArray(x, y), is_ph)
+        ds = Dataset.from_da(DataArray(x, y), is_ph=is_ph)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
     weight_multi_ds_titration(ds)
@@ -279,7 +279,7 @@ def analyze_spectra(
 #############################################
 
 
-def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult[Minimizer]:
+def fit_binding_glob(ds: Dataset, *, robust: bool = False) -> FitResult[Minimizer]:
     """Analyze multi-label titration datasets and visualize the results."""
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
@@ -300,6 +300,7 @@ def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult[Minimizer]:
 ################################################
 def fit_lm(
     ds: Dataset,
+    *,
     robust: bool = False,
     iterative: bool = False,
     outlier_threshold: float | None = None,
@@ -408,7 +409,7 @@ def analyze_spectra_glob(
             prev_max = spectra_adjusted.index.max()
             adjusted_list.append(spectra_adjusted)
         spectra_merged = pd.concat(adjusted_list)
-        svd = analyze_spectra(spectra_merged, ds.is_ph)
+        svd = analyze_spectra(spectra_merged, is_ph=ds.is_ph)
         ds_svd = ds.copy(labels_svd)
         weight_multi_ds_titration(ds_svd)  # Fixed from ds
         f_res = fit_binding_glob(ds_svd)
@@ -452,7 +453,7 @@ def _plot_spectra_glob_emcee(
 
 
 def outlier2(
-    ds: Dataset, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
+    ds: Dataset, *, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
 ) -> FitResult[Minimizer]:
     """Remove outliers and reassign weights."""
     # Re-weight dataset
@@ -490,7 +491,7 @@ def outlier2(
     n_outliers = mask.tolist().count(False)
     if n_outliers > 0:
         reweighted_ds.apply_mask(mask)
-        logger.warning(f"outlier in {key}: {mask.astype(int)}.")
+        logger.warning("outlier in %s: %s.", key, mask.astype(int))
     return fit_binding_glob(reweighted_ds, robust=False)
 
 
@@ -525,9 +526,9 @@ def fit_binding_glob_reweighted(
             mask = outlier_glob(residual, threshold=threshold)
             n_outliers = mask.tolist().count(True)
             if n_outliers == 1:
-                logger.warning(f"{n_outliers} outlier in {key}:y{lbl}.")
+                logger.warning("%s outlier in %s:y%s.", n_outliers, key, lbl)
             elif n_outliers > 1:
-                logger.warning(f"{n_outliers} outliers in {key}:y{lbl}.")
+                logger.warning("%s outliers in %s:y%s.", n_outliers, key, lbl)
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
@@ -573,17 +574,17 @@ def fit_binding_glob_recursive_outlier(
     # Initial fit
     r = fit_binding_glob_recursive(ds, tol=tol)
     if r.result:
-        mask = outlier_glob(r.result.residual, threshold)
+        mask = outlier_glob(r.result.residual, threshold=threshold)
     while mask.any() and r.dataset:
         ds.apply_mask(~mask)
         r = fit_binding_glob_recursive(ds, tol=tol)
         if r.result:
-            mask = outlier_glob(r.result.residual, threshold)
+            mask = outlier_glob(r.result.residual, threshold=threshold)
     return r
 
 
 def outlier_glob(
-    residuals: ArrayF, threshold: float = 2.0, plot_z_scores: bool = False
+    residuals: ArrayF, *, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
