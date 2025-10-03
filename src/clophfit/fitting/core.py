@@ -91,44 +91,52 @@ logger = logging.getLogger(__name__)
 
 # --- LMfit Backend: Helpers and Fitting Functions ---
 def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
-    """Compute concatenated residuals for multiple datasets for lmfit."""
-    x = {k: da.x for k, da in ds.items()}
-    y = {k: da.y for k, da in ds.items()}
-    w = {
-        k: 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
-        for k, da in ds.items()
-    }
+    """Compute concatenated residuals for multiple datasets for lmfit.
+
+    Optimized version with reduced dictionary lookups and vectorized operations.
+    """
     is_ph = ds.is_ph
-    # Compute model values
-    models = {}
-    for lbl, x_data in x.items():
-        models[lbl] = binding_1site(
-            x_data,
-            params["K"].value,
-            params[f"S0_{lbl}"].value,
-            params[f"S1_{lbl}"].value,
-            is_ph,
-        )
-    # Return weighted residuals as a single array
-    residuals: ArrayF = np.concatenate([(w[lbl] * (y[lbl] - models[lbl])) for lbl in x])
-    return residuals
+    K = params["K"].value  # Extract once to avoid repeated access  # noqa: N806
+
+    # Pre-allocate lists for better performance
+    residuals_list: list[ArrayF] = []
+
+    for lbl, da in ds.items():
+        # Get parameter values once per label
+        S0 = params[f"S0_{lbl}"].value  # noqa: N806
+        S1 = params[f"S1_{lbl}"].value  # noqa: N806
+
+        # Compute model and residuals in one go
+        model = binding_1site(da.x, K, S0, S1, is_ph)
+        weight = 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
+        residuals_list.append(weight * (da.y - model))
+
+    return np.concatenate(residuals_list)
 
 
 def _build_params_1site(ds: Dataset) -> Parameters:
-    """Initialize lmfit Parameters for a 1-site model from a Dataset."""
+    """Initialize lmfit Parameters for a 1-site model from a Dataset.
+
+    Optimized version with reduced list operations and vectorized computations.
+    """
     params = Parameters()
     if ds.is_ph:
         params.add("K", min=3, max=11)
     else:
         # epsilon avoids x/K raise x/0 error
         params.add("K", min=float_info.epsilon)
-    k_initial_guesses = []
-    for lbl, da in ds.items():
+
+    # Pre-allocate numpy array for better performance
+    k_initial_guesses = np.empty(len(ds))
+
+    for i, (lbl, da) in enumerate(ds.items()):
         params.add(f"S0_{lbl}", value=da.y[0])
         params.add(f"S1_{lbl}", value=da.y[-1])
-        target_y = (da.y[0] + da.y[-1]) / 2
+        # Vectorized computation of target and halfway point
+        target_y = (da.y[0] + da.y[-1]) * 0.5
         halfway_idx = np.argmin(np.abs(da.y - target_y))
-        k_initial_guesses.append(da.x[halfway_idx])
+        k_initial_guesses[i] = da.x[halfway_idx]
+
     params["K"].value = np.mean(k_initial_guesses)
     return params
 
@@ -171,14 +179,26 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
     to estimate `y_err`. For any `DataArray` where weighting fails (e.g., due
     to insufficient data), a fallback error is assigned based on the errors
     from successfully fitted arrays.
+
+    Optimized version with reduced set operations and memory allocations.
     """
-    failed_labels = [lbl for lbl, da in ds.items() if not weight_da(da, ds.is_ph)]
-    if failed_labels:
-        max_yerr = -np.inf
-        for lbl in ds.keys() - set(failed_labels):
-            max_yerr = max(np.max(ds[lbl].y_err).item(), max_yerr)
+    failed_labels = []
+    successful_max_yerr = -np.inf
+
+    # Single pass: weight and track failures/successes
+    for lbl, da in ds.items():
+        if not weight_da(da, ds.is_ph):
+            failed_labels.append(lbl)
+        else:
+            # Track maximum error from successful fits
+            max_err = np.max(da.y_err).item()
+            successful_max_yerr = max(successful_max_yerr, max_err)
+
+    # Assign fallback error to failed labels
+    if failed_labels and successful_max_yerr > -np.inf:
+        fallback_error = successful_max_yerr * 10
         for lbl in failed_labels:
-            ds[lbl].y_err = np.array([max_yerr * 10])
+            ds[lbl].y_err = np.full_like(ds[lbl].xc, fallback_error)
 
 
 # --- Spectral Data Processing ---
@@ -238,9 +258,9 @@ def analyze_spectra(
             msg = f"Band parameters ({ini}, {fin}) are not in the spectra's index."
             raise ValueError(msg)
         # columns index name are not necessarily unique
-        y = np.array(
-            [spectra.iloc[:, i].loc[ini:fin].sum() for i in range(spectra.shape[1])]
-        )
+        y = np.array([
+            spectra.iloc[:, i].loc[ini:fin].sum() for i in range(spectra.shape[1])
+        ])
         # rescale y
         y /= np.abs(y).max() / 10
         ds = Dataset.from_da(DataArray(x, y), is_ph)

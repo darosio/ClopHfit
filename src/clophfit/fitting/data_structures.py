@@ -291,11 +291,35 @@ class Dataset(UserDict[str, DataArray]):
                 del self[key]
 
     def concatenate_data(self) -> tuple[ArrayF, ArrayF, ArrayF, ArrayF]:
-        """Concatenate x, y, x_err, and y_err across all datasets."""
-        x_data = np.concatenate([v.x for v in self.values()])
-        y_data = np.concatenate([v.y for v in self.values()])
-        x_err = np.concatenate([v.x_err for v in self.values()])
-        y_err = np.concatenate([v.y_err for v in self.values()])
+        """Concatenate x, y, x_err, and y_err across all datasets.
+
+        Optimized version with pre-allocation for better memory efficiency.
+        """
+        if not self:
+            # Return empty arrays for empty dataset
+            empty = np.array([], dtype=np.float64)
+            return empty, empty, empty, empty
+
+        # Pre-calculate total length for efficient allocation
+        total_length = sum(len(v.y) for v in self.values())
+
+        # Pre-allocate arrays
+        x_data = np.empty(total_length, dtype=np.float64)
+        y_data = np.empty(total_length, dtype=np.float64)
+        x_err = np.empty(total_length, dtype=np.float64)
+        y_err = np.empty(total_length, dtype=np.float64)
+
+        # Fill arrays using slicing instead of concatenation
+        offset = 0
+        for v in self.values():
+            length = len(v.y)
+            end_idx = offset + length
+            x_data[offset:end_idx] = v.x
+            y_data[offset:end_idx] = v.y
+            x_err[offset:end_idx] = v.x_err
+            y_err[offset:end_idx] = v.y_err
+            offset = end_idx
+
         return x_data, y_data, x_err, y_err
 
     def export(self, filep: str | Path) -> None:
