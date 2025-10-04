@@ -214,7 +214,7 @@ def fit_binding_pymc(
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
         for lbl, da in ds.items():
             y_model = binding_1site(
-                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
             )
             pm.Normal(
                 f"y_likelihood_{lbl}",
@@ -252,7 +252,7 @@ def fit_binding_pymc2(
             ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=10.0)  # TODO: 100
         for lbl, da in ds.items():
             y_model = binding_1site(
-                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
             )
             pm.Normal(
                 f"y_likelihood_{lbl}",
@@ -331,7 +331,11 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
             for lbl, da in ds.items():
                 ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean())
                 y_model = binding_1site(
-                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                    x_true,
+                    pars["K"],
+                    pars[f"S0_{lbl}"],
+                    pars[f"S1_{lbl}"],
+                    is_ph=ds.is_ph,
                 )
                 true_buffer[lbl] = pm.Normal(
                     f"true_buffer_{lbl}", mu=0, sigma=da.y_err.mean()
@@ -355,7 +359,11 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
             ye_mag0 = pm.HalfNormal("ye_mag", sigma=10.0)
             for lbl, da in ds.items():
                 y_model = binding_1site(
-                    x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                    x_true,
+                    pars["K"],
+                    pars[f"S0_{lbl}"],
+                    pars[f"S1_{lbl}"],
+                    is_ph=ds.is_ph,
                 )
                 pm.Normal(
                     f"y_likelihood_{lbl}",
@@ -406,7 +414,7 @@ def fit_binding_pymc_odr(
 
             def _y_model(x: float, lbl: str = lbl) -> float:
                 return binding_1site(
-                    x, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], ds.is_ph
+                    x, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
                 )
 
             # Define symbolic closest points using PyMC-compatible operations
@@ -469,7 +477,7 @@ def weighted_stats(
     return results
 
 
-def fit_binding_pymc_multi(  # noqa: PLR0913
+def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
@@ -535,7 +543,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
                         K,
                         pars[f"S0_{lbl}_{key}"],
                         pars[f"S1_{lbl}_{key}"],
-                        ds.is_ph,
+                        is_ph=ds.is_ph,
                     )
                     pm.Normal(
                         f"y_likelihood_{lbl}_{key}",
@@ -551,7 +559,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913
     return trace
 
 
-def fit_binding_pymc_multi2(  # noqa: PLR0913
+def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     bg_err: dict[int, ArrayF],
@@ -644,7 +652,7 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913
                         k_param_for_well,
                         pars[f"S0_{lbl}_{key}"],
                         pars[f"S1_{lbl}_{key}"],
-                        ds.is_ph,
+                        is_ph=ds.is_ph,
                     )
                     # Predicted Total Fluorescence (Signal + Buffer) for the likelihood mu
                     mu_total_pred = pm.Deterministic(
@@ -884,7 +892,7 @@ class Fitter:
         return FitResult()
 
 
-def fit_pymc_hierarchical(  # noqa: PLR0913
+def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     bg_err: dict[int, ArrayF],
@@ -989,7 +997,7 @@ def fit_pymc_hierarchical(  # noqa: PLR0913
                         k_param,
                         priors[f"S0_{lbl}_{key}"],
                         priors[f"S1_{lbl}_{key}"],
-                        r.dataset.is_ph,
+                        is_ph=r.dataset.is_ph,
                     )
                     mu_total = pm.Deterministic(
                         f"mu_total_{lbl}_{key}", y_model_signal + true_buffer_mean[lbl]

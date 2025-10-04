@@ -309,7 +309,7 @@ def plot_fit(
             params["K"].value,
             params[f"S0_{lbl}"].value,
             params[f"S1_{lbl}"].value,
-            ds.is_ph,
+            is_ph=ds.is_ph,
         )
         for lbl in ds
     }
@@ -364,7 +364,7 @@ def plot_fit(
                     p_sample["K"].value,
                     p_sample[f"S0_{lbl}"].value,
                     p_sample[f"S1_{lbl}"].value,
-                    ds.is_ph,
+                    is_ph=ds.is_ph,
                 )
             dy = y_samples.std(axis=0)
             # Plot uncertainty.
@@ -417,7 +417,7 @@ def plot_fit_gemini(
             params["K"].value,
             params[f"S0_{lbl}"].value,
             params[f"S1_{lbl}"].value,
-            ds.is_ph,
+            is_ph=ds.is_ph,
         )
 
         # Plot original data points
@@ -467,7 +467,7 @@ def plot_fit_gemini(
                     sampled_params["K"].value,
                     sampled_params[f"S0_{lbl}"].value,
                     sampled_params[f"S1_{lbl}"].value,
-                    ds.is_ph,
+                    is_ph=ds.is_ph,
                 )
             dy = y_samples.std(axis=0)
             ax.fill_between(x_fit, y_fit - dy, y_fit + dy, alpha=0.1, color=clr)

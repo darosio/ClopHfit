@@ -1602,7 +1602,7 @@ class Titration(TecanfilesGroup):
         try:
             ds = self._create_global_ds(key)
             # FIXME: return fit_binding_glob_reweighted(ds, key)
-            return outlier2(ds, key)
+            return outlier2(ds, key=key)
         except InsufficientDataError:
             logger.warning("Skipping global fit for well %s.", key)
             return FitResult()
@@ -1625,7 +1625,7 @@ class Titration(TecanfilesGroup):
         ds = Dataset({f"{label}": da}, is_ph=self.is_ph)
         # Apply weighting if bg_err is not provided
         if not self.bg_err:
-            weight_da(da, ds.is_ph)
+            weight_da(da, is_ph=ds.is_ph)
         return ds
 
     def _create_global_ds(self, key: str) -> Dataset:

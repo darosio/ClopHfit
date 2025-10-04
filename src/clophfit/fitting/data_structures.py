@@ -223,7 +223,7 @@ class Dataset(UserDict[str, DataArray]):
             data = {f"y{i}": da_item for i, da_item in enumerate(da)}
         elif isinstance(da, DataArray):
             data = {"default": da}
-        return cls(data, is_ph)
+        return cls(data, is_ph=is_ph)
 
     def apply_mask(self, combined_mask: ArrayMask) -> None:
         """Correctly distribute and apply the combined mask across all DataArrays.

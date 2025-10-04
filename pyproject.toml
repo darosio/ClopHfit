@@ -165,7 +165,6 @@ ignore = [
   "DOC201", # Missing return section in docstring - too strict for scientific code
   "DOC501", # Missing exception documentation - too strict
   "PLR0914", # Too many local variables - common in scientific functions
-  "PLR0917", # Too many positional arguments - common in scientific functions
   "PLR1702", # Too many nested blocks - common in data processing
   "PLR6301", # Method could be function/static - often design choice
 ]
@@ -254,6 +253,7 @@ max-complexity = 12
   "N816",
   "PD901",
   "PLR0913",
+  "PLR0917", # Too many positional arguments - common in scientific functions
   "PLR2004",
   "SLF001",
   "T20",
