@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import typing
-from typing import Literal, TypedDict
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -13,7 +12,6 @@ import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
-from pydantic import BaseModel, ConfigDict
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy import optimize
@@ -51,17 +49,42 @@ def create_x_true(
 
 
 def create_parameter_priors(
-    params: Parameters, n_sd: float, key: str = "", ctr_name: str = ""
+    params: Parameters,
+    n_sd: float,
+    key: str = "",
+    ctr_name: str = "",
+    default_sigma: float = 1e-3,
 ) -> dict[str, pm.Distribution]:
-    """Create parameter priors."""
+    """Create PyMC parameter prior distributions from lmfit Parameters.
+
+    Parameters
+    ----------
+    params : Parameters
+        lmfit Parameters to convert to PyMC priors.
+    n_sd : float
+        Scaling factor for parameter standard errors.
+    key : str
+        Optional suffix to add to parameter names.
+    ctr_name : str
+        If specified, skip creating K prior (shared from control group).
+    default_sigma : float
+        Default sigma when stderr is not available (default: 1e-3).
+
+    Returns
+    -------
+    dict[str, pm.Distribution]
+        Dictionary of PyMC distribution objects.
+    """
     priors: dict[str, pm.Distribution] = {}
 
     def param_name(p_name: str) -> str:
         return f"{p_name}_{key}" if key else p_name
 
     for name, p in params.items():
-        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
-        if ctr_name and name == "K":  # shared K comes from control priors
+        # Use specified default sigma if stderr is not available
+        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else default_sigma
+        # Skip creating a separate K prior if it belongs to a control group
+        if ctr_name and name == "K":
             continue
         priors[param_name(name)] = pm.Normal(param_name(name), mu=p.value, sigma=sigma)
     return priors
@@ -105,9 +128,17 @@ def process_trace(
     -------
     FitResult[az.InferenceData]
         The updated fit result with extracted parameter values and datasets.
+
+    Raises
+    ------
+    TypeError
+        If az.summary does not return a DataFrame.
     """
     # Extract summary statistics for parameters
     rdf = az.summary(trace)
+    if not isinstance(rdf, pd.DataFrame):
+        msg = "az.summary did not return a DataFrame"
+        raise TypeError(msg)
     rpars = Parameters()
     for name, row in rdf.iterrows():
         if name in p_names:
@@ -115,20 +146,13 @@ def process_trace(
             rpars[name].stderr = row["sd"]
             rpars[name].init_value = row.get("r_hat", np.nan)
     # x_true and x_errc
-    nxc: list[float] = []
-    nx_errc: list[float] = []
-    for name, row in rdf.iterrows():
-        if isinstance(name, str) and name.startswith("x_true"):
-            nxc.append(row["mean"])
-            nx_errc.append(row["sd"])
+    nxc, nx_errc = _extract_x_true_from_trace_df(rdf)
     for da in ds.values():
-        da.xc = np.array(nxc)  # Update x_true values in the dataset
-        da.x_errc = (
-            np.array(nx_errc) * n_xerr
-        )  # Scale the errors FIXME: n_xerr not needed
+        da.xc = nxc  # Update x_true values in the dataset
+        da.x_errc = nx_errc * n_xerr  # Scale the errors FIXME: n_xerr not needed
     # Scale y_errc if present
     try:
-        mag = float(rdf.loc["ye_mag", "mean"])  # type: ignore[arg-type, index]
+        mag = float(rdf.loc["ye_mag", "mean"])  # type: ignore[arg-type]
     except Exception:  # noqa: BLE001
         mag = 1.0
     for da in ds.values():
@@ -166,15 +190,10 @@ def extract_fit(
             )
             rpars[extracted_name].stderr = row["sd"]
             rpars[extracted_name].init_value = row.get("r_hat", np.nan)
-    nxc: list[float] = []
-    nx_errc: list[float] = []
-    for name, row in trace_df.iterrows():
-        if isinstance(name, str) and name.startswith("x_true"):
-            nxc.append(row["mean"])
-            nx_errc.append(row["sd"])
+    nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
     for da in ds.values():
-        da.xc = np.array(nxc)
-        da.x_errc = np.array(nx_errc)
+        da.xc = nxc
+        da.x_errc = nx_errc
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
@@ -182,15 +201,34 @@ def extract_fit(
     return FitResult(fig, _Result(rpars), az.InferenceData(), ds)
 
 
-def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
-    """Extract x_true from an ArviZ summary DataFrame."""
+def _extract_x_true_from_trace_df(
+    trace_df: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract x_true values and errors from an ArviZ summary DataFrame.
+
+    Parameters
+    ----------
+    trace_df : pd.DataFrame
+        ArviZ summary DataFrame containing trace results.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Arrays of x_true means and standard deviations.
+    """
     nxc: list[float] = []
     nx_errc: list[float] = []
     for name, row in trace_df.iterrows():
         if isinstance(name, str) and name.startswith("x_true"):
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
-    return DataArray(xc=np.array(nxc), yc=np.ones_like(nxc), x_errc=np.array(nx_errc))
+    return np.array(nxc), np.array(nx_errc)
+
+
+def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
+    """Extract x_true from an ArviZ summary DataFrame."""
+    nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
+    return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
 
 
 def fit_binding_pymc(
@@ -800,72 +838,6 @@ def compare_posteriors(
     print(table[["mean", "hdi_2.5%", "hdi_97.5%", "deterministic_K"]])
 
 
-def _create_pymc_priors(
-    params: Parameters, n_sd: float, key: str = "", ctr_name: str = ""
-) -> dict[str, pm.Distribution]:
-    """Create PyMC prior distributions from lmfit Parameters."""
-    priors = {}
-
-    def param_name(p_name: str) -> str:
-        return f"{p_name}_{key}" if key else p_name
-
-    for name, p in params.items():
-        # Use a small default sigma if stderr is not available
-        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1.0
-        # Skip creating a separate K prior if it belongs to a control group
-        if ctr_name and name == "K":
-            continue
-        priors[param_name(name)] = pm.Normal(param_name(name), mu=p.value, sigma=sigma)
-    return priors
-
-
-def _create_pymc_x_true(
-    xc: ArrayF, x_errc: ArrayF, n_xerr: float
-) -> ArrayF | pm.Deterministic:
-    """Create latent variables for x-values with uncertainty."""
-    if n_xerr > 0 and np.any(x_errc > 0):
-        x_err_scaled = x_errc * n_xerr
-        xd = -np.diff(xc)
-        xd_err = np.sqrt(x_err_scaled[:-1] ** 2 + x_err_scaled[1:] ** 2)
-        # Lower bound to prevent unphysical ordering
-        lower = xd.min() - 2.5 * xd_err[np.argmin(xd)]
-
-        x_diff = pm.TruncatedNormal("x_diff", mu=xd, sigma=xd_err, lower=lower)
-        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_err_scaled[0])
-        x_cumsum = pm.math.cumsum(x_diff)
-        return pm.Deterministic(
-            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
-        )
-    return xc  # Treat x as fixed if no error is provided
-
-
-class FitConfig(TypedDict):
-    """Store PyMC-fit setup parameters."""
-
-    n_sd: float
-    n_xerr: float
-    ye_scaling: float
-    n_samples: int
-
-
-FitMethod = Literal["bayesian", "frequentist", "robust"]
-
-
-class FitConfig2(BaseModel):
-    """Store PyMC-fit setup parameters."""
-
-    n_sd: float = 10.0
-    n_xerr: float = 1.0
-    ye_scaling: float = 1.0
-    n_samples: int = 2000
-    method: FitMethod = "bayesian"
-
-    model_config = ConfigDict(extra="forbid")
-
-
-DEFAULT_CONFIG = None
-
-
 def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
@@ -935,7 +907,7 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
     print(k_stderr)
 
     with pm.Model():
-        x_true = _create_pymc_x_true(xc, x_errc, n_xerr)
+        x_true = create_x_true(xc, x_errc, n_xerr)
 
         # --- Priors for noise model ---
         sigma_signal_scale = {
@@ -962,7 +934,9 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
                 ctr_name = next(
                     (name for name, wells in scheme.names.items() if key in wells), ""
                 )
-                priors = _create_pymc_priors(r.result.params, n_sd, key, ctr_name)
+                priors = create_parameter_priors(
+                    r.result.params, n_sd, key, ctr_name, default_sigma=1.0
+                )
                 k_param = k_params[ctr_name] if ctr_name else priors[f"K_{key}"]
 
                 for lbl, da in r.dataset.items():

@@ -1605,7 +1605,7 @@ class Titration(TecanfilesGroup):
         """Compute global fit for a single key."""
         try:
             ds = self._create_global_ds(key)
-            # FIXME: return fit_binding_glob_reweighted(ds, key)
+            # FIXME: return outlier2(ds, key=key)  # Replaced deprecated fit_binding_glob_reweighted
             return outlier2(ds, key=key)
         except InsufficientDataError:
             logger.warning("Skipping global fit for well %s.", key)

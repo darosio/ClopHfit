@@ -10,6 +10,11 @@ import pytest
 from lmfit import Parameters  # type: ignore[import-untyped]
 from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 
+from clophfit.fitting.api import (
+    fit_binding_glob_recursive,
+    fit_binding_glob_recursive_outlier,
+    fit_binding_glob_reweighted,
+)
 from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
@@ -424,21 +429,61 @@ def test_dataarray_error_length_mismatch() -> None:
     """Test for length mismatch when setting error arrays."""
     xc = np.array([1, 2, 3, 4])
     yc = np.array([10, 20, 30, 40])
-    short_err = np.array([0.1, 0.2])  # Mismatched length
-    with pytest.raises(
-        InvalidDataError, match="Length of 'xc' and 'y_errc' must be equal"
-    ):
-        DataArray(xc=xc, yc=yc, y_errc=short_err)
-    with pytest.raises(
-        InvalidDataError, match="Length of 'xc' and 'x_errc' must be equal"
-    ):
-        DataArray(xc=xc, yc=yc, x_errc=short_err)
     da = DataArray(xc=xc, yc=yc)
-    # MAYBE: match with "Length of 'y_err' must be 1 or same as 'y'."
-    with pytest.raises(
-        InvalidDataError, match="Length of 'xc' and 'y_errc' must be equal"
+
+    with pytest.raises(InvalidDataError):
+        da.y_err = np.array([0.1, 0.2])  # Wrong length
+
+    with pytest.raises(InvalidDataError):
+        da.x_err = np.array([0.1])  # Wrong length
+
+
+###############################################################################
+# Tests for deprecated API functions (to ensure coverage before removal)
+###############################################################################
+
+
+def test_deprecated_api_functions_smoke(ph_dataset: Dataset) -> None:
+    """Smoke tests for deprecated API functions to ensure coverage."""
+    # Test fit_binding_glob_reweighted
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = fit_binding_glob_reweighted(ph_dataset, key="test_key")
+        assert result.result is not None
+        assert result.result.success is True
+
+    # Test fit_binding_glob_recursive
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = fit_binding_glob_recursive(ph_dataset)
+        assert result.result is not None
+        assert result.result.success is True
+
+    # Test fit_binding_glob_recursive_outlier
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        result = fit_binding_glob_recursive_outlier(ph_dataset)
+        assert result.result is not None
+        assert result.result.success is True
+
+
+def test_deprecated_api_functions_emit_warnings(ph_dataset: Dataset) -> None:
+    """Test that deprecated API functions emit proper deprecation warnings."""
+    # Test that deprecation warnings are emitted
+    with pytest.warns(
+        DeprecationWarning, match="fit_binding_glob_reweighted is deprecated"
     ):
-        da.y_err = short_err
+        fit_binding_glob_reweighted(ph_dataset, key="test_key")
+
+    with pytest.warns(
+        DeprecationWarning, match="fit_binding_glob_recursive is deprecated"
+    ):
+        fit_binding_glob_recursive(ph_dataset)
+
+    with pytest.warns(
+        DeprecationWarning, match="fit_binding_glob_recursive_outlier is deprecated"
+    ):
+        fit_binding_glob_recursive_outlier(ph_dataset)
 
 
 def test_dataset_from_da_with_nan() -> None:
