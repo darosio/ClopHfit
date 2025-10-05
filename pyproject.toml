@@ -166,7 +166,6 @@ ignore = [
   "DOC501", # Missing exception documentation - too strict
   "PLR0914", # Too many local variables - common in scientific functions
   "PLR1702", # Too many nested blocks - common in data processing
-  "PLR6301", # Method could be function/static - often design choice
 ]
 select = [
   "A", # builtins
@@ -260,7 +259,11 @@ max-complexity = 12
 ]
 "__init__.py" = ["I002"] # don't need annotations
 "docs/*" = ["INP"]
-"tests/*" = ["PLR2004", "S101"]
+"tests/*" = [
+  "PLR2004",
+  "S101",
+  "PLR6301", # Method could be function/static - pytest relies on self
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

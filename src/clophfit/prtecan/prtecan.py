@@ -353,7 +353,8 @@ class Labelblock:
         self.data: dict[str, float] = self._extract_data(lines[15:23])
         self._normalize_data()
 
-    def _validate_lines(self, lines: list[list[str | int | float]]) -> None:
+    @staticmethod
+    def _validate_lines(lines: list[list[str | int | float]]) -> None:
         """Validate if input lines correspond to a 96-well plate."""
         if not (lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13):
             msg = "Cannot build Labelblock: not 96 wells?"
@@ -401,7 +402,8 @@ class Labelblock:
                     logger.warning(msg)
         return data
 
-    def _validate_96_well_format(self, lines: list[list[str | int | float]]) -> None:
+    @staticmethod
+    def _validate_96_well_format(lines: list[list[str | int | float]]) -> None:
         """Validate 96-well plate data format."""
         for i, row in enumerate(ROW_NAMES):
             if lines[i][0] != row:
@@ -1173,8 +1175,9 @@ class TitrationResults:
         plt.close(fig)
         return fig
 
+    @staticmethod
     def _determine_xlim(
-        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
+        df_ctr: pd.DataFrame, df_unk: pd.DataFrame
     ) -> tuple[float, float]:
         lower, upper = 0.99, 1.01
         xlim = (df_unk["K"].min(), df_unk["K"].max())
@@ -1435,7 +1438,8 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    def _generate_combinations(self) -> list[tuple[tuple[bool, ...], str]]:
+    @staticmethod
+    def _generate_combinations() -> list[tuple[tuple[bool, ...], str]]:
         """Generate parameter combinations for export and fitting."""
         bool_iter = itertools.product([False, True], repeat=4)
         return [
@@ -1737,7 +1741,8 @@ class Titration(TecanfilesGroup):
             return extract_fit(key, ctr, self.result_multi_trace[1], ds)
         return FitResult()
 
-    def get_scheme_name(self, key: str, scheme_map: dict[str, set[str]]) -> str:
+    @staticmethod
+    def get_scheme_name(key: str, scheme_map: dict[str, set[str]]) -> str:
         """Extract ctr name."""
         for scheme, keys in scheme_map.items():
             if key in keys:

@@ -866,32 +866,6 @@ class FitConfig2(BaseModel):
 DEFAULT_CONFIG = None
 
 
-class Fitter:
-    """Adapter for all fit."""
-
-    def __init__(
-        self, method: FitMethod = "bayesian", config: FitConfig | None = None
-    ) -> None:
-        self.method = method
-        self.config = config or DEFAULT_CONFIG
-
-    def fit(self, dataset: Dataset) -> FitResult[MiniT]:
-        """Unified fitting interface."""
-        if self.method == "bayesian":
-            return self._fit_bayesian(dataset)
-        if self.method == "frequentist":
-            return self._fit_frequentist(dataset)
-        return FitResult()
-
-    def _fit_bayesian(self, dataset: Dataset) -> FitResult[MiniT]:
-        print(dataset)
-        return FitResult()
-
-    def _fit_frequentist(self, dataset: Dataset) -> FitResult[MiniT]:
-        print(dataset)
-        return FitResult()
-
-
 def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
