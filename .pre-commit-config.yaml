@@ -80,6 +80,7 @@ repos:
     rev: 0.7.3
     hooks:
       - id: pydoclint
+        exclude: "^.*.py"
 
   - repo: https://github.com/crate-ci/typos
     rev: v1.37.0
