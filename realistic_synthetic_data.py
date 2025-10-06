@@ -25,10 +25,10 @@ class RealisticSimulationParameters:
 
     # True parameters for data generation (realistic ranges)
     K_true: float = 7.2  # pKa in range 6-8
-    S0_y1_true: float = 650.0  # Baseline signal (realistic range)
+    S0_y1_true: float = 150.0  # Baseline signal (realistic range)
     S1_y1_true: float = 1200.0  # Max signal change
     S0_y2_true: float = 800.0  # Different baseline for y2
-    S1_y2_true: float = 400.0  # Different signal change
+    S1_y2_true: float = 100.0  # Different signal change
 
     # Realistic pH series (7 points, typical experimental range)
     pH_values: list[float] = None  # Will default to realistic values
@@ -37,14 +37,14 @@ class RealisticSimulationParameters:
     # Key update: y1 errors are 10x larger than y2 errors
     y1_base_error: float = 100.0  # Base error for y1 (10x larger than y2)
     y2_base_error: float = 10.0  # Base error for y2 (reference level)
-    x_base_error: float = 0.02  # pH measurement error
+    x_base_error: float = 0.01  # pH measurement error
 
     # Signal-dependent noise (shot noise, more realistic)
-    shot_noise_factor: float = 0.2  # 20% shot noise
+    shot_noise_factor: float = 0.01  # 1% shot noise
 
     # Outlier characteristics (more realistic)
     outlier_probability: float = 0.1  # 10% chance of outliers (more realistic)
-    outlier_magnitude: float = 3.0  # 3σ outliers (more realistic)
+    outlier_magnitude: float = 2.0  # 3σ outliers (more realistic)
 
     # pH measurement errors (varying by point, as in real data)
     pH_error_variation: bool = True
@@ -70,20 +70,14 @@ def generate_realistic_dataset(
 
     # Default pH values (typical experimental series, high to low pH)
     if params.pH_values is None:
-        pH_points = np.array([8.92, 8.307, 7.763, 7.037, 6.513, 5.98, 5.47])
+        x = np.array([8.92, 8.307, 7.763, 7.037, 6.513, 5.98, 5.47])
     else:
-        pH_points = np.array(params.pH_values)
+        x = np.array(params.pH_values)
 
-    n_points = len(pH_points)
+    n_points = len(x)
 
-    # Convert pH to [H+] concentration
-    x = 10 ** (-pH_points)
-
-    # Generate true signals using binding model
-    K_conc = 10 ** (-params.K_true)  # Convert pKa to concentration
-
-    y1_true = binding_1site(x, K_conc, params.S0_y1_true, params.S1_y1_true, is_ph=True)
-    y2_true = binding_1site(x, K_conc, params.S0_y2_true, params.S1_y2_true, is_ph=True)
+    y1_true = binding_1site(x, params.K_true, params.S0_y1_true, params.S1_y1_true, is_ph=True)
+    y2_true = binding_1site(x, params.K_true, params.S0_y2_true, params.S1_y2_true, is_ph=True)
 
     # Generate realistic errors
     if params.pH_error_variation:
@@ -110,24 +104,16 @@ def generate_realistic_dataset(
     mask2 = np.ones(n_points, dtype=bool)
 
     # Create DataArrays with realistic characteristics
-    da1 = DataArray(xc=pH_points, yc=y1_obs, x_errc=pH_errors, y_errc=y1_errors)
+    da1 = DataArray(xc=x, yc=y1_obs, x_errc=pH_errors, y_errc=y1_errors)
     da1.mask = mask1
 
-    da2 = DataArray(xc=pH_points, yc=y2_obs, x_errc=pH_errors, y_errc=y2_errors)
+    da2 = DataArray(xc=x, yc=y2_obs, x_errc=pH_errors, y_errc=y2_errors)
     da2.mask = mask2
 
     # Create Dataset
     dataset = Dataset({"y1": da1, "y2": da2}, is_ph=True)
 
-    true_params = {
-        "K": params.K_true,
-        "S0_y1": params.S0_y1_true,
-        "S1_y1": params.S1_y1_true,
-        "S0_y2": params.S0_y2_true,
-        "S1_y2": params.S1_y2_true,
-    }
-
-    return dataset, true_params
+    return dataset
 
 
 def analyze_real_data_patterns():
