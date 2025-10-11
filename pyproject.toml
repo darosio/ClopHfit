@@ -280,3 +280,4 @@ extend-ignore-re = [
 arange = "arange"
 arosio = "Arosio"
 setp = "setp"
+ttest = "ttest"

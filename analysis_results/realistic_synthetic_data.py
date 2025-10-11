@@ -15,8 +15,8 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import numpy as np
 
-from src.clophfit.fitting.data_structures import DataArray, Dataset
-from src.clophfit.fitting.models import binding_1site
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.models import binding_1site
 
 
 @dataclass
@@ -113,7 +113,16 @@ def generate_realistic_dataset(
     # Create Dataset
     dataset = Dataset({"y1": da1, "y2": da2}, is_ph=True)
 
-    return dataset
+    # Create true parameters dictionary
+    true_params = {
+        "K": params.K_true,
+        "S0_y1": params.S0_y1_true,
+        "S1_y1": params.S1_y1_true,
+        "S0_y2": params.S0_y2_true,
+        "S1_y2": params.S1_y2_true,
+    }
+
+    return dataset, true_params
 
 
 def analyze_real_data_patterns():
