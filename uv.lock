@@ -436,7 +436,7 @@ dev = [
     { name = "cruft", specifier = ">=2.16.0" },
     { name = "git-cliff", specifier = ">=2.10.1" },
     { name = "mdformat", specifier = ">=0.7.22" },
-    { name = "mdformat-gfm", specifier = ">=0.4.1" },
+    { name = "mdformat-gfm", specifier = ">=1.0.0" },
     { name = "pylsp-mypy", specifier = ">=0.7.0" },
     { name = "python-lsp-ruff", specifier = ">=2.3.0" },
     { name = "ruff", specifier = ">=0.14.0" },
@@ -1585,30 +1585,17 @@ wheels = [
 
 [[package]]
 name = "mdformat-gfm"
-version = "0.4.1"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "mdformat" },
-    { name = "mdformat-tables" },
     { name = "mdit-py-plugins" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/db/873bad63b36e390a33bc0cf7222442010997d3ccf29a1889f24d28fdeddd/mdformat_gfm-0.4.1.tar.gz", hash = "sha256:e189e728e50cfb15746abc6b3178ca0e2bebbb7a8d3d98fbc9e24bc1a4c65564", size = 7528, upload-time = "2024-12-13T09:21:27.212Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/ba/3d4c680a2582593b8ba568ab60b119d93542fa39d757d65aae3c4f357e29/mdformat_gfm-0.4.1-py3-none-any.whl", hash = "sha256:63c92cfa5102f55779d4e04b16a79a6a5171e658c6c479175c0955fb4ca78dde", size = 8750, upload-time = "2024-12-13T09:21:25.158Z" },
-]
-
-[[package]]
-name = "mdformat-tables"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "mdformat" },
     { name = "wcwidth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/fc/995ba209096bdebdeb8893d507c7b32b7e07d9a9f2cdc2ec07529947794b/mdformat_tables-1.0.0.tar.gz", hash = "sha256:a57db1ac17c4a125da794ef45539904bb8a9592e80557d525e1f169c96daa2c8", size = 6106, upload-time = "2024-08-23T23:41:33.413Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/6f/a626ebb142a290474401b67e2d61e73ce096bf7798ee22dfe6270f924b3f/mdformat_gfm-1.0.0.tar.gz", hash = "sha256:d1d49a409a6acb774ce7635c72d69178df7dce1dc8cdd10e19f78e8e57b72623", size = 10112, upload-time = "2025-10-16T09:12:22.402Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/37/d78e37d14323da3f607cd1af7daf262cb87fe614a245c15ad03bb03a2706/mdformat_tables-1.0.0-py3-none-any.whl", hash = "sha256:94cd86126141b2adc3b04c08d1441eb1272b36c39146bab078249a41c7240a9a", size = 5104, upload-time = "2024-08-23T23:41:31.863Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/18/6bc2189b744dd383cad03764f41f30352b1278d2205096f77a29c0b327ad/mdformat_gfm-1.0.0-py3-none-any.whl", hash = "sha256:7305a50efd2a140d7c83505b58e3ac5df2b09e293f9bbe72f6c7bee8c678b005", size = 10970, upload-time = "2025-10-16T09:12:21.276Z" },
 ]
 
 [[package]]
