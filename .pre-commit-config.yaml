@@ -35,7 +35,7 @@ repos:
         exclude: \.ipynb$
 
   - repo: https://github.com/google/yamlfmt
-    rev: v0.17.2
+    rev: v0.18.1
     hooks:
       - id: yamlfmt
 
@@ -104,7 +104,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.2
+    rev: 0.9.3
     hooks:
       - id: uv-lock
         stages: [pre-commit]
