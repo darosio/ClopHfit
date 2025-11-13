@@ -82,7 +82,7 @@ repos:
       - id: pydoclint
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.39.0
+    rev: v1.39.1
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
@@ -104,7 +104,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.8
+    rev: 0.9.9
     hooks:
       - id: uv-lock
         stages: [pre-commit]
