@@ -18,6 +18,10 @@ from click import Context, Path as cPath
 
 from clophfit import __enspire_out_dir__, __tecan_out_dir__, configure_logging, fitting
 from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import (
+    DataValidationError,
+    MissingDependencyError,
+)
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 
@@ -75,7 +79,10 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
 @click.option("--mcmc",type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None",show_default=True,help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
-def tecan(  # noqa: PLR0913,PLR0915
+@click.option(
+    "--dry-run", is_flag=True, help="Validate inputs without processing data."
+)
+def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,
     list_file: str,
     cl: float,
@@ -92,6 +99,7 @@ def tecan(  # noqa: PLR0913,PLR0915
     fit: bool,
     png: bool,
     mcmc: str,
+    dry_run: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
@@ -114,27 +122,50 @@ def tecan(  # noqa: PLR0913,PLR0915
     logger.debug("CLI started")
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
     out_fp.mkdir(parents=True, exist_ok=True)
-    # Options validation.
-    if cl and not add:
-        msg = "--cl requires --add to be specified."
-        raise click.UsageError(msg)
-    if dil and not add:
-        msg = "--dil requires --add to be specified."
-        raise click.UsageError(msg)
-    if bg and not sch:
-        # Also --sch must contain valid buffers!
-        msg = "Scheme is needed to compute buffer bg i.e. --bg requires --sch!"
-        raise click.UsageError(msg)
-    if comb and not (bg and sch and dil):
-        msg = "All combinations requires --bg and --dil to be specified."
-        raise click.UsageError(msg)
+    # Options validation with clear error messages
+    try:
+        _validate_tecan_options(cl, bg, dil, add, sch, comb)
+    except (DataValidationError, MissingDependencyError) as e:
+        raise click.ClickException(str(e)) from e
+
+    # Dry run mode: validate inputs and exit
+    if dry_run:
+        click.echo("🔍 Dry run mode: Validating inputs...\n")
+        _dry_run_validation(list_file, sch, add, cl, out_fp)
+        click.echo("\n✅ Validation successful! All inputs are valid.")
+        click.echo("   Remove --dry-run flag to process data.")
+        return
+
     # Config
     tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png)
-    # Load titration
+
+    # Load titration with error handling
     list_fp = Path(list_file)
     logger.info(f"Titration list: {list_fp.resolve()}")
     logger.info(f"{tecan_config}")
-    tit = Titration.fromlistfile(list_fp, not cl)
+
+    try:
+        tit = Titration.fromlistfile(list_fp, not cl)
+    except FileNotFoundError as e:
+        msg = (
+            f"List file not found: {list_fp}\n"
+            f"Please check that the file exists and the path is correct."
+        )
+        raise click.ClickException(msg) from e
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+        msg = (
+            f"Error parsing list file: {list_fp}\n"
+            f"Expected format: CSV with columns for file paths and concentrations.\n"
+            f"Details: {e}"
+        )
+        raise click.ClickException(msg) from e
+    except Exception as e:
+        msg = (
+            f"Error loading titration data from {list_fp}: {e}\n"
+            f"Please check the file format and contents."
+        )
+        raise click.ClickException(msg) from e
+
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj
     tit.params.dil = dil
@@ -142,26 +173,221 @@ def tecan(  # noqa: PLR0913,PLR0915
     tit.params.bg_mth = bg_mth
     tit.params.mcmc = mcmc
     logger.info(f"{tit.params}")
+
+    # Load additions file with error handling
     if add:
-        tit.load_additions(Path(add))
-        logger.info(f"Additions: {tit.additions}")
+        try:
+            tit.load_additions(Path(add))
+            logger.info(f"Additions: {tit.additions}")
+        except FileNotFoundError:
+            msg = (
+                f"Additions file not found: {add}\n"
+                f"This file is required when using --cl or --dil options."
+            )
+            raise click.ClickException(msg) from None
+        except Exception as e:
+            msg = (
+                f"Error loading additions file {add}: {e}\n"
+                f"Expected format: Initial volume and addition volumes."
+            )
+            raise click.ClickException(msg) from e
+
     if cl and tit.additions:
-        tit.x = calculate_conc(tit.additions, cl)
-        logger.info(f"{tit.x}")
+        try:
+            tit.x = calculate_conc(tit.additions, cl)
+            logger.info(f"{tit.x}")
+        except Exception as e:
+            msg = (
+                f"Error calculating chloride concentrations: {e}\n"
+                f"Please check additions file format and --cl value."
+            )
+            raise click.ClickException(msg) from e
+
+    # Load scheme file with error handling
     if sch:
-        tit.load_scheme(Path(sch))
-        f = tit.buffer.plot(title=title)
-        f.savefig(out_fp / "buffer.png")
-        f = tit.buffer.plot(nrm=True, title=title)
-        f.savefig(out_fp / "buffer_norm.png")
-        logger.info(f"{tit.scheme}")
-    with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
-        for lbg in tit.labelblocksgroups.values():
-            pprint.pprint(lbg.metadata, stream=fp)
-    f = tit.plot_temperature(title=title)
-    f.savefig(out_fp / "temperatures.png")
-    # Output and export
-    tit.export_data_fit(tecan_config)
+        try:
+            tit.load_scheme(Path(sch))
+            f = tit.buffer.plot(title=title)
+            f.savefig(out_fp / "buffer.png")
+            f = tit.buffer.plot(nrm=True, title=title)
+            f.savefig(out_fp / "buffer_norm.png")
+            logger.info(f"{tit.scheme}")
+        except FileNotFoundError:
+            msg = (
+                f"Scheme file not found: {sch}\n"
+                f"This file is required when using --bg option."
+            )
+            raise click.ClickException(msg) from None
+        except Exception as e:
+            msg = (
+                f"Error loading scheme file {sch}: {e}\n"
+                f"Expected format: Tab-separated file with well positions and sample names."
+            )
+            raise click.ClickException(msg) from e
+
+    # Export metadata and plots with error handling
+    try:
+        with (out_fp / "metadata-labels.txt").open("w", encoding="utf-8") as fp:
+            for lbg in tit.labelblocksgroups.values():
+                pprint.pprint(lbg.metadata, stream=fp)
+        f = tit.plot_temperature(title=title)
+        f.savefig(out_fp / "temperatures.png")
+    except PermissionError as e:
+        msg = (
+            f"Permission denied writing to output directory: {out_fp}\n"
+            f"Please check directory permissions."
+        )
+        raise click.ClickException(msg) from e
+    except OSError as e:
+        msg = f"Error writing output files to {out_fp}: {e}"
+        raise click.ClickException(msg) from e
+
+    # Output and export with error handling
+    try:
+        tit.export_data_fit(tecan_config)
+    except Exception as e:
+        msg = (
+            f"Error during data export and fitting: {e}\n"
+            f"Check the log file for more details: ppr_tecan_cli.log"
+        )
+        raise click.ClickException(msg) from e
+
+
+def _validate_tecan_options(  # noqa: PLR0913
+    cl: float | None,
+    bg: bool,
+    dil: bool,
+    add: str | None,
+    sch: str | None,
+    comb: bool,
+) -> None:
+    """Validate tecan command options.
+
+    Parameters
+    ----------
+    cl : float | None
+        Chloride concentration option.
+    bg : bool
+        Background subtraction flag.
+    dil : bool
+        Dilution correction flag.
+    add : str | None
+        Additions file path.
+    sch : str | None
+        Scheme file path.
+    comb : bool
+        All combinations flag.
+
+    Raises
+    ------
+    MissingDependencyError
+        If required files are not specified.
+    DataValidationError
+        If option combinations are invalid.
+    """
+    if cl and not add:
+        raise MissingDependencyError(
+            missing_file="additions file (--add)",
+            required_by="--cl option",
+            reason="Chloride titrations require addition volumes to calculate concentrations.",
+        )
+    if dil and not add:
+        raise MissingDependencyError(
+            missing_file="additions file (--add)",
+            required_by="--dil option",
+            reason="Dilution correction requires addition volumes.",
+        )
+    if bg and not sch:
+        raise MissingDependencyError(
+            missing_file="scheme file (--sch)",
+            required_by="--bg option",
+            reason="Buffer subtraction requires a plate scheme to identify buffer wells.",
+        )
+    if comb and not (bg and sch and dil):
+        msg = "All combinations mode requires --bg, --sch, and --dil to be specified."
+        raise DataValidationError(
+            msg,
+            suggestions=[
+                "Add --bg --sch scheme.txt --dil flags",
+                "Or remove --all flag if you don't need all combinations",
+            ],
+        )
+
+
+def _dry_run_validation(
+    list_file: str,
+    sch: str | None,
+    add: str | None,
+    cl: float | None,
+    out_fp: Path,
+) -> None:
+    """Perform dry-run validation of input files.
+
+    Parameters
+    ----------
+    list_file : str
+        Path to list file.
+    sch : str | None
+        Path to scheme file.
+    add : str | None
+        Path to additions file.
+    cl : float | None
+        Chloride concentration.
+    out_fp : Path
+        Output directory.
+
+    Raises
+    ------
+    click.ClickException
+        If validation fails.
+    """
+    list_fp = Path(list_file)
+
+    # Validate list file
+    click.echo(f"✓ List file exists: {list_fp}")
+    try:
+        df = pd.read_csv(list_fp)
+        click.echo(f"  - Contains {len(df)} entries")
+        if len(df) == 0:
+            msg = "List file is empty"
+            raise click.ClickException(msg)  # noqa: TRY301 #FIXME:
+    except click.ClickException:
+        raise
+    except Exception as e:
+        msg = f"Error reading list file: {e}"
+        raise click.ClickException(msg) from e
+
+    # Validate scheme file
+    if sch:
+        sch_fp = Path(sch)
+        click.echo(f"✓ Scheme file exists: {sch_fp}")
+        try:
+            sch_df = pd.read_csv(sch_fp, sep="\t")
+            click.echo(f"  - Contains {len(sch_df)} well definitions")
+        except Exception as e:
+            msg = f"Error reading scheme file: {e}"
+            raise click.ClickException(msg) from e
+
+    # Validate additions file
+    if add:
+        add_fp = Path(add)
+        click.echo(f"✓ Additions file exists: {add_fp}")
+        try:
+            with add_fp.open() as f:
+                lines = f.readlines()
+            click.echo(f"  - Contains {len(lines)} lines")
+            if cl:
+                click.echo(f"  - Will calculate [Cl] with {cl} mM stock")
+        except Exception as e:
+            msg = f"Error reading additions file: {e}"
+            raise click.ClickException(msg) from e
+
+    # Validate output directory
+    click.echo(f"✓ Output directory: {out_fp}")
+    if not out_fp.exists():
+        click.echo(f"  - Will create: {out_fp}")
+    else:
+        click.echo("  - Already exists (files may be overwritten)")
 
 
 ########################################
