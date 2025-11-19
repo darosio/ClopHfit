@@ -119,11 +119,13 @@ def process_trace(
         if isinstance(name, str) and name.startswith("x_true"):
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
-    for da in ds.values():
-        da.xc = np.array(nxc)  # Update x_true values in the dataset
-        da.x_errc = (
-            np.array(nx_errc) * n_xerr
-        )  # Scale the errors FIXME: n_xerr not needed
+    # Only update xc if x_true was modeled (i.e., n_xerr > 0)
+    if nxc:
+        for da in ds.values():
+            da.xc = np.array(nxc)  # Update x_true values in the dataset
+            da.x_errc = (
+                np.array(nx_errc) * n_xerr
+            )  # Scale the errors FIXME: n_xerr not needed
     # Scale y_errc if present
     try:
         mag = float(rdf.loc["ye_mag", "mean"])  # type: ignore[arg-type, index]
