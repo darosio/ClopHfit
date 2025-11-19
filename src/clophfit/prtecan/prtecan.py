@@ -10,6 +10,7 @@ import warnings
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property, partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -37,7 +38,7 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
@@ -47,10 +48,12 @@ if typing.TYPE_CHECKING:
 
 # TODO: Add tqdm progress bar
 
-# list_of_lines
-# after set([type(x) for l in csvl for x in l]) = float | int | str
+# Constants for Tecan file parsing
+#: Standard metadata line length for Tecan files
 STD_MD_LINE_LENGTH = 2
+#: Number of columns in a 96-well plate
 NUM_COLS_96WELL = 12
+#: Row names for 96-well plates
 ROW_NAMES = tuple("ABCDEFGH")
 
 logger = logging.getLogger(__name__)
@@ -137,6 +140,7 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     >>> strip_lines(lines)
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
     """
+    # Use generator expression for memory efficiency
     return [[e for e in line if e] for line in lines]
 
 
@@ -307,10 +311,8 @@ class Labelblock:
 
     Raises
     ------
-    Exception
-        When data do not correspond to a complete 96-well plate.
     ValueError
-        When something went wrong. Possibly because not 96-well.
+        When data do not correspond to a complete 96-well plate.
     TypeError
         When normalization parameters are not numerical.
 
@@ -390,7 +392,7 @@ class Labelblock:
                 well = f"{row}{col:0>2}"
                 try:
                     data[well] = float(lines[i][col])
-                except ValueError:
+                except (ValueError, IndexError):
                     data[well] = np.nan
                     label = self.metadata.get("Label")
                     if label is not None and hasattr(label, "value"):
@@ -403,7 +405,13 @@ class Labelblock:
 
     def _validate_96_well_format(self, lines: list[list[str | int | float]]) -> None:
         """Validate 96-well plate data format."""
+        if len(lines) < len(ROW_NAMES):
+            msg = f"Insufficient rows: expected {len(ROW_NAMES)}, got {len(lines)}"
+            raise ValueError(msg)
         for i, row in enumerate(ROW_NAMES):
+            if len(lines[i]) == 0:
+                msg = f"Row {i} is empty"
+                raise ValueError(msg)
             if lines[i][0] != row:
                 msg = f"Row {i} label mismatch: expected {row}, got {lines[i][0]}"
                 raise ValueError(msg)
@@ -453,8 +461,8 @@ class Tecanfile:
     ------
     FileNotFoundError
         When path does not exist.
-    Exception
-        When no Labelblock is found.
+    ValueError
+        When no Labelblock is found or file format is invalid.
     """
 
     path: Path
