@@ -40,7 +40,7 @@ repos:
       - id: yamlfmt
 
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.8
+    rev: v1.7.9
     hooks:
       - id: actionlint
 
@@ -104,7 +104,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.10
+    rev: 0.9.11
     hooks:
       - id: uv-lock
         stages: [pre-commit]
