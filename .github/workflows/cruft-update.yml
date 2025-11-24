@@ -31,10 +31,12 @@ jobs:
         run: uv sync --group dev
 
       - name: Check and update from template
+        id: cruft_update
         env:
           CRUFT_NO_INPUT: "1"
         run: |
           set -e
+          echo "has_changes=false" >> "$GITHUB_OUTPUT"
           if ! uv run cruft check; then
             git switch -c chore/template-update || git switch chore/template-update
             uv run cruft update -y
@@ -43,11 +45,12 @@ jobs:
               git -c user.name="github-actions[bot]" \
                   -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
                   commit -m "chore(template): apply latest cookiecutter updates via Cruft"
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
             fi
           fi
 
       - name: Create PR
-        if: ${{ !cancelled() && !failure() }}
+        if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         uses: peter-evans/create-pull-request@v7
         with:
           branch: "chore/template-update"
