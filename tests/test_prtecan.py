@@ -1,4 +1,4 @@
-"""Test prtecan module."""
+"""Comprehensive test suite for prtecan module."""
 
 from __future__ import annotations
 
@@ -11,42 +11,632 @@ import numpy as np
 import pandas as pd
 import pytest
 import seaborn as sns  # type: ignore[import-untyped]
-from numpy.testing import assert_almost_equal, assert_array_equal
+from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
 from clophfit.fitting.data_structures import FitResult
 from clophfit.prtecan import (
+    Buffer,
     BufferFit,
     Labelblock,
     LabelblocksGroup,
+    Metadata,
     PlateScheme,
+    TecanConfig,
     Tecanfile,
     TecanfilesGroup,
     Titration,
+    TitrationConfig,
+    TitrationResults,
+    calculate_conc,
+    dilution_correction,
+    extract_metadata,
+    merge_md,
+    strip_lines,
 )
 
-# By defining csvl, lb0, and lb1 as class attributes, they are created only once
-# per test session. Use fixture to capture UserWarning "OVER"
-
-data_tests = Path(__file__).parent / "Tecan"  # Test data paths
+# Test data paths
+data_tests = Path(__file__).parent / "Tecan"
 pytestmark = pytest.mark.filterwarnings("ignore:OVER")
 
 
-def test_lookup_listoflines() -> None:
-    """It returns indexes for pattern match on col in list of lines."""
-    csvl: list[list[str | int | float]] = [
-        ["pp", "xy", 1, 2.0],
-        ["pp", "xx", 1, 2],
-        ["pp", 12, 1, 2],
-        ["pp", "yy", 1, 2.0],
-        ["a"],
-        ["pp", "xy", 1, 2],
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def create_test_metadata() -> list[list[Any]]:
+    """Create sample metadata for testing."""
+    return [
+        ["Label: Label1", "", "", "", "", "", "", "", "", "", "", "", ""],
+        ["Mode", "", "", "", "Fluorescence Top Reading", "", "", "", "", ""],
+        ["Shaking (Linear) Amplitude:", "", "", "", 2, "mm", "", "", "", "", ""],
+        ["Excitation Wavelength", "", "", "", 400, "nm", "", "unexpected", "", "", ""],
+        ["", "Temperature: 26 °C", "", "", "", "", "", "", "", "", ""],
     ]
-    assert prtecan.lookup_listoflines(csvl, pattern="pp") == [0, 1, 2, 3, 5]
-    assert not prtecan.lookup_listoflines(csvl, pattern="xy")  # == []
-    assert prtecan.lookup_listoflines(csvl, pattern="xy", col=1) == [0, 5]
-    assert prtecan.lookup_listoflines(csvl, pattern="yy", col=1) == [3]
-    assert not prtecan.lookup_listoflines(csvl, pattern="yy", col=2)  # == []
+
+
+def create_sample_labelblock() -> Labelblock:
+    """Create a sample Labelblock from test data."""
+    csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+    idxs = prtecan.lookup_listoflines(csvl)
+    return Labelblock(csvl[idxs[0] : idxs[1]])
+
+
+# =============================================================================
+# Unit Tests
+# =============================================================================
+
+
+class TestLookupListOfLinesEdgeCases:
+    """Test edge cases for lookup_listoflines function."""
+
+    def test_empty_input(self) -> None:
+        """It handles empty input gracefully."""
+        assert prtecan.lookup_listoflines([], "pattern") == []
+
+    def test_no_matches(self) -> None:
+        """It returns empty list for no matches."""
+        csvl: list[list[str | int | float]] = [["a", "b"], ["c", "d"]]
+        assert prtecan.lookup_listoflines(csvl, "z") == []
+
+    def test_partial_lines(self) -> None:
+        """It handles lines with fewer columns than specified."""
+        csvl: list[list[str | int | float]] = [["a"], ["b", "c"], ["d"]]
+        assert prtecan.lookup_listoflines(csvl, "c", col=1) == [1]
+
+    @pytest.mark.parametrize(
+        ("pattern", "col", "expected"),
+        [
+            ("pp", 0, [0, 1, 2, 3, 5]),
+            ("xy", 1, [0, 5]),
+            ("yy", 1, [3]),
+            ("zz", 1, []),
+        ],
+    )
+    def test_lookup_listoflines(
+        self, pattern: str, col: int, expected: list[int | float]
+    ) -> None:
+        """Parametrized test for lookup_listoflines with different patterns and columns."""
+        csvl: list[list[str | int | float]] = [
+            ["pp", "xy", 1, 2.0],
+            ["pp", "xx", 1, 2],
+            ["pp", 12, 1, 2],
+            ["pp", "yy", 1, 2.0],
+            ["a"],
+            ["pp", "xy", 1, 2],
+        ]
+        assert prtecan.lookup_listoflines(csvl, pattern=pattern, col=col) == expected
+
+
+class TestStripLines:
+    """Test strip_lines function."""
+
+    def test_strip_empty_fields(self) -> None:
+        """It removes empty fields."""
+        lines: list[list[str | int | float]] = [["Excitation", "", "", 485.0, "nm", ""]]
+        stripped = strip_lines(lines)
+        assert stripped == [["Excitation", 485.0, "nm"]]
+
+    def test_empty_input(self) -> None:
+        """It handles empty input."""
+        assert strip_lines([]) == []
+
+
+class TestExtractMetadata:
+    """Test extract_metadata function."""
+
+    def test_standard_metadata(self) -> None:
+        """It extracts standard metadata."""
+        lines = create_test_metadata()
+        md = extract_metadata(lines)
+        assert "Temperature" in md
+        assert md["Temperature"].value == 26.0
+        assert md["Temperature"].unit == ["°C"]
+
+    def test_single_line_metadata(self) -> None:
+        """It extracts single-line metadata."""
+        lines: list[list[str | int | float]] = [["Mode", "Fluorescence Top Reading"]]
+        md = extract_metadata(lines)
+        assert md["Mode"].value == "Fluorescence Top Reading"
+
+
+class TestMergeMD:
+    """Test merge_md function."""
+
+    def test_identical_metadata(self) -> None:
+        """It merges identical metadata."""
+        md1 = {"Gain": Metadata(93), "Temp": Metadata(25.0, ["°C"])}
+        md2 = {"Gain": Metadata(93), "Temp": Metadata(25.0, ["°C"])}
+        result = merge_md([md1, md2])
+        assert result["Gain"].value == 93
+        assert "Temp" in result
+
+    @pytest.mark.parametrize(
+        ("md1", "md2", "expected_keys"),
+        [
+            # Common key with same value
+            (
+                {"Gain": Metadata(93), "Temp": Metadata(25.0)},
+                {"Gain": Metadata(93), "Mode": Metadata("Reading")},
+                {"Gain"},
+            ),
+            # Different values for common key
+            ({"Gain": Metadata(93)}, {"Gain": Metadata(94)}, set()),
+            # Multiple keys with some missing
+            (
+                {"Gain": Metadata(93), "Temp": Metadata(25.0), "Extra1": Metadata(1)},
+                {
+                    "Gain": Metadata(93),
+                    "Mode": Metadata("Reading"),
+                    "Extra2": Metadata(2),
+                },
+                {"Gain"},
+            ),
+            # Empty input
+            ([], [], set()),
+            # Single metadata dictionary
+            ([{"Key": Metadata("value")}], None, {"Key"}),
+        ],
+    )
+    def test_merge_md(
+        self,
+        md1: dict[str, Metadata] | list[dict[str, Metadata]],
+        md2: dict[str, Metadata] | None,
+        expected_keys: set[str],
+    ) -> None:
+        """Test merge_md with various metadata combinations."""
+        if isinstance(md1, list):
+            mds = md1
+        elif md2 is None:
+            mds = [md1]
+        else:
+            mds = [md1, md2]
+
+        result = merge_md(mds)
+
+        # Check that only expected keys are present
+        assert set(result.keys()) == expected_keys
+
+        # Verify values for common keys are correct
+        for key in expected_keys:
+            if len(mds) > 1:
+                assert result[key] == mds[0][key]
+
+
+class TestCalculateConc:
+    """Test calculate_conc function."""
+
+    @pytest.mark.parametrize(
+        ("additions", "stock", "expected"),
+        [
+            ([100, 20, 20], 1000, [0.0, 166.66666667, 285.71428571]),
+            ([100, 50, 50], 500, [0.0, 166.66666667, 250.0]),
+        ],
+    )
+    def test_calculation(
+        self, additions: list[float], stock: float, expected: list[float]
+    ) -> None:
+        """It calculates concentrations correctly."""
+        result = calculate_conc(additions, stock)
+        assert_allclose(result, expected, rtol=1e-5)
+
+    def test_zero_additions(self) -> None:
+        """It handles empty additions."""
+        with pytest.raises(IndexError):
+            calculate_conc([], 1000)
+
+
+class TestDilutionCorrection:
+    """Test dilution_correction function."""
+
+    @pytest.mark.parametrize(
+        ("additions", "expected"),
+        [
+            ([100, 50, 50], [1.0, 1.5, 2.0]),
+            ([200, 50, 50], [1.0, 1.25, 1.5]),
+            ([100], [1.0]),
+        ],
+    )
+    def test_correction_factors(
+        self, additions: list[float], expected: list[float]
+    ) -> None:
+        """It calculates dilution correction factors."""
+        result = dilution_correction(additions)
+        assert_allclose(result, expected)
+
+
+class TestLabelblock:
+    """Test Labelblock class."""
+
+    @pytest.fixture(scope="class")
+    def labelblock(self) -> Labelblock:
+        """Create sample labelblock fixture."""
+        return create_sample_labelblock()
+
+    def test_metadata_parsing(self, labelblock: Labelblock) -> None:
+        """It parses metadata correctly."""
+        assert "Temperature" in labelblock.metadata
+        assert labelblock.metadata["Temperature"].value == 25.6
+
+    def test_data_extraction(self, labelblock: Labelblock) -> None:
+        """It extracts data values."""
+        assert "A01" in labelblock.data
+        assert isinstance(labelblock.data["A01"], float)
+
+    def test_normalization(self, labelblock: Labelblock) -> None:
+        """It normalizes data using metadata."""
+        assert "A01" in labelblock.data_nrm
+        assert labelblock.data_nrm["A01"] > 0
+
+    def test_equality(self, labelblock: Labelblock) -> None:
+        """It correctly implements equality checks."""
+        assert labelblock == labelblock  # noqa: PLR0124
+
+    def test_invalid_plate_format(self) -> None:
+        """It raises ValueError for invalid plate formats."""
+        invalid_lines: list[list[str | int | float]] = [["A01", 100], ["B01", 200]]
+        with pytest.raises(ValueError, match="plate"):
+            Labelblock(invalid_lines)
+
+
+class TestTecanfile:
+    """Test Tecanfile class."""
+
+    @pytest.fixture(scope="class")
+    def tecanfile(self) -> Tecanfile:
+        """Create tecanfile fixture."""
+        return Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+
+    def test_file_loading(self, tecanfile: Tecanfile) -> None:
+        """It loads file metadata."""
+        assert "Date:" in tecanfile.metadata
+        assert tecanfile.metadata["Date:"].value == "20/02/2014"
+
+    def test_labelblocks_parsing(self, tecanfile: Tecanfile) -> None:
+        """It parses labelblocks."""
+        assert len(tecanfile.labelblocks) >= 1
+        assert "Temperature" in tecanfile.labelblocks[1].metadata
+
+    def test_invalid_file(self) -> None:
+        """It handles invalid files."""
+        with pytest.raises(FileNotFoundError):
+            Tecanfile(Path("nonexistent.xls"))
+
+
+class TestLabelblocksGroup:
+    """Test LabelblocksGroup class."""
+
+    @pytest.fixture(scope="class")
+    def labelblocks_group(self) -> LabelblocksGroup:
+        """Create labelblocks group fixture."""
+        tf1 = Tecanfile(data_tests / "L1/290513_5.5.xls")
+        tf2 = Tecanfile(data_tests / "L1/290513_7.2.xls")
+        return LabelblocksGroup([tf1.labelblocks[1], tf2.labelblocks[1]])
+
+    def test_metadata_merging(self, labelblocks_group: LabelblocksGroup) -> None:
+        """It merges metadata from labelblocks."""
+        assert "Gain" in labelblocks_group.metadata
+        assert labelblocks_group.metadata["Gain"].value == 94
+
+    def test_data_aggregation(self, labelblocks_group: LabelblocksGroup) -> None:
+        """It aggregates data from labelblocks."""
+        assert "A01" in labelblocks_group.data
+        assert len(labelblocks_group.data["A01"]) == 2
+
+    def test_unequal_labelblocks(self) -> None:
+        """It handles unequal labelblocks."""
+        tf1 = Tecanfile(data_tests / "L1/290513_5.5.xls")
+        tf2 = Tecanfile(data_tests / "L1/290513_8.8.xls")
+        with pytest.raises(ValueError, match="Creation of labelblock group failed"):
+            LabelblocksGroup([tf1.labelblocks[1], tf2.labelblocks[2]])
+
+
+class TestPlateScheme:
+    """Test PlateScheme class."""
+
+    def test_buffer_wells(self) -> None:
+        """It handles buffer wells."""
+        ps = PlateScheme()
+        ps.buffer = ["A01", "B01"]
+        assert ps.buffer == ["A01", "B01"]
+
+    def test_from_file(self) -> None:
+        """It loads scheme from file."""
+        ps = PlateScheme(data_tests / "140220/scheme.txt")
+        assert "buffer" not in ps.names
+        assert len(ps.buffer) > 0
+        assert "G03" in ps.names
+        assert "V224Q" in ps.names
+
+
+class TestTitrationConfig:
+    """Test TitrationConfig class."""
+
+    def test_config_creation(self) -> None:
+        """It creates configuration with default values."""
+        config = TitrationConfig()
+        assert config.bg is True
+        assert config.bg_adj is False
+
+    def test_callback(self) -> None:
+        """It triggers callback on parameter change."""
+        callback_called = False
+
+        def callback() -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        config = TitrationConfig()
+        config.set_callback(callback)
+        config.bg = False
+        assert callback_called
+
+
+class TestBufferFit:
+    """Test BufferFit class."""
+
+    def test_empty_property(self) -> None:
+        """It correctly identifies empty fits."""
+        empty_fit = BufferFit()
+        assert empty_fit.empty is True
+
+        non_empty_fit = BufferFit(1.0, 0.0, 0.1, 0.2)
+        assert non_empty_fit.empty is False
+
+
+class TestBuffer:
+    """Test Buffer class."""
+
+    @pytest.fixture(scope="class")
+    def titration(self) -> Titration:
+        """Create titration fixture."""
+        tf = Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+        return Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    @pytest.fixture
+    def buffer(self, titration: Titration) -> Buffer:
+        """Create buffer fixture from titration."""
+        return titration.buffer
+
+    def test_wells_setter(self, buffer: Buffer) -> None:
+        """It sets buffer wells and clears cache."""
+        buffer.wells = ["D01", "E01"]
+        assert buffer.wells == ["D01", "E01"]
+
+    def test_empty_wells(self, buffer: Buffer) -> None:
+        """It handles empty buffer wells."""
+        buffer.wells = []
+        assert buffer.dataframes == {}
+
+
+class TestTitrationResults:
+    """Test TitrationResults class."""
+
+    @pytest.fixture
+    def titration_results(self) -> TitrationResults:
+        """Create titration results fixture."""
+        scheme = PlateScheme()
+        scheme.names = {"sample1": {"A01"}}
+        return TitrationResults(scheme, {"A01"}, lambda _: FitResult())
+
+    def test_dataframe_property(self, titration_results: TitrationResults) -> None:
+        """It creates a DataFrame from results."""
+        df = titration_results.dataframe
+        assert isinstance(df, pd.DataFrame)
+        assert "A01" in df.index
+
+    def test_lazy_computation(self, titration_results: TitrationResults) -> None:
+        """It computes results lazily."""
+        assert not titration_results.results  # Should be empty before access
+        _ = titration_results["A01"]  # Trigger computation
+        assert "A01" in titration_results.results
+
+
+class TestTitration:
+    """Test Titration class."""
+
+    @pytest.fixture(scope="class")
+    def titration(self) -> Titration:
+        """Create titration fixture for testing."""
+        tf = Tecanfile(data_tests / "140220/pH6.5_200214.xls")
+        return Titration([tf], x=np.array([6.5]), is_ph=True)
+
+    def test_from_listfile(self) -> None:
+        """It creates titration from list file."""
+        tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        assert len(tit.x) > 0
+        assert len(tit.tecanfiles) > 0
+
+    def test_buffer_handling(self, titration: Titration) -> None:
+        """It handles buffer wells."""
+        titration.buffer.wells = ["D01", "E01"]
+        assert titration.buffer.wells == ["D01", "E01"]
+
+    def test_additions_loading(self, titration: Titration) -> None:
+        """It loads additions from file."""
+        titration.load_additions(data_tests / "140220/additions.pH")
+        assert titration.additions is not None
+        assert len(titration.additions) > 0
+
+    def test_scheme_loading(self, titration: Titration) -> None:
+        """It loads plate scheme from file."""
+        titration.load_scheme(data_tests / "140220/scheme.txt")
+        assert len(titration.scheme.buffer) > 0
+
+
+class TestTecanConfig:
+    """Test TecanConfig class."""
+
+    def test_config_creation(self, tmp_path: Path) -> None:
+        """It creates configuration with all parameters."""
+        config = TecanConfig(
+            out_fp=tmp_path, comb=True, lim=(0, 10), title="Test", fit=True, png=True
+        )
+        assert config.out_fp == tmp_path
+        assert config.comb is True
+
+
+# =============================================================================
+# Integration Tests
+# =============================================================================
+
+
+def test_end_to_end_titration_processing(tmp_path: Path) -> None:
+    """Test complete workflow from file loading to fitting."""
+    # Load titration
+    tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+
+    # Load additions and scheme
+    tit.load_additions(data_tests / "140220/additions.pH")
+    tit.load_scheme(data_tests / "140220/scheme.txt")
+
+    # Configure
+    tit.params.bg = True
+    tit.params.dil = True
+    tit.params.nrm = True
+
+    # Export
+    config = TecanConfig(
+        out_fp=tmp_path, comb=False, lim=None, title="Test", fit=True, png=False
+    )
+    tit.export_data_fit(config)
+
+    # Verify output files were created
+    assert (tmp_path / "dat_bg_dil_nrm").exists()
+    assert (tmp_path / "dat_bg_dil_nrm/fit").exists()
+
+
+# =============================================================================
+# Test Suite for Suggestions
+# =============================================================================
+
+
+class TestSuggestedTestCases:
+    """Test cases based on the provided suggestions.py.txt."""
+
+    def test_dilution_correction_standard(self) -> None:
+        """Test dilution correction function returns cumulative volume ratio."""
+        additions = [100.0, 50.0, 50.0]
+        # volumes = [100,150,200] -> corrections = [1.0,1.5,2.0]
+        corr = prtecan.dilution_correction(additions)
+        assert_array_equal(corr, np.array([1.0, 1.5, 2.0]))
+
+    def test_plate_scheme_discard_and_nofit_keys(self) -> None:
+        """Test discard setter and nofit_keys property of PlateScheme."""
+        ps = PlateScheme()
+        ps.buffer = ["A01", "B01"]
+        ps.discard = ["C01"]
+        # nofit_keys is union of buffer and discard
+        assert set(ps.nofit_keys) == {"A01", "B01", "C01"}
+
+        with pytest.raises(TypeError):
+            # non-str entries
+            ps.discard = [1, 2]  # type: ignore[list-item]
+
+    def test_titration_config_callback_trigger(self) -> None:
+        """Test that TitrationConfig triggers callback on attribute change."""
+        cfg = TitrationConfig()
+        events = []
+        cfg.set_callback(lambda: events.append(True))
+        # change boolean attribute
+        cfg.bg = not cfg.bg
+        assert events == [True]
+        # setting same value does not re-trigger
+        cfg.bg = cfg.bg
+        assert events == [True]
+        # change string attribute
+        cfg.bg_mth = "fit"
+        assert len(events) == 2
+
+    def test_bufferfit_empty_flag(self) -> None:
+        """Test BufferFit.empty property for NaN and non-NaN values."""
+        bf = BufferFit()
+        assert bf.empty
+        bf2 = BufferFit(m=1.0, q=0.0, m_err=0.1, q_err=0.2)
+        assert not bf2.empty
+
+    def test_generate_combinations_and_prepare_folder(self, tmp_path: Path) -> None:
+        """Test generation of parameter combinations and output folder naming."""
+        data_tests = Path(__file__).parent / "Tecan"
+        # use existing list file for minimal Titration
+        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+        combos = tit._generate_combinations()  # noqa: SLF001
+        # 2^4 boolean flags times 3 methods
+        assert len(combos) == 16 * 3
+        flags, method = combos[0]
+        assert isinstance(flags, tuple)
+        assert len(flags) == 4
+        assert method in ("mean", "meansd", "fit")
+        # test prepare output folder naming
+        # set all flags to True and bg_mth to 'fit'
+        tit.params.bg = True
+        tit.params.bg_adj = True
+        tit.params.dil = True
+        tit.params.nrm = True
+        tit.params.bg_mth = "fit"
+        out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
+        name = out.name
+        assert "_bg" in name
+        assert "_adj" in name
+        assert "_dil" in name
+        assert "_nrm" in name
+        assert "_fit" in name
+
+    def test_extract_xls_roundtrip(self, tmp_path: Path) -> None:
+        """Test read_xls and strip_lines integration with a temporary CSV file."""
+        # create a small Excel file
+        test_df = pd.DataFrame(
+            [[1, None, "a"], [None, 2, None]], columns=["x", "y", "z"]
+        )
+        path = tmp_path / "test.xls"
+        test_df.to_excel(path, index=False)
+        lines = prtecan.read_xls(path)
+        # strip_lines should remove blanks
+        stripped = prtecan.strip_lines(lines)
+        # each line has no empty elements
+        assert all(all(e != "" for e in row) for row in stripped)
+
+
+class TestLookupListOfLinesEdgeCases2:
+    """Test edge cases for lookup_listoflines function - additional tests."""
+
+    def test_empty_input(self) -> None:
+        """It handles empty input gracefully."""
+        assert prtecan.lookup_listoflines([], "pattern") == []
+
+    def test_no_matches(self) -> None:
+        """It returns empty list for no matches."""
+        csvl: list[list[str | int | float]] = [["a", "b"], ["c", "d"]]
+        assert prtecan.lookup_listoflines(csvl, "z") == []
+
+    def test_partial_lines(self) -> None:
+        """It handles lines with fewer columns than specified."""
+        csvl: list[list[str | int | float]] = [["a"], ["b", "c"], ["d"]]
+        assert prtecan.lookup_listoflines(csvl, "c", col=1) == [1]
+
+    @pytest.mark.parametrize(
+        ("pattern", "col", "expected"),
+        [
+            ("pp", 0, [0, 1, 2, 3, 5]),
+            ("xy", 1, [0, 5]),
+            ("yy", 1, [3]),
+            ("zz", 1, []),
+        ],
+    )
+    def test_lookup_listoflines(
+        self, pattern: str, col: int, expected: list[int]
+    ) -> None:
+        """Parametrized test for lookup_listoflines with different patterns and columns."""
+        csvl: list[list[str | int | float]] = [
+            ["pp", "xy", 1, 2.0],
+            ["pp", "xx", 1, 2],
+            ["pp", 12, 1, 2],
+            ["pp", "yy", 1, 2.0],
+            ["a"],
+            ["pp", "xy", 1, 2],
+        ]
+        assert prtecan.lookup_listoflines(csvl, pattern=pattern, col=col) == expected
 
 
 def test_strip_lines() -> None:
@@ -133,8 +723,8 @@ def test_titration_results_empty() -> None:
         _ = empty_results["A01"]
 
 
-class TestLabelblock:
-    """Test labelblock class."""
+class TestLabelblock2:
+    """Test labelblock class - comprehensive tests."""
 
     @staticmethod
     def _get_two_labelblocks() -> tuple[Labelblock, Labelblock]:
@@ -241,8 +831,8 @@ class TestCsvlFunctions:
         assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
 
 
-class TestTecanfile:
-    """Test TecanFile class."""
+class TestTecanfile2:
+    """Test TecanFile class - comprehensive tests."""
 
     tf = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
 
@@ -287,8 +877,8 @@ class TestTecanfile:
             prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
-class TestLabelblocksGroup:
-    """Test LabelBlocksGroup class."""
+class TestLabelblocksGroup2:
+    """Test LabelBlocksGroup class - comprehensive tests."""
 
     @pytest.fixture(autouse=True, scope="class")
     def tfs(self) -> list[Tecanfile]:
@@ -484,8 +1074,8 @@ class TestTecanfilesGroup:
                 prtecan.TecanfilesGroup(self.tecanfiles)
 
 
-class TestTitration:
-    """Test Titration class."""
+class TestTitration2:
+    """Test Titration class - comprehensive tests."""
 
     @pytest.fixture
     def tit(self) -> Titration:
@@ -634,8 +1224,8 @@ class TestTitration:
         assert isinstance(g, sns.FacetGrid)
 
 
-class TestPlateScheme:
-    """Test PlateScheme."""
+class TestPlateScheme2:
+    """Test PlateScheme - comprehensive tests."""
 
     @pytest.fixture(autouse=True, scope="class")
     def ps(self) -> PlateScheme:

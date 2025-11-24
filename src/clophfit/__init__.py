@@ -15,7 +15,7 @@ __tecan_out_dir__ = f"out-{__version__}"
 
 
 def configure_logging(
-    verbose: int = 0, quiet: bool = False, log_file: str = ""
+    verbose: int = 0, quiet: bool = False, log_file: str = "clophfit.log"
 ) -> None:
     """Centralized logging configuration for both library and CLI.
 
@@ -28,11 +28,6 @@ def configure_logging(
     log_file : str
         Path to log file. Default "clophfit.log".
     """
-    file_formatter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)-8s] %(name)-20s : %(message)s",
-        datefmt="%Y-%m-%d %H:%M",
-    )
-    console_formatter = logging.Formatter(fmt="[%(levelname)-8s]  %(message)s")
     # Map verbosity levels to logging levels
     level_mapping = {
         0: logging.ERROR,
@@ -65,6 +60,10 @@ def configure_logging(
     ):
         file_handler = RotatingFileHandler(log_file, maxBytes=10**6, backupCount=3)
         file_handler.setLevel(logging.DEBUG)
+        file_formatter = logging.Formatter(
+            fmt="%(asctime)s [%(levelname)-8s] %(name)-20s : %(message)s",
+            datefmt="%Y-%m-%d %H:%M",
+        )
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
 
@@ -72,6 +71,7 @@ def configure_logging(
     if verbosity > 0 or (sys.stderr.isatty() and verbose == 0):
         console_handler = logging.StreamHandler()
         console_handler.setLevel(log_level)
+        console_formatter = logging.Formatter(fmt="[%(levelname)-8s]  %(message)s")
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
 
@@ -80,9 +80,5 @@ def configure_logging(
     for name in logger_dict:
         if name.startswith("clophfit."):
             logging.getLogger(name).propagate = True
-
     # Capture warnings as logs
     logging.captureWarnings(True)
-
-    # # Set up warnings to show each RuntimeWarning only once
-    # In case: warnings.simplefilter("once", RuntimeWarning)

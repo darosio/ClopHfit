@@ -17,6 +17,7 @@ detailed information on their operation and use.
 """
 
 from clophfit.prtecan.prtecan import (
+    Buffer,
     BufferFit,
     Labelblock,
     LabelblocksGroup,
@@ -38,6 +39,7 @@ from clophfit.prtecan.prtecan import (
 )
 
 __all__ = [
+    "Buffer",
     "BufferFit",
     "FitdataParams",
     "Labelblock",
