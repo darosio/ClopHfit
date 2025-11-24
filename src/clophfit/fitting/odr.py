@@ -94,8 +94,8 @@ def fit_binding_odr(fr: FitResult[MiniT]) -> FitResult[odr.Output]:
     start_idx = 0
     for da in ds.values():
         end_idx = start_idx + len(da.y)
-        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])  # type: ignore[attr-defined]
-        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])  # type: ignore[attr-defined]
+        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])
+        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
         start_idx = end_idx
     # Update the parameters with results from ODR
     p_names = ["K"]
@@ -121,16 +121,16 @@ def fit_binding_odr_recursive(
         return FitResult()
     # Initial fit
     ro = fit_binding_odr(result)
-    residual_variance = ro.mini.res_var if isinstance(ro.mini, odr.Output) else 0.0  # type: ignore[attr-defined]
+    residual_variance = ro.mini.res_var if isinstance(ro.mini, odr.Output) else 0.0
     for _ in range(max_iterations):
         rn = fit_binding_odr(ro)
-        if rn.mini and rn.mini.res_var == 0:  # type: ignore[attr-defined]
+        if rn.mini and rn.mini.res_var == 0:
             rn = ro
             break
         # Check convergence
-        if rn.mini and residual_variance - rn.mini.res_var < tol:  # type: ignore[attr-defined]
+        if rn.mini and residual_variance - rn.mini.res_var < tol:
             break
-        residual_variance = rn.mini.res_var if rn.mini else 0.0  # type: ignore[attr-defined]
+        residual_variance = rn.mini.res_var if rn.mini else 0.0
         ro = rn
     return rn
 
@@ -139,8 +139,8 @@ def outlier(
     output: odr.Output, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
-    residuals_x = output.delta  # type: ignore[attr-defined]
-    residuals_y = output.eps  # type: ignore[attr-defined]
+    residuals_x = output.delta
+    residuals_y = output.eps
     residuals = np.sqrt(residuals_x**2 + residuals_y**2)
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
     if plot_z_scores:
