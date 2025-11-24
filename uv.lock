@@ -448,7 +448,7 @@ tests = [
     { name = "pandas-stubs", specifier = ">=2.3.2.250926" },
     { name = "pygments", specifier = ">=2.19.2" },
     { name = "pytest", specifier = ">=9.0.1" },
-    { name = "scipy-stubs", specifier = ">=1.16.3.0" },
+    { name = "scipy-stubs", specifier = ">=1.16.3.1" },
     { name = "types-click", specifier = ">=7.1.8" },
     { name = "types-setuptools", specifier = ">=80.9.0.20250822" },
     { name = "xdoctest", specifier = ">=1.3.0" },
@@ -2666,14 +2666,14 @@ wheels = [
 
 [[package]]
 name = "scipy-stubs"
-version = "1.16.3.0"
+version = "1.16.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "optype", extra = ["numpy"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bd/68/c53c3bce6bd069a164015be1be2671c968b526be4af1e85db64c88f04546/scipy_stubs-1.16.3.0.tar.gz", hash = "sha256:d6943c085e47a1ed431309f9ca582b6a206a9db808a036132a0bf01ebc34b506", size = 356462, upload-time = "2025-10-28T22:05:31.198Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/3e/8baf960c68f012b8297930d4686b235813974833a417db8d0af798b0b93d/scipy_stubs-1.16.3.1.tar.gz", hash = "sha256:0738d55a7f8b0c94cdb8063f711d53330ebefe166f7d48dec9ffd932a337226d", size = 359990, upload-time = "2025-11-23T23:05:21.274Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/1c/0ba7305fa01cfe7a6f1b8c86ccdd1b7a0d43fa9bd769c059995311e291a2/scipy_stubs-1.16.3.0-py3-none-any.whl", hash = "sha256:90e5d82ced2183ef3c5c0a28a77df8cc227458624364fa0ff975ad24fa89d6ad", size = 557713, upload-time = "2025-10-28T22:05:29.454Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/39/e2a69866518f88dc01940c9b9b044db97c3387f2826bd2a173e49a5c0469/scipy_stubs-1.16.3.1-py3-none-any.whl", hash = "sha256:69bc52ef6c3f8e09208abdfaf32291eb51e9ddf8fa4389401ccd9473bdd2a26d", size = 560397, upload-time = "2025-11-23T23:05:19.432Z" },
 ]
 
 [[package]]
