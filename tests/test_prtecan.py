@@ -279,6 +279,52 @@ class TestLabelblock:
         with pytest.raises(ValueError, match="plate"):
             Labelblock(invalid_lines)
 
+    def test_almost_eq(self) -> None:
+        """Test the __almost_eq__ method of the Labelblock class."""
+        lb0 = create_sample_labelblock()
+        file_path1 = Path(data_tests) / "L1" / "290513_7.2.xls"
+        csvl1 = prtecan.read_xls(file_path1)  # Gain=98
+        idxs1 = prtecan.lookup_listoflines(csvl1)
+        lb11 = Labelblock(csvl1[idxs1[1] :])
+        file_path2 = Path(data_tests) / "L1" / "290513_8.8.xls"
+        csvl2 = prtecan.read_xls(file_path2)  # Gain=99
+        idxs2 = prtecan.lookup_listoflines(csvl2)
+        lb12 = Labelblock(csvl2[idxs2[1] :])
+        assert lb11 != lb12
+        assert lb11.__almost_eq__(lb12)
+        assert not lb11.__almost_eq__(lb0)
+
+    def test_overvalue(self, caplog: pytest.LogCaptureFixture) -> None:
+        """It detects saturated data ("OVER")."""
+        csvl = prtecan.read_xls(data_tests / "140220" / "pH6.5_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
+        with caplog.at_level(logging.WARNING):
+            lb = Labelblock(csvl[idxs[0] : idxs[1]])
+        expected_messages = [
+            " OVER value in Label1: A06 of tecanfile ",
+            " OVER value in Label1: H02 of tecanfile ",
+        ]
+        for expected_message in expected_messages:
+            assert any(log.message == expected_message for log in caplog.records), (
+                f"Expected log message '{expected_message}' not found"
+            )
+        assert np.nansum(lb.data["A06"]) == np.nansum(np.nan)
+        assert np.nansum(lb.data["H02"]) == np.nansum(np.nan)
+
+    def test_raise_missing_column(self) -> None:
+        """It raises Exception when a column is missing from the labelblock."""
+        csvl = prtecan.read_xls(data_tests / "exceptions/88wells_290212_20.xlsx")
+        idxs = prtecan.lookup_listoflines(csvl)
+        with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
+            Labelblock(csvl[idxs[0] : len(csvl)])
+
+    def test_raise_missing_row(self) -> None:
+        """It raises Exception when a row is missing from the labelblock."""
+        csvl = prtecan.read_xls(data_tests / "exceptions/84wells_290212_20.xlsx")
+        idxs = prtecan.lookup_listoflines(csvl)
+        with pytest.raises(ValueError, match="Row 7 label mismatch: expected H, got "):
+            Labelblock(csvl[idxs[0] : len(csvl)])
+
 
 class TestTecanfile:
     """Test Tecanfile class."""
@@ -302,6 +348,39 @@ class TestTecanfile:
         """It handles invalid files."""
         with pytest.raises(FileNotFoundError):
             Tecanfile(Path("nonexistent.xls"))
+
+    def test_path(self, tecanfile: Tecanfile) -> None:
+        """It reads the file path."""
+        assert tecanfile.path == data_tests / "140220/pH8.3_200214.xls"
+
+    def test_detailed_labelblocks(self, tecanfile: Tecanfile) -> None:
+        """It parses Temperature metadata and cell data from labelblocks."""
+        assert tecanfile.labelblocks[1].metadata["Temperature"].value == 25.3
+        assert tecanfile.labelblocks[2].metadata["Temperature"].value == 25.7
+        assert tecanfile.labelblocks[1].data["A01"] == 17260
+        assert tecanfile.labelblocks[2].data["H12"] == 4196
+
+    def test_eq(self, tecanfile: Tecanfile) -> None:
+        """A Tecanfile is equal to itself and not equal to a different Tecanfile."""
+        tf1 = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
+        assert tecanfile == tf1, "Tecanfile is not equal to itself"
+        tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
+        assert tecanfile != tf2, (
+            "Different Tecanfiles are incorrectly reported as equal"
+        )
+
+    def test_warn(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Warn if labelblocks are repeated in a Tf as it might compromise grouping."""
+        with caplog.at_level(logging.WARNING):
+            prtecan.Tecanfile(data_tests / "exceptions/290212_7.67_repeated_lb.xls")
+        assert any(
+            "Repeated labelblocks" in record.message for record in caplog.records
+        )
+
+    def test_missing_label(self) -> None:
+        """It raises Exception when there is no Label pattern."""
+        with pytest.raises(ValueError, match="No Labelblock found"):
+            prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
 
 
 class TestLabelblocksGroup:
@@ -331,6 +410,31 @@ class TestLabelblocksGroup:
         with pytest.raises(ValueError, match="Creation of labelblock group failed"):
             LabelblocksGroup([tf1.labelblocks[1], tf2.labelblocks[2]])
 
+    def test_detailed_data(self) -> None:
+        """Test detailed data aggregation."""
+        tfs = [
+            Tecanfile(data_tests / "L1" / "290513_5.5.xls"),
+            Tecanfile(data_tests / "L1" / "290513_7.2.xls"),
+        ]
+        lbg = LabelblocksGroup([tfs[0].labelblocks[1], tfs[1].labelblocks[1]])
+        assert lbg.data["A01"] == [18713, 17088]
+        assert lbg.data["H12"] == [28596, 25771]
+        assert_almost_equal(lbg.data_nrm["A01"], [995.372, 908.936], 3)
+
+    def test_metadata_merging_detailed(self) -> None:
+        """Test metadata merging with common and uncommon values."""
+        tfs = [
+            Tecanfile(data_tests / "L1" / "290513_7.2.xls"),
+            Tecanfile(data_tests / "L1" / "290513_8.8.xls"),
+        ]
+        lbg = LabelblocksGroup([tfs[0].labelblocks[2], tfs[1].labelblocks[2]])
+        # Gain values differ (98 vs 99), so Gain should not be in merged metadata
+        assert lbg.metadata.get("Gain") is None
+        assert lbg.labelblocks[0].metadata["Gain"].value == 98
+        assert lbg.labelblocks[1].metadata["Gain"].value == 99
+        # But normalized data should still be available
+        assert_almost_equal(lbg.data_nrm["H12"], [693.980, 714.495], 3)
+
 
 class TestPlateScheme:
     """Test PlateScheme class."""
@@ -348,6 +452,35 @@ class TestPlateScheme:
         assert len(ps.buffer) > 0
         assert "G03" in ps.names
         assert "V224Q" in ps.names
+
+    def test_buffer_validation(self) -> None:
+        """Test buffer setter with type validation."""
+        ps = PlateScheme()
+        ps.buffer = ["A1", "A2"]
+        assert ps.buffer == ["A1", "A2"]
+        with pytest.raises(TypeError):
+            ps.buffer = [1, 2]  # type: ignore[list-item]
+
+    def test_ctrl_validation(self) -> None:
+        """Test ctrl setter with type validation."""
+        ps = PlateScheme()
+        ps.ctrl = ["B1", "B2"]
+        assert ps.ctrl == ["B1", "B2"]
+        with pytest.raises(TypeError):
+            ps.ctrl = [1, 2]  # type: ignore[list-item]
+
+    def test_names_validation(self) -> None:
+        """Test names setter with type validation."""
+        ps = PlateScheme()
+        ps.names = {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
+        assert ps.names == {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
+        with pytest.raises(TypeError):
+            ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore[dict-item]
+
+    def test_invalid_file(self) -> None:
+        """Test providing an incorrect file."""
+        with pytest.raises(FileNotFoundError):
+            PlateScheme(file=Path("incorrect_file.csv"))
 
 
 class TestTitrationConfig:
@@ -434,7 +567,7 @@ class TestTitrationResults:
 
 
 class TestTitration:
-    """Test Titration class."""
+    """Test Titration class - basic functionality."""
 
     @pytest.fixture(scope="class")
     def titration(self) -> Titration:
@@ -598,47 +731,6 @@ class TestSuggestedTestCases:
         assert all(all(e != "" for e in row) for row in stripped)
 
 
-class TestLookupListOfLinesEdgeCases2:
-    """Test edge cases for lookup_listoflines function - additional tests."""
-
-    def test_empty_input(self) -> None:
-        """It handles empty input gracefully."""
-        assert prtecan.lookup_listoflines([], "pattern") == []
-
-    def test_no_matches(self) -> None:
-        """It returns empty list for no matches."""
-        csvl: list[list[str | int | float]] = [["a", "b"], ["c", "d"]]
-        assert prtecan.lookup_listoflines(csvl, "z") == []
-
-    def test_partial_lines(self) -> None:
-        """It handles lines with fewer columns than specified."""
-        csvl: list[list[str | int | float]] = [["a"], ["b", "c"], ["d"]]
-        assert prtecan.lookup_listoflines(csvl, "c", col=1) == [1]
-
-    @pytest.mark.parametrize(
-        ("pattern", "col", "expected"),
-        [
-            ("pp", 0, [0, 1, 2, 3, 5]),
-            ("xy", 1, [0, 5]),
-            ("yy", 1, [3]),
-            ("zz", 1, []),
-        ],
-    )
-    def test_lookup_listoflines(
-        self, pattern: str, col: int, expected: list[int]
-    ) -> None:
-        """Parametrized test for lookup_listoflines with different patterns and columns."""
-        csvl: list[list[str | int | float]] = [
-            ["pp", "xy", 1, 2.0],
-            ["pp", "xx", 1, 2],
-            ["pp", 12, 1, 2],
-            ["pp", "yy", 1, 2.0],
-            ["a"],
-            ["pp", "xy", 1, 2],
-        ]
-        assert prtecan.lookup_listoflines(csvl, pattern=pattern, col=col) == expected
-
-
 def test_strip_lines() -> None:
     """It strips empty fields."""
     lines: list[list[float | int | str]] = [
@@ -723,100 +815,6 @@ def test_titration_results_empty() -> None:
         _ = empty_results["A01"]
 
 
-class TestLabelblock2:
-    """Test labelblock class - comprehensive tests."""
-
-    @staticmethod
-    def _get_two_labelblocks() -> tuple[Labelblock, Labelblock]:
-        """Simulate csvl with 2 labelblocks."""
-        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
-        idxs = prtecan.lookup_listoflines(csvl)
-        # pylint: disable=W0201
-        lb0 = Labelblock(csvl[idxs[0] : idxs[1]])
-        lb1 = Labelblock(csvl[idxs[1] :])
-        return lb0, lb1
-
-    @pytest.fixture(scope="class")
-    def labelblocks(self) -> tuple[Labelblock, Labelblock]:
-        """Fixture that provides two labelblocks."""
-        return self._get_two_labelblocks()
-
-    def test_metadata(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """It parses "Temperature" metadata."""
-        lb0, lb1 = labelblocks
-        assert lb0.metadata["Temperature"].value == 25.6
-        assert lb1.metadata["Temperature"].value == 25.3
-
-    def test_data(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """It parses data values."""
-        lb0, lb1 = labelblocks
-        assert lb0.data["F06"] == 19551
-        assert lb1.data["H12"] == 543
-
-    def test_data_normalized(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """Normalize data using key metadata values."""
-        lb0, lb1 = labelblocks
-        assert lb0.data_nrm["F06"] == pytest.approx(1051.1290323)
-        assert lb1.data_nrm["H12"] == pytest.approx(48.4821429)
-
-    def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """A Labelblock is equal to itself and not equal to a different Labelblock."""
-        lb0, lb1 = labelblocks
-        assert lb0 == lb0  # noqa: PLR0124 # pylint: disable-msg=R0124
-        assert lb0 is not lb1
-        with pytest.raises(TypeError):
-            assert lb0 == 1
-
-    def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
-        """Test the __almost_eq__ method of the Labelblock class."""
-        lb0, _ = labelblocks
-        file_path1 = Path(data_tests) / "L1" / "290513_7.2.xls"
-        csvl1 = prtecan.read_xls(file_path1)  # Gain=98
-        idxs1 = prtecan.lookup_listoflines(csvl1)
-        lb11 = Labelblock(csvl1[idxs1[1] :])
-        file_path2 = Path(data_tests) / "L1" / "290513_8.8.xls"
-        csvl2 = prtecan.read_xls(file_path2)  # Gain=99
-        idxs2 = prtecan.lookup_listoflines(csvl2)
-        lb12 = Labelblock(csvl2[idxs2[1] :])
-        assert lb11 != lb12
-        assert lb11.__almost_eq__(lb12)
-        assert not lb11.__almost_eq__(lb0)
-
-    def test_overvalue(self, caplog: pytest.LogCaptureFixture) -> None:
-        """It detects saturated data ("OVER")."""
-        csvl = prtecan.read_xls(data_tests / "140220" / "pH6.5_200214.xls")
-        idxs = prtecan.lookup_listoflines(csvl)
-        with caplog.at_level(logging.WARNING):
-            lb = Labelblock(csvl[idxs[0] : idxs[1]])
-            # Print out the captured logs for debugging
-        for log in caplog.records:
-            print(log.message)
-        expected_messages = [
-            " OVER value in Label1: A06 of tecanfile ",
-            " OVER value in Label1: H02 of tecanfile ",
-        ]
-        for expected_message in expected_messages:
-            assert any(log.message == expected_message for log in caplog.records), (
-                f"Expected log message '{expected_message}' not found"
-            )
-        assert np.nansum(lb.data["A06"]) == np.nansum(np.nan)
-        assert np.nansum(lb.data["H02"]) == np.nansum(np.nan)
-
-    def test_raise_missing_column(self) -> None:
-        """It raises Exception when a column is missing from the labelblock."""
-        csvl = prtecan.read_xls(data_tests / "exceptions/88wells_290212_20.xlsx")
-        idxs = prtecan.lookup_listoflines(csvl)
-        with pytest.raises(ValueError, match=r"Cannot build Labelblock: not 96 wells?"):
-            Labelblock(csvl[idxs[0] : len(csvl)])
-
-    def test_raise_missing_row(self) -> None:
-        """It raises Exception when a row is missing from the labelblock."""
-        csvl = prtecan.read_xls(data_tests / "exceptions/84wells_290212_20.xlsx")
-        idxs = prtecan.lookup_listoflines(csvl)
-        with pytest.raises(ValueError, match="Row 7 label mismatch: expected H, got "):
-            Labelblock(csvl[idxs[0] : len(csvl)])
-
-
 class TestCsvlFunctions:
     """Test TecanFile reading and parsing functions."""
 
@@ -829,100 +827,6 @@ class TestCsvlFunctions:
     def test_lookup_listoflines(self) -> None:
         """It finds Label occurrences using module function."""
         assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
-
-
-class TestTecanfile2:
-    """Test TecanFile class - comprehensive tests."""
-
-    tf = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
-
-    def test_path(self) -> None:
-        """It reads the file path."""
-        assert self.tf.path == data_tests / "140220/pH8.3_200214.xls"
-
-    def test_metadata(self) -> None:
-        """It parses the Date."""
-        assert self.tf.metadata["Date:"].value == "20/02/2014"
-
-    def test_labelblocks(self) -> None:
-        """It parses "Temperature" metadata and cell data from 2 labelblocks."""
-        assert self.tf.labelblocks[1].metadata["Temperature"].value == 25.3
-        assert self.tf.labelblocks[2].metadata["Temperature"].value == 25.7
-        assert self.tf.labelblocks[1].data["A01"] == 17260
-        assert self.tf.labelblocks[2].data["H12"] == 4196
-
-    def test_eq(self) -> None:
-        """A Tecanfile is equal to itself and not equal to a different Tecanfile."""
-        tf1 = prtecan.Tecanfile(data_tests / "140220/pH8.3_200214.xls")
-        assert self.tf == tf1, "Tecanfile is not equal to itself"
-        tf2 = prtecan.Tecanfile(data_tests / "140220/pH9.1_200214.xls")
-        assert self.tf != tf2, "Different Tecanfiles are incorrectly reported as equal"
-
-    def test_warn(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Warn if labelblocks are repeated in a Tf as it might compromise grouping."""
-        with caplog.at_level(logging.WARNING):
-            prtecan.Tecanfile(data_tests / "exceptions/290212_7.67_repeated_lb.xls")
-        assert any(
-            "Repeated labelblocks" in record.message for record in caplog.records
-        )
-
-    def test_filenotfound(self) -> None:
-        """It raises FileNotFoundError when the file path does not exist."""
-        with pytest.raises(FileNotFoundError):
-            prtecan.Tecanfile(Path("pinocchio"))
-
-    def test_missing_label(self) -> None:
-        """It raises Exception when there is no Label pattern."""
-        with pytest.raises(ValueError, match="No Labelblock found"):
-            prtecan.Tecanfile(data_tests / "exceptions/0_Labelblocks_290513_5.5.xlsx")
-
-
-class TestLabelblocksGroup2:
-    """Test LabelBlocksGroup class - comprehensive tests."""
-
-    @pytest.fixture(autouse=True, scope="class")
-    def tfs(self) -> list[Tecanfile]:
-        """Set up list of Tecanfile."""
-        return [
-            Tecanfile(data_tests / "L1" / "290513_5.5.xls"),
-            Tecanfile(data_tests / "L1" / "290513_7.2.xls"),
-            Tecanfile(data_tests / "L1" / "290513_8.8.xls"),
-        ]
-
-    @pytest.fixture(autouse=True, scope="class")
-    def lbgd(self, tfs: list[Tecanfile]) -> dict[int, LabelblocksGroup]:
-        """Set up LabelblocksGroup 1 and 2."""
-        lbg1 = LabelblocksGroup([tfs[0].labelblocks[1], tfs[1].labelblocks[1]])
-        lbg2 = LabelblocksGroup([tfs[1].labelblocks[2], tfs[2].labelblocks[2]])
-        return {1: lbg1, 2: lbg2}
-
-    def test_metadata(self, lbgd: dict[int, LabelblocksGroup]) -> None:
-        """Merge only shared metadata."""
-        assert lbgd[1].metadata.get("Temperature") is None
-        assert lbgd[2].metadata.get("Temperature") is None
-        assert lbgd[2].metadata.get("Gain") is None
-        assert lbgd[2].labelblocks[0].metadata["Gain"].value == 98
-        assert lbgd[2].labelblocks[1].metadata["Gain"].value == 99
-        # Common metadata.
-        assert lbgd[1].metadata["Gain"].value == 94
-        assert lbgd[1].metadata["Number of Flashes"].value == 10
-
-    def test_data(self, lbgd: dict[int, LabelblocksGroup]) -> None:
-        """Merge data."""
-        assert lbgd[1].data is not None
-        assert lbgd[1].data["A01"] == [18713, 17088]
-        assert lbgd[1].data["H12"] == [28596, 25771]
-        assert lbgd[2].data == {}
-
-    def test_data_normalized(self, lbgd: dict[int, LabelblocksGroup]) -> None:
-        """Merge data_normalized."""
-        assert_almost_equal(lbgd[2].data_nrm["H12"], [693.980, 714.495], 3)
-        assert_almost_equal(lbgd[1].data_nrm["A01"], [995.372, 908.936], 3)
-
-    def test_notequal_labelblocks(self, tfs: list[Tecanfile]) -> None:
-        """Raise Exception when concatenating unequal labelblocks."""
-        with pytest.raises(ValueError, match="Creation of labelblock group failed"):
-            prtecan.LabelblocksGroup([tfs[1].labelblocks[1], tfs[2].labelblocks[2]])
 
 
 class TestTecanfilesGroup:
@@ -1074,8 +978,8 @@ class TestTecanfilesGroup:
                 prtecan.TecanfilesGroup(self.tecanfiles)
 
 
-class TestTitration2:
-    """Test Titration class - comprehensive tests."""
+class TestTitrationAdvanced:
+    """Test Titration class - comprehensive advanced tests."""
 
     @pytest.fixture
     def tit(self) -> Titration:
@@ -1222,41 +1126,6 @@ class TestTitration2:
         """It handles empty buffers (before assignment of buffer_wells)."""
         g = tit.buffer.plot()
         assert isinstance(g, sns.FacetGrid)
-
-
-class TestPlateScheme2:
-    """Test PlateScheme - comprehensive tests."""
-
-    @pytest.fixture(autouse=True, scope="class")
-    def ps(self) -> PlateScheme:
-        """Create a void PlateScheme."""
-        return PlateScheme()
-
-    def test_buffer(self, ps: PlateScheme) -> None:
-        """Set buffer and test raise error."""
-        ps.buffer = ["A1", "A2"]
-        assert ps.buffer == ["A1", "A2"]
-        with pytest.raises(TypeError):
-            ps.buffer = [1, 2]  # type: ignore[list-item]
-
-    def test_ctrl(self, ps: PlateScheme) -> None:
-        """Set ctrl and test raise error."""
-        ps.ctrl = ["B1", "B2"]
-        assert ps.ctrl == ["B1", "B2"]
-        with pytest.raises(TypeError):
-            ps.ctrl = [1, 2]  # type: ignore[list-item]
-
-    def test_names(self, ps: PlateScheme) -> None:
-        """Set names and test raise error."""
-        ps.names = {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
-        assert ps.names == {"name1": {"A1", "A2"}, "name2": {"B1", "B2"}}
-        with pytest.raises(TypeError):
-            ps.names = {"name1": [1, 2], "name2": [3, 4]}  # type: ignore[dict-item]
-
-    def test_invalid_file(self) -> None:
-        """Test providing an incorrect file."""
-        with pytest.raises(FileNotFoundError):
-            PlateScheme(file=Path("incorrect_file.csv"))
 
 
 # some:  @pytest.mark.skipif(sys.platform == "win32", reason="broken on windows")
