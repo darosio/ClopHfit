@@ -301,8 +301,21 @@ def dilution_correction(additions: list[float]) -> ArrayF:
     -------
     ArrayF
         Dilution correction vector.
+
+    Raises
+    ------
+    ValueError
+        If additions list is empty or if initial volume is zero.
     """
+    if len(additions) == 0:
+        return np.array([])
+
     volumes = np.cumsum(additions)
+
+    if volumes[0] == 0:
+        msg = "Initial volume (first addition) cannot be zero"
+        raise ValueError(msg)
+
     corrections: ArrayF = volumes / volumes[0]
     return corrections
 

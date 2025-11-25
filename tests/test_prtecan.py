@@ -245,6 +245,18 @@ class TestDilutionCorrection:
         result = dilution_correction(additions)
         assert_allclose(result, expected)
 
+    def test_dilution_correction_edge_cases(self) -> None:
+        """Test dilution correction with edge cases."""
+        # Empty list returns empty array
+        result = dilution_correction([])
+        assert len(result) == 0
+        # Single element
+        result = dilution_correction([100.0])
+        assert_allclose(result, [1.0])
+        # Zero initial volume raises ValueError
+        with pytest.raises(ValueError, match=r"Initial volume .* cannot be zero"):
+            dilution_correction([0.0, 100.0])
+
 
 class TestLabelblock:
     """Test Labelblock class."""
@@ -482,6 +494,17 @@ class TestPlateScheme:
         with pytest.raises(FileNotFoundError):
             PlateScheme(file=Path("incorrect_file.csv"))
 
+    def test_discard_validation_and_nofit_keys(self) -> None:
+        """Test discard setter and nofit_keys property of PlateScheme."""
+        ps = prtecan.PlateScheme()
+        ps.buffer = ["A01", "B01"]
+        ps.discard = ["C01"]
+        # nofit_keys is union of buffer and discard
+        assert set(ps.nofit_keys) == {"A01", "B01", "C01"}
+        with pytest.raises(TypeError):
+            #  non-str entries
+            ps.discard = [1, 2]  # type: ignore[list-item]
+
 
 class TestTitrationConfig:
     """Test TitrationConfig class."""
@@ -491,6 +514,9 @@ class TestTitrationConfig:
         config = TitrationConfig()
         assert config.bg is True
         assert config.bg_adj is False
+        assert config.dil is True
+        assert config.nrm is True
+        assert config.bg_mth == "mean"
 
     def test_callback(self) -> None:
         """It triggers callback on parameter change."""
@@ -505,6 +531,21 @@ class TestTitrationConfig:
         config.bg = False
         assert callback_called
 
+    def test_callback_trigger(self) -> None:
+        """Test that TitrationConfig triggers callback on attribute change."""
+        cfg = TitrationConfig()
+        events = []
+        cfg.set_callback(lambda: events.append(True))
+        # change boolean attribute
+        cfg.bg = not cfg.bg
+        assert events == [True]
+        # setting same value does not re-trigger
+        cfg.bg = cfg.bg
+        assert events == [True]
+        # change string attribute
+        cfg.bg_mth = "fit"
+        assert len(events) == 2
+
 
 class TestBufferFit:
     """Test BufferFit class."""
@@ -513,8 +554,7 @@ class TestBufferFit:
         """It correctly identifies empty fits."""
         empty_fit = BufferFit()
         assert empty_fit.empty is True
-
-        non_empty_fit = BufferFit(1.0, 0.0, 0.1, 0.2)
+        non_empty_fit = BufferFit(m=1.0, q=0.0, m_err=0.1, q_err=0.2)
         assert non_empty_fit.empty is False
 
 
@@ -597,6 +637,32 @@ class TestTitration:
         titration.load_scheme(data_tests / "140220/scheme.txt")
         assert len(titration.scheme.buffer) > 0
 
+    def test_generate_combinations_and_prepare_folder(self, tmp_path: Path) -> None:
+        """Test generation of parameter combinations and output folder naming."""
+        # use existing list file for minimal Titration
+        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+        combos = tit._generate_combinations()  # noqa: SLF001
+        # 2^4 boolean flags times 3 methods
+        assert len(combos) == 16 * 3
+        flags, method = combos[0]
+        assert isinstance(flags, tuple)
+        assert len(flags) == 4
+        assert method in ("mean", "meansd", "fit")
+        # test prepare output folder naming
+        # set all flags to True and bg_mth to 'fit'
+        tit.params.bg = True
+        tit.params.bg_adj = True
+        tit.params.dil = True
+        tit.params.nrm = True
+        tit.params.bg_mth = "fit"
+        out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
+        name = out.name
+        assert "_bg" in name
+        assert "_adj" in name
+        assert "_dil" in name
+        assert "_nrm" in name
+        assert "_fit" in name
+
 
 class TestTecanConfig:
     """Test TecanConfig class."""
@@ -643,92 +709,6 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
 # =============================================================================
 # Test Suite for Suggestions
 # =============================================================================
-
-
-class TestSuggestedTestCases:
-    """Test cases based on the provided suggestions.py.txt."""
-
-    def test_dilution_correction_standard(self) -> None:
-        """Test dilution correction function returns cumulative volume ratio."""
-        additions = [100.0, 50.0, 50.0]
-        # volumes = [100,150,200] -> corrections = [1.0,1.5,2.0]
-        corr = prtecan.dilution_correction(additions)
-        assert_array_equal(corr, np.array([1.0, 1.5, 2.0]))
-
-    def test_plate_scheme_discard_and_nofit_keys(self) -> None:
-        """Test discard setter and nofit_keys property of PlateScheme."""
-        ps = PlateScheme()
-        ps.buffer = ["A01", "B01"]
-        ps.discard = ["C01"]
-        # nofit_keys is union of buffer and discard
-        assert set(ps.nofit_keys) == {"A01", "B01", "C01"}
-
-        with pytest.raises(TypeError):
-            # non-str entries
-            ps.discard = [1, 2]  # type: ignore[list-item]
-
-    def test_titration_config_callback_trigger(self) -> None:
-        """Test that TitrationConfig triggers callback on attribute change."""
-        cfg = TitrationConfig()
-        events = []
-        cfg.set_callback(lambda: events.append(True))
-        # change boolean attribute
-        cfg.bg = not cfg.bg
-        assert events == [True]
-        # setting same value does not re-trigger
-        cfg.bg = cfg.bg
-        assert events == [True]
-        # change string attribute
-        cfg.bg_mth = "fit"
-        assert len(events) == 2
-
-    def test_bufferfit_empty_flag(self) -> None:
-        """Test BufferFit.empty property for NaN and non-NaN values."""
-        bf = BufferFit()
-        assert bf.empty
-        bf2 = BufferFit(m=1.0, q=0.0, m_err=0.1, q_err=0.2)
-        assert not bf2.empty
-
-    def test_generate_combinations_and_prepare_folder(self, tmp_path: Path) -> None:
-        """Test generation of parameter combinations and output folder naming."""
-        data_tests = Path(__file__).parent / "Tecan"
-        # use existing list file for minimal Titration
-        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
-        combos = tit._generate_combinations()  # noqa: SLF001
-        # 2^4 boolean flags times 3 methods
-        assert len(combos) == 16 * 3
-        flags, method = combos[0]
-        assert isinstance(flags, tuple)
-        assert len(flags) == 4
-        assert method in ("mean", "meansd", "fit")
-        # test prepare output folder naming
-        # set all flags to True and bg_mth to 'fit'
-        tit.params.bg = True
-        tit.params.bg_adj = True
-        tit.params.dil = True
-        tit.params.nrm = True
-        tit.params.bg_mth = "fit"
-        out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
-        name = out.name
-        assert "_bg" in name
-        assert "_adj" in name
-        assert "_dil" in name
-        assert "_nrm" in name
-        assert "_fit" in name
-
-    def test_extract_xls_roundtrip(self, tmp_path: Path) -> None:
-        """Test read_xls and strip_lines integration with a temporary CSV file."""
-        # create a small Excel file
-        test_df = pd.DataFrame(
-            [[1, None, "a"], [None, 2, None]], columns=["x", "y", "z"]
-        )
-        path = tmp_path / "test.xls"
-        test_df.to_excel(path, index=False)
-        lines = prtecan.read_xls(path)
-        # strip_lines should remove blanks
-        stripped = prtecan.strip_lines(lines)
-        # each line has no empty elements
-        assert all(all(e != "" for e in row) for row in stripped)
 
 
 def test_strip_lines() -> None:
@@ -827,6 +807,20 @@ class TestCsvlFunctions:
     def test_lookup_listoflines(self) -> None:
         """It finds Label occurrences using module function."""
         assert prtecan.lookup_listoflines(self.csvl) == [14, 44]
+
+    def test_extract_xls_roundtrip(self, tmp_path: Path) -> None:
+        """Test read_xls and strip_lines integration with a temporary CSV file."""
+        # create a small Excel file
+        test_df = pd.DataFrame(
+            [[1, None, "a"], [None, 2, None]], columns=["x", "y", "z"]
+        )
+        path = tmp_path / "test.xls"
+        test_df.to_excel(path, index=False)
+        lines = prtecan.read_xls(path)
+        # strip_lines should remove blanks
+        stripped = prtecan.strip_lines(lines)
+        # each line has no empty elements
+        assert all(all(e != "" for e in row) for row in stripped)
 
 
 class TestTecanfilesGroup:
@@ -1256,91 +1250,3 @@ class TestTitrationAnalysis:
         g = titan.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
-
-
-#########
-# Extra #
-#########
-def test_dilution_correction_standard() -> None:
-    """Test dilution correction function returns cumulative volume ratio."""
-    additions = [100.0, 50.0, 50.0]
-    # volumes = [100,150,200] -> corrections = [1.0,1.5,2.0]
-    corr = prtecan.dilution_correction(additions)
-    assert_array_equal(corr, np.array([1.0, 1.5, 2.0]))
-
-
-def test_plate_scheme_discard_and_nofit_keys() -> None:
-    """Test discard setter and nofit_keys property of PlateScheme."""
-    ps = prtecan.PlateScheme()
-    ps.buffer = ["A01", "B01"]
-    ps.discard = ["C01"]
-    # nofit_keys is union of buffer and discard
-    assert set(ps.nofit_keys) == {"A01", "B01", "C01"}
-    with pytest.raises(TypeError):
-        #  non-str entries
-        ps.discard = [1, 2]  # type: ignore[list-item]
-
-
-def test_titration_config_callback_trigger() -> None:
-    """Test that TitrationConfig triggers callback on attribute change."""
-    cfg = prtecan.TitrationConfig()
-    events = []
-    cfg.set_callback(lambda: events.append(True))
-    # change boolean attribute
-    cfg.bg = not cfg.bg
-    assert events == [True]
-    # setting same value does not re-trigger
-    cfg.bg = cfg.bg
-    assert events == [True]
-    # change string attribute
-    cfg.bg_mth = "fit"
-    assert len(events) == 2
-
-
-def test_bufferfit_empty_flag() -> None:
-    """Test BufferFit.empty property for NaN and non-NaN values."""
-    bf = BufferFit()
-    assert bf.empty
-    bf2 = prtecan.BufferFit(m=1.0, q=0.0, m_err=0.1, q_err=0.2)
-    assert not bf2.empty
-
-
-def test_generate_combinations_and_prepare_folder(tmp_path: Path) -> None:
-    """Test generation of parameter combinations and output folder naming."""
-    data_tests = Path(__file__).parent / "Tecan"
-    # use existing list file for minimal Titration
-    tit = prtecan.Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
-    combos = tit._generate_combinations()  # noqa: SLF001
-    # 2^4 boolean flags times 3 methods
-    assert len(combos) == 16 * 3
-    flags, method = combos[0]
-    assert isinstance(flags, tuple)
-    assert len(flags) == 4
-    assert method in ("mean", "meansd", "fit")
-    # test prepare output folder naming
-    # set all flags to True and bg_mth to 'fit'
-    tit.params.bg = True
-    tit.params.bg_adj = True
-    tit.params.dil = True
-    tit.params.nrm = True
-    tit.params.bg_mth = "fit"
-    out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
-    name = out.name
-    assert "_bg" in name
-    assert "_adj" in name
-    assert "_dil" in name
-    assert "_nrm" in name
-    assert "_fit" in name
-
-
-def test_extract_xls_roundtrip(tmp_path: Path) -> None:
-    """Test read_xls and strip_lines integration with a temporary CSV file."""
-    # create a small Excel file
-    test_df = pd.DataFrame([[1, None, "a"], [None, 2, None]], columns=["x", "y", "z"])
-    path = tmp_path / "test.xls"
-    test_df.to_excel(path, index=False)
-    lines = prtecan.read_xls(path)
-    # strip_lines should remove blanks
-    stripped = prtecan.strip_lines(lines)
-    # each line has no empty elements
-    assert all(all(e != "" for e in row) for row in stripped)
