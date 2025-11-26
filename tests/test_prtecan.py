@@ -259,7 +259,6 @@ class TestLabelblock:
         """Simulate csvl with 2 labelblocks."""
         csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
         idxs = prtecan.lookup_listoflines(csvl)
-        # pylint: disable=W0201
         lb0 = Labelblock(csvl[idxs[0] : idxs[1]])
         lb1 = Labelblock(csvl[idxs[1] :])
         return lb0, lb1
@@ -290,7 +289,7 @@ class TestLabelblock:
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """A Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        assert lb0 == lb0  # noqa: PLR0124 # pylint: disable-msg=R0124
+        assert lb0 == lb0  # noqa: PLR0124
         assert lb0 is not lb1
         with pytest.raises(TypeError):
             assert lb0 == 1

@@ -64,23 +64,23 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @ppr.command()
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
-@click.option("--cl", type=float, help="Cl titration: [Cl] (mM) of added aliquots.")
-@click.option("--bg", is_flag=True, help="Subtract buffer (from scheme.txt).")
-@click.option("--bg-adj", is_flag=True, help="Adjust bg to avoid negative value.")
-@click.option("--dil", is_flag=True, help="Apply dilution correction.")
-@click.option("--nrm", is_flag=True, help="Normalize using metadata.")
-@click.option("--bg-mth", default="mean", show_default=True, help="Method for bg.")
-@click.option("--sch", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
-@click.option("--add", type=cPath(exists=True), help="Initial volume and additions.")
-@click.option("--all", "comb", is_flag=True, help="Export (fit) all data combinations.")
+@click.option("--cl", type=float, help="Cl stock concentration (mM) of added aliquots.")
+@click.option("--bg", is_flag=True, help="Whether to subtract buffer (from scheme.txt).")  # fmt: skip
+@click.option("--bg-adj", is_flag=True, help="Whether to heuristically adjust negative background values.")  # fmt: skip
+@click.option("--dil", is_flag=True, help="Whether to apply dilution correction.")
+@click.option("--nrm", is_flag=True, help="Whether to normalize using metadata.")
+@click.option("--bg-mth", default="mean", show_default=True, help="Method for background calculation.")  # fmt: skip
+@click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
+@click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions).")  # fmt: skip
+@click.option("--all", "comb", is_flag=True, help="Whether to export all data combinations.")  # fmt: skip
 @click.option("--lim", type=(float, float), help="Range MIN, MAX of plot_K.")
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
-@click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
-@click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
+@click.option("--fit/--no-fit", default=True, show_default=True, help="Whether to perform fitting.")  # fmt: skip
+@click.option("--png/--no-png", default=True, show_default=True, help="Whether to export PNG files.")  # fmt: skip
 @click.option("--mcmc", type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
-    ctx: Context,
+    ctx: Context,  # Click context object.
     list_file: str,
     cl: float,
     bg: bool,
@@ -100,7 +100,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
-    LIST_FILE : List of Tecan files and concentration values.
+    LIST_FILE : Path to file containing Tecan files and concentration values.
 
     Saves titrations as .dat files and fits all wells using 2 labels. The
     function produces:
@@ -109,7 +109,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 
     - csv tables for all labelblocks and global fittings.
 
-    Note: Buffer is always subtracted if scheme indicates buffer well positions.
+    Buffer is always subtracted if scheme indicates buffer well positions.
     """
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     verbose = ctx.obj.get("VERBOSE", 0)

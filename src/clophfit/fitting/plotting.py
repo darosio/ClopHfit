@@ -268,7 +268,7 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
-    parameter_posterior = idata.posterior[p_name]  # pylint: disable=E1101
+    parameter_posterior = idata.posterior[p_name]
     az.plot_posterior(parameter_posterior, ax=ax)  # type: ignore[no-untyped-call]
 
 
