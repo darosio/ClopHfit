@@ -44,7 +44,7 @@ lint:  ## Lints the codebase using pre-commit.
 
 # Testing
 test:  ## Runs tests using pytest and coverage
-	$(COVERAGE) run -p -m pytest -v
+	$(COVERAGE) run -p -m pytest -v $(ARGS)
 
 cov:  ## Generates a coverage report in multiple formats (report, xml).
 	$(COVERAGE) combine

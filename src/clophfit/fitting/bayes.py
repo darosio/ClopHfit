@@ -30,7 +30,11 @@ if typing.TYPE_CHECKING:
 def create_x_true(
     xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
 ) -> ArrayF | pm.Deterministic:
-    """Create latent variables for x-values with uncertainty."""
+    """Create latent variables for x-values with uncertainty.
+
+    Returns a PyMC Deterministic variable when in a Model context with uncertainty,
+    or a numpy array when there's no uncertainty or no active Model.
+    """
     if n_xerr > 0 and np.any(x_errc > 0):
         x_errc_scaled = x_errc * n_xerr
         xd = -np.diff(xc)
@@ -45,6 +49,15 @@ def create_x_true(
         return pm.Deterministic(
             "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
         )
+    # No uncertainty - check if we're in a Model context
+    try:
+        model = pm.Model.get_context(error_if_none=False)
+        if model is not None:
+            # In a model context, wrap as Deterministic
+            return pm.Deterministic("x_true", as_tensor_variable(xc))
+    except Exception:  # noqa: S110, BLE001
+        pass
+    # Outside model context or error, return numpy array
     return xc
 
 
@@ -147,9 +160,10 @@ def process_trace(
             rpars[name].init_value = row.get("r_hat", np.nan)
     # x_true and x_errc
     nxc, nx_errc = _extract_x_true_from_trace_df(rdf)
-    for da in ds.values():
-        da.xc = nxc  # Update x_true values in the dataset
-        da.x_errc = nx_errc * n_xerr  # Scale the errors FIXME: n_xerr not needed
+    if nxc.size > 0:
+        for da in ds.values():
+            da.xc = nxc  # Update x_true values in the dataset
+            da.x_errc = nx_errc * n_xerr  # Scale the errors FIXME: n_xerr not needed
     # Scale y_errc if present
     try:
         mag = float(rdf.loc["ye_mag", "mean"])  # type: ignore[arg-type]
@@ -763,8 +777,8 @@ def plot_ppc_well(
     figsize: tuple[float, float]
         size?
 
-    Return
-    ------
+    Returns
+    -------
     figure.Figure
         Plot
     """

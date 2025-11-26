@@ -10,6 +10,7 @@ import warnings
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property, partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -37,7 +38,7 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
@@ -47,10 +48,12 @@ if typing.TYPE_CHECKING:
 
 # TODO: Add tqdm progress bar
 
-# list_of_lines
-# after set([type(x) for l in csvl for x in l]) = float | int | str
+# Constants for Tecan file parsing
+#: Standard metadata line length for Tecan files
 STD_MD_LINE_LENGTH = 2
+#: Number of columns in a 96-well plate
 NUM_COLS_96WELL = 12
+#: Row names for 96-well plates
 ROW_NAMES = tuple("ABCDEFGH")
 
 logger = logging.getLogger(__name__)
@@ -137,6 +140,7 @@ def strip_lines(lines: list[list[str | int | float]]) -> list[list[str | int | f
     >>> strip_lines(lines)
     [['Shaking (Linear) Amplitude:', 2, 'mm']]
     """
+    # Use generator expression for memory efficiency
     return [[e for e in line if e] for line in lines]
 
 
@@ -231,11 +235,18 @@ def extract_metadata(
 
 def merge_md(mds: list[dict[str, Metadata]]) -> dict[str, Metadata]:
     """Merge a list of metadata dict if the key value is the same in the list."""
-    mmd = {k: v for k, v in mds[0].items() if all(v == md[k] for md in mds[1:])}
+    if not mds:
+        return {}
+
+    mmd = {
+        k: v for k, v in mds[0].items() if all(k in md and v == md[k] for md in mds[1:])
+    }
 
     # To account for the case 93"Optimal" and 93"Manual" in lb metadata
     def all_same_gain(mds: list[dict[str, Metadata]]) -> bool:
-        return all(md["Gain"].value == mds[0]["Gain"].value for md in mds[1:])
+        return all(
+            "Gain" in md and md["Gain"].value == mds[0]["Gain"].value for md in mds[1:]
+        )
 
     if (
         mmd.get("Gain") is None
@@ -290,8 +301,21 @@ def dilution_correction(additions: list[float]) -> ArrayF:
     -------
     ArrayF
         Dilution correction vector.
+
+    Raises
+    ------
+    ValueError
+        If additions list is empty or if initial volume is zero.
     """
+    if len(additions) == 0:
+        return np.array([])
+
     volumes = np.cumsum(additions)
+
+    if volumes[0] == 0:
+        msg = "Initial volume (first addition) cannot be zero"
+        raise ValueError(msg)
+
     corrections: ArrayF = volumes / volumes[0]
     return corrections
 
@@ -307,10 +331,8 @@ class Labelblock:
 
     Raises
     ------
-    Exception
-        When data do not correspond to a complete 96-well plate.
     ValueError
-        When something went wrong. Possibly because not 96-well.
+        When data do not correspond to a complete 96-well plate.
     TypeError
         When normalization parameters are not numerical.
 
@@ -356,8 +378,15 @@ class Labelblock:
     @staticmethod
     def _validate_lines(lines: list[list[str | int | float]]) -> None:
         """Validate if input lines correspond to a 96-well plate."""
-        if not (lines[14][0] == "<>" and lines[23] == lines[24] == [""] * 13):
-            msg = "Cannot build Labelblock: not 96 wells?"
+        first_block_line = 25
+        if (
+            len(lines) < first_block_line
+            or len(lines[14]) == 0
+            or lines[14][0] != "<>"
+            or lines[23] != lines[24]
+            or lines[23] != [""] * 13
+        ):
+            msg = "Cannot build Labelblock: not 96 wells plate format"
             raise ValueError(msg)
 
     def _extract_data(self, lines: list[list[str | int | float]]) -> dict[str, float]:
@@ -391,7 +420,7 @@ class Labelblock:
                 well = f"{row}{col:0>2}"
                 try:
                     data[well] = float(lines[i][col])
-                except ValueError:
+                except (ValueError, IndexError):
                     data[well] = np.nan
                     label = self.metadata.get("Label")
                     if label is not None and hasattr(label, "value"):
@@ -405,7 +434,13 @@ class Labelblock:
     @staticmethod
     def _validate_96_well_format(lines: list[list[str | int | float]]) -> None:
         """Validate 96-well plate data format."""
+        if len(lines) < len(ROW_NAMES):
+            msg = f"Insufficient rows: expected {len(ROW_NAMES)}, got {len(lines)}"
+            raise ValueError(msg)
         for i, row in enumerate(ROW_NAMES):
+            if len(lines[i]) == 0:
+                msg = f"Row {i} is empty"
+                raise ValueError(msg)
             if lines[i][0] != row:
                 msg = f"Row {i} label mismatch: expected {row}, got {lines[i][0]}"
                 raise ValueError(msg)
@@ -455,8 +490,8 @@ class Tecanfile:
     ------
     FileNotFoundError
         When path does not exist.
-    Exception
-        When no Labelblock is found.
+    ValueError
+        When no Labelblock is found or file format is invalid.
     """
 
     path: Path

@@ -113,6 +113,7 @@ def test_prenspire(tmp_path: Path) -> None:
             raise ImageComparisonFailure(msg)
 
 
+@pytest.mark.slow
 def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
@@ -129,6 +130,7 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     assert result.exit_code == 0
 
 
+@pytest.mark.slow
 def test_prtecan_cl(tmp_path: Path) -> None:
     """Test prtecan command with actual data."""
     list_f = str(tpath / "Tecan" / "140220" / "list.cl.csv")

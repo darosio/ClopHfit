@@ -35,17 +35,17 @@ repos:
         exclude: \.ipynb$
 
   - repo: https://github.com/google/yamlfmt
-    rev: v0.17.2
+    rev: v0.20.0
     hooks:
       - id: yamlfmt
 
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.7
+    rev: v1.7.9
     hooks:
       - id: actionlint
 
   - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.22
+    rev: 1.0.0
     hooks:
       - id: mdformat
         additional_dependencies:
@@ -59,7 +59,7 @@ repos:
         # - id: taplo-lint
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.13.2
+    rev: v0.14.6
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -77,14 +77,14 @@ repos:
 
   # should be replaced in the future ref https://github.com/astral-sh/ruff/issues/458
   - repo: https://github.com/jsh9/pydoclint
-    rev: 0.7.3
+    rev: 0.8.2
     hooks:
       - id: pydoclint
         exclude: "^dev/"
 
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.37.0
+    rev: v1.39.2
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
@@ -106,7 +106,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.8.22
+    rev: 0.9.12
     hooks:
       - id: uv-lock
         stages: [pre-commit]
@@ -114,7 +114,7 @@ repos:
         pass_filenames: false
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.2.0
+    rev: v4.3.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
