@@ -144,7 +144,11 @@ live_mode = true
 strict = true
 
 [tool.ruff]
-extend-exclude = ["src/clophfit/old/", "scripts/"]
+extend-exclude = [
+  "src/clophfit/old/",
+  "scripts/",
+  "dev/",
+]
 extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true
@@ -280,3 +284,4 @@ extend-ignore-re = [
 arange = "arange"
 arosio = "Arosio"
 setp = "setp"
+ttest = "ttest"

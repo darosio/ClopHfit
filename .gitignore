@@ -72,3 +72,10 @@ tests/data/_tmpoutput
 # direnv
 .direnv
 # .envrc
+
+# Development/analysis outputs
+dev/**/*.png
+dev/**/*.pdf
+dev/**/*.csv
+dev/**/*.dat
+ppr_tecan_cli.log.*
