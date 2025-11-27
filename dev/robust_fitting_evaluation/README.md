@@ -1,54 +1,56 @@
 # Robust Fitting Evaluation - Development Scripts
 
-This directory contains development and analysis scripts created during the evaluation and improvement of robust fitting methods for the ClopHfit project.
+Development and analysis scripts for evaluating robust fitting methods in ClopHfit.
 
-## Purpose
+## Key Results
 
-These scripts were used to:
+See **`ROBUST_FITTING_SUMMARY_CORRECTED.md`** for comprehensive findings.
 
-- Evaluate different robust fitting approaches
-- Generate synthetic datasets for testing
-- Compare performance of various methods
-- Produce visualizations and reports
+### Main Conclusion
 
-## Organization
+**Your existing IRLS method (`fit_binding_glob_reweighted`) is optimal** for production use:
 
-### Main Analysis Scripts
+- 100% success rate across all difficulty levels
+- Best parameter accuracy (26.1% avg error)
+- Handles heteroscedastic errors (10x differential) excellently
+- Already integrated in codebase
 
-- **`final_robust_evaluation.py`** - Comprehensive evaluation of all robust fitting methods
-- **`enhanced_robust_testing.py`** - Enhanced testing framework for robust methods
-- **`simple_enhanced_robust.py`** - Simplified implementation of enhanced robust fitting
-- **`error_scaling_impact_demo.py`** - Demonstration of error scaling effects
-- **`show_simulated_data.py`** - Visualization of simulated datasets
-- **`cleanup_analysis_files.py`** - Utility to organize analysis outputs
+### Method Comparison (100 test datasets)
 
-### Results and Supporting Files
+| Method          | Success | Accuracy | Speed  | Use Case             |
+| --------------- | ------- | -------- | ------ | -------------------- |
+| IRLS            | 100%    | 26.1%    | 0.095s | Primary (production) |
+| Standard LM     | 100%    | 28.5%    | 0.052s | Speed-critical       |
+| Simple Enhanced | 100%    | 30.5%    | 0.350s | Maximum reliability  |
+| Robust Huber    | 91%     | 30.7%    | 0.228s | Not recommended      |
 
-- **`analysis_results/`** - Generated results, plots, and archived experiments
-  - `comprehensive_fitting_evaluation.py` - Comprehensive evaluation script
-  - `debug_fitting_issues.py` - Debugging utilities
-  - `realistic_synthetic_data.py` - Realistic data generation
-  - `archive/` - Archived previous versions and experiments
+## Scripts
 
-## Status
+### Evaluation Scripts
 
-⚠️ **WORK IN PROGRESS** - This benchmark work is incomplete.
+- `final_robust_evaluation.py` - Comprehensive method comparison framework
+- `enhanced_robust_testing.py` - Testing framework for robust methods
+- `error_scaling_impact_demo.py` - Error scaling analysis
 
-The synthetic data generation needs refinement to better match real experimental datasets before final recommendations can be made. See `BENCHMARK_STATUS.md` for detailed status and next steps.
+### Alternative Implementations
 
-### Preliminary Findings Available
+- `simple_enhanced_robust.py` - Alternative robust fitting method (research)
 
-Initial benchmarks identified:
+### Utilities
 
-- Best performing methods (`fit_lm_standard`, `fit_binding_glob_reweighted`)
-- Broken methods that need fixing (`outlier2`, `api_fit_lm_outlier`)
-- Functional duplicates that could be consolidated
+- `show_simulated_data.py` - Data visualization tool
+- `cleanup_analysis_files.py` - Analysis file organization
 
-**Note**: These findings are based on preliminary synthetic data and should be validated against real experimental datasets.
+### Supporting Files
+
+- `analysis_results/` - Generated plots and archived experiments
+  - `realistic_synthetic_data.py` - Synthetic data generator
+  - `comprehensive_fitting_evaluation.py` - Full evaluation script
+  - `archive/` - Previous versions
 
 ## Note
 
-These are **development/research scripts** and are not part of the main ClopHfit package. They are excluded from linting and testing in the main build process.
+These are development/research scripts, excluded from main package linting and testing.
 
 ## Next Steps
 
@@ -62,4 +64,4 @@ See `BENCHMARK_STATUS.md` for complete details.
 
 ______________________________________________________________________
 
-*Last Updated: 2025-11-25*
+*Last Updated: 2025-11-26*
