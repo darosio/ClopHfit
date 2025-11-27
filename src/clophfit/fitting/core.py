@@ -89,7 +89,7 @@ EMCEE_STEPS = 1800
 logger = logging.getLogger(__name__)
 
 
-### helpers
+# helpers
 def _binding_1site_models(params: Parameters, x: ArrayDict, is_ph: bool) -> ArrayDict:
     """Compute models for the given input data and parameters."""
     models = {}

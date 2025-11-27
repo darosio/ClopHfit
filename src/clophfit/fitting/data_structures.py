@@ -9,6 +9,7 @@ Classes:
 
 import copy
 import warnings
+from collections import UserDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, TypeVar, runtime_checkable
@@ -115,7 +116,7 @@ class DataArray:
         self._validate_xerrc_lengths()
 
 
-class Dataset(dict[str, DataArray]):
+class Dataset(UserDict[str, DataArray]):
     """A dictionary-like container for storing `DataArray`.
 
     Parameters

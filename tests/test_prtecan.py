@@ -647,7 +647,7 @@ class TestTitration:
         flags, method = combos[0]
         assert isinstance(flags, tuple)
         assert len(flags) == 4
-        assert method in ("mean", "meansd", "fit")
+        assert method in {"mean", "meansd", "fit"}
         # test prepare output folder naming
         # set all flags to True and bg_mth to 'fit'
         tit.params.bg = True

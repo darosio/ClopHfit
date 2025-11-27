@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF
 
 # TODO: Add tqdm progress bar
+# TODO: sort before computing to have outlier output sorted
 
 # Constants for Tecan file parsing
 #: Standard metadata line length for Tecan files
@@ -757,7 +758,7 @@ class PlateScheme:
             self.names = {
                 str(k): set(v)
                 for k, v in scheme.items()
-                if k not in ("buffer", "discard")
+                if k not in {"buffer", "discard"}
             }
 
 
@@ -1196,7 +1197,7 @@ class TitrationResults:
             ax2.set_yticklabels([str(label) for label in df_unk.index])
             ax2.set_ylim(-1, len(df_unk))
             # Set x-limits
-            xlim = xlim if xlim else self._determine_xlim(df_ctr, df_unk)
+            xlim = xlim or self._determine_xlim(df_ctr, df_unk)
             if self.scheme.ctrl:
                 ax1.set_xlim(xlim)
             ax2.set_xlim(xlim)
@@ -1633,6 +1634,7 @@ class Titration(TecanfilesGroup):
         try:
             ds = self._create_global_ds(key)
             # FIXME: return fit_binding_glob_reweighted(ds, key)
+            # FIXME: return fit_binding_glob(ds, robust=True)
             return outlier2(ds, key)
         except InsufficientDataError:
             logger.warning(f"Skipping global fit for well {key}.")
@@ -1726,7 +1728,11 @@ class Titration(TecanfilesGroup):
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame(
-            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
+            {
+                "filenames": filenames,
+                "x": da_true.x,
+                "x_err": da_true.x_err,
+            }
         ).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
@@ -1743,7 +1749,11 @@ class Titration(TecanfilesGroup):
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame(
-            {"filenames": filenames, "x": da_true.x, "x_err": da_true.x_err}
+            {
+                "filenames": filenames,
+                "x": da_true.x,
+                "x_err": da_true.x_err,
+            }
         ).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 

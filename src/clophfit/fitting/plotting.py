@@ -279,9 +279,9 @@ def plot_fit(
     pp: PlotParameters | None = None,
 ) -> None:
     """Plot residuals for each dataset with uncertainty."""
-    _stretch = 0.05
+    stretch = 0.05
     xfit = {
-        k: np.linspace(da.x.min() * (1 - _stretch), da.x.max() * (1 + _stretch), 100)
+        k: np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
         for k, da in ds.items()
     }
     # Compute y-fit using the model directly to avoid circular imports

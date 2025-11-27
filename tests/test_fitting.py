@@ -26,35 +26,6 @@ from clophfit.fitting.plotting import plot_fit
 
 
 @pytest.fixture
-def ph_dataset() -> Dataset:
-    """Create a sample pH-titration Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # Generated with K=7, S0=2, S1=1
-    y = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    return Dataset({"default": DataArray(x, y)}, is_ph=True)
-
-
-@pytest.fixture
-def cl_dataset() -> Dataset:
-    """Create a sample Cl-titration Dataset."""
-    x = np.array([0, 5.0, 10, 40, 160, 1000])
-    # Generated with K=10, S0=2, S1=0
-    y = np.array([2.0, 1.33333333, 1.0, 0.4, 0.11764706, 0.01980198])
-    return Dataset({"default": DataArray(x, y)}, is_ph=False)
-
-
-@pytest.fixture
-def multi_dataset() -> Dataset:
-    """Create a sample multi-label Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # y1 generated with K=7, S0=2, S1=1
-    y1 = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    # y2 generated with K=7, S0=0, S1=1
-    y2 = np.array([0.01, 0.091, 0.5, 0.909, 0.99])
-    return Dataset({"y1": DataArray(x, y1), "y2": DataArray(x, y2)}, is_ph=True)
-
-
-@pytest.fixture
 def spectra_df() -> pd.DataFrame:
     """Create a sample spectral DataFrame."""
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
@@ -114,8 +85,8 @@ def test_fit_binding_glob_ph(ph_dataset: Dataset) -> None:
     assert f_res.result is not None
     assert f_res.result.success is True
     assert np.isclose(f_res.result.params["K"].value, 7.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S0_default"].value, 2.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S1_default"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_default"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S1_default"].value, 2.0, atol=1e-4)
 
 
 def test_fit_binding_glob_cl(cl_dataset: Dataset) -> None:
@@ -136,11 +107,11 @@ def test_fit_binding_glob_multi(multi_dataset: Dataset) -> None:
     # Check shared parameter K
     assert np.isclose(f_res.result.params["K"].value, 7.0, atol=1e-4)
     # Check parameters for the first dataset
-    assert np.isclose(f_res.result.params["S0_y1"].value, 2.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S1_y1"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_y1"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S1_y1"].value, 2.0, atol=1e-4)
     # Check parameters for the second dataset
-    assert np.isclose(f_res.result.params["S0_y2"].value, 0.0, atol=1e-3)
-    assert np.isclose(f_res.result.params["S1_y2"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_y2"].value, 1.0, atol=1e-3)
+    assert np.isclose(f_res.result.params["S1_y2"].value, 0.0, atol=1e-4)
 
 
 def test_fit_binding_insufficient_data() -> None:

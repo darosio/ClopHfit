@@ -15,14 +15,29 @@ tool, users can easily analyze their data and obtain accurate fitting results.
 ## Features
 
 - Plate Reader data Parser.
-- Perform non-linear least square fitting.
+- Perform non-linear least square fitting with **multiple algorithms**.
 - Extract and fit pH and chloride titrations of GFP libraries.
   - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
-  - Estimate uncertainty using bootstrap.
+  - Estimate uncertainty using bootstrap or MCMC (Bayesian).
   - Subtract buffer for each titration point.
   - Report controls e.g. S202N, E2 and V224Q.
   - Correct for dilution of titration additions.
   - Plot data when fitting fails and save txt file anyway.
+
+### Fitting Methods
+
+ClopHfit provides multiple fitting algorithms validated on 364+ real experimental wells:
+
+- **ODR-Recursive**: Orthogonal Distance Regression (best error bar precision) ✅ **Recommended**
+- **outlier2**: Two-stage outlier detection (good precision, fast)
+- **IRLS**: Iteratively Reweighted Least Squares
+- **Recursive**: Iterative reweighting
+- **Bayesian (PyMC)**: MCMC for rigorous uncertainty quantification
+- Standard LM and Robust Huber also available
+
+**See**: [`FITTING_METHODS_SUMMARY.md`](FITTING_METHODS_SUMMARY.md) for guidance on method selection.
+
+**Full analysis**: [`FITTING_METHODS_COMPARISON.md`](FITTING_METHODS_COMPARISON.md)
 
 ## Installation
 

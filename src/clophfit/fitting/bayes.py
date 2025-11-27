@@ -431,7 +431,7 @@ def fit_binding_pymc_odr(
                 f"y_model_{lbl}",
                 pm.math.stack([_y_model(x) for x in xc]),  # noqa: PD013
             )
-            ## TODO:  y_model = as_tensor_variable([_y_model(x) for x in xc])
+            # TODO:  y_model = as_tensor_variable([_y_model(x) for x in xc])
 
             mask = as_tensor_variable(da.mask)
             # Orthogonal distance likelihood
@@ -446,7 +446,7 @@ def fit_binding_pymc_odr(
             )
         # Inference
         return pm.sample(n_samples, cores=4, return_inferencedata=True)
-    ## TODO:  return process_trace(trace, params.keys(), ds, 0)
+    # TODO:  return process_trace(trace, params.keys(), ds, 0)
 
 
 # ------------------------------------------------------------------
@@ -583,7 +583,7 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913
         stderr[name] = [
             v.result.params["K"].stderr
             for well, v in results.items()
-            if v.result and well in wells  #  and "K" in v.result.params._params
+            if v.result and well in wells  # and "K" in v.result.params._params
         ]
     ctr_ks = weighted_stats(values, stderr)
     # MAYBE: Restore logger.info(f"Weighted K stats for control groups: {ctr_ks}")

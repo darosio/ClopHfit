@@ -19,31 +19,11 @@ from clophfit.fitting.bayes import (
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import fit_binding_glob
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
+from clophfit.fitting.data_structures import Dataset, FitResult, MiniT
 
 ###############################################################################
 # Fixtures
 ###############################################################################
-
-
-@pytest.fixture
-def ph_dataset() -> Dataset:
-    """Create a sample pH-titration Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # Generated with K=7, S0=2, S1=1
-    y = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    return Dataset({"default": DataArray(x, y)}, is_ph=True)
-
-
-@pytest.fixture
-def multi_dataset() -> Dataset:
-    """Create a sample multi-label Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # y1 generated with K=7, S0=2, S1=1
-    y1 = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    # y2 generated with K=7, S0=0, S1=1
-    y2 = np.array([0.01, 0.091, 0.5, 0.909, 0.99])
-    return Dataset({"y1": DataArray(x, y1), "y2": DataArray(x, y2)}, is_ph=True)
 
 
 @pytest.fixture
