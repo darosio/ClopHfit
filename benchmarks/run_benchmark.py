@@ -20,7 +20,7 @@ from benchmarks.realistic_synthetic_data import (
     generate_realistic_dataset,
 )
 from benchmarks.simple_enhanced_robust import fit_lm_robust_simple
-from clophfit.fitting.core import fit_binding_glob_reweighted, fit_lm
+from clophfit.fitting.core import fit_lm, outlier2
 
 # Constants
 MIN_SUCCESS_RATE_THRESHOLD = 50
@@ -64,7 +64,7 @@ def run_comprehensive_evaluation(n_tests: int = 50) -> dict[str, EvaluationResul
     methods = {
         "Standard LM": fit_lm,
         "Robust Huber": lambda ds: fit_lm(ds, robust=True),
-        "IRLS": lambda ds: fit_binding_glob_reweighted(ds, key="eval"),
+        "Outlier2": lambda ds: outlier2(ds, key="eval"),
         "Simple Enhanced": lambda ds: fit_lm_robust_simple(ds, verbose=False),
     }
 
@@ -541,14 +541,14 @@ def generate_integration_guide(best_method: str) -> None:
    - Convergence to best solution
         """)
 
-    elif best_method == "IRLS":
+    elif best_method == "Outlier2":
         print("""
-1. The IRLS method is already integrated in your codebase
-2. Use fit_binding_glob_reweighted:
-   from src.clophfit.fitting.core import fit_binding_glob_reweighted
+1. The Outlier2 method is already integrated in your codebase
+2. Use outlier2:
+   from clophfit.fitting.core import outlier2
 
 3. Usage:
-   result = fit_binding_glob_reweighted(dataset, key="your_key")
+   result = outlier2(dataset, key="your_key")
 
 4. This method provides good balance of robustness and accuracy
         """)

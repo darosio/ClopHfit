@@ -20,8 +20,8 @@ from scipy import stats
 from src.clophfit.fitting.core import (
     _binding_1site_residuals,
     _build_params_1site,
-    fit_binding_glob_reweighted,
     fit_lm,
+    outlier2,
 )
 from src.clophfit.fitting.data_structures import Dataset, FitResult
 from src.clophfit.fitting.plotting import PlotParameters, plot_fit
@@ -226,7 +226,7 @@ def compare_simple_robust_methods(
     methods: dict[str, Callable[[], FitResult]] = {
         "Standard LM": lambda: fit_lm(ds),
         "Robust Huber": lambda: fit_lm(ds, robust=True),
-        "IRLS": lambda: fit_binding_glob_reweighted(ds, key="test"),
+        "Outlier2": lambda: outlier2(ds, key="test"),
         "Simple Enhanced": lambda: fit_lm_robust_simple(ds, verbose=False),
     }
 

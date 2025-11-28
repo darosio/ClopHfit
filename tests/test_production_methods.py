@@ -4,17 +4,12 @@ These tests validate the methods recommended in FITTING_METHODS_SUMMARY.md:
 1. ODR-Recursive (rank #2, best speed/precision)
 2. ODR-Recursive+Outlier (rank #1, best precision)
 3. outlier2 (rank #3, good alternative)
-4. IRLS (rank #4, acceptable)
 """
 
-from collections.abc import Callable
-from typing import Any
-
-import pytest
+from typing import TYPE_CHECKING, Any
 
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_reweighted,
     outlier2,
 )
 from clophfit.fitting.data_structures import Dataset, FitResult
@@ -22,6 +17,9 @@ from clophfit.fitting.odr import (
     fit_binding_odr_recursive,
     fit_binding_odr_recursive_outlier,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_odr_recursive_basic_convergence(ph_dataset: Dataset) -> None:
@@ -64,30 +62,13 @@ def test_outlier2_basic_convergence(ph_dataset: Dataset) -> None:
     assert result.result.params["K"].stderr > 0, "Invalid stderr"
 
 
-def test_irls_basic_convergence(ph_dataset: Dataset) -> None:
-    """Test that IRLS (reweighted) method converges on pH data."""
-    result = fit_binding_glob_reweighted(ph_dataset, key="default")
-    assert result.result is not None
-    assert result.result.success, "IRLS fit failed"
-    assert "K" in result.result.params, "Missing K parameter"
-    assert result.result.params["K"].stderr is not None
-    assert result.result.params["K"].stderr > 0, "Invalid stderr"
-
-
 def test_all_production_methods_converge(ph_dataset: Dataset) -> None:
     """Verify all recommended production methods succeed on same data."""
-    # Methods that work directly on Dataset
-    # Note: using 'default' key as defined in ph_dataset fixture
-    direct_methods: list[tuple[str, Callable[[], FitResult[Any]]]] = [
-        ("outlier2", lambda: outlier2(ph_dataset, key="default")),
-        ("IRLS", lambda: fit_binding_glob_reweighted(ph_dataset, key="default")),
-    ]
-
-    for name, method in direct_methods:
-        result = method()
-        assert result.result is not None, f"{name} returned None result"
-        assert result.result.success, f"{name} failed to converge"
-        assert "K" in result.result.params, f"{name} missing K parameter"
+    # outlier2 works directly on Dataset
+    result = outlier2(ph_dataset, key="default")
+    assert result.result is not None, "outlier2 returned None result"
+    assert result.result.success, "outlier2 failed to converge"
+    assert "K" in result.result.params, "outlier2 missing K parameter"
 
     # ODR methods need LM result first
     lm_result = fit_binding_glob(ph_dataset, robust=False)
@@ -131,21 +112,12 @@ def test_multi_label_support(multi_dataset: Dataset) -> None:
     """Test production methods work with multi-label data."""
     # outlier2 supports multi-label
     # Note: outlier2 iterates over all labels if key is not provided, or specific key if provided.
-    # But here we want to test if it works.
     # The fixture 'multi_dataset' has keys "y1" and "y2".
 
     result = outlier2(multi_dataset, key="y1")
     assert result.result is not None
     assert result.result.success
-
-    # Check both labels are present
-    # Actually outlier2 with a key returns a fit for that key.
     assert "K" in result.result.params
-
-    # IRLS supports multi-label
-    result2 = fit_binding_glob_reweighted(multi_dataset, key="y1")
-    assert result2.result is not None
-    assert result2.result.success
 
 
 def test_odr_preserves_lm_structure(ph_dataset: Dataset) -> None:
@@ -167,26 +139,15 @@ def test_odr_preserves_lm_structure(ph_dataset: Dataset) -> None:
         assert param.stderr >= 0, f"{param_name} has negative stderr"
 
 
-@pytest.mark.parametrize(
-    ("method_name", "method_func"),
-    [
-        ("outlier2", lambda ds: outlier2(ds, key="default")),
-        ("IRLS", lambda ds: fit_binding_glob_reweighted(ds, key="default")),
-    ],
-)
-def test_production_method_robust_to_noise(
-    ph_dataset: Dataset,
-    method_name: str,
-    method_func: Callable[[Dataset], FitResult[Any]],
-) -> None:
-    """Test that production methods handle realistic data."""
-    result = method_func(ph_dataset)
+def test_outlier2_robust_to_noise(ph_dataset: Dataset) -> None:
+    """Test that outlier2 handles realistic data."""
+    result = outlier2(ph_dataset, key="default")
 
     assert result.result is not None
-    assert result.result.success, f"{method_name} failed on realistic data"
+    assert result.result.success, "outlier2 failed on realistic data"
     assert result.result.params["K"].stderr is not None
-    assert result.result.params["K"].stderr > 0, f"{method_name} invalid stderr"
+    assert result.result.params["K"].stderr > 0, "outlier2 invalid stderr"
 
     # K should be in reasonable range for pH (3-12)
     k_val = result.result.params["K"].value
-    assert 3.0 < k_val < 12.0, f"{method_name} K ({k_val:.2f}) out of pH range"
+    assert 3.0 < k_val < 12.0, f"outlier2 K ({k_val:.2f}) out of pH range"

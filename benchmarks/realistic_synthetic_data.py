@@ -569,12 +569,12 @@ def test_fitting_with_realistic_data():
         # Quick test with basic fitting
         import time
 
-        from src.clophfit.fitting.core import fit_binding_glob_reweighted, fit_lm
+        from src.clophfit.fitting.core import fit_lm, outlier2
 
         methods_to_test = {
             "Standard LM": lambda: fit_lm(dataset),
             "Robust Huber": lambda: fit_lm(dataset, robust=True),
-            "IRLS": lambda: fit_binding_glob_reweighted(dataset, key="test"),
+            "Outlier2": lambda: outlier2(dataset, key="test"),
         }
 
         for method_name, method_func in methods_to_test.items():

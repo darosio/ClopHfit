@@ -21,9 +21,6 @@ import pandas as pd
 from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_recursive,
-    fit_binding_glob_recursive_outlier,
-    fit_binding_glob_reweighted,
     outlier2,
 )
 from clophfit.fitting.data_structures import DataArray, Dataset
@@ -227,9 +224,6 @@ def run_all_methods_on_scenario(
     methods = {
         "Standard LM": lambda ds: fit_binding_glob(ds, robust=False),
         "Robust Huber": lambda ds: fit_binding_glob(ds, robust=True),
-        "IRLS (reweighted)": lambda ds: fit_binding_glob_reweighted(ds, key="stress"),
-        "Recursive": fit_binding_glob_recursive,
-        "Recursive+Outlier": fit_binding_glob_recursive_outlier,
         "Outlier2": lambda ds: outlier2(ds, key="stress"),
         "Bayesian-Shared": run_bayesian_shared,
         "Bayesian-PerLabel": run_bayesian_perlabel,

@@ -5,8 +5,6 @@
 Uses Titration to get properly corrected data (buffer subtraction + dilution).
 Tests all available fitting functions:
 - fit_binding_glob (LM variants)
-- fit_binding_glob_reweighted (IRLS)
-- fit_binding_glob_recursive (recursive)
 - fit_binding_odr (ODR)
 - fit_binding_pymc / pymc2 (Bayesian MCMC)
 - outlier2
@@ -22,9 +20,6 @@ import pandas as pd
 
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_recursive,
-    fit_binding_glob_recursive_outlier,
-    fit_binding_glob_reweighted,
     outlier2,
 )
 from clophfit.fitting.odr import (
@@ -152,14 +147,6 @@ def test_all_methods(tit: Titration, well_key: str) -> dict[str, dict]:
             "Robust Huber",
             fit_binding_glob,
             lambda d: fit_binding_glob(d, robust=True),
-            False,
-        ),
-        ("IRLS", fit_binding_glob_reweighted, fit_binding_glob_reweighted, True),
-        ("Recursive", fit_binding_glob_recursive, fit_binding_glob_recursive, False),
-        (
-            "Recursive+Outlier",
-            fit_binding_glob_recursive_outlier,
-            fit_binding_glob_recursive_outlier,
             False,
         ),
         ("Outlier2", outlier2, outlier2, True),

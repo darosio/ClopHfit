@@ -12,6 +12,6 @@ B12	E2GFP
 C12	S202N
 D12	buffer
 E12	buffer
-F12	E2GFP
-G12	V224Q
 H12	S202N
+F12	discard
+G12	discard
