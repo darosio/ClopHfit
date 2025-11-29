@@ -10,8 +10,6 @@ on:
       - "docs/**"
       - "*.md"
   push:
-    branches:
-      - main
     paths-ignore:
       - "*.md"
 
@@ -90,6 +88,7 @@ jobs:
 
   docs_build:
     runs-on: ubuntu-latest
+    # if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     steps:
       - name: Install binaries for docs
         run: |

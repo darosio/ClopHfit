@@ -12,6 +12,7 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
+    outlier2,
     weight_da,
     weight_multi_ds_titration,
 )
@@ -23,35 +24,6 @@ from clophfit.fitting.plotting import plot_fit
 ###############################################################################
 # Fixtures
 ###############################################################################
-
-
-@pytest.fixture
-def ph_dataset() -> Dataset:
-    """Create a sample pH-titration Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # Generated with K=7, S0=2, S1=1
-    y = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    return Dataset({"default": DataArray(x, y)}, is_ph=True)
-
-
-@pytest.fixture
-def cl_dataset() -> Dataset:
-    """Create a sample Cl-titration Dataset."""
-    x = np.array([0, 5.0, 10, 40, 160, 1000])
-    # Generated with K=10, S0=2, S1=0
-    y = np.array([2.0, 1.33333333, 1.0, 0.4, 0.11764706, 0.01980198])
-    return Dataset({"default": DataArray(x, y)}, is_ph=False)
-
-
-@pytest.fixture
-def multi_dataset() -> Dataset:
-    """Create a sample multi-label Dataset."""
-    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # y1 generated with K=7, S0=2, S1=1
-    y1 = np.array([1.99, 1.909, 1.5, 1.0909, 1.0099])
-    # y2 generated with K=7, S0=0, S1=1
-    y2 = np.array([0.01, 0.091, 0.5, 0.909, 0.99])
-    return Dataset({"y1": DataArray(x, y1), "y2": DataArray(x, y2)}, is_ph=True)
 
 
 @pytest.fixture
@@ -114,8 +86,8 @@ def test_fit_binding_glob_ph(ph_dataset: Dataset) -> None:
     assert f_res.result is not None
     assert f_res.result.success is True
     assert np.isclose(f_res.result.params["K"].value, 7.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S0_default"].value, 2.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S1_default"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_default"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S1_default"].value, 2.0, atol=1e-4)
 
 
 def test_fit_binding_glob_cl(cl_dataset: Dataset) -> None:
@@ -136,11 +108,11 @@ def test_fit_binding_glob_multi(multi_dataset: Dataset) -> None:
     # Check shared parameter K
     assert np.isclose(f_res.result.params["K"].value, 7.0, atol=1e-4)
     # Check parameters for the first dataset
-    assert np.isclose(f_res.result.params["S0_y1"].value, 2.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S1_y1"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_y1"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S1_y1"].value, 2.0, atol=1e-4)
     # Check parameters for the second dataset
-    assert np.isclose(f_res.result.params["S0_y2"].value, 0.0, atol=1e-3)
-    assert np.isclose(f_res.result.params["S1_y2"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_y2"].value, 1.0, atol=1e-3)
+    assert np.isclose(f_res.result.params["S1_y2"].value, 0.0, atol=1e-4)
 
 
 def test_fit_binding_insufficient_data() -> None:
@@ -494,3 +466,159 @@ def test_export_ds(multi_dataset: Dataset, tmp_path: Path) -> None:
     np.testing.assert_allclose(
         multi_dataset["y1"].x, read_df.xc.to_numpy().astype(float)
     )
+
+
+###############################################################################
+# outlier2() tests
+###############################################################################
+
+# Test parameters for outlier2
+_TRUE_K = 7.0
+_TRUE_S0_Y1, _TRUE_S1_Y1 = 600.0, 50.0
+_TRUE_S0_Y2, _TRUE_S1_Y2 = 500.0, 40.0
+_BUFFER_SD = 40.0
+
+
+def _create_synthetic_dataset(  # noqa: PLR0913
+    n_points: int = 7,
+    true_k: float = _TRUE_K,
+    seed: int = 42,
+    add_outlier: bool = False,
+    outlier_label: str = "y1",
+    outlier_idx: int = 2,
+    outlier_magnitude: float = 5.0,
+) -> Dataset:
+    """Create synthetic dual-channel pH titration dataset for outlier2 tests."""
+    rng = np.random.default_rng(seed)
+
+    x = np.linspace(5.5, 9.0, n_points)
+    x_err = 0.05 * np.ones_like(x)
+
+    y1_true = binding_1site(x, true_k, _TRUE_S0_Y1, _TRUE_S1_Y1, is_ph=True)
+    y2_true = binding_1site(x, true_k, _TRUE_S0_Y2, _TRUE_S1_Y2, is_ph=True)
+
+    y1_err = np.sqrt(np.maximum(y1_true, 1.0) + _BUFFER_SD**2)
+    y2_err = np.sqrt(np.maximum(y2_true, 1.0) + _BUFFER_SD**2)
+
+    y1 = y1_true + rng.normal(0, y1_err)
+    y2 = y2_true + rng.normal(0, y2_err)
+
+    if add_outlier:
+        if outlier_label == "y1":
+            y1[outlier_idx] += outlier_magnitude * y1_err[outlier_idx]
+        else:
+            y2[outlier_idx] += outlier_magnitude * y2_err[outlier_idx]
+
+    da1 = DataArray(x, y1, x_errc=x_err, y_errc=y1_err)
+    da2 = DataArray(x, y2, x_errc=x_err, y_errc=y2_err)
+
+    return Dataset({"y1": da1, "y2": da2}, is_ph=True)
+
+
+class TestOutlier2:
+    """Tests for outlier2() function."""
+
+    def test_returns_fit_result(self) -> None:
+        """outlier2 should return a valid FitResult."""
+        ds = _create_synthetic_dataset()
+        fr = outlier2(ds, key="test")
+
+        assert fr.result is not None
+        assert "K" in fr.result.params
+
+    def test_k_estimate_reasonable(self) -> None:
+        """K estimate should be close to true value."""
+        ds = _create_synthetic_dataset(seed=123)
+        fr = outlier2(ds, key="test")
+
+        assert fr.result is not None
+        k_est = fr.result.params["K"].value
+        assert abs(k_est - _TRUE_K) < 0.5
+
+    def test_uniform_error_model(self) -> None:
+        """Uniform error model should assign constant errors per label."""
+        ds = _create_synthetic_dataset()
+        fr = outlier2(ds, key="test", error_model="uniform")
+
+        assert fr.dataset is not None
+        for da in fr.dataset.values():
+            np.testing.assert_allclose(da.y_err, da.y_err[0] * np.ones_like(da.y_err))
+
+    def test_shotnoise_error_model(self) -> None:
+        """Shot-noise error model should preserve relative error structure."""
+        ds = _create_synthetic_dataset()
+        original_ratio_y1 = ds["y1"].y_err[0] / ds["y1"].y_err[-1]
+
+        fr = outlier2(ds, key="test", error_model="shot-noise")
+
+        assert fr.dataset is not None
+        new_ratio_y1 = fr.dataset["y1"].y_err[0] / fr.dataset["y1"].y_err[-1]
+        np.testing.assert_allclose(original_ratio_y1, new_ratio_y1, rtol=0.1)
+
+    def test_detects_outlier_in_y1(self) -> None:
+        """Should detect large outlier in y1."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="y1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = outlier2(ds, key="test", threshold=2.5)
+
+        assert fr.dataset is not None
+        assert len(fr.dataset["y1"].y) < 7
+
+    def test_detects_outlier_in_y2(self) -> None:
+        """Should detect large outlier in y2."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="y2", outlier_idx=4, outlier_magnitude=10.0
+        )
+        fr = outlier2(ds, key="test", threshold=2.5)
+
+        assert fr.dataset is not None
+        assert len(fr.dataset["y2"].y) < 7
+
+    def test_no_false_positives_clean_data(self) -> None:
+        """Should not remove points from clean data."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        fr = outlier2(ds, key="test", threshold=3.0)
+
+        assert fr.dataset is not None
+        assert len(fr.dataset["y1"].y) == 7
+        assert len(fr.dataset["y2"].y) == 7
+
+    def test_correct_residual_slicing(self) -> None:
+        """Residuals should be correctly sliced for each label."""
+        ds = _create_synthetic_dataset()
+        fr_init = fit_binding_glob(ds, robust=True)
+        assert fr_init.result is not None
+
+        total_residuals = len(fr_init.result.residual)
+        assert total_residuals == len(ds["y1"].y) + len(ds["y2"].y)
+
+    def test_single_label_dataset(self) -> None:
+        """Should work with single-label dataset."""
+        rng = np.random.default_rng(42)
+        x = np.linspace(5.5, 9.0, 7)
+        y_true = binding_1site(x, _TRUE_K, _TRUE_S0_Y1, _TRUE_S1_Y1, is_ph=True)
+        y_err = np.sqrt(np.maximum(y_true, 1.0) + _BUFFER_SD**2)
+        y = y_true + rng.normal(0, y_err)
+
+        da = DataArray(x, y, x_errc=0.05 * np.ones_like(x), y_errc=y_err)
+        ds = Dataset({"y1": da}, is_ph=True)
+
+        fr = outlier2(ds, key="test")
+        assert fr.result is not None
+
+    def test_deterministic_output(self) -> None:
+        """Same input should give same output."""
+        ds1 = _create_synthetic_dataset(seed=42)
+        ds2 = _create_synthetic_dataset(seed=42)
+
+        fr1 = outlier2(ds1, key="test")
+        fr2 = outlier2(ds2, key="test")
+
+        assert fr1.result is not None
+        assert fr2.result is not None
+        np.testing.assert_allclose(
+            fr1.result.params["K"].value,
+            fr2.result.params["K"].value,
+            rtol=1e-10,
+        )

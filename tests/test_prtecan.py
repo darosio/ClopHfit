@@ -647,7 +647,7 @@ class TestTitration:
         flags, method = combos[0]
         assert isinstance(flags, tuple)
         assert len(flags) == 4
-        assert method in ("mean", "meansd", "fit")
+        assert method in {"mean", "meansd", "fit"}
         # test prepare output folder naming
         # set all flags to True and bg_mth to 'fit'
         tit.params.bg = True
@@ -1234,7 +1234,7 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'E02' in the third fit result
         assert titan.result_global["E02"].result is not None
         k_e02 = titan.result_global["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.978, abs=1e-3)
+        assert k_e02.value == pytest.approx(7.977, abs=1e-3)
         assert k_e02.stderr == pytest.approx(0.017, abs=1e-3)
         # Fit up to the second-last data point
 

@@ -11,7 +11,7 @@ E12	buffer
 F01	buffer
 F12	E2GFP
 G01	E2GFP
+G12	V224Q
 H01	V224L
+H12	V224L
 A01	discard
-G12	discard
-H12	discard

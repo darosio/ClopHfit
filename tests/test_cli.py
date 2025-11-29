@@ -28,7 +28,7 @@ def runner_setup() -> CliRunner:
 def create_temp_tsv_file(content: str) -> IO[str]:
     """Create a temporary TSV file and populate it with content."""
     with tempfile.NamedTemporaryFile(
-        delete=False, mode="w+", suffix=".tsv"
+        encoding="utf-8", delete=False, mode="w+", suffix=".tsv"
     ) as temp_file:
         temp_file.write(content)
         temp_file.seek(0)
@@ -55,7 +55,7 @@ def test_custom_output(runner: CliRunner) -> None:
     temp_file = create_temp_tsv_file("Well\tpH\tCl\tName\nD01\t9.15\t0\tNTT-G10\n")
 
     with tempfile.NamedTemporaryFile(
-        delete=False, mode="w+", suffix=".csv"
+        encoding="utf-8", delete=False, mode="w+", suffix=".csv"
     ) as output_file:
         output_file.write("Well,pH,Cl,Name,Temp,Labels" + "\n")
         output_file.seek(0)  # Important to rewind the file to the beginning
@@ -166,7 +166,7 @@ def test_fit_titration(
         sbands = "None"
     result = runner.invoke(fit_titration, base_args)
     assert result.exit_code == 0
-    expected_output = re.sub(" ", r"\\s+", output.strip())
+    expected_output = re.sub(r" ", r"\\s+", output.strip())
     # Assert that the pattern appears in the output
     assert re.search(expected_output, result.output) is not None
     # Asserting that PDF is created
@@ -191,7 +191,7 @@ def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> 
     runner = CliRunner()
     result = runner.invoke(fit_titration, base_args)
     assert result.exit_code == 0
-    expected_output = re.sub(" ", r"\\s+", output.strip())
+    expected_output = re.sub(r" ", r"\\s+", output.strip())
     assert re.search(expected_output, result.output) is not None
     # assert that the png files are generated
     pngs = [dat_fp.with_suffix(".png")]

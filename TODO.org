@@ -1,0 +1,93 @@
+* DONE test heteroscedastic
+distribution of all residue is gaussian and for weighed residues? or just normalized by the  sqrt(y_i) value
+
+** Residual Distribution Analysis (532 points from L1, L2, L4, 140220)
+| Method             |   Std | Shapiro p | Conclusion            |
+|--------------------+-------+-----------+-----------------------|
+| lm_physics         | 2.807 |     0.000 | errors underestimated |
+| outlier2_uniform   | 1.036 |     0.778 | ✓ BEST ~N(0,1)        |
+| outlier2_shotnoise | 1.127 |     0.265 | ✓ Good, ~N(0,1)       |
+| lm_reweighted      | 0.817 |     0.000 | errors overestimated  |
+
+** Coverage Analysis (38 control wells with known pKa from L1+L2+L4+140220)
+| Method               | K_err | Bias   | RMSE  | Coverage |
+|----------------------+-------+--------+-------+----------|
+| lm_robust            | 0.161 | +0.036 | 0.135 | 89.5% ✓  |
+| lm_physics           | 0.119 | +0.059 | 0.162 | 84.2%    |
+| odr_physics          | 0.097 | +0.011 | 0.132 | 81.6%    |
+| pymc_physics_shared  | 0.109 | +0.060 | 0.171 | 81.6%    |
+| outlier2_uniform     | 0.052 | +0.009 | 0.128 | 50.0% ✗  |
+| outlier2_shotnoise   | 0.051 | +0.011 | 0.119 | 47.4% ✗  |
+
+** Synthetic Data Validation (calibrated to match real data)
+Parameters: n_points=7, buffer_sd=40, S0_y1=600, S0_y2=500
+| Method           | Synth K_err | Real K_err | Synth Cov | Real Cov |
+|------------------+-------------+------------+-----------+----------|
+| lm_robust        |       0.140 |      0.161 |     89.0% |   89.5%  | ✓ Match
+| lm_physics       |       0.121 |      0.119 |     89.0% |   84.2%  | ✓ Match
+| odr_physics      |       0.122 |      0.097 |     86.0% |   81.6%  | ~Match
+| outlier2_uniform |       0.112 |      0.052 |     87.0% |   50.0%  | Mismatch
+
+** Key Finding: Heteroscedasticity Paradox
+outlier2_uniform produces residuals closest to N(0,1) but has POOR coverage (50%)
+because uncertainties are underestimated in absolute scale.
+Synthetic data shows higher coverage (87%) → real data has additional systematic effects.
+
+** Recommendation
+- Use lm_robust (89.5% coverage) or odr_physics (81.6% coverage, lowest bias)
+- Avoid residual-based methods for final uncertainty quantification
+- Synthetic data generator calibrated to match real data (buffer_sd=40)
+
+Plot: docs/residuals_all_methods.png
+Results: comprehensive_fitting_results_with_L1.csv
+* DONE leave a trace in the linear git history of the simulation/analysis before clean (functions removal)
+* TODO Check docs/tutorial/prtecan.ipynb
+that is in not using directly unavailable fitting methods
+* TODO Refactor fitting API for uniform error model handling
+Current design inconsistency:
+- fit_binding_glob(ds: Dataset) - takes Dataset directly, controls y_err
+- fit_binding_odr(fr: FitResult) - takes FitResult, inherits y_err from preliminary fit
+- fit_binding_pymc(fr: FitResult) - takes FitResult, inherits y_err from preliminary fit
+
+This makes it hard to systematically compare error models for ODR/PyMC.
+
+Proposed fix: Add Dataset input option or error_model parameter to ODR/PyMC functions
+so all fitting methods can be tested with the same error model consistently.
+* TODO for manuscript
+   Key observations:
+
+     - Coverage is similar (~85-88%) regardless of whether data was generated with physics or uniform errors
+     - lm_physics, lm_robust, and odr_physics all achieve ~86-88% coverage
+     - outlier2 methods achieve ~81-83% coverage (slightly lower but still reasonable)
+     - lm_reweighted is consistently poor (~50% coverage) - overconfident
+     - Coverage doesn't vary much with pKa - method performance is stable across the pKa range
+
+** Synthetic Comparison: Data Error Model × Fit Error Model (N=30, pKa=6.0-8.0)
+Results from benchmarks/compare_error_models.py
+
+| Data Error | Fit Error | Method       | K_err | bias   | RMSE  | Coverage |
+|------------+-----------+--------------+-------+--------+-------+----------|
+| PHYSICS    | PHYSICS   | lm_physics   | 0.139 | +0.018 | 0.148 | 87.3%    |
+|            |           | lm_robust    | 0.157 | +0.014 | 0.167 | 86.0%    |
+|            |           | odr          | 0.149 | +0.007 | 0.178 | 86.0%    |
+|            |           | outlier2     | 0.124 | +0.021 | 0.166 | 81.3%    |
+| PHYSICS    | UNIFORM   | lm_robust    | 0.160 | +0.021 | 0.163 | 88.0%    |
+|            |           | lm           | 0.140 | +0.020 | 0.148 | 88.0%    |
+|            |           | odr          | 0.147 | +0.008 | 0.173 | 86.7%    |
+|            |           | outlier2     | 0.124 | +0.023 | 0.167 | 81.3%    |
+| UNIFORM    | PHYSICS   | lm_physics   | 0.139 | +0.017 | 0.149 | 88.0%    |
+|            |           | lm_robust    | 0.158 | +0.023 | 0.162 | 86.7%    |
+|            |           | odr          | 0.152 | +0.006 | 0.182 | 85.3%    |
+|            |           | outlier2     | 0.124 | +0.020 | 0.167 | 81.3%    |
+| UNIFORM    | UNIFORM   | lm           | 0.140 | +0.018 | 0.149 | 88.7%    |
+|            |           | lm_robust    | 0.159 | +0.025 | 0.170 | 86.0%    |
+|            |           | odr          | 0.149 | +0.007 | 0.177 | 86.0%    |
+|            |           | outlier2     | 0.124 | +0.021 | 0.168 | 81.3%    |
+
+*** Key findings:
+1. Coverage is remarkably stable (~85-88%) across all error model combinations
+2. Matching data and fit error models doesn't significantly improve coverage
+3. outlier2 consistently achieves ~81% coverage regardless of error model
+4. Best coverage (88.7%): Uniform data + Uniform fit + lm method
+5. Real data's lower coverage for outlier2 (50%) suggests additional systematic
+   effects not captured in synthetic simulation (reference pKa uncertainty, etc.)

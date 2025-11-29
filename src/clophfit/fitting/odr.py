@@ -100,8 +100,7 @@ def fit_binding_odr(fr: FitResult[MiniT]) -> FitResult[odr.Output]:
     # Update the parameters with results from ODR
     p_names = ["K"]
     for lbl in ds:
-        p_names.append(f"S0_{lbl}")
-        p_names.append(f"S1_{lbl}")
+        p_names.extend((f"S0_{lbl}", f"S1_{lbl}"))
     params = Parameters()
     for name, value, error in zip(p_names, output.beta, output.sd_beta, strict=True):
         params.add(name, value=value)

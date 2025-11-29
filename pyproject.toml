@@ -148,8 +148,7 @@ live_mode = true
 strict = true
 
 [tool.ruff]
-extend-exclude = ["src/clophfit/old/", "scripts/"]
-extend-include = ["*.ipynb"]
+extend-exclude = ["src/clophfit/old/", "scripts/", "benchmarks/"]
 fix = true
 force-exclude = true
 line-length = 88

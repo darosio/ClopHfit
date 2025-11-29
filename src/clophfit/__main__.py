@@ -78,7 +78,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
-@click.option("--mcmc",type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None",show_default=True,help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
+@click.option("--mcmc", type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
 @click.option(
     "--dry-run", is_flag=True, help="Validate inputs without processing data."
 )
@@ -373,7 +373,7 @@ def _dry_run_validation(
         add_fp = Path(add)
         click.echo(f"✓ Additions file exists: {add_fp}")
         try:
-            with add_fp.open() as f:
+            with add_fp.open(encoding="utf-8") as f:
                 lines = f.readlines()
             click.echo(f"  - Contains {len(lines)} lines")
             if cl:
