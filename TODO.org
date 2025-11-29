@@ -1,0 +1,3 @@
+* TODO test heteroscedastic
+distribution of all residue is gaussian and for weighed residues? or just normalized by the  sqrt(y_i) value
+* TODO leave a trace in the linear git history of the simulation/analysis before clean (functions removal)

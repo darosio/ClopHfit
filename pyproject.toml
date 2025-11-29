@@ -248,6 +248,7 @@ max-complexity = 12
   "PLR0913",
   "PLR2004",
   "SLF001",
+  "F821",
 ]
 "__init__.py" = ["I002"] # don't need annotations
 "docs/*" = ["INP"]

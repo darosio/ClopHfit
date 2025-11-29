@@ -329,25 +329,56 @@ def _plot_spectra_glob_emcee(
 
 
 def outlier2(
-    ds: Dataset, key: str = "", threshold: float = 3.0, plot_z_scores: bool = False
+    ds: Dataset,
+    key: str = "",
+    threshold: float = 3.0,
+    plot_z_scores: bool = False,
+    error_model: str = "uniform",
 ) -> FitResult[Minimizer]:
-    """Remove outliers and reassign weights."""
-    # Re-weight dataset
+    """Remove outliers and reassign weights.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Input dataset.
+    key : str
+        Identifier for logging.
+    threshold : float
+        Z-score threshold for outlier detection.
+    plot_z_scores : bool
+        Whether to plot z-scores.
+    error_model : str
+        Error reweighting model: "uniform" assigns uniform errors per label,
+        "shot-noise" rescales physical errors preserving relative structure.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+
+    """
+    # Initial robust fit
     fr = fit_binding_glob(ds, robust=True)
     if not fr.result:
         return FitResult()
-    weighted_residuals = fr.result.residual
-    weights = np.concatenate([1.0 / da.y_err for da in ds.values()])
-    residuals = weighted_residuals / weights
+
+    # Reweight dataset based on error model
     reweighted_ds = copy.deepcopy(ds)
     start_idx = 0
-    for da in reweighted_ds.values():
+    for da0, da in zip(ds.values(), reweighted_ds.values(), strict=True):
         end_idx = start_idx + len(da.y)
         reduced_residual = fr.result.residual[start_idx:end_idx]
-        residual = np.abs(reduced_residual) * da.y_err
-        sigma = np.mean(np.abs(residual))
-        sigma = max(sigma, 1e-3)  # Avoid division by zero
-        da.y_errc = sigma * np.ones_like(da.xc)
+        residual = np.abs(reduced_residual) * da0.y_err
+
+        if error_model == "shot-noise":
+            # Rescale original errors (preserve relative structure)
+            scale = np.mean(residual) / np.mean(da0.y_err)
+            scale = max(scale, 1e-3)
+            da.y_errc = da0.y_errc * scale
+        else:  # "uniform"
+            sigma = np.mean(np.abs(residual))
+            sigma = max(sigma, 1e-3)
+            da.y_errc = sigma * np.ones_like(da.xc)
+        start_idx = end_idx
 
     # Find outliers
     fr = fit_binding_glob(reweighted_ds, robust=True)
