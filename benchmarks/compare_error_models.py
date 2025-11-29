@@ -1,11 +1,23 @@
 #!/usr/bin/env python
 """Compare error modeling approaches for pH titration fitting.
 
-This script validates different error estimation strategies:
-1. Physics-informed: √y + σ_buffer²
-2. Residual-based: mean|residual| per channel (outlier2)
-3. Bayesian with shared ye_mag scaling factor
-4. Bayesian with separate ye_mag per channel
+This script validates different error estimation strategies across all fitting methods:
+
+LMfit-based methods:
+- fit_binding_glob: Standard least-squares with physics/uniform/shot-noise errors
+- fit_binding_glob_reweighted: RLS with outlier removal
+- fit_binding_glob_recursive: Iterative reweighting
+- fit_binding_glob_recursive_outlier: Recursive with outlier detection
+- outlier2: Robust reweighting with outlier detection (uniform/shot-noise)
+
+ODR-based methods:
+- fit_binding_odr: Orthogonal distance regression
+- fit_binding_odr_recursive: Iterative ODR
+- fit_binding_odr_recursive_outlier: ODR with outlier detection
+
+Bayesian methods:
+- fit_binding_pymc: PyMC with shared ye_mag scaling
+- fit_binding_pymc2: PyMC with separate ye_mag per channel
 
 Tests with:
 - Synthetic data (known ground truth)
@@ -24,11 +36,24 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
-from clophfit.fitting.core import fit_binding_glob, outlier2, weight_multi_ds_titration
+from clophfit.fitting.core import (
+    fit_binding_glob,
+    fit_binding_glob_recursive,
+    fit_binding_glob_recursive_outlier,
+    fit_binding_glob_reweighted,
+    outlier2,
+    weight_multi_ds_titration,
+)
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.models import binding_1site
+from clophfit.fitting.odr import (
+    fit_binding_odr,
+    fit_binding_odr_recursive,
+    fit_binding_odr_recursive_outlier,
+)
 from clophfit.prtecan import Titration
 
 if TYPE_CHECKING:
@@ -40,22 +65,28 @@ logger = logging.getLogger(__name__)
 # Suppress PyMC sampling output for cleaner logs
 logging.getLogger("pymc").setLevel(logging.WARNING)
 
-# Ground truth parameters for synthetic data
+# Ground truth parameters for synthetic data (calibrated to match real data)
+# Based on analysis of L1, L2, L4, 140220 datasets:
+# - Signal ranges: y1 ~100-1500, y2 ~50-1700
+# - Buffer SD: ~40-45 (estimated from y_err = sqrt(y + buffer_sd^2))
+# - SNR: ~17-19
+# - n_points: typically 7-14
 TRUE_K = 7.0
-TRUE_S0_Y1 = 1000.0  # High signal channel
-TRUE_S1_Y1 = 100.0
-TRUE_S0_Y2 = 500.0  # Lower signal channel
-TRUE_S1_Y2 = 50.0
+TRUE_S0_Y1 = 600.0  # High signal channel (mean ~580 in real data)
+TRUE_S1_Y1 = 50.0
+TRUE_S0_Y2 = 500.0  # Lower signal channel (mean ~520 in real data)
+TRUE_S1_Y2 = 40.0
+BUFFER_SD = 40.0  # Estimated from real data (~45)
 
 # Known pKa values for control samples (from literature/validation)
 # E2GFP is the reference with well-characterized pKa ~7.0
 KNOWN_PKA = {
-    "E2GFP": 6.8,  # Reference GFP variant
-    "V224L": 5.95,  # Approximate known value
-    "V224Q": 7.95,  # Approximate known value
-    "NTT": 7.55,  # Approximate known value
-    "G03": 7.9,  # Approximate known value
-    "S202N": 6.8,  # Approximate known value
+    "V224L": 5.81,  # Approximate known value
+    "E2GFP": 6.82,  # Reference GFP variant
+    "S202N": 6.94,  # Approximate known value
+    "NTT": 7.57,  # Approximate known value
+    "G03": 7.94,  # Approximate known value
+    "V224Q": 8.,  # Approximate known value
 }
 
 # Dataset configurations
@@ -115,36 +146,50 @@ class FitComparison:
 
 
 def generate_synthetic_data(
-    n_points: int = 12,
-    buffer_sd: float = 20.0,
+    n_points: int = 7,
+    buffer_sd: float = BUFFER_SD,
     add_outliers: bool = False,
     seed: int | None = None,
+    true_K: float = 7.0,
 ) -> tuple[Dataset, dict[str, float]]:
-    """Generate synthetic dual-channel pH titration data."""
+    """Generate synthetic dual-channel pH titration data matching real data characteristics.
+
+    Based on empirical analysis of L1, L2, L4, 140220 datasets:
+    - Typical n_points: 7 pH values
+    - Buffer SD: ~40 fluorescence units
+    - Signal ranges: y1 ~50-600, y2 ~40-500
+    - True measurement error follows sqrt(y + buffer_sd^2)
+    - SNR: ~17-19
+    """
     if seed is not None:
         np.random.seed(seed)
 
-    x = np.linspace(5.0, 9.5, n_points)
-    x_err = 0.05 * np.ones_like(x)
+    # pH range matching real experiments
+    x = np.linspace(5.5, 9.0, n_points)
+    x_err = 0.05 * np.ones_like(x)  # pH meter precision
 
-    y1_true = binding_1site(x, TRUE_K, TRUE_S0_Y1, TRUE_S1_Y1, is_ph=True)
-    y2_true = binding_1site(x, TRUE_K, TRUE_S0_Y2, TRUE_S1_Y2, is_ph=True)
+    # Generate true signal using binding model
+    y1_true = binding_1site(x, true_K, TRUE_S0_Y1, TRUE_S1_Y1, is_ph=True)
+    y2_true = binding_1site(x, true_K, TRUE_S0_Y2, TRUE_S1_Y2, is_ph=True)
 
+    # Physics-informed error model: shot noise + buffer noise
     y1_err_true = np.sqrt(np.maximum(y1_true, 1.0) + buffer_sd**2)
     y2_err_true = np.sqrt(np.maximum(y2_true, 1.0) + buffer_sd**2)
 
+    # Add noise
     y1 = y1_true + np.random.normal(0, y1_err_true)
     y2 = y2_true + np.random.normal(0, y2_err_true)
 
+    # Add outliers if requested (mimics real data issues)
     if add_outliers:
-        outlier_idx = [2, 7]
-        y1[outlier_idx[0]] += 5 * y1_err_true[outlier_idx[0]]
-        y2[outlier_idx[1]] -= 4 * y2_err_true[outlier_idx[1]]
+        outlier_idx = [1, n_points - 2]
+        y1[outlier_idx[0]] += 4 * y1_err_true[outlier_idx[0]]
+        y2[outlier_idx[1]] -= 3 * y2_err_true[outlier_idx[1]]
 
     da1 = DataArray(x, y1, x_errc=x_err, y_errc=y1_err_true)
     da2 = DataArray(x, y2, x_errc=x_err, y_errc=y2_err_true)
 
-    return Dataset({"y1": da1, "y2": da2}, is_ph=True), {"K": TRUE_K}
+    return Dataset({"y1": da1, "y2": da2}, is_ph=True), {"K": true_K}
 
 
 def extract_K(fr: FitResult) -> tuple[float, float]:
@@ -182,27 +227,90 @@ def fit_all_methods(
     """Fit dataset with all methods and return K estimates."""
     results = {}
 
+    # === LMfit-based methods ===
+
     # Method 1: Physics-informed errors (keep original y_err)
     ds_physics = copy.deepcopy(ds)
     fr_physics = fit_binding_glob(ds_physics, robust=False)
-    results["physics"] = extract_K(fr_physics)
+    results["lm_physics"] = extract_K(fr_physics)
 
-    # Method 2: Residual-based (outlier2)
-    ds_residual = copy.deepcopy(ds)
-    fr_residual = outlier2(ds_residual, key=key)
-    results["outlier2"] = extract_K(fr_residual)
+    # Method 2: Physics with robust fitting
+    ds_robust = copy.deepcopy(ds)
+    fr_robust = fit_binding_glob(ds_robust, robust=True)
+    results["lm_robust"] = extract_K(fr_robust)
 
-    # Method 3: weight_da (SEM-based)
+    # Method 3: outlier2 with uniform error model
+    ds_out2_uni = copy.deepcopy(ds)
+    fr_out2_uni = outlier2(ds_out2_uni, key=key, error_model="uniform")
+    results["outlier2_uniform"] = extract_K(fr_out2_uni)
+
+    # Method 4: outlier2 with shot-noise error model
+    ds_out2_shot = copy.deepcopy(ds)
+    fr_out2_shot = outlier2(ds_out2_shot, key=key, error_model="shot-noise")
+    results["outlier2_shotnoise"] = extract_K(fr_out2_shot)
+
+    # Method 5: Reweighted fitting
+    ds_reweight = copy.deepcopy(ds)
+    fr_reweight = fit_binding_glob_reweighted(ds_reweight, key=key, threshold=2.5)
+    results["lm_reweighted"] = extract_K(fr_reweight)
+
+    # Method 6: Recursive fitting
+    ds_recursive = copy.deepcopy(ds)
+    fr_recursive = fit_binding_glob_recursive(ds_recursive, tol=0.01)
+    results["lm_recursive"] = extract_K(fr_recursive)
+
+    # Method 7: Recursive with outlier detection
+    ds_rec_out = copy.deepcopy(ds)
+    fr_rec_out = fit_binding_glob_recursive_outlier(ds_rec_out, tol=0.01, threshold=3.0)
+    results["lm_recursive_outlier"] = extract_K(fr_rec_out)
+
+    # Method 8: weight_da (SEM-based)
     ds_weight = copy.deepcopy(ds)
     for da in ds_weight.values():
         da.y_errc = np.ones_like(da.xc)
     weight_multi_ds_titration(ds_weight)
     fr_weight = fit_binding_glob(ds_weight, robust=False)
-    results["weight_da"] = extract_K(fr_weight)
+    results["lm_weight_da"] = extract_K(fr_weight)
 
-    # Bayesian methods (optional, slower)
+    # === ODR-based methods ===
+
+    # Method 9: ODR with physics errors
+    if fr_physics.result is not None:
+        try:
+            fr_odr = fit_binding_odr(fr_physics)
+            results["odr_physics"] = extract_K(fr_odr)
+        except Exception:
+            results["odr_physics"] = (np.nan, np.nan)
+
+    # Method 10: ODR with outlier2 uniform errors
+    if fr_out2_uni.result is not None:
+        try:
+            fr_odr_uni = fit_binding_odr(fr_out2_uni)
+            results["odr_uniform"] = extract_K(fr_odr_uni)
+        except Exception:
+            results["odr_uniform"] = (np.nan, np.nan)
+
+    # Method 11: ODR recursive
+    if fr_physics.result is not None:
+        try:
+            fr_odr_rec = fit_binding_odr_recursive(fr_physics, tol=0.01)
+            results["odr_recursive"] = extract_K(fr_odr_rec)
+        except Exception:
+            results["odr_recursive"] = (np.nan, np.nan)
+
+    # Method 12: ODR recursive with outlier
+    if fr_physics.result is not None:
+        try:
+            fr_odr_rec_out = fit_binding_odr_recursive_outlier(
+                fr_physics, tol=0.01, threshold=3.0
+            )
+            results["odr_recursive_outlier"] = extract_K(fr_odr_rec_out)
+        except Exception:
+            results["odr_recursive_outlier"] = (np.nan, np.nan)
+
+    # === Bayesian methods (optional, slower) ===
     if run_bayesian:
-        # Method 4: PyMC with physics-informed errors + shared ye_mag
+        # Method 13: PyMC with physics-informed errors + shared ye_mag
         if fr_physics.result is not None:
             try:
                 with warnings.catch_warnings():
@@ -215,44 +323,85 @@ def fit_all_methods(
                 logger.warning(f"PyMC physics failed for {key}: {e}")
                 results["pymc_physics"] = (np.nan, np.nan)
 
-        # Method 5: PyMC with residual errors + shared ye_mag
-        if fr_residual.result is not None:
+        # Method 14: PyMC with outlier2 uniform errors
+        if fr_out2_uni.result is not None:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    fr_pymc_residual = fit_binding_pymc(
-                        fr_residual, n_sd=n_sd, n_xerr=0, n_samples=1000
+                    fr_pymc_uni = fit_binding_pymc(
+                        fr_out2_uni, n_sd=n_sd, n_xerr=0, n_samples=1000
                     )
-                results["pymc_residual"] = extract_K_from_trace(fr_pymc_residual)
+                results["pymc_uniform"] = extract_K_from_trace(fr_pymc_uni)
             except Exception as e:
-                logger.warning(f"PyMC residual failed for {key}: {e}")
-                results["pymc_residual"] = (np.nan, np.nan)
+                logger.warning(f"PyMC uniform failed for {key}: {e}")
+                results["pymc_uniform"] = (np.nan, np.nan)
 
-        # Method 6: PyMC with residual errors + separate ye_mag per channel
-        if fr_residual.result is not None:
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    fr_pymc_sep_res = fit_binding_pymc2(
-                        fr_residual, n_sd=n_sd, n_xerr=0, n_samples=1000
-                    )
-                results["pymc_sep_res"] = extract_K_from_trace(fr_pymc_sep_res)
-            except Exception as e:
-                logger.warning(f"PyMC sep_res failed for {key}: {e}")
-                results["pymc_sep_res"] = (np.nan, np.nan)
-
-        # Method 7: PyMC with physics errors + separate ye_mag per channel
+        # Method 15: PyMC2 with physics + separate ye_mag per channel
         if fr_physics.result is not None:
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    fr_pymc_sep_phys = fit_binding_pymc2(
+                    fr_pymc2_phys = fit_binding_pymc2(
                         fr_physics, n_sd=n_sd, n_xerr=0, n_samples=1000
                     )
-                results["pymc_sep_phys"] = extract_K_from_trace(fr_pymc_sep_phys)
+                results["pymc2_physics"] = extract_K_from_trace(fr_pymc2_phys)
             except Exception as e:
-                logger.warning(f"PyMC sep_phys failed for {key}: {e}")
-                results["pymc_sep_phys"] = (np.nan, np.nan)
+                logger.warning(f"PyMC2 physics failed for {key}: {e}")
+                results["pymc2_physics"] = (np.nan, np.nan)
+
+        # Method 16: PyMC2 with outlier2 uniform + separate ye_mag
+        if fr_out2_uni.result is not None:
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    fr_pymc2_uni = fit_binding_pymc2(
+                        fr_out2_uni, n_sd=n_sd, n_xerr=0, n_samples=1000
+                    )
+                results["pymc2_uniform"] = extract_K_from_trace(fr_pymc2_uni)
+            except Exception as e:
+                logger.warning(f"PyMC2 uniform failed for {key}: {e}")
+                results["pymc2_uniform"] = (np.nan, np.nan)
+
+    return results
+
+
+def analyze_residuals(
+    ds: Dataset, key: str = ""
+) -> dict[str, dict[str, float]]:
+    """Analyze residual distributions for heteroscedasticity testing."""
+    methods = {
+        "lm_physics": fit_binding_glob(copy.deepcopy(ds)),
+        "outlier2_uniform": outlier2(copy.deepcopy(ds), key, error_model="uniform"),
+        "outlier2_shotnoise": outlier2(copy.deepcopy(ds), key, error_model="shot-noise"),
+    }
+
+    results = {}
+    for name, fr in methods.items():
+        if fr.result is None or fr.dataset is None:
+            continue
+
+        # Get weighted residuals from lmfit
+        weighted_res = fr.result.residual
+        y_all = np.concatenate([da.y for da in fr.dataset.values()])
+        y_err = np.concatenate([da.y_err for da in fr.dataset.values()])
+
+        # Different normalizations
+        raw_res = weighted_res * y_err
+        shot_res = raw_res / np.sqrt(np.abs(y_all) + 1)
+
+        # Normality tests
+        _, p_raw = stats.shapiro(raw_res)
+        _, p_weighted = stats.shapiro(weighted_res)
+        _, p_shot = stats.shapiro(shot_res)
+
+        results[name] = {
+            "raw_std": float(np.std(raw_res)),
+            "raw_shapiro_p": p_raw,
+            "weighted_std": float(np.std(weighted_res)),
+            "weighted_shapiro_p": p_weighted,
+            "shot_std": float(np.std(shot_res)),
+            "shot_shapiro_p": p_shot,
+        }
 
     return results
 
@@ -556,7 +705,28 @@ def main() -> None:
     logger.info("Comprehensive Error Model Comparison Study")
     logger.info("=" * 60)
 
-    methods = ["physics", "outlier2", "weight_da", "pymc_physics", "pymc_residual", "pymc_sep_res", "pymc_sep_phys"]
+    # All methods to compare
+    methods = [
+        # LMfit methods
+        "lm_physics",
+        "lm_robust",
+        "outlier2_uniform",
+        "outlier2_shotnoise",
+        "lm_reweighted",
+        "lm_recursive",
+        "lm_recursive_outlier",
+        "lm_weight_da",
+        # ODR methods
+        "odr_physics",
+        "odr_uniform",
+        "odr_recursive",
+        "odr_recursive_outlier",
+        # Bayesian methods
+        "pymc_physics",
+        "pymc_uniform",
+        "pymc2_physics",
+        "pymc2_uniform",
+    ]
 
     # Find base path (script location or CWD)
     script_path = Path(__file__).resolve()
@@ -611,6 +781,37 @@ def main() -> None:
         plot_comprehensive_comparison(
             df_real, output_dir / "error_model_comparison.png", methods
         )
+
+        # Heteroscedasticity analysis on all datasets (all control wells)
+        logger.info("\n--- Heteroscedasticity Analysis (All Datasets) ---")
+        all_residuals: dict[str, dict[str, list[float]]] = {}
+        for ds_name, config in DATASETS.items():
+            data_path = base_path / config["path"]
+            if not data_path.exists():
+                continue
+            titan = load_titration(data_path)
+            wells = titan.scheme.ctrl if titan.scheme.ctrl else []
+            for well in wells:
+                try:
+                    ds_well = titan._create_global_ds(well)
+                    res_analysis = analyze_residuals(ds_well, well)
+                    for method, stats_dict in res_analysis.items():
+                        if method not in all_residuals:
+                            all_residuals[method] = {k: [] for k in stats_dict}
+                        for stat_name, value in stats_dict.items():
+                            all_residuals[method][stat_name].append(value)
+                except Exception:
+                    pass
+
+        # Print aggregated results
+        print("\nResidual Distribution Analysis (all control wells):")
+        print(f"{'Method':<20} {'weighted_std':>12} {'weighted_p':>12}")
+        print("-" * 46)
+        for method, stats_dict in all_residuals.items():
+            if "weighted_std" in stats_dict and stats_dict["weighted_std"]:
+                avg_std = np.mean(stats_dict["weighted_std"])
+                avg_p = np.mean(stats_dict["weighted_shapiro_p"])
+                print(f"{method:<20} {avg_std:>12.3f} {avg_p:>12.4f}")
 
         logger.info(f"\nResults saved to {output_dir}")
     else:

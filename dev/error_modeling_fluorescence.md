@@ -316,30 +316,37 @@ A Monte Carlo simulation study was conducted to compare error estimation approac
 | Residual (outlier2) | 7.033 | 0.056 | +0.033    | **96.7%**       |
 | weight_da (SEM)     | 7.045 | 0.055 | +0.045    | 96.7%           |
 
-### Results: Real Control Wells (38 wells with known pKa across 4 datasets)
+### Results: Real Control Wells (31 wells with known pKa across 3 datasets)
 
-Comprehensive comparison on real data from Tecan plate reader experiments (L1, L2, L4, 140220 datasets) with corrected reference pKa values and problematic wells excluded:
+Comprehensive comparison on real data from Tecan plate reader experiments (L2, L4, 140220 datasets) with all fitting methods:
 
-| Method                    | K̄    | K_err Mean | Mean Bias | RMSE  | 95% CI Coverage |
-| ------------------------- | ---- | ---------- | --------- | ----- | --------------- |
-| Physics-informed (lmfit)  | 7.17 | 0.119      | +0.059    | 0.162 | **84.2%**       |
-| outlier2 (lmfit)          | 7.13 | 0.071      | +0.025    | 0.125 | 65.8%           |
-| weight_da (lmfit)         | 7.12 | 0.058      | +0.016    | 0.130 | 55.3%           |
-| **PyMC + physics errors** | 7.16 | 0.128      | +0.056    | 0.180 | **81.6%**       |
-| PyMC + residual errors    | 7.13 | 0.084      | +0.021    | 0.130 | 68.4%           |
-| PyMC sep + residual       | 7.14 | 0.059      | +0.034    | 0.143 | 52.6%           |
-| PyMC sep + physics        | 7.13 | 0.058      | +0.027    | 0.140 | 57.9%           |
+| Method              | n   | K̄     | K_err Mean | Mean Bias | RMSE  | 95% CI Coverage |
+| ------------------- | --- | ----- | ---------- | --------- | ----- | --------------- |
+| **lm_robust**       | 31  | 7.250 | 0.171      | +0.056    | 0.139 | **87.1%**       |
+| **odr_physics**     | 31  | 7.216 | 0.090      | +0.022    | 0.120 | **83.9%**       |
+| lm_physics          | 31  | 7.278 | 0.119      | +0.085    | 0.171 | 80.6%           |
+| pymc_physics_shared | 31  | 7.282 | 0.097      | +0.089    | 0.178 | 77.4%           |
+| pymc_physics_sep    | 31  | 7.239 | 0.044      | +0.046    | 0.145 | 41.9%           |
+| outlier2_uniform    | 31  | 7.214 | 0.041      | +0.021    | 0.135 | 38.7%           |
+| pymc_uniform_shared | 31  | 7.211 | 0.041      | +0.018    | 0.142 | 38.7%           |
+| pymc_uniform_sep    | 31  | 7.227 | 0.043      | +0.034    | 0.162 | 38.7%           |
+| outlier2_shotnoise  | 31  | 7.217 | 0.039      | +0.024    | 0.123 | 35.5%           |
+| lm_reweighted       | 31  | 7.255 | 0.030      | +0.062    | 0.146 | 16.1%           |
+
+**Critical Finding**: Methods with best coverage use larger uncertainty estimates (K_err ~0.09-0.17), while residual-based methods (outlier2) produce smaller uncertainties (K_err ~0.04) that are **overconfident**.
+
+**Heteroscedasticity Paradox**: `outlier2_uniform` produces weighted residuals closest to N(0,1) (Shapiro p=0.778), but has poor coverage (38.7%). This means the residuals are well-normalized but the **absolute scale of uncertainties is underestimated**.
 
 **Critical Comparison: Physics vs Residual Errors in PyMC**
 
 | Starting Errors          | ye_mag type | K_err | Bias   | Coverage |
 | ------------------------ | ----------- | ----- | ------ | -------- |
-| Physics (√y + σ_buffer²) | shared      | 0.128 | +0.056 | **82%**  |
-| Residual (outlier2)      | shared      | 0.084 | +0.021 | 68%      |
-| Physics (√y + σ_buffer²) | separate    | 0.058 | +0.027 | 58%      |
-| Residual (outlier2)      | separate    | 0.059 | +0.034 | 53%      |
+| Physics (√y + σ_buffer²) | shared      | 0.097 | +0.089 | **77%**  |
+| Physics (√y + σ_buffer²) | separate    | 0.044 | +0.046 | 42%      |
+| Residual (outlier2)      | shared      | 0.041 | +0.018 | 39%      |
+| Residual (outlier2)      | separate    | 0.043 | +0.034 | 39%      |
 
-PyMC with physics-informed errors and shared ye_mag achieves **best coverage (82%)**.
+Physics-informed errors with shared ye_mag achieve best Bayesian coverage.
 
 **Per-Sample Analysis (by dataset):**
 
@@ -389,31 +396,33 @@ PyMC with physics-informed errors and shared ye_mag achieves **best coverage (82
 
 ### Key Findings
 
-1. **Physics-informed errors achieve excellent coverage (84%)** approaching nominal 95% with correct reference values.
+1. **Robust fitting (lm_robust) achieves best coverage (87.1%)** - Huber loss provides natural outlier resistance while preserving reasonable uncertainty estimates.
 
-1. **PyMC with physics errors and shared ye_mag achieves 82% coverage** - nearly as good as lmfit physics.
+1. **ODR with physics errors achieves 83.9% coverage** with lowest bias (+0.022) and good RMSE (0.120).
 
-1. **Separate ye_mag per channel reduces coverage** to 53-58% regardless of starting error model - overconfident.
+1. **Physics-informed errors outperform residual-based errors** for coverage, even though residual-based methods produce better-normalized residuals.
 
-1. **Correct reference pKa values are critical**: Previous apparent "bias" was largely due to incorrect reference values.
+1. **Heteroscedasticity paradox**: `outlier2_uniform` produces weighted residuals closest to N(0,1) (Shapiro p=0.778) but has poor coverage (38.7%) because uncertainties are underestimated in absolute scale.
 
-1. **L1 dataset now works** with normalized data (--nrm flag), achieving 100% coverage.
+1. **Separate ye_mag per channel reduces coverage** to ~40% regardless of starting error model - overconfident.
 
-1. **RMSE ~0.13-0.16 pH units** is achievable with proper error modeling and clean data.
+1. **RMSE ~0.12-0.14 pH units** is achievable with proper error modeling.
 
 ### Recommendation
 
 For production use:
 
-1. **Use physics-informed errors** (`√y + σ_buffer²`) - achieves 84% coverage
+1. **Use robust fitting (lm_robust)** - achieves 87.1% coverage with Huber loss
 
-1. **For Bayesian inference, use PyMC with physics errors and shared ye_mag** - achieves 82% coverage
+1. **For highest accuracy with good coverage, use ODR** - 83.9% coverage, lowest bias
+
+1. **For Bayesian inference, use PyMC with physics errors and shared ye_mag** - achieves 77% coverage
+
+1. **Avoid residual-based error estimation** (outlier2) for final uncertainty quantification - produces overconfident intervals
 
 1. **Use shared ye_mag** (not separate per channel) to avoid overconfidence
 
 1. **Always use --nrm flag** for datasets with "almost equal" label blocks
-
-1. **Exclude problematic wells** (low signal, misloaded) via scheme files
 
 A more principled approach would preserve physics-informed structure through to PyMC:
 
