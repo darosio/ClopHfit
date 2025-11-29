@@ -78,7 +78,7 @@ from clophfit.fitting.plotting import (
 from .data_structures import FitResult, SpectraGlobResults
 
 if typing.TYPE_CHECKING:
-    from clophfit.clophfit_types import ArrayDict, ArrayF
+    from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask
 
 
 # --- Globals ---
@@ -400,3 +400,104 @@ def outlier2(
         reweighted_ds.apply_mask(mask)
         logger.warning(f"outlier in {key}: {mask.astype(int)}.")
     return fit_binding_glob(reweighted_ds, robust=False)
+
+
+def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
+    """Update y_err from residuals mean."""
+    updated_ds = copy.deepcopy(ds)
+    for i, da in enumerate(updated_ds.values()):
+        len_x = len(da.y)
+        label_residuals = residuals[i * len_x : (i + 1) * len_x]
+        # residuals not masked to reduce weight of dataset with outliers
+        sigma = np.mean(np.abs(label_residuals))
+        # Avoid division by zero if all residuals are 0
+        sigma = max(sigma, 1e-3)
+        da.y_err = np.full(da.y.shape, sigma)
+    return updated_ds
+
+
+def fit_binding_glob_reweighted(
+    ds: Dataset, key: str, threshold: float = 2.05
+) -> FitResult[Minimizer]:
+    """RLS and outlier removal for multi-label titration datasets."""
+    # Initial fit
+    r = fit_binding_glob(ds)
+    if r.dataset and r.result:
+        start_idx = 0
+        for lbl, (da0, da) in enumerate(
+            zip(ds.values(), r.dataset.values(), strict=True), start=1
+        ):
+            end_idx = start_idx + len(da.y)
+            residual = r.result.residual[start_idx:end_idx]  # reduced residues
+            da.y_errc[da.mask] = np.abs(residual) * da0.y_err
+            mask = outlier_glob(residual, threshold=threshold)
+            n_outliers = mask.tolist().count(True)
+            if n_outliers == 1:
+                logger.warning(f"{n_outliers} outlier in {key}:y{lbl}.")
+            elif n_outliers > 1:
+                logger.warning(f"{n_outliers} outliers in {key}:y{lbl}.")
+            da.mask[da.mask] = ~mask
+            start_idx = end_idx
+        return fit_binding_glob(r.dataset)
+    return FitResult()
+
+
+def fit_binding_glob_recursive(
+    ds: Dataset, max_iterations: int = 15, tol: float = 0.1
+) -> FitResult[Minimizer]:
+    """Analyze multi-label titration datasets using ODR."""
+    # Initial fit
+    r = fit_binding_glob(ds)
+    residual_variance = r.result.redchi if r.result else 0.0
+
+    rn = r  # new
+    for _ in range(max_iterations):
+        if r.dataset and r.result:
+            start_idx = 0
+            for da in r.dataset.values():
+                end_idx = start_idx + len(da.y)
+                da.y_errc[da.mask] = np.maximum(
+                    np.abs(r.result.residual[start_idx:end_idx]), 0.01
+                )
+                start_idx = end_idx
+            rn = fit_binding_glob(r.dataset)
+        else:  # new
+            break
+        if rn.mini and rn.mini.minimize().redchi == 0:
+            rn = r
+            break
+        # Check convergence
+        if rn.result and residual_variance - rn.result.redchi < tol:
+            break
+        residual_variance = r.result.redchi if r.result else 0.0
+        r = rn
+    return rn
+
+
+def fit_binding_glob_recursive_outlier(
+    ds: Dataset, tol: float = 0.01, threshold: float = 3.0
+) -> FitResult[Minimizer]:
+    """Analyze multi-label titration datasets using IRLS."""
+    # Initial fit
+    r = fit_binding_glob_recursive(ds, tol=tol)
+    if r.result:
+        mask = outlier_glob(r.result.residual, threshold)
+    while mask.any() and r.dataset:
+        ds.apply_mask(~mask)
+        r = fit_binding_glob_recursive(ds, tol=tol)
+        if r.result:
+            mask = outlier_glob(r.result.residual, threshold)
+    return r
+
+
+def outlier_glob(
+    residuals: ArrayF, threshold: float = 2.0, plot_z_scores: bool = False
+) -> ArrayMask:
+    """Identify outliers."""
+    z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
+    if plot_z_scores:
+        plt.scatter(range(len(z_scores)), z_scores)
+        plt.axhline(y=threshold, color="r", linestyle="-")
+        plt.title("Z-scores")
+    outliers: ArrayMask = z_scores > threshold
+    return outliers
