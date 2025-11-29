@@ -91,3 +91,20 @@ Results from benchmarks/compare_error_models.py
 4. Best coverage (88.7%): Uniform data + Uniform fit + lm method
 5. Real data's lower coverage for outlier2 (50%) suggests additional systematic
    effects not captured in synthetic simulation (reference pKa uncertainty, etc.)
+
+* TODO Review refactor_benchmark branch
+The origin/refactor_benchmark branch has diverged significantly from main.
+Contains improvements but also outdated code. When ready:
+- Compare file by file with: git diff main...origin/refactor_benchmark -- <file>
+- Consider deleting branch after extracting any remaining useful parts
+- Most synthetic data utilities already in src/clophfit/testing/
+
+** Already ported to main:
+- [X] Dataset.__repr__() for readable output
+- [X] make_synthetic_ds() in testing/fitter_test_utils.py
+- [X] outlier2() with error_model parameter
+
+** May still be useful:
+- [ ] fit_binding_glob_recursive_outlier (if needed)
+- [ ] Additional benchmark scripts
+- [ ] Memory efficiency improvements (check perf: memory efficiency commit)
