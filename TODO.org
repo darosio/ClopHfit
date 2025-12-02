@@ -41,6 +41,126 @@ Synthetic data shows higher coverage (87%) → real data has additional systemat
 Plot: docs/residuals_all_methods.png
 Results: comprehensive_fitting_results_with_L1.csv
 * DONE leave a trace in the linear git history of the simulation/analysis before clean (functions removal)
+* DONE Comprehensive comparison of fitting methods (2024-11-30)
+benchmarks/compare_fitting_methods.py - Statistical comparison with synthetic & real data
+
+** Generated Graphics (committed before function removal)
+- benchmarks/synthetic_data_examples.png - Example synthetic data with/without outliers
+- benchmarks/coverage_comparison.png - Coverage bar chart across methods
+- benchmarks/bias_comparison.png - Bias bar chart across methods
+- benchmarks/coverage_vs_bias.png - Coverage vs bias scatter
+- benchmarks/uncertainty_calibration.png - K_err vs actual coverage
+- benchmarks/bias_rmse_comparison.png - Bias vs RMSE scatter plots
+
+** Final API (simplified after benchmarking)
+
+*** fit_binding_glob(ds, robust=False, scale_covar=True)
+- Default: standard least-squares with covariance scaling
+- robust=True: Huber loss for outlier resistance (BEST bias with outliers)
+- scale_covar=True: scales K_err by sqrt(reduced_chi_sq) when > 1
+
+*** fit_binding_glob_robust(ds, error_model="uniform")
+- Iterative error reweighting + Huber loss
+- Higher coverage on real data but worse bias with outliers
+- Use when error estimates are unreliable
+
+** Results Summary
+| Method | Clean Bias | Clean Cov | Outlier Bias | Outlier Cov |
+|--------|------------|-----------|--------------|-------------|
+| lm_standard | -0.002 | 94% | -0.059 | 100% |
+| lm_robust | +0.024 | 62% | -0.018 | 80% |
+| lm_robust+scale | +0.024 | 67% | -0.018 | 80% |
+| fit_glob_robust | +0.041 | 82% | -0.097 | 84% |
+
+** Final Benchmark Results (2024-11-30) - Realistic Synthetic Data
+Synthetic data calibrated to match real data characteristics:
+- y1: inverted curve, range ~460, 6% relative error (FRET acceptor)
+- y2: normal curve, range ~900, 3% relative error (FRET donor)
+- Outliers: 4σ drop in y1 at low pH (mimics real data pattern)
+
+| Method | Clean Bias | Outlier Bias | Clean RMSE | Outlier RMSE |
+|--------|------------|--------------|------------|--------------|
+| outlier2 | -0.0001 | **0.007** | 0.048 | **0.049** |
+| lm_standard | -0.003 | 0.032 | **0.041** | 0.053 |
+| lm_robust | -0.002 | 0.010 | 0.049 | 0.052 |
+
+Real data (38 wells):
+| Method | Mean K | Std K |
+|--------|--------|-------|
+| outlier2 | 6.69 | 0.36 |
+| lm_standard | 6.76 | 0.35 |
+| lm_robust | 6.72 | **0.33** |
+
+*** Conclusions:
+1. outlier2 is BEST for outlier handling (4x lower bias than lm_standard)
+2. lm_standard has best clean RMSE but worst outlier robustness
+3. lm_robust is good compromise - second-best outlier bias, lowest variance on real data
+
+** Outlier Magnitude Sensitivity Analysis (2024-12-01)
+benchmarks/outlier_magnitude_comparison.png
+
+Tested 2 outliers at low pH in y1 channel (DROP pattern like real data)
+50 trials per outlier magnitude, scale_covar=True for all methods
+
+| Sigma | Std Bias | Rob Bias | Std RMSE | Rob RMSE | Std Cov | Rob Cov |
+|-------|----------|----------|----------|----------|---------|---------|
+|     0 |   0.0053 |  -0.0006 |   0.0863 |   0.0933 |   96.0% |   94.3% |
+|     3 |   0.0076 |   0.0162 |   0.0885 |   0.0933 |   98.0% |   97.2% |
+|     5 |   0.0308 |   0.0215 |   0.0971 |   0.1051 |  100.0% |  100.0% |
+|     8 |   0.1043 |   0.0437 |   0.1467 |   0.1337 |  100.0% |  100.0% |
+|    10 |   0.1875 |   0.0665 |   0.2206 |   0.1440 |  100.0% |  100.0% |
+
+*** Conclusions:
+1. Robust (Huber) reduces bias by ~65% for severe outliers (10σ)
+2. RMSE crossover at ~8σ - Robust wins for large outliers
+3. Both maintain ~95-100% coverage thanks to scale_covar=True
+4. For typical outliers (3-5σ): Standard WLS is sufficient
+5. For severe outliers (>5σ): Use robust=True
+
+** Residual Normality Analysis (2024-12-01)
+benchmarks/residual_normality.png
+
+Checks if standardized residuals follow Gaussian distribution (critical for valid CI):
+
+Real Data (38 controls):
+| Method | Shapiro p-value | Excess Kurtosis | Normality |
+|--------|-----------------|-----------------|-----------|
+| lm_standard | 0.003 | 1.2 | Rejected |
+| lm_robust | 0.008 | 0.9 | Rejected |
+| outlier2 | 0.015 | 0.8 | Rejected |
+
+Synthetic with Outliers (N=100):
+| Method | Shapiro p-value | Excess Kurtosis | Normality |
+|--------|-----------------|-----------------|-----------|
+| lm_standard | <0.001 | 2.5 | Rejected |
+| lm_robust | 0.02 | 1.1 | Rejected |
+| outlier2 | 0.08 | 0.5 | Marginal |
+
+*** Key insight:
+All methods show some deviation from normality on real data.
+outlier2's Bayesian approach produces the most Gaussian residuals with outliers.
+
+** Final Recommendation (2024-12-01)
+- fit_binding_glob(ds, scale_covar=True) - DEFAULT for most use cases
+  * Proper heteroscedastic error weighting naturally downweights outliers
+  * When y1_err >> y2_err (typical: 100 vs 40), outliers in y1 have ~6x less influence
+  * No information loss from outlier masking
+
+- outlier2(ds, error_model="uniform") - When explicit outlier identification needed
+  * Best residual normality with outliers (Shapiro p=0.08)
+  * Most Gaussian residuals → most reliable uncertainty estimates
+  * Use when downstream analysis requires Gaussian assumptions
+
+** Action: REMOVE deprecated functions
+- fit_binding_reweight - superseded by outlier2()
+- fit_binding_glob_robust - standard WLS better with heteroscedastic errors
+- fit_binding_glob_recursive_outlier - poor coverage, complex
+
+** Keep (final API)
+- fit_binding_glob(ds, scale_covar=True) - standard least-squares (PRIMARY)
+- fit_binding_glob_recursive(ds) - conservative uncertainty estimates
+- outlier2(ds, error_model="uniform") - Bayesian with explicit outlier detection
+
 * TODO Check docs/tutorial/prtecan.ipynb
 that is in not using directly unavailable fitting methods
 * TODO Refactor fitting API for uniform error model handling
@@ -108,3 +228,71 @@ Contains improvements but also outdated code. When ready:
 - [ ] fit_binding_glob_recursive_outlier (if needed)
 - [ ] Additional benchmark scripts
 - [ ] Memory efficiency improvements (check perf: memory efficiency commit)
+
+* TODO Next Steps
++1. Analyze real experimental data characteristics
++1. Refine synthetic data generation to match real data
++1. Run comprehensive benchmarks
++1. Validate recommendations
++1. Implement cleanup based on validated results
+
+* removed core helper
+#+begin_src jupyter-python
+# --- LMfit Backend: Helpers and Fitting Functions ---
+def _binding_1site_models(params: Parameters, x: ArrayDict, is_ph: bool) -> ArrayDict:
+    "Compute models for the given input data and parameters."
+    models = {}
+    for lbl, x_data in x.items():
+        models[lbl] = binding_1site(
+            x_data,
+            params["K"].value,
+            params[f"S0_{lbl}"].value,
+            params[f"S1_{lbl}"].value,
+            is_ph,
+        )
+    return models
+
+
+def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bool]:
+    x = {k: da.x for k, da in ds.items()}
+    y = {k: da.y for k, da in ds.items()}
+    w = {
+        k: 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
+        for k, da in ds.items()
+    }
+    return x, y, w, ds.is_ph
+#+end_src
+
+* optimized
+#+begin_src jupyter-python
+  minimizer = Minimizer(
+      _binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True
+  )
+
+  # Use Huber loss for robustness to outliers
+  huber_result = minimizer.minimize(method="least_squares", loss="huber")
+
+  ...
+
+      # Update weights based on residuals (IRLS step)
+      if iteration < irls_iterations - 1:  # Don't update weights on last iteration
+          start_idx = 0
+          for da in current_ds.values():
+              end_idx = start_idx + len(da.y)
+              residuals = irls_result.residual[start_idx:end_idx]
+
+              # Conservative weight update: inverse of residual magnitude with damping
+              old_errors = da.y_errc[da.mask].copy()
+              new_errors = np.maximum(
+                  np.abs(residuals), 1e-6
+              )  # Prevent division by zero
+
+              # Apply damping to prevent instability
+              damped_errors = (
+                  1 - irls_damping
+              ) * old_errors + irls_damping * new_errors
+              da.y_errc[da.mask] = damped_errors
+
+              start_idx = end_idx
+
+    #+end_src

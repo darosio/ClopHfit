@@ -5,9 +5,8 @@ from __future__ import annotations
 import csv
 import logging
 import pprint
-from collections import namedtuple
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import click
 import lmfit  # type: ignore[import-untyped]
@@ -65,25 +64,23 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @ppr.command()
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
-@click.option("--cl", type=float, help="Cl titration: [Cl] (mM) of added aliquots.")
-@click.option("--bg", is_flag=True, help="Subtract buffer (from scheme.txt).")
-@click.option("--bg-adj", is_flag=True, help="Adjust bg to avoid negative value.")
-@click.option("--dil", is_flag=True, help="Apply dilution correction.")
-@click.option("--nrm", is_flag=True, help="Normalize using metadata.")
-@click.option("--bg-mth", default="mean", show_default=True, help="Method for bg.")
-@click.option("--sch", type=cPath(exists=True), help="Plate scheme (buffers CTRs).")
-@click.option("--add", type=cPath(exists=True), help="Initial volume and additions.")
-@click.option("--all", "comb", is_flag=True, help="Export (fit) all data combinations.")
+@click.option("--cl", type=float, help="Cl stock concentration (mM) of added aliquots.")
+@click.option("--bg", is_flag=True, help="Whether to subtract buffer (from scheme.txt).")  # fmt: skip
+@click.option("--bg-adj", is_flag=True, help="Whether to heuristically adjust negative background values.")  # fmt: skip
+@click.option("--dil", is_flag=True, help="Whether to apply dilution correction.")
+@click.option("--nrm", is_flag=True, help="Whether to normalize using metadata.")
+@click.option("--bg-mth", default="mean", show_default=True, help="Method for background calculation.")  # fmt: skip
+@click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
+@click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions).")  # fmt: skip
+@click.option("--all", "comb", is_flag=True, help="Whether to export all data combinations.")  # fmt: skip
 @click.option("--lim", type=(float, float), help="Range MIN, MAX of plot_K.")
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
-@click.option("--fit/--no-fit", default=True, show_default=True, help="Perform also fit.")  # fmt: skip
-@click.option("--png/--no-png", default=True, show_default=True, help="Export png files.")  # fmt: skip
+@click.option("--fit/--no-fit", default=True, show_default=True, help="Whether to perform fitting.")  # fmt: skip
+@click.option("--png/--no-png", default=True, show_default=True, help="Whether to export PNG files.")  # fmt: skip
 @click.option("--mcmc", type=click.Choice(["None", "multi", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, or single.")  # fmt: skip
-@click.option(
-    "--dry-run", is_flag=True, help="Validate inputs without processing data."
-)
+@click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
-    ctx: Context,
+    ctx: Context,  # Click context object.
     list_file: str,
     cl: float,
     bg: bool,
@@ -103,7 +100,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
-    LIST_FILE : List of Tecan files and concentration values.
+    LIST_FILE : Path to file containing Tecan files and concentration values.
 
     Saves titrations as .dat files and fits all wells using 2 labels. The
     function produces:
@@ -112,7 +109,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 
     - csv tables for all labelblocks and global fittings.
 
-    Note: Buffer is always subtracted if scheme indicates buffer well positions.
+    Buffer is always subtracted if scheme indicates buffer well positions.
     """
     out = ctx.obj.get("OUT", __tecan_out_dir__)
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -141,11 +138,11 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 
     # Load titration with error handling
     list_fp = Path(list_file)
-    logger.info(f"Titration list: {list_fp.resolve()}")
-    logger.info(f"{tecan_config}")
+    logger.info("Titration list: %s", list_fp.resolve())
+    logger.info("%s", tecan_config)
 
     try:
-        tit = Titration.fromlistfile(list_fp, not cl)
+        tit = Titration.fromlistfile(list_fp, is_ph=not cl)
     except FileNotFoundError as e:
         msg = (
             f"List file not found: {list_fp}\n"
@@ -172,13 +169,13 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
     tit.params.mcmc = mcmc
-    logger.info(f"{tit.params}")
+    logger.info("%s", tit.params)
 
     # Load additions file with error handling
     if add:
         try:
             tit.load_additions(Path(add))
-            logger.info(f"Additions: {tit.additions}")
+            logger.info("Additions: %s", tit.additions)
         except FileNotFoundError:
             msg = (
                 f"Additions file not found: {add}\n"
@@ -195,7 +192,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     if cl and tit.additions:
         try:
             tit.x = calculate_conc(tit.additions, cl)
-            logger.info(f"{tit.x}")
+            logger.info("%s", tit.x)
         except Exception as e:
             msg = (
                 f"Error calculating chloride concentrations: {e}\n"
@@ -211,7 +208,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
             f.savefig(out_fp / "buffer.png")
             f = tit.buffer.plot(nrm=True, title=title)
             f.savefig(out_fp / "buffer_norm.png")
-            logger.info(f"{tit.scheme}")
+            logger.info("%s", tit.scheme)
         except FileNotFoundError:
             msg = (
                 f"Scheme file not found: {sch}\n"
@@ -441,7 +438,9 @@ def fit_enspire(  # noqa: C901,PLR0912
                     raise ValueError(msg)
                 for label, data in d_tit.items():
                     band = dbands.get(label)
-                    fit_result = fitting.core.analyze_spectra(data, is_ph, band)
+                    fit_result = fitting.core.analyze_spectra(
+                        data, is_ph=is_ph, band=band
+                    )
                     if fit_result.is_valid() and fit_result.mini:
                         userargs = fit_result.mini.userargs[0]["default"]
                         ds_data[label] = DataArray(userargs.x, userargs.y)
@@ -454,7 +453,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                     len(d_tit.keys() - dbands.keys()) > 1  # svd > 1
                     or len(dbands.keys() & d_tit.keys()) > 1  # bands > 1
                 ):
-                    ds = Dataset(ds_data, is_ph)
+                    ds = Dataset(ds_data, is_ph=is_ph)
                     spectra_gres = fitting.core.analyze_spectra_glob(d_tit, ds, dbands)
                     if spectra_gres.svd and spectra_gres.svd.is_valid():
                         pdf_file = out_dir / f"{name}_{temp}_all_{tit}_SVD.pdf"
@@ -522,7 +521,11 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
     csv_df = pd.read_csv(csv_f)
     # Ignore buffer wells! SVD will use differences between spectra.
     note_df = note_df[note_df["mutant"] != "buffer"]
-    Notes = namedtuple("Notes", ["wells", "conc"])
+
+    class Notes(NamedTuple):
+        wells: list[str]
+        conc: list[float]
+
     titration_type = "pH" if is_ph else "Cl"
     note = Notes(list(note_df["well"]), list(note_df[titration_type]))
     spectra = csv_df[note.wells]
@@ -534,7 +537,7 @@ def spec(ctx: Context, csv_f: str, note_f: str, band: tuple[int, int] | None) ->
         print(note)
         print("DataFrame\n", spectra)
     is_ph = titration_type == "pH"
-    fit_result = fitting.core.analyze_spectra(spectra, is_ph, band)
+    fit_result = fitting.core.analyze_spectra(spectra, is_ph=is_ph, band=band)
     # output
     out.mkdir(parents=True, exist_ok=True)
     pdf_file = out / f"{Path(csv_f).stem}_{band}_{Path(note_f).stem}.pdf"
@@ -565,7 +568,7 @@ def glob(ctx: Context, file: str, boot: int, weight: bool) -> None:
         lbl: DataArray(x, file_df[lbl].to_numpy().astype(float))
         for lbl in file_df.columns[1:]
     }
-    ds = Dataset(ds_data, is_ph)
+    ds = Dataset(ds_data, is_ph=is_ph)
     if weight:
         fitting.core.weight_multi_ds_titration(ds)
     f_res = fitting.core.fit_binding_glob(ds)

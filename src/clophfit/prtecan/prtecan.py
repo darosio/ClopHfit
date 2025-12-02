@@ -376,7 +376,8 @@ class Labelblock:
         self.data: dict[str, float] = self._extract_data(lines[15:23])
         self._normalize_data()
 
-    def _validate_lines(self, lines: list[list[str | int | float]]) -> None:
+    @staticmethod
+    def _validate_lines(lines: list[list[str | int | float]]) -> None:
         """Validate if input lines correspond to a 96-well plate."""
         first_block_line = 25
         if (
@@ -431,7 +432,8 @@ class Labelblock:
                     logger.warning(msg)
         return data
 
-    def _validate_96_well_format(self, lines: list[list[str | int | float]]) -> None:
+    @staticmethod
+    def _validate_96_well_format(lines: list[list[str | int | float]]) -> None:
         """Validate 96-well plate data format."""
         if len(lines) < len(ROW_NAMES):
             msg = f"Insufficient rows: expected {len(ROW_NAMES)}, got {len(lines)}"
@@ -467,7 +469,7 @@ class Labelblock:
             and self.metadata["Gain"].value == other.metadata["Gain"].value
         )
 
-    def __almost_eq__(self, other: Labelblock) -> bool:
+    def almost_equal(self, other: Labelblock) -> bool:
         """Check if two Labelblocks are almost equal (same excitation and emission)."""
         return all(self.metadata[k] == other.metadata[k] for k in Labelblock._KEYS[:5])
 
@@ -573,7 +575,7 @@ class LabelblocksGroup:
         if self.allequal or all(labelblocks[0] == lb for lb in labelblocks[1:]):
             self.allequal = True
         # Check if all labelblocks are almost equal (requires normalization)
-        elif all(labelblocks[0].__almost_eq__(lb) for lb in labelblocks[1:]):
+        elif all(labelblocks[0].almost_equal(lb) for lb in labelblocks[1:]):
             self.allequal = False
         else:
             msg = "Creation of labelblock group failed. Labelblocks are neither equal nor almost equal."
@@ -646,9 +648,9 @@ class TecanfilesGroup:
         rngs = tuple(tf.labelblocks.keys() for tf in self.tecanfiles)
         for idx in itertools.product(*rngs):
             try:
-                gr = LabelblocksGroup(
-                    [tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)]
-                )
+                gr = LabelblocksGroup([
+                    tf.labelblocks[idx[i]] for i, tf in enumerate(self.tecanfiles)
+                ])
             except ValueError:
                 continue
             else:
@@ -657,7 +659,8 @@ class TecanfilesGroup:
             msg = f"No common labelblocks in files: {[tf.path.name for tf in self.tecanfiles]}."
             raise ValueError(msg)
         logger.warning(
-            f"Different LabelblocksGroup across files: {[str(tf.path) for tf in self.tecanfiles]}."
+            "Different LabelblocksGroup across files: %s.",
+            [str(tf.path) for tf in self.tecanfiles],
         )
 
 
@@ -785,7 +788,7 @@ class TitrationConfig:
         if self._callback is not None:
             self._callback()
 
-    def __setattr__(self, name: str, value: bool | str) -> None:
+    def __setattr__(self, name: str, value: bool | str) -> None:  # noqa: FBT001
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
             super().__setattr__(name, value)
@@ -831,9 +834,9 @@ class Buffer:
         if not self.wells:
             return {}
         dfs = {
-            label: pd.DataFrame(
-                {k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data}
-            )
+            label: pd.DataFrame({
+                k: lbg.data[k] for k in self.wells if lbg.data and k in lbg.data
+            })
             for label, lbg in self.tit.labelblocksgroups.items()
         }
         self.fit_results = self._fit_buffer(dfs)  # Perform fit
@@ -966,7 +969,7 @@ class Buffer:
                 buf_df["sem"] = sem
         return fit_resultd
 
-    def plot(self, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
+    def plot(self, *, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
         """Plot buffers of all labelblocksgroups."""
         dataframed = self.dataframes_nrm if nrm else self.dataframes
         fit_results = self.fit_results_nrm if nrm else self.fit_results
@@ -1117,9 +1120,9 @@ class TitrationResults:
         if not self.all_computed():
             self.compute_all()
         try:
-            n_sd: float = expected_sd / np.nanmedian(
-                [v.result.params[par].stderr for v in self.results.values() if v.result]
-            )
+            n_sd: float = expected_sd / np.nanmedian([
+                v.result.params[par].stderr for v in self.results.values() if v.result
+            ])
         except ZeroDivisionError:
             logger.warning("Unable to calculate n_sd; defaulting to 1.0")
             n_sd = 1.0  # Fallback if stderr values are missing
@@ -1181,7 +1184,7 @@ class TitrationResults:
                 sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
                 ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
                 ax1.legend(loc="upper left", frameon=False)
-                ax1.grid(True, axis="both")
+                ax1.grid(visible=True, axis="both")
                 ax1.set_xticklabels([])
                 ax1.set_xlabel("")
             ax2 = plt.subplot2grid((8, 1), loc=(1, 0), rowspan=7)
@@ -1192,7 +1195,7 @@ class TitrationResults:
             x, y = df_unk["K"], df_unk.index
             sns.stripplot(x=x, y=y, size=9, orient="h", ax=ax2)
             ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
-            ax2.grid(True, axis="both")
+            ax2.grid(visible=True, axis="both")
             ax2.set_yticks(range(len(df_unk)))
             ax2.set_yticklabels([str(label) for label in df_unk.index])
             ax2.set_ylim(-1, len(df_unk))
@@ -1208,8 +1211,9 @@ class TitrationResults:
         plt.close(fig)
         return fig
 
+    @staticmethod
     def _determine_xlim(
-        self, df_ctr: pd.DataFrame, df_unk: pd.DataFrame
+        df_ctr: pd.DataFrame, df_unk: pd.DataFrame
     ) -> tuple[float, float]:
         lower, upper = 0.99, 1.01
         xlim = (df_unk["K"].min(), df_unk["K"].max())
@@ -1219,7 +1223,7 @@ class TitrationResults:
         return xlim
 
 
-@dataclass
+@dataclass  # noqa: PLR0904 # Too many public methods - acceptable for complex classes
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
@@ -1339,7 +1343,7 @@ class Titration(TecanfilesGroup):
         )
 
     @classmethod
-    def fromlistfile(cls, list_file: Path | str, is_ph: bool) -> Titration:
+    def fromlistfile(cls, list_file: Path | str, *, is_ph: bool) -> Titration:
         """Build `Titration` from a list[.pH|.Cl] file."""
         tecanfiles, x, x_err = cls._listfile(Path(list_file))
         return cls(tecanfiles, x, is_ph, x_err=x_err)
@@ -1446,7 +1450,10 @@ class Titration(TecanfilesGroup):
             if y.min() < alpha * 0 * y.max():
                 delta = alpha * (y.max() - y.min()) - y.min()
                 logger.warning(
-                    f"Buffer for '{key}:{label}' was adjusted by {delta / sd:.2f} SD."
+                    "Buffer for '%s:%s' was adjusted by %.2f SD.",
+                    key,
+                    label,
+                    delta / sd,
                 )
                 return y + float(delta)
             return y  # never used if properly called?
@@ -1467,7 +1474,8 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    def _generate_combinations(self) -> list[tuple[tuple[bool, ...], str]]:
+    @staticmethod
+    def _generate_combinations() -> list[tuple[tuple[bool, ...], str]]:
         """Generate parameter combinations for export and fitting."""
         bool_iter = itertools.product([False, True], repeat=4)
         return [
@@ -1479,7 +1487,7 @@ class Titration(TecanfilesGroup):
     def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
         """Apply a combination of parameters to the Titration."""
         (bg, adj, dil, nrm), method = combination
-        logger.info(f"Params are: ........... {(bg, adj, dil, nrm), method}")
+        logger.info("Params are: ........... %s", ((bg, adj, dil, nrm), method))
         self.params.bg = bg
         self.params.bg_adj = adj
         self.params.dil = dil
@@ -1626,7 +1634,7 @@ class Titration(TecanfilesGroup):
             ds = self._create_ds(key, label)
             return fit_binding_glob(ds)
         except InsufficientDataError:
-            logger.warning(f"Skip fit for well {key} for Label:{label}.")
+            logger.warning("Skip fit for well %s for Label:%s.", key, label)
             return FitResult()
 
     def _compute_global_fit(self, key: str) -> FitResult[Minimizer]:
@@ -1637,7 +1645,7 @@ class Titration(TecanfilesGroup):
             # FIXME: return fit_binding_glob(ds, robust=True)
             return outlier2(ds, key)
         except InsufficientDataError:
-            logger.warning(f"Skipping global fit for well {key}.")
+            logger.warning("Skipping global fit for well %s.", key)
             return FitResult()
 
     def _create_data_array(self, key: str, label: int) -> DataArray:
@@ -1658,7 +1666,7 @@ class Titration(TecanfilesGroup):
         ds = Dataset({f"{label}": da}, is_ph=self.is_ph)
         # Apply weighting if bg_err is not provided
         if not self.bg_err:
-            weight_da(da, ds.is_ph)
+            weight_da(da, is_ph=ds.is_ph)
         return ds
 
     def _create_global_ds(self, key: str) -> Dataset:
@@ -1686,12 +1694,12 @@ class Titration(TecanfilesGroup):
                     result_glob, threshold=2.5
                 )
             except Exception:
-                logger.exception(f"Error during ODR fitting for well '{key}'")
+                logger.exception("Error during ODR fitting for well '%s'", key)
                 result_odr = FitResult()
             # Log any warnings captured during the process
             for warn in caught_warnings:
                 if issubclass(warn.category, RuntimeWarning):
-                    logger.warning(f"Warning for well '{key}': {warn.message}")
+                    logger.warning("Warning for well '%s': %s", key, warn.message)
         return result_odr
 
     @cached_property
@@ -1699,7 +1707,7 @@ class Titration(TecanfilesGroup):
         """Perform global MCMC fitting."""
         # FIXME: 0.15 vs. 0.05
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         return TitrationResults(
             self.scheme, self.fit_keys, partial(self._compute_mcmc_fit, n_sd=n_sd)
         )
@@ -1707,40 +1715,38 @@ class Titration(TecanfilesGroup):
     def _compute_mcmc_fit(self, key: str, n_sd: float) -> FitResult[az.InferenceData]:
         """Compute global MCMC fit for a single key."""
         # Calculate n_sd from the previous global fitting results
-        logger.info(f"Starting PyMC sampling for key: {key}")
+        logger.info("Starting PyMC sampling for key: %s", key)
         try:  # FIXME: Global vs. ODR
             result_pymc = fit_binding_pymc(self.result_global[key], n_sd=n_sd, n_xerr=1)
         except Exception:
-            logger.exception(f"Error during MCMC sampling for key: {key}")
+            logger.exception("Error during MCMC sampling for key: %s", key)
             result_pymc = FitResult()  # empty result
         finally:
-            logger.info(f"MCMC fitting completed for well: {key}")
+            logger.info("MCMC fitting completed for well: %s", key)
         return result_pymc
 
     @cached_property
     def result_multi_trace(self) -> tuple[az.InferenceData, pd.DataFrame]:
         """Perform global MCMC fitting and x_true."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
         trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame(
-            {
-                "filenames": filenames,
-                "x": da_true.x,
-                "x_err": da_true.x_err,
-            }
-        ).to_csv("list_x_true.csv", index=False, header=False)
+        pd.DataFrame({
+            "filenames": filenames,
+            "x": da_true.x,
+            "x_err": da_true.x_err,
+        }).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property
     def result_multi_trace2(self) -> tuple[az.InferenceData, pd.DataFrame]:
         """Perform global MCMC fitting and x_true."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info(f"n_sd[Global] estimated for MCMC fitting: {n_sd:.3f}")
+        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
         trace = fit_binding_pymc_multi2(
             results, self.scheme, self.buffer.bg_err, n_sd=n_sd
@@ -1748,13 +1754,11 @@ class Titration(TecanfilesGroup):
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame(
-            {
-                "filenames": filenames,
-                "x": da_true.x,
-                "x_err": da_true.x_err,
-            }
-        ).to_csv("list_x_true.csv", index=False, header=False)
+        pd.DataFrame({
+            "filenames": filenames,
+            "x": da_true.x,
+            "x_err": da_true.x_err,
+        }).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property
@@ -1774,7 +1778,8 @@ class Titration(TecanfilesGroup):
             return extract_fit(key, ctr, self.result_multi_trace[1], ds)
         return FitResult()
 
-    def get_scheme_name(self, key: str, scheme_map: dict[str, set[str]]) -> str:
+    @staticmethod
+    def get_scheme_name(key: str, scheme_map: dict[str, set[str]]) -> str:
         """Extract ctr name."""
         for scheme, keys in scheme_map.items():
             if key in keys:
@@ -1822,7 +1827,7 @@ class Titration(TecanfilesGroup):
         plt.title(f"Temperature = {format_estimate(ave, std)} °C {title}", fontsize=14)
         plt.xlabel(f"{pp.kind}", fontsize=14)
         plt.ylabel("Temperature (°C)", fontsize=14)
-        plt.grid(lw=0.33)
+        plt.grid(visible=True, lw=0.33)
         # Add a legend
         plt.legend(title="Label")
         plt.close()

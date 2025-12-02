@@ -135,7 +135,7 @@ def fit_binding_odr_recursive(
 
 
 def outlier(
-    output: odr.Output, threshold: float = 2.0, plot_z_scores: bool = False
+    output: odr.Output, *, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
     residuals_x = output.delta
@@ -160,10 +160,10 @@ def fit_binding_odr_recursive_outlier(
     # Initial fit
     ro = fit_binding_odr_recursive(result, tol=tol)
     if ro.mini:
-        omask = outlier(ro.mini, threshold)
+        omask = outlier(ro.mini, threshold=threshold)
     while omask.any() and ro.dataset:
         result.dataset.apply_mask(~omask)
         ro = fit_binding_odr_recursive(result, tol=tol)
         if ro.mini:
-            omask = outlier(ro.mini, 3.0)
+            omask = outlier(ro.mini, threshold=3.0)
     return ro

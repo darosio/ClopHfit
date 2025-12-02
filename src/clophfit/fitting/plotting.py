@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
+    from matplotlib import axes
     from matplotlib.axes import Axes
 
     from clophfit.clophfit_types import ArrayF
@@ -79,7 +80,7 @@ class PlotParameters:
 
 def _apply_common_plot_style(ax: Axes, title: str, xlabel: str, ylabel: str) -> None:
     """Add grid, title and x_y_labels."""
-    ax.grid(True)
+    ax.grid(visible=True)
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -267,7 +268,7 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     samples_dict = {key: np.array(val) for key, val in samples.items()}
     idata = az.from_dict(posterior=samples_dict)
-    parameter_posterior = idata.posterior[p_name]  # pylint: disable=E1101
+    parameter_posterior = idata.posterior[p_name]
     az.plot_posterior(parameter_posterior, ax=ax)  # type: ignore[no-untyped-call]
 
 
@@ -278,8 +279,25 @@ def plot_fit(
     nboot: int = 0,
     pp: PlotParameters | None = None,
 ) -> None:
-    """Plot residuals for each dataset with uncertainty."""
+    """Plot fitted curves and data points with uncertainty on a given Axes.
+
+    Parameters
+    ----------
+    ax : Axes
+        The matplotlib axis to plot on.
+    ds : Dataset
+        The dataset containing the data points.
+    params : Parameters
+        The fitted parameters from lmfit.
+    nboot : int
+        Number of bootstrap samples to generate confidence bands.
+    pp : PlotParameters | None
+        Plotting parameters for consistent styling.
+
+    """
     stretch = 0.05
+    colors = [COLOR_MAP(i) for i in range(len(ds))]
+
     xfit = {
         k: np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
         for k, da in ds.items()
@@ -291,7 +309,7 @@ def plot_fit(
             params["K"].value,
             params[f"S0_{lbl}"].value,
             params[f"S1_{lbl}"].value,
-            ds.is_ph,
+            is_ph=ds.is_ph,
         )
         for lbl in ds
     }
@@ -346,7 +364,7 @@ def plot_fit(
                     p_sample["K"].value,
                     p_sample[f"S0_{lbl}"].value,
                     p_sample[f"S1_{lbl}"].value,
-                    ds.is_ph,
+                    is_ph=ds.is_ph,
                 )
             dy = y_samples.std(axis=0)
             # Plot uncertainty.
@@ -362,6 +380,105 @@ def plot_fit(
     title = "=".join(["K", str(k).replace("+/-", "±")])
     xlabel = "pH" if ds.is_ph else "Cl"
     _apply_common_plot_style(ax, f"LM fit {title}", xlabel, "")
+
+
+# --- Plotting ---
+def plot_fit_gemini(
+    ax: axes.Axes,
+    ds: Dataset,
+    params: Parameters,
+    nboot: int = 0,
+    pp: PlotParameters | None = None,
+) -> None:
+    """
+    Plot fitted curves and data points on a given axis.
+
+    Parameters
+    ----------
+    ax : axes.Axes
+        The matplotlib axis to plot on.
+    ds : Dataset
+        The dataset containing the data points.
+    params : Parameters
+        The fitted parameters from lmfit.
+    nboot : int
+        Number of bootstrap samples to generate confidence bands.
+    pp : PlotParameters | None
+        Plotting parameters for consistent styling.
+    """
+    stretch = 0.05
+    colors = [COLOR_MAP(i) for i in range(len(ds))]
+
+    for (lbl, da), clr in zip(ds.items(), colors, strict=False):
+        # Generate smooth x-values for the fitted curve
+        x_fit = np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
+        y_fit = binding_1site(
+            x_fit,
+            params["K"].value,
+            params[f"S0_{lbl}"].value,
+            params[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+
+        # Plot original data points
+        if pp:
+            ax.scatter(
+                da.x,
+                da.y,
+                c=list(da.x),
+                s=99,
+                edgecolors=clr,
+                label=lbl,
+                vmin=pp.hue_norm[0],
+                vmax=pp.hue_norm[1],
+                cmap=pp.palette,
+            )
+        else:
+            ax.plot(da.x, da.y, "o", color=clr, label=lbl)
+
+        # Plot the fitted curve
+        ax.plot(x_fit, y_fit, "-", color="gray")
+
+        # Plot error bars if available
+        if da.y_err.size > 0:
+            x_err = da.x_err if da.x_err.size > 0 else None
+            ax.errorbar(
+                da.x,
+                da.y,
+                yerr=da.y_err,
+                xerr=x_err,
+                fmt=".",
+                color=clr,
+                alpha=0.4,
+                capsize=3,
+            )
+
+        # Plot bootstrap confidence interval
+        if nboot > 0 and params["K"].stderr is not None:
+            y_samples = np.empty((nboot, len(x_fit)))
+            rng = np.random.default_rng()
+            for i in range(nboot):
+                sampled_params = params.copy()
+                for p in sampled_params.values():
+                    if p.stderr:
+                        p.value = rng.normal(p.value, p.stderr)
+                y_samples[i, :] = binding_1site(
+                    x_fit,
+                    sampled_params["K"].value,
+                    sampled_params[f"S0_{lbl}"].value,
+                    sampled_params[f"S1_{lbl}"].value,
+                    is_ph=ds.is_ph,
+                )
+            dy = y_samples.std(axis=0)
+            ax.fill_between(x_fit, y_fit - dy, y_fit + dy, alpha=0.1, color=clr)
+
+    # --- Final Touches ---
+    ax.legend()
+    k_val = params["K"].value
+    k_err = params["K"].stderr
+    title = f"K = {ufloat(k_val, k_err):.2u}" if k_err else f"K = {k_val:.3g}"
+    xlabel = "pH" if ds.is_ph else "Cl"
+    _apply_common_plot_style(ax, f"Fit: {title}", xlabel, "")
 
 
 # TODO: Complete print emcee

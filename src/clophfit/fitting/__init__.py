@@ -3,6 +3,6 @@
 Re-export key submodules for convenient access.
 """
 
-from . import core, data_structures, errors, models, odr, plotting
+from . import bayes, core, data_structures, errors, models, odr, plotting
 
-__all__ = ["core", "data_structures", "errors", "models", "odr", "plotting"]
+__all__ = ["bayes", "core", "data_structures", "errors", "models", "odr", "plotting"]

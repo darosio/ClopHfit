@@ -355,6 +355,9 @@ def test_bayes_module_imports() -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.filterwarnings(
+    "ignore:invalid value encountered in scalar divide"
+)  # smoke tests use very short MCMC chains (50 samples), which causes arviz to encounter numerical issues when calculating convergence diagnostics.
 def test_fit_binding_pymc_smoke_test(ph_dataset: Dataset) -> None:
     """Smoke test for the PyMC fitter with minimal sampling."""
     pytest.importorskip("pymc")
@@ -398,6 +401,9 @@ def test_fit_binding_pymc_with_xerr(ph_dataset: Dataset) -> None:
 
 
 @pytest.mark.slow
+@pytest.mark.filterwarnings(
+    "ignore:invalid value encountered in scalar divide"
+)  # smoke tests use very short MCMC chains (50 samples), which causes arviz to encounter numerical issues when calculating convergence diagnostics.
 def test_fit_binding_pymc2_smoke_test(multi_dataset: Dataset) -> None:
     """Smoke test for PyMC fitter with separate ye_mag per label."""
     pytest.importorskip("pymc")

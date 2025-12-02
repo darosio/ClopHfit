@@ -78,7 +78,7 @@ from clophfit.fitting.plotting import (
 from .data_structures import FitResult, SpectraGlobResults
 
 if typing.TYPE_CHECKING:
-    from clophfit.clophfit_types import ArrayDict, ArrayF, ArrayMask
+    from clophfit.clophfit_types import ArrayF, ArrayMask
 
 
 # --- Globals ---
@@ -89,81 +89,142 @@ EMCEE_STEPS = 1800
 logger = logging.getLogger(__name__)
 
 
-# helpers
-def _binding_1site_models(params: Parameters, x: ArrayDict, is_ph: bool) -> ArrayDict:
-    """Compute models for the given input data and parameters."""
-    models = {}
-    for lbl, x_data in x.items():
-        models[lbl] = binding_1site(
-            x_data,
-            params["K"].value,
-            params[f"S0_{lbl}"].value,
-            params[f"S1_{lbl}"].value,
-            is_ph,
-        )
-    return models
-
-
-def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bool]:
-    x = {k: da.x for k, da in ds.items()}
-    y = {k: da.y for k, da in ds.items()}
-    w = {
-        k: 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
-        for k, da in ds.items()
-    }
-    return x, y, w, ds.is_ph
+# --- LMfit Backend: Helpers and Fitting Functions ---
 
 
 def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
-    """Compute concatenated residuals (array) for multiple datasets [weight = 1/sigma]."""
-    x, y, w, is_ph = _init_from_dataset(ds)
-    models = _binding_1site_models(params, x, is_ph)
-    residuals: ArrayF = np.concatenate([(w[lbl] * (y[lbl] - models[lbl])) for lbl in x])
-    return residuals
+    """Compute concatenated residuals for multiple datasets for lmfit.
+
+    Optimized version with reduced dictionary lookups and vectorized operations.
+    """
+    is_ph = ds.is_ph
+    K = params["K"].value  # Extract once to avoid repeated access  # noqa: N806
+
+    # Pre-allocate lists for better performance
+    residuals_list: list[ArrayF] = []
+
+    for lbl, da in ds.items():
+        # Get parameter values once per label
+        S0 = params[f"S0_{lbl}"].value  # noqa: N806
+        S1 = params[f"S1_{lbl}"].value  # noqa: N806
+
+        # Compute model and residuals in one go
+        model = binding_1site(da.x, K, S0, S1, is_ph=is_ph)
+        weight = 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
+        residuals_list.append(weight * (da.y - model))
+
+    return np.concatenate(residuals_list)
 
 
 def _build_params_1site(ds: Dataset) -> Parameters:
-    """Initialize parameters for 1 site model based on the given dataset."""
+    """Initialize lmfit Parameters for a 1-site model from a Dataset.
+
+    Optimized version with reduced list operations and vectorized computations.
+    """
     params = Parameters()
     if ds.is_ph:
         params.add("K", min=3, max=11)
     else:
         # epsilon avoids x/K raise x/0 error
         params.add("K", min=float_info.epsilon)
-    k_initial = []
-    for lbl, da in ds.items():
+
+    # Pre-allocate numpy array for better performance
+    k_initial_guesses = np.empty(len(ds))
+
+    for i, (lbl, da) in enumerate(ds.items()):
         params.add(f"S0_{lbl}", value=da.y[0])
         params.add(f"S1_{lbl}", value=da.y[-1])
-        target_y = (da.y[0] + da.y[-1]) / 2
-        k_initial.append(da.x[np.argmin(np.abs(da.y - target_y))])
-    params["K"].value = np.mean(k_initial)
+        # Vectorized computation of target and halfway point
+        target_y = (da.y[0] + da.y[-1]) * 0.5
+        halfway_idx = np.argmin(np.abs(da.y - target_y))
+        k_initial_guesses[i] = da.x[halfway_idx]
+
+    params["K"].value = np.mean(k_initial_guesses)
     return params
 
 
+def weight_da(da: DataArray, *, is_ph: bool) -> bool:
+    """Estimate initial weights for a DataArray by fitting it individually.
+
+    The standard error of the residuals from this initial fit is used as
+    the uncertainty (`y_err`) for subsequent weighted fits.
+
+    Parameters
+    ----------
+    da : DataArray
+        The data array to be weighted.
+    is_ph : bool
+        Whether the titration is pH-based.
+
+    Returns
+    -------
+    bool
+        True if the weighting fit was successful, False otherwise.
+    """
+    ds = Dataset.from_da(da, is_ph=is_ph)
+    params = _build_params_1site(ds)
+    if len(params) > len(da.y):
+        # Not enough data points to fit; assign default error
+        da.y_err = np.ones_like(da.xc)
+        return False
+    mr = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
+    # Calculate residuals SEM
+    sem = np.std(mr.residual, ddof=1) / np.sqrt(len(mr.residual))
+    da.y_err = sem if np.isfinite(sem) and sem > 0 else np.array([1.0])
+    return True
+
+
+def weight_multi_ds_titration(ds: Dataset) -> None:
+    """Assign weights to all DataArrays within a Dataset.
+
+    Iterates through each `DataArray` in the `Dataset`, calling `weight_da`
+    to estimate `y_err`. For any `DataArray` where weighting fails (e.g., due
+    to insufficient data), a fallback error is assigned based on the errors
+    from successfully fitted arrays.
+
+    Optimized version with reduced set operations and memory allocations.
+    """
+    failed_labels = []
+    successful_max_yerr = -np.inf
+
+    # Single pass: weight and track failures/successes
+    for lbl, da in ds.items():
+        if not weight_da(da, is_ph=ds.is_ph):
+            failed_labels.append(lbl)
+        else:
+            # Track maximum error from successful fits
+            max_err = np.max(da.y_err).item()
+            successful_max_yerr = max(successful_max_yerr, max_err)
+
+    # Assign fallback error to failed labels
+    if failed_labels and successful_max_yerr > -np.inf:
+        fallback_error = successful_max_yerr * 10
+        for lbl in failed_labels:
+            ds[lbl].y_err = np.full_like(ds[lbl].xc, fallback_error)
+
+
+# --- Spectral Data Processing ---
 def analyze_spectra(
-    spectra: pd.DataFrame, is_ph: bool, band: tuple[int, int] | None = None
+    spectra: pd.DataFrame, *, is_ph: bool, band: tuple[int, int] | None = None
 ) -> FitResult[Minimizer]:
-    """Analyze spectra titration, create and plot fit results.
+    """Analyze spectra titration, fit the data, and plot the results.
 
     This function performs either Singular Value Decomposition (SVD) or
-    integrates the spectral data over a specified band and fits the integrated
-    data to a binding model.
+    integrates spectra over a specified band.
 
     Parameters
     ----------
     spectra : pd.DataFrame
         The DataFrame containing spectra (one spectrum for each column).
     is_ph : bool
-        Whether the x values should be interpreted as pH values rather than
-        concentrations.
+        Whether the x-axis represents pH.
     band : tuple[int, int] | None
-        The band to integrate over. If None (default), performs Singular Value
-        Decomposition (SVD).
+        If provided, use the 'band' integration method. Otherwise, use 'svd'.
 
     Returns
     -------
     FitResult[Minimizer]
-        A FitResult object containing the figure, result, and mini.
+        An object containing the fit results and the summary plot.
 
     Raises
     ------
@@ -187,7 +248,7 @@ def analyze_spectra(
         spectra = spectra.dropna(axis=0)
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
         u, s, v = np.linalg.svd(ddf)
-        ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph)
+        ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph=is_ph)
         plot_autovectors(ax2, spectra.index, u)
         plot_autovalues(ax3, s[:])  # don't plot last auto-values?
         plot_pca(ax5, v, x, PlotParameters(is_ph))
@@ -199,12 +260,12 @@ def analyze_spectra(
             msg = f"Band parameters ({ini}, {fin}) are not in the spectra's index."
             raise ValueError(msg)
         # columns index name are not necessarily unique
-        y = np.array(
-            [spectra.iloc[:, i].loc[ini:fin].sum() for i in range(spectra.shape[1])]
-        )
+        y = np.array([
+            spectra.iloc[:, i].loc[ini:fin].sum() for i in range(spectra.shape[1])
+        ])
         # rescale y
         y /= np.abs(y).max() / 10
-        ds = Dataset.from_da(DataArray(x, y), is_ph)
+        ds = Dataset.from_da(DataArray(x, y), is_ph=is_ph)
         ylabel = "Integrated Band Fluorescence"
         ylabel_color = (0.0, 0.0, 0.0, 1.0)  # "k"
     weight_multi_ds_titration(ds)
@@ -217,52 +278,138 @@ def analyze_spectra(
     return FitResult(fig, result, mini, ds)
 
 
-def fit_binding_glob(ds: Dataset, robust: bool = False) -> FitResult[Minimizer]:
-    """Analyze multi-label titration datasets and visualize the results."""
+def fit_binding_glob(ds: Dataset, *, robust: bool = False) -> FitResult[Minimizer]:
+    """Analyze multi-label titration datasets and visualize the results.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Input dataset with x, y, and y_err for each label.
+    robust : bool
+        If True, use Huber loss for robust fitting (reduces outlier influence).
+
+    Returns
+    -------
+    FitResult[Minimizer]
+
+    Raises
+    ------
+    InsufficientDataError
+        If there are not enough data points for the number of parameters.
+
+    Notes
+    -----
+    Parameter uncertainties are scaled by sqrt(reduced_chi_sq) via lmfit's
+    Minimizer(scale_covar=True), which improves coverage when errors are
+    underestimated.
+    """
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
-        raise InsufficientDataError
+        msg = "Not enough data points for the number of parameters."
+        raise InsufficientDataError(msg)
     mini = Minimizer(_binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True)
     if robust:
         # Use Huber loss for robust fitting to reduce the influence of outliers
         result = mini.minimize(method="least_squares", loss="huber")
     else:
         result = mini.minimize()
+
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, result.params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     return FitResult(fig, result, mini, copy.deepcopy(ds))
 
 
-def weight_da(da: DataArray, is_ph: bool) -> bool:
-    """Assign weights to each label based on individual label fitting."""
-    success = True
-    ds = Dataset.from_da(da, is_ph=is_ph)
+################################################
+def fit_lm(
+    ds: Dataset,
+    *,
+    robust: bool = False,
+    iterative: bool = False,
+    outlier_threshold: float | None = None,
+) -> FitResult[Minimizer]:
+    """Fit a dataset using the Least-Squares (LM) method with lmfit.
+
+    This function can perform a standard fit, a robust fit (using Huber loss),
+    or an iterative fit where weights are refined and outliers are removed.
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset to fit.
+    robust : bool
+        If True, use a robust loss function (Huber) to reduce the influence
+        of outliers.
+    iterative : bool
+        If True, perform Iteratively Reweighted Least Squares (IRLS).
+    outlier_threshold : float | None
+        If set, remove outliers with residuals exceeding this many standard
+        deviations and refit.
+
+    Returns
+    -------
+    FitResult[Minimizer]
+        The result of the fit.
+
+    Raises
+    ------
+    InsufficientDataError
+        When too small dataset.
+    """
+    if len(np.concatenate([da.y for da in ds.values()])) <= len(
+        _build_params_1site(ds)
+    ):
+        msg = "Not enough data points for the number of parameters."
+        raise InsufficientDataError(msg)
+
+    # --- Initial Fit ---
     params = _build_params_1site(ds)
-    # Too few data points (compared to number of parameters).
-    if len(params) > len(da.y):
-        success = False
-        sem = 1.0 * np.ones_like(da.xc)
+    minimizer = Minimizer(
+        _binding_1site_residuals, params, fcn_args=(ds,), scale_covar=True
+    )
+    if robust:
+        result = minimizer.minimize(method="least_squares", loss="huber")
     else:
-        mr = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
-        # Calculate residuals SEM
-        sem = np.std(mr.residual, ddof=1) / np.sqrt(len(mr.residual))
-    da.y_err = sem
-    return success
+        result = minimizer.minimize()
 
+    # --- Optional: Iterative Reweighting and Outlier Removal ---
+    if iterative or outlier_threshold is not None:
+        current_ds = copy.deepcopy(ds)
+        for _ in range(10):  # Max 10 iterations
+            # 1. Refit with current weights
+            params = _build_params_1site(current_ds)
+            m = Minimizer(_binding_1site_residuals, params, fcn_args=(current_ds,))
+            res = m.minimize()
 
-def weight_multi_ds_titration(ds: Dataset) -> None:
-    """Assign weights to each label based on individual label fitting."""
-    failed_fit_labels = []
-    for lbl, da in ds.items():
-        if not weight_da(da, ds.is_ph):
-            failed_fit_labels.append(lbl)
-    if failed_fit_labels:
-        max_yerr = -np.inf
-        for lbl in ds.keys() - set(failed_fit_labels):
-            max_yerr = max(np.max(ds[lbl].y_err).item(), max_yerr)
-        for lbl in failed_fit_labels:
-            ds[lbl].y_err = np.array([max_yerr * 10])
+            if not res.success:
+                break  # Stop if fit fails
+
+            # 2. Update weights from residuals
+            start_idx = 0
+            for da in current_ds.values():
+                end_idx = start_idx + len(da.y)
+                residuals = res.residual[start_idx:end_idx]
+                # Update y_err based on the new residuals
+                da.y_errc[da.mask] = np.maximum(np.abs(residuals), 1e-3)
+                start_idx = end_idx
+
+            # 3. (Optional) Outlier removal
+            if outlier_threshold is not None:
+                z_scores = np.abs(stats.zscore(res.residual))
+                mask = z_scores < outlier_threshold
+                if not np.all(mask):
+                    current_ds.apply_mask(mask)  # Permanently remove for next iteration
+                else:
+                    break  # No outliers removed, convergence
+
+            result = res  # Store the latest successful result
+
+    # --- Final Plotting and Return ---
+    fig = figure.Figure()
+    ax = fig.add_subplot(111)
+    plot_fit(ax, ds, result.params, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
+
+    return FitResult(figure=fig, result=result, mini=None, dataset=ds)
 
 
 def analyze_spectra_glob(
@@ -285,7 +432,7 @@ def analyze_spectra_glob(
             prev_max = spectra_adjusted.index.max()
             adjusted_list.append(spectra_adjusted)
         spectra_merged = pd.concat(adjusted_list)
-        svd = analyze_spectra(spectra_merged, ds.is_ph)
+        svd = analyze_spectra(spectra_merged, is_ph=ds.is_ph)
         ds_svd = ds.copy(labels_svd)
         weight_multi_ds_titration(ds_svd)  # Fixed from ds
         f_res = fit_binding_glob(ds_svd)
@@ -332,6 +479,7 @@ def outlier2(
     ds: Dataset,
     key: str = "",
     threshold: float = 3.0,
+    *,
     plot_z_scores: bool = False,
     error_model: str = "uniform",
 ) -> FitResult[Minimizer]:
@@ -401,8 +549,58 @@ def outlier2(
     n_outliers = mask.tolist().count(False)
     if n_outliers > 0:
         reweighted_ds.apply_mask(mask)
-        logger.warning(f"outlier in {key}: {mask.astype(int)}.")
+        logger.warning("outlier in %s: %s.", key, mask.astype(int))
     return fit_binding_glob(reweighted_ds, robust=False)
+
+
+def fit_binding_glob_robust(
+    ds: Dataset,
+    error_model: str = "uniform",
+) -> FitResult[Minimizer]:
+    """Robust fitting with error reweighting based on residuals.
+
+    This function performs iterative reweighting:
+    1. Initial Huber-loss fit for outlier-resistant estimates
+    2. Reweight errors based on residuals (per-label)
+    3. Final Huber-loss fit with reweighted errors
+
+    For simple robust fitting without reweighting, use:
+        fit_binding_glob(ds, robust=True)
+
+    Parameters
+    ----------
+    ds : Dataset
+        Input dataset with x, y, and y_err for each label.
+    error_model : str
+        "uniform": reweight to uniform errors per label (default)
+        "none": skip reweighting, equivalent to fit_binding_glob(robust=True)
+
+    Returns
+    -------
+    FitResult[Minimizer]
+    """
+    if error_model == "none":
+        return fit_binding_glob(ds, robust=True)
+
+    # Step 1: Initial robust fit
+    fr = fit_binding_glob(ds, robust=True)
+    if not fr.result:
+        return FitResult()
+
+    # Step 2: Reweight errors based on residuals (per-label)
+    reweighted_ds = copy.deepcopy(ds)
+    start_idx = 0
+    for da0, da in zip(ds.values(), reweighted_ds.values(), strict=True):
+        end_idx = start_idx + len(da.y)
+        reduced_residual = fr.result.residual[start_idx:end_idx]
+        raw_residual = np.abs(reduced_residual) * da0.y_err
+        sigma = np.mean(np.abs(raw_residual))
+        sigma = max(sigma, 1e-3)
+        da.y_errc = sigma * np.ones_like(da.xc)
+        start_idx = end_idx
+
+    # Step 3: Final fit with Huber loss on reweighted data
+    return fit_binding_glob(reweighted_ds, robust=True)
 
 
 def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
@@ -436,9 +634,9 @@ def fit_binding_glob_reweighted(
             mask = outlier_glob(residual, threshold=threshold)
             n_outliers = mask.tolist().count(True)
             if n_outliers == 1:
-                logger.warning(f"{n_outliers} outlier in {key}:y{lbl}.")
+                logger.warning("%s outlier in %s:y%s.", n_outliers, key, lbl)
             elif n_outliers > 1:
-                logger.warning(f"{n_outliers} outliers in {key}:y{lbl}.")
+                logger.warning("%s outliers in %s:y%s.", n_outliers, key, lbl)
             da.mask[da.mask] = ~mask
             start_idx = end_idx
         return fit_binding_glob(r.dataset)
@@ -484,17 +682,17 @@ def fit_binding_glob_recursive_outlier(
     # Initial fit
     r = fit_binding_glob_recursive(ds, tol=tol)
     if r.result:
-        mask = outlier_glob(r.result.residual, threshold)
+        mask = outlier_glob(r.result.residual, threshold=threshold)
     while mask.any() and r.dataset:
         ds.apply_mask(~mask)
         r = fit_binding_glob_recursive(ds, tol=tol)
         if r.result:
-            mask = outlier_glob(r.result.residual, threshold)
+            mask = outlier_glob(r.result.residual, threshold=threshold)
     return r
 
 
 def outlier_glob(
-    residuals: ArrayF, threshold: float = 2.0, plot_z_scores: bool = False
+    residuals: ArrayF, *, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
     z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))

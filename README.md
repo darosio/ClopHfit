@@ -14,15 +14,15 @@ tool, users can easily analyze their data and obtain accurate fitting results.
 
 ## Features
 
-- Plate Reader data Parser.
-- Perform non-linear least square fitting with **multiple algorithms**.
-- Extract and fit pH and chloride titrations of GFP libraries.
-  - For 2 labelblocks (e.g. 400, 485 nm) fit data separately and globally.
-  - Estimate uncertainty using bootstrap or MCMC (Bayesian).
-  - Subtract buffer for each titration point.
-  - Report controls e.g. S202N, E2 and V224Q.
-  - Correct for dilution of titration additions.
-  - Plot data when fitting fails and save txt file anyway.
+- **Plate Reader Data Parser**: Support for Tecan and EnSpire (PerkinElmer) file formats
+- **Non-linear Least Square Fitting**: Advanced fitting algorithms with uncertainty estimation
+- **pH and Chloride Titration Analysis**: Specialized tools for GFP library analysis
+  - Multi-wavelength analysis (e.g., 400, 485 nm) with separate and global fitting options
+  - Bootstrap uncertainty estimation
+  - Automatic buffer subtraction for each titration point
+  - Control variant reporting (S202N, E2, V224Q)
+  - Dilution correction for titration additions
+  - Robust error handling with automatic plot and data export
 
 ### Fitting Methods
 
@@ -41,31 +41,41 @@ ClopHfit provides multiple fitting algorithms validated on 364+ real experimenta
 
 ## Installation
 
-From PyPI with pip:
+### From PyPI
 
-```
+Using pip:
+
+```bash
 pip install clophfit
 ```
 
-Or isolate with pipx:
+### Recommended: Using pipx
 
-```
+For isolated installation (recommended):
+
+```bash
 pipx install clophfit
 ```
 
-Shell completion (Click/Typer):
+### Shell Completion
 
-- Bash:
+Enable shell completion for the `clop` command:
 
-  ```
-  _CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
-  source ~/.local/bin/clop-complete.bash
-  ```
-
-- Fish:
+#### Bash
 
 ```bash
-  _CLOP_COMPLETE=fish_source clop | source
+_CLOP_COMPLETE=bash_source clop > ~/.local/bin/clop-complete.bash
+source ~/.local/bin/clop-complete.bash
+# Add to your ~/.bashrc to make it permanent:
+echo 'source ~/.local/bin/clop-complete.bash' >> ~/.bashrc
+```
+
+#### Fish
+
+```bash
+_CLOP_COMPLETE=fish_source clop | source
+# Add to fish config to make it permanent:
+_CLOP_COMPLETE=fish_source clop > ~/.config/fish/completions/clop.fish
 ```
 
 ## Usage
@@ -77,32 +87,41 @@ Docs: https://clophfit.readthedocs.io/
 ClopHfit provides several command line interface tools for fitting and
 processing data.
 
-#### prtecan
+#### prtecan - Tecan File Analysis
 
-Extract and fit titrations from a list of Tecan files collected at various pH or
-chloride concentrations:
+Extract and fit titrations from Tecan files collected at various pH or chloride concentrations:
 
-```
-ppr -o prova2 --is-ph tecan list.pH --scheme ../scheme.txt --norm
+```bash
+# pH titration analysis
+ppr -o output_folder --is-ph tecan list.pH --scheme scheme.txt --norm \
     --dil additions.pH --Klim 6.8,8.4
+
+# Chloride titration analysis
+ppr -o output_folder tecan list.Cl --scheme scheme.txt --norm \
+    --dil additions.Cl --Klim 1.0,50.0
 ```
 
-Use the --no-weight option to reproduce an older pr.tecan version.
+**Note**: Use `--no-weight` option to reproduce older pr.tecan behavior.
 
-#### eq1
+#### eq1 - Dissociation Constant Prediction
 
 Predict chloride dissociation constant K_d at a given pH:
 
-```
+```bash
 clop eq1 --help
+clop eq1 12 8.2 7.3
 ```
 
-#### prenspire
+#### prenspire - EnSpire File Parser
 
-Parser for EnSpire (PerkinElmer) file:
+Process EnSpire (PerkinElmer) files:
 
-```
-ppr -o folder enspire file.csv
+```bash
+# Basic parsing
+ppr -o output_folder enspire data.csv
+
+# With annotation file for titration analysis
+ppr -o output_folder enspire data.csv note.csv
 ```
 
 Destination folder (default: "./Meas-${version}") will contain for each Measurement:
@@ -122,12 +141,17 @@ destination folder (default: "./Meas-${version}") will also contain:
 - a pdf for global (multiband) analysis pdfalong with global and all_SVD;
 - a pdf for SVD analysis of all concatenated spectra.
 
-#### note_to_csv
+#### note_to_csv - Note File Converter
 
-```
-note_to_csv -t 37.0 -l "B E F" -o 37 NTT-G03-Cl_note
-note_to_csv -t 20.0 -l "A C D" -o 20 NTT-G03-Cl_note
-cat 20 37 > G03_Cl_note.csv
+Convert and combine note files for different experimental conditions:
+
+```bash
+# Convert notes for different temperatures
+note_to_csv -t 37.0 -l "B E F" -o temp_37 NTT-G03-Cl_note
+note_to_csv -t 20.0 -l "A C D" -o temp_20 NTT-G03-Cl_note
+
+# Combine temperature conditions
+cat temp_20 temp_37 > G03_Cl_note.csv
 ```
 
 ### Python

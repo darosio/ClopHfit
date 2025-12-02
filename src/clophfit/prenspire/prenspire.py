@@ -8,7 +8,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -118,16 +118,16 @@ class EnspireFile:
             plt.close(fig)
 
     # Helpers
-    def _read_csv_file(
-        self, file: Path, verboseprint: Callable[..., Any]
-    ) -> list[list[str]]:
+    @staticmethod
+    def _read_csv_file(file: Path, verboseprint: Callable[..., Any]) -> list[list[str]]:
         """Read EnSpire exported file into csvl."""
         csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
         verboseprint("read file csv")
         return csvl
 
+    @staticmethod
     def _find_data_indices(
-        self, csvl: list[list[str]], verboseprint: Callable[..., Any]
+        csvl: list[list[str]], verboseprint: Callable[..., Any]
     ) -> tuple[int, int]:
         """Find the indices of the data blocks in the input file."""
         inil = lookup_listoflines(csvl, pattern="Well", col=0)
@@ -145,12 +145,9 @@ class EnspireFile:
         verboseprint("fin =", fin)
         return ini, fin
 
+    @staticmethod
     def _check_csvl_format(
-        self,
-        csvl: list[list[str]],
-        ini: int,
-        fin: int,
-        verboseprint: Callable[..., Any],
+        csvl: list[list[str]], ini: int, fin: int, verboseprint: Callable[..., Any]
     ) -> None:
         """Check csv format around ini and fin."""
         if not csvl[ini - 3] == csvl[ini - 2] == []:
@@ -161,8 +158,9 @@ class EnspireFile:
             raise CsvLineError(msg)
         verboseprint("checked csv format around ini and fin")
 
+    @staticmethod
     def _extract_platemap(
-        self, post: list[list[str]], verboseprint: Callable[..., Any]
+        post: list[list[str]], verboseprint: Callable[..., Any]
     ) -> tuple[list[str], list[list[str]]]:
         """Extract well list and Platemap from _metadata_post.
 
@@ -200,8 +198,9 @@ class EnspireFile:
         verboseprint("Created attributes _wells_platemap and _platemap.")
         return wells, platemap
 
+    @staticmethod
     def _create_metadata(
-        self, pre: list[list[str]], post: list[list[str]]
+        pre: list[list[str]], post: list[list[str]]
     ) -> dict[str, str | list[str]]:
         """Create metadata dictionary."""
         pre_md_start_line = 3
@@ -270,7 +269,13 @@ class EnspireFile:
         # Monochromator is expected to be either Exc or Ems
         for k, measurement in measurements.items():
             label = f"Meas{k}"
-            heading = collections.namedtuple("heading", "ex em res")
+
+            class Heading(NamedTuple):
+                ex: str
+                em: str
+                res: str
+
+            heading = Heading
             head = heading(
                 f"{label}WavelengthExc", f"{label}WavelengthEms", f"{label}Result"
             )
@@ -310,8 +315,9 @@ class EnspireFile:
                 ]
         return wells, measurements
 
+    @staticmethod
     def _parse_measurements_metadata(
-        self, csvl_post: list[list[str]], verboseprint: Callable[..., Any]
+        csvl_post: list[list[str]], verboseprint: Callable[..., Any]
     ) -> dict[str, Any]:
         """Initialize measurements with metadata for each label."""
         pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
@@ -367,8 +373,8 @@ class EnspireFile:
         pr.searchString(ps2)
         return measurements
 
+    @staticmethod
     def _check_header_measurements_keys(
-        self,
         headerdata: list[str],
         measurements: dict[str, Any],
         verboseprint: Callable[..., Any],

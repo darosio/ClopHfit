@@ -10,6 +10,7 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Unix Shell",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
@@ -155,13 +156,20 @@ line-length = 88
 target-version = "py312"
 unsafe-fixes = true
 # Enable preview mode
-preview = false
+preview = true
 
 [tool.ruff.format]
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["ANN201", "E501", "ISC001", "T20", "INP", "G", "FBT", "PYI"]
+ignore = [
+  "E501",
+  "T20",
+  "DOC201", # Missing return section in docstring - too strict for scientific code
+  "DOC501", # Missing exception documentation - too strict
+  "PLR0914", # Too many local variables - common in scientific functions
+  "PLR1702", # Too many nested blocks - common in data processing
+]
 select = [
   "A", # builtins
   "AIR", # airflow
@@ -231,27 +239,43 @@ split-on-trailing-comma = true
 max-complexity = 12
 
 [tool.ruff.lint.per-file-ignores]
+"src/clophfit/__init__.py" = [
+  "FBT001", # configure_logging has boolean arg for CLI compatibility
+  "FBT002", # configure_logging has boolean default for CLI compatibility
+]
+"src/clophfit/__main__.py" = [
+  "FBT001", # Boolean args acceptable in CLI with Click
+  "FBT002", # Boolean defaults acceptable in CLI with Click
+  "PLR0917", # Many args acceptable in CLI commands
+]
 "*.ipynb" = [
+  "ANN001",
+  "ANN002",
+  "ANN003",
+  "ANN201",
+  "ANN202",
   "ARG",
+  "D103",
   "ERA",
+  "ICN001",
   "N802",
   "N803",
   "N806",
   "N816",
-  "ANN001",
-  "ANN002",
-  "ANN003",
-  "ANN202",
-  "D103",
-  "ICN001",
   "PD901",
   "PLR0913",
+  "PLR0917", # Too many positional arguments - common in scientific functions
   "PLR2004",
   "SLF001",
+  "T20",
 ]
 "__init__.py" = ["I002"] # don't need annotations
 "docs/*" = ["INP"]
-"tests/*" = ["PLR2004", "S101"]
+"tests/*" = [
+  "PLR2004",
+  "S101",
+  "PLR6301", # Method could be function/static - pytest relies on self
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -269,3 +293,4 @@ extend-ignore-re = [
 arange = "arange"
 arosio = "Arosio"
 setp = "setp"
+ttest = "ttest"

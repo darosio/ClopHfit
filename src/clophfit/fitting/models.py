@@ -51,18 +51,18 @@ from clophfit.clophfit_types import ArrayF
 # fmt: off
 @typing.overload
 def binding_1site(
-    x: float, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
+    x: float, K: float, S0: float, S1: float, *, is_ph: bool = False  # noqa: N803
 ) -> float: ...
 
 @typing.overload
 def binding_1site(
-    x: ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
+    x: ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False  # noqa: N803
 ) -> ArrayF: ...
 # fmt: on
 
 
 def binding_1site(
-    x: float | ArrayF, K: float, S0: float, S1: float, is_ph: bool = False  # noqa: N803
+    x: float | ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False  # noqa: N803
 ) -> float | ArrayF:  # fmt: skip
     r"""Single site binding model function.
 

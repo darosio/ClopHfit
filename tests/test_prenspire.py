@@ -62,13 +62,13 @@ class TestEnspireFile:
 
     def test_get_data_ini(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test get_data_ini."""
-        assert ef1._ini == 12  # noqa: SLF001 # pylint: disable-msg=W0212
-        assert ef2._ini == 9  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef1._ini == 12  # noqa: SLF001
+        assert ef2._ini == 9  # noqa: SLF001
 
     def test_fin(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test _fin (line_index())."""
-        assert ef1._fin == 14897  # noqa: SLF001 # pylint: disable-msg=W0212
-        assert ef2._fin == 856  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef1._fin == 14897  # noqa: SLF001
+        assert ef2._fin == 856  # noqa: SLF001
 
     """
     # def test_metadata_post(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
@@ -80,8 +80,8 @@ class TestEnspireFile:
     #     self, ef1: EnspireFile, ef2: EnspireFile
     # ) -> None:
     #     \"Test locales.\"
-    #     assert ef1._metadata_post[31][4] == "300 µl"
-    #     assert ef2._metadata_post[31][4] == "300 µl"
+    #     assert ef1._metadata_post[31][4] == "300 μl"
+    #     assert ef2._metadata_post[31][4] == "300 μl"
 
     # def test_data_list(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
     #     \"Test data_list.\"
@@ -96,8 +96,8 @@ class TestEnspireFile:
 
     def test_get_list_from_platemap(self, ef1: EnspireFile, ef2: EnspireFile) -> None:
         """Test list from platemap."""
-        assert ef1._wells_platemap[2] == "A03"  # noqa: SLF001 # pylint: disable-msg=W0212
-        assert ef2._wells_platemap[1] == "F02"  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert ef1._wells_platemap[2] == "A03"  # noqa: SLF001
+        assert ef2._wells_platemap[1] == "F02"  # noqa: SLF001
 
     def test_metadata(self, ef1: EnspireFile) -> None:
         """Test metadata dictionary."""
@@ -179,8 +179,8 @@ class TestNote:
 
     def test__note_list(self, n1: Note) -> None:
         """Test well_list from note."""
-        assert n1._note.loc[2, "Well"] == "A03"  # noqa: SLF001 # pylint: disable-msg=W0212
-        assert n1._note.iloc[64, 1] == 8.2  # noqa: SLF001 # pylint: disable-msg=W0212
+        assert n1._note.loc[2, "Well"] == "A03"  # noqa: SLF001
+        assert n1._note.iloc[64, 1] == 8.2  # noqa: SLF001
 
     def test_wells(self, n1: Note, ef1: EnspireFile, n1err: Note) -> None:
         """Check wells from Note vs EnspireFile."""

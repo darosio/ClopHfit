@@ -11,7 +11,7 @@ from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
     FitResult,
-    _Result,
+    _Result,  # noqa: PLC2701
 )
 
 

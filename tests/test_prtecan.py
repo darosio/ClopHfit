@@ -56,13 +56,6 @@ def create_test_metadata() -> list[list[Any]]:
     ]
 
 
-def create_sample_labelblock() -> Labelblock:
-    """Create a sample Labelblock from test data."""
-    csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
-    idxs = prtecan.lookup_listoflines(csvl)
-    return Labelblock(csvl[idxs[0] : idxs[1]])
-
-
 # =============================================================================
 # Unit Tests
 # =============================================================================
@@ -261,29 +254,45 @@ class TestDilutionCorrection:
 class TestLabelblock:
     """Test Labelblock class."""
 
+    @staticmethod
+    def _get_two_labelblocks() -> tuple[Labelblock, Labelblock]:
+        """Simulate csvl with 2 labelblocks."""
+        csvl = prtecan.read_xls(data_tests / "140220/pH6.5_200214.xls")
+        idxs = prtecan.lookup_listoflines(csvl)
+        lb0 = Labelblock(csvl[idxs[0] : idxs[1]])
+        lb1 = Labelblock(csvl[idxs[1] :])
+        return lb0, lb1
+
     @pytest.fixture(scope="class")
-    def labelblock(self) -> Labelblock:
-        """Create sample labelblock fixture."""
-        return create_sample_labelblock()
+    def labelblocks(self) -> tuple[Labelblock, Labelblock]:
+        """Fixture that provides two labelblocks."""
+        return self._get_two_labelblocks()
 
-    def test_metadata_parsing(self, labelblock: Labelblock) -> None:
-        """It parses metadata correctly."""
-        assert "Temperature" in labelblock.metadata
-        assert labelblock.metadata["Temperature"].value == 25.6
+    def test_metadata(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """It parses "Temperature" metadata."""
+        lb0, lb1 = labelblocks
+        assert lb0.metadata["Temperature"].value == 25.6
+        assert lb1.metadata["Temperature"].value == 25.3
 
-    def test_data_extraction(self, labelblock: Labelblock) -> None:
-        """It extracts data values."""
-        assert "A01" in labelblock.data
-        assert isinstance(labelblock.data["A01"], float)
+    def test_data(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """It parses data values."""
+        lb0, lb1 = labelblocks
+        assert lb0.data["F06"] == 19551
+        assert lb1.data["H12"] == 543
 
-    def test_normalization(self, labelblock: Labelblock) -> None:
-        """It normalizes data using metadata."""
-        assert "A01" in labelblock.data_nrm
-        assert labelblock.data_nrm["A01"] > 0
+    def test_data_normalized(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """Normalize data using key metadata values."""
+        lb0, lb1 = labelblocks
+        assert lb0.data_nrm["F06"] == pytest.approx(1051.1290323)
+        assert lb1.data_nrm["H12"] == pytest.approx(48.4821429)
 
-    def test_equality(self, labelblock: Labelblock) -> None:
-        """It correctly implements equality checks."""
-        assert labelblock == labelblock  # noqa: PLR0124
+    def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """A Labelblock is equal to itself and not equal to a different Labelblock."""
+        lb0, lb1 = labelblocks
+        assert lb0 == lb0  # noqa: PLR0124
+        assert lb0 is not lb1
+        with pytest.raises(TypeError):
+            assert lb0 == 1
 
     def test_invalid_plate_format(self) -> None:
         """It raises ValueError for invalid plate formats."""
@@ -291,9 +300,9 @@ class TestLabelblock:
         with pytest.raises(ValueError, match="plate"):
             Labelblock(invalid_lines)
 
-    def test_almost_eq(self) -> None:
-        """Test the __almost_eq__ method of the Labelblock class."""
-        lb0 = create_sample_labelblock()
+    def test_almost_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
+        """Test the almost_equal method of the Labelblock class."""
+        lb0, _ = labelblocks
         file_path1 = Path(data_tests) / "L1" / "290513_7.2.xls"
         csvl1 = prtecan.read_xls(file_path1)  # Gain=98
         idxs1 = prtecan.lookup_listoflines(csvl1)
@@ -303,8 +312,8 @@ class TestLabelblock:
         idxs2 = prtecan.lookup_listoflines(csvl2)
         lb12 = Labelblock(csvl2[idxs2[1] :])
         assert lb11 != lb12
-        assert lb11.__almost_eq__(lb12)
-        assert not lb11.__almost_eq__(lb0)
+        assert lb11.almost_equal(lb12)
+        assert not lb11.almost_equal(lb0)
 
     def test_overvalue(self, caplog: pytest.LogCaptureFixture) -> None:
         """It detects saturated data ("OVER")."""
@@ -312,6 +321,9 @@ class TestLabelblock:
         idxs = prtecan.lookup_listoflines(csvl)
         with caplog.at_level(logging.WARNING):
             lb = Labelblock(csvl[idxs[0] : idxs[1]])
+            # Print out the captured logs for debugging
+        for log in caplog.records:
+            print(log.message)
         expected_messages = [
             " OVER value in Label1: A06 of tecanfile ",
             " OVER value in Label1: H02 of tecanfile ",
@@ -820,7 +832,7 @@ class TestCsvlFunctions:
         # strip_lines should remove blanks
         stripped = prtecan.strip_lines(lines)
         # each line has no empty elements
-        assert all(all(e != "" for e in row) for row in stripped)
+        assert all(all(e for e in row) for row in stripped)
 
 
 class TestTecanfilesGroup:
@@ -1063,12 +1075,12 @@ class TestTitrationAdvanced:
     def test_raise_listfilenotfound(self) -> None:
         """It raises FileNotFoundError when list.xx file does not exist."""
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
-            Titration.fromlistfile(Path("aax"), True)
+            Titration.fromlistfile(Path("aax"), is_ph=True)
 
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):
-            Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", True)
+            Titration.fromlistfile(data_tests / "140220" / "list.pH2.csv", is_ph=True)
 
     def test_data_bg_and_nrm(self, tit1: Titration) -> None:
         """Calculate buffer value from average of buffer wells and subtract."""
@@ -1209,13 +1221,18 @@ class TestTitrationAnalysis:
     def test_fit(self, titan: Titration) -> None:
         """It fits each label separately."""
         fres = titan.results
+        assert len(fres[1]) == 0
+        assert len(fres[2]) == 0
+        assert not fres[1]["H02"].is_valid()
+        assert fres[2]["H02"].is_valid()
+        assert len(fres[1]) == 1
+        assert len(fres[2]) == 1
+        # Check skipping fit of well 'H02' Label:1
+        assert fres[1]["H02"] == FitResult(None, None, None)
         # Check that the first fit result dictionary has 92 elements
         fres[1].compute_all()
         assert len(fres[1]) == 92
-        # Check that the first fit result for 'H02' is None
-        assert fres[1]["H02"] == FitResult(None, None, None)
         # Check that the second fit result for 'H02' is not None
-        assert fres[2]["H02"].is_valid()
         # Check 'K' and std error for 'H02' in the second fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]

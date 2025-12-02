@@ -41,7 +41,6 @@ from clophfit.prtecan.prtecan import (
 __all__ = [
     "Buffer",
     "BufferFit",
-    "FitdataParams",
     "Labelblock",
     "LabelblocksGroup",
     "Metadata",

@@ -25,6 +25,8 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 
+from .errors import InvalidDataError
+
 
 @dataclass
 class DataArray:
@@ -51,19 +53,19 @@ class DataArray:
         """Validate that xc and yc have the same length."""
         if len(self.xc) != len(self.yc):
             msg = "Length of 'xc' and 'yc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     def _validate_yerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
         if self.y_errc.size > 0 and len(self.xc) != len(self.y_errc):
             msg = "Length of 'xc' and 'y_errc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     def _validate_xerrc_lengths(self) -> None:
         """Validate that xc and wc have the same length."""
         if self.x_errc.size > 0 and len(self.xc) != len(self.x_errc):
             msg = "Length of 'xc' and 'x_errc' must be equal."
-            raise ValueError(msg)
+            raise InvalidDataError(msg)
 
     @property
     def mask(self) -> ArrayMask:
@@ -129,24 +131,27 @@ class Dataset(UserDict[str, DataArray]):
 
     is_ph: bool = False
 
-    def __init__(self, data: dict[str, DataArray], is_ph: bool = False) -> None:
+    def __init__(self, data: dict[str, DataArray], *, is_ph: bool = False) -> None:
         super().__init__(data or {})
         self.is_ph = is_ph
 
-    def __repr__(self) -> str:  # pragma: no cover
+    def __repr__(self) -> str:  # pragma: no cover - formatting utility
         """Readable, concise summary of the dataset with rounded values."""
 
-        def _fmt_arr(a: list[float] | ArrayF, max_items: int = 6, prec: int = 3) -> str:
+        def _fmt_arr(
+            a: list[float] | np.ndarray, max_items: int = 6, prec: int = 3
+        ) -> str:
             arr = np.asarray(a)
             if arr.size == 0:
                 return "[]"
+            # Numeric rounding for float/int
             if np.issubdtype(arr.dtype, np.floating) or np.issubdtype(
                 arr.dtype, np.integer
             ):
                 arr = np.round(arr.astype(float), prec)
 
-            def fmt(v: float) -> str:
-                return f"{v:g}"
+                def fmt(v: float) -> str:
+                    return f"{v:g}"
 
             if arr.size <= max_items:
                 return "[" + ", ".join(fmt(v) for v in arr.tolist()) + "]"
@@ -182,22 +187,22 @@ class Dataset(UserDict[str, DataArray]):
         lines = [header]
         for lbl, da in self.items():
             try:
-                lines.extend(
-                    (
-                        f"  - {lbl}:",
-                        f"        x={_fmt_arr(getattr(da, 'xc', np.array([])))}",
-                        f"        y={_fmt_arr(getattr(da, 'yc', np.array([])))}",
-                        f"        mask={_fmt_mask(da.mask)}",
-                        f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}",
-                        f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}",
-                    )
-                )
-            except Exception:  # noqa: BLE001
+                lines.extend((
+                    f"  - {lbl}:",
+                    f"        x={_fmt_arr(getattr(da, 'xc', np.array([])))}",
+                    f"        y={_fmt_arr(getattr(da, 'yc', np.array([])))}",
+                    f"        mask={_fmt_mask(da.mask)}",
+                    f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}",
+                    f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}",
+                ))
+            except Exception:  # noqa: BLE001 - never crash on repr
                 lines.append(f"  - {lbl}: <unavailable>")
         return "\n".join(lines)
 
     @classmethod
-    def from_da(cls, da: DataArray | list[DataArray], is_ph: bool = False) -> "Dataset":
+    def from_da(
+        cls, da: DataArray | list[DataArray], *, is_ph: bool = False
+    ) -> "Dataset":
         """Alternative constructor to create Dataset from a list of DataArray.
 
         Parameters
@@ -218,7 +223,7 @@ class Dataset(UserDict[str, DataArray]):
             data = {f"y{i}": da_item for i, da_item in enumerate(da)}
         elif isinstance(da, DataArray):
             data = {"default": da}
-        return cls(data, is_ph)
+        return cls(data, is_ph=is_ph)
 
     def apply_mask(self, combined_mask: ArrayMask) -> None:
         """Correctly distribute and apply the combined mask across all DataArrays.
@@ -288,11 +293,35 @@ class Dataset(UserDict[str, DataArray]):
                 del self[key]
 
     def concatenate_data(self) -> tuple[ArrayF, ArrayF, ArrayF, ArrayF]:
-        """Concatenate x, y, x_err, and y_err across all datasets."""
-        x_data = np.concatenate([v.x for v in self.values()])
-        y_data = np.concatenate([v.y for v in self.values()])
-        x_err = np.concatenate([v.x_err for v in self.values()])
-        y_err = np.concatenate([v.y_err for v in self.values()])
+        """Concatenate x, y, x_err, and y_err across all datasets.
+
+        Optimized version with pre-allocation for better memory efficiency.
+        """
+        if not self:
+            # Return empty arrays for empty dataset
+            empty = np.array([], dtype=np.float64)
+            return empty, empty, empty, empty
+
+        # Pre-calculate total length for efficient allocation
+        total_length = sum(len(v.y) for v in self.values())
+
+        # Pre-allocate arrays
+        x_data = np.empty(total_length, dtype=np.float64)
+        y_data = np.empty(total_length, dtype=np.float64)
+        x_err = np.empty(total_length, dtype=np.float64)
+        y_err = np.empty(total_length, dtype=np.float64)
+
+        # Fill arrays using slicing instead of concatenation
+        offset = 0
+        for v in self.values():
+            length = len(v.y)
+            end_idx = offset + length
+            x_data[offset:end_idx] = v.x
+            y_data[offset:end_idx] = v.y
+            x_err[offset:end_idx] = v.x_err
+            y_err[offset:end_idx] = v.y_err
+            offset = end_idx
+
         return x_data, y_data, x_err, y_err
 
     def export(self, filep: str | Path) -> None:

@@ -46,7 +46,22 @@ def configure_logging(
     def has_handler_of_type(
         logger: logging.Logger, handler_type: type, match_file: str | None = None
     ) -> bool:
-        """Check if the logger has a handler of a given type (optionally matching a filename)."""
+        """Check if the logger has a handler of a given type (optionally matching a filename).
+
+        Parameters
+        ----------
+        logger : logging.Logger
+            The logger to check for handlers.
+        handler_type : type
+            The handler type to look for.
+        match_file : str | None, optional
+            Optional filename to match against handler's baseFilename.
+
+        Returns
+        -------
+        bool
+            True if handler of the specified type is found, False otherwise.
+        """
         for h in logger.handlers:
             if isinstance(h, handler_type) and (
                 match_file is None or getattr(h, "baseFilename", None) == match_file
@@ -81,4 +96,4 @@ def configure_logging(
         if name.startswith("clophfit."):
             logging.getLogger(name).propagate = True
     # Capture warnings as logs
-    logging.captureWarnings(True)
+    logging.captureWarnings(capture=True)

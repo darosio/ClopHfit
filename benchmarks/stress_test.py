@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Stress test all fitting methods with challenging synthetic scenarios.
 
 Creates datasets with:
@@ -13,7 +12,6 @@ These scenarios reveal which methods are truly robust vs. which only work on cle
 """
 
 import time
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -23,171 +21,11 @@ from clophfit.fitting.core import (
     fit_binding_glob,
     outlier2,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset
-from clophfit.fitting.models import binding_1site
-
-
-@dataclass
-class StressScenario:
-    """Definition of a stress test scenario."""
-
-    name: str
-    description: str
-    outlier_prob: float = 0.0
-    outlier_magnitude: float = 3.0
-    low_ph_drop_prob: float = 0.0
-    low_ph_drop_magnitude: float = 0.6  # fraction to drop
-    noise_multiplier: float = 1.0
-    saturation_prob: float = 0.0
-    x_error_large: float = 0.0  # Large random x-errors (e.g., 0.3 pH units)
-    x_systematic_offset: float = 0.0  # Systematic x-offset (e.g., +0.5 pH)
-    x_outlier_index: int = -1  # Index of x-value to make an outlier (-1 = none)
-    seed: int = 42
-
-
-def generate_stress_dataset(
-    scenario: StressScenario,
-    pka_true: float = 7.0,
-    s0_y1: float = 500.0,
-    s1_y1: float = 300.0,
-    s0_y2: float = 50.0,
-    s1_y2: float = 350.0,
-) -> tuple[Dataset, dict]:
-    """Generate a synthetic dataset with stress factors.
-
-    Parameters
-    ----------
-    scenario : StressScenario
-        Definition of outlier, saturation, and x-error behavior.
-    pka_true : float, optional
-        Ground-truth pKa (shared across channels).
-    s0_y1 : float, optional
-        Baseline fluorescence for y1.
-    s1_y1 : float, optional
-        Plateau fluorescence for y1.
-    s0_y2 : float, optional
-        Baseline fluorescence for y2.
-    s1_y2 : float, optional
-        Plateau fluorescence for y2.
-
-    Returns
-    -------
-    Dataset
-        The synthetic dataset with masks, errors, and perturbations applied.
-    dict
-        Ground-truth parameters used in the simulation.
-    """
-    rng = np.random.default_rng(scenario.seed)
-
-    # Standard pH titration points (true values)
-    x_true = np.array([9.0, 8.2, 7.8, 7.0, 6.6, 5.8, 5.0])
-
-    # Apply x-space perturbations
-    x_measured = x_true.copy()
-
-    # Large random x-errors
-    if scenario.x_error_large > 0:
-        x_measured += rng.normal(0, scenario.x_error_large, size=x_true.shape)
-
-    # Systematic x-offset
-    if scenario.x_systematic_offset != 0:
-        x_measured += scenario.x_systematic_offset
-
-    # Single x-outlier
-    if scenario.x_outlier_index >= 0 and scenario.x_outlier_index < len(x_measured):
-        x_measured[scenario.x_outlier_index] += rng.choice(
-            [
-                -1.0,
-                1.0,
-            ]
-        )  # ±1 pH unit off
-
-    # Generate clean signal using TRUE x-values
-    y1_clean = binding_1site(x_true, pka_true, s0_y1, s1_y1, is_ph=True)
-    y2_clean = binding_1site(x_true, pka_true, s0_y2, s1_y2, is_ph=True)
-
-    # Add base noise
-    base_noise_y1 = 0.05 * (np.max(y1_clean) - np.min(y1_clean))
-    base_noise_y2 = 0.05 * (np.max(y2_clean) - np.min(y2_clean))
-
-    y1_noisy = y1_clean + rng.normal(
-        0, base_noise_y1 * scenario.noise_multiplier, size=x_true.shape
-    )
-    y2_noisy = y2_clean + rng.normal(
-        0, base_noise_y2 * scenario.noise_multiplier, size=x_true.shape
-    )
-
-    # Add outliers
-    n_points = len(x_true)
-    n_outliers = int(n_points * scenario.outlier_prob)
-    if n_outliers > 0:
-        outlier_indices = rng.choice(n_points, size=n_outliers, replace=False)
-        for idx in outlier_indices:
-            if rng.random() > 0.5:  # 50% chance for each channel
-                y1_noisy[idx] += (
-                    scenario.outlier_magnitude * base_noise_y1 * rng.choice([-1, 1])
-                )
-            else:
-                y2_noisy[idx] += (
-                    scenario.outlier_magnitude * base_noise_y2 * rng.choice([-1, 1])
-                )
-
-    # Add low-pH signal drop
-    if scenario.low_ph_drop_prob > 0 and rng.random() < scenario.low_ph_drop_prob:
-        # Drop signal at 1-2 most acidic points
-        n_drop = rng.choice([1, 2])
-        acidic_indices = np.argsort(x_true)[:n_drop]  # Lowest pH values
-        for idx in acidic_indices:
-            drop_factor = 1.0 - scenario.low_ph_drop_magnitude
-            y1_noisy[idx] *= drop_factor
-            # Optionally also affect y2
-            if rng.random() > 0.3:
-                y2_noisy[idx] *= drop_factor
-
-    # Add saturation (mask points)
-    mask = np.ones(n_points, dtype=bool)
-    if scenario.saturation_prob > 0:
-        n_saturated = int(n_points * scenario.saturation_prob)
-        if n_saturated > 0:
-            sat_indices = rng.choice(n_points, size=n_saturated, replace=False)
-            mask[sat_indices] = False
-
-    # Create dataset (using MEASURED x-values)
-    ds = Dataset({}, is_ph=True)
-
-    # Estimate errors
-    y1_err = np.full_like(y1_noisy, base_noise_y1 * scenario.noise_multiplier)
-    y2_err = np.full_like(y2_noisy, base_noise_y2 * scenario.noise_multiplier)
-
-    # X-errors for Bayesian methods
-    if scenario.x_error_large > 0:
-        x_err = np.full_like(x_measured, scenario.x_error_large)
-    elif scenario.x_systematic_offset != 0:
-        x_err = np.full_like(
-            x_measured, 0.1
-        )  # Assume we don't know about systematic offset
-    elif scenario.x_outlier_index >= 0:
-        x_err = np.full_like(x_measured, 0.05)
-    else:
-        x_err = np.full_like(x_measured, 0.05)  # Default pH error
-
-    da1 = DataArray(xc=x_measured, yc=y1_noisy, x_errc=x_err, y_errc=y1_err)
-    da1.mask = mask
-    da2 = DataArray(xc=x_measured, yc=y2_noisy, x_errc=x_err, y_errc=y2_err)
-    da2.mask = mask
-
-    ds["1"] = da1
-    ds["2"] = da2
-
-    truth = {
-        "K": pka_true,
-        "S0_1": s0_y1,
-        "S1_1": s1_y1,
-        "S0_2": s0_y2,
-        "S1_2": s1_y2,
-    }
-
-    return ds, truth
+from clophfit.testing.synthetic import (
+    STRESS_SCENARIOS,
+    StressScenario,
+    make_stress_dataset,
+)
 
 
 def run_all_methods_on_scenario(
@@ -237,20 +75,21 @@ def run_all_methods_on_scenario(
         times = []
 
         for rep in range(n_replicates):
-            # Generate new dataset for each replicate
-            ds, truth = generate_stress_dataset(
-                StressScenario(
-                    name=scenario.name,
-                    description=scenario.description,
-                    outlier_prob=scenario.outlier_prob,
-                    outlier_magnitude=scenario.outlier_magnitude,
-                    low_ph_drop_prob=scenario.low_ph_drop_prob,
-                    low_ph_drop_magnitude=scenario.low_ph_drop_magnitude,
-                    noise_multiplier=scenario.noise_multiplier,
-                    saturation_prob=scenario.saturation_prob,
-                    seed=scenario.seed + rep,
-                )
+            # Generate new dataset for each replicate using the new module
+            rep_scenario = StressScenario(
+                name=scenario.name,
+                description=scenario.description,
+                outlier_prob=scenario.outlier_prob,
+                outlier_magnitude=scenario.outlier_magnitude,
+                low_ph_drop_prob=scenario.low_ph_drop_prob,
+                low_ph_drop_magnitude=scenario.low_ph_drop_magnitude,
+                noise_multiplier=scenario.noise_multiplier,
+                saturation_prob=scenario.saturation_prob,
+                x_error_large=scenario.x_error_large,
+                x_systematic_offset=scenario.x_systematic_offset,
+                seed=scenario.seed + rep,
             )
+            ds, truth = make_stress_dataset(rep_scenario)
 
             try:
                 start = time.time()
@@ -284,7 +123,7 @@ def run_all_methods_on_scenario(
                         pass
 
                 if K_fit is not None:
-                    K_true = truth["K"]
+                    K_true = truth.K
                     error = abs(K_fit - K_true) / K_true * 100  # Percent error
                     errors.append(error)
                     successes += 1
@@ -317,92 +156,8 @@ def main():
     print("=" * 80)
     print()
 
-    # Define stress scenarios
-    scenarios = [
-        StressScenario(
-            name="Clean",
-            description="Baseline: no stress factors",
-            seed=42,
-        ),
-        StressScenario(
-            name="HighNoise",
-            description="3x normal noise level",
-            noise_multiplier=3.0,
-            seed=43,
-        ),
-        StressScenario(
-            name="Outliers-10%",
-            description="10% outliers (3σ magnitude)",
-            outlier_prob=0.10,
-            outlier_magnitude=3.0,
-            seed=44,
-        ),
-        StressScenario(
-            name="Outliers-30%",
-            description="30% outliers (3σ magnitude)",
-            outlier_prob=0.30,
-            outlier_magnitude=3.0,
-            seed=45,
-        ),
-        StressScenario(
-            name="pH-Drop",
-            description="Low-pH signal drop (60% reduction)",
-            low_ph_drop_prob=1.0,  # Always happens
-            low_ph_drop_magnitude=0.6,
-            seed=46,
-        ),
-        StressScenario(
-            name="Saturation",
-            description="20% saturated points (masked)",
-            saturation_prob=0.20,
-            seed=47,
-        ),
-        StressScenario(
-            name="Combined-Moderate",
-            description="15% outliers + high noise + pH drop",
-            outlier_prob=0.15,
-            outlier_magnitude=3.0,
-            low_ph_drop_prob=0.5,
-            low_ph_drop_magnitude=0.5,
-            noise_multiplier=2.0,
-            seed=48,
-        ),
-        StressScenario(
-            name="Combined-Severe",
-            description="30% outliers + very high noise + pH drop + saturation",
-            outlier_prob=0.30,
-            outlier_magnitude=4.0,
-            low_ph_drop_prob=1.0,
-            low_ph_drop_magnitude=0.7,
-            noise_multiplier=4.0,
-            saturation_prob=0.15,
-            seed=49,
-        ),
-        StressScenario(
-            name="X-Error-Large",
-            description="Large x-errors (±0.3 pH units) - Bayesian advantage",
-            outlier_prob=0.0,
-            noise_multiplier=1.0,
-            x_error_large=0.3,
-            seed=50,
-        ),
-        StressScenario(
-            name="X-Error-Systematic",
-            description="Systematic x-offset (+0.5 pH) - Bayesian advantage",
-            outlier_prob=0.0,
-            noise_multiplier=1.0,
-            x_systematic_offset=0.5,
-            seed=51,
-        ),
-        StressScenario(
-            name="X-Outlier",
-            description="One pH measurement way off (outlier in x-space)",
-            outlier_prob=0.0,
-            noise_multiplier=1.0,
-            x_outlier_index=3,  # Middle pH point
-            seed=52,
-        ),
-    ]
+    # Use predefined scenarios from the synthetic module
+    scenarios = list(STRESS_SCENARIOS.values())
 
     all_results = []
 

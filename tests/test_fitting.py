@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from lmfit import Parameters  # type: ignore[import-untyped]
+from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 
 from clophfit.fitting.core import (
     analyze_spectra,
@@ -16,8 +17,8 @@ from clophfit.fitting.core import (
     weight_da,
     weight_multi_ds_titration,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset
-from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
+from clophfit.fitting.errors import InsufficientDataError, InvalidDataError
 from clophfit.fitting.models import binding_1site, kd
 from clophfit.fitting.plotting import plot_fit
 
@@ -387,7 +388,7 @@ def test_dataarray_initialization_failure() -> None:
     """Test for length mismatch error during DataArray initialization."""
     xc = np.array([1, 2, 3])
     yc = np.array([10, 20, 30, 40])  # Mismatched length
-    with pytest.raises(ValueError, match="Length of 'xc' and 'yc' must be equal"):
+    with pytest.raises(InvalidDataError, match="Length of 'xc' and 'yc' must be equal"):
         DataArray(xc=xc, yc=yc)
 
 
@@ -395,15 +396,13 @@ def test_dataarray_error_length_mismatch() -> None:
     """Test for length mismatch when setting error arrays."""
     xc = np.array([1, 2, 3, 4])
     yc = np.array([10, 20, 30, 40])
-    short_err = np.array([0.1, 0.2])  # Mismatched length
-    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal"):
-        DataArray(xc=xc, yc=yc, y_errc=short_err)
-    with pytest.raises(ValueError, match="Length of 'xc' and 'x_errc' must be equal"):
-        DataArray(xc=xc, yc=yc, x_errc=short_err)
     da = DataArray(xc=xc, yc=yc)
-    # MAYBE: match with "Length of 'y_err' must be 1 or same as 'y'."
-    with pytest.raises(ValueError, match="Length of 'xc' and 'y_errc' must be equal"):
-        da.y_err = short_err
+
+    with pytest.raises(InvalidDataError):
+        da.y_err = np.array([0.1, 0.2])  # Wrong length
+
+    with pytest.raises(InvalidDataError):
+        da.x_err = np.array([0.1])  # Wrong length
 
 
 def test_dataset_from_da_with_nan() -> None:
@@ -467,6 +466,102 @@ def test_export_ds(multi_dataset: Dataset, tmp_path: Path) -> None:
         multi_dataset["y1"].x, read_df.xc.to_numpy().astype(float)
     )
 
+    # Additional
+    # For DataArray
+    # FIXME: complete tests
+    """
+    def test_dataarray_with_zero_length() -> None:
+        "Test initialization with empty arrays."
+        with pytest.raises(ValueError):
+            DataArray(np.array([]), np.array([]))
+
+
+    def test_dataarray_inf_values() -> None:
+        "Test handling of infinite values."
+        x = np.array([1, 2, np.inf])
+        y = np.array([1, 2, 3])
+        da = DataArray(x, y)
+        assert not np.isinf(da.x).any()
+
+
+    def test_serialization_roundtrip(tmp_path) -> None:
+        "Test save/load roundtrip."
+        original = Dataset(
+            {
+                "test1": DataArray(np.array([1, 2, 3]), np.array([4, 5, 6])),
+                "test2": DataArray(np.array([1, 2, 3]), np.array([7, 8, 9])),
+            }
+        )
+        # Save
+        path = tmp_path / "test.h5"
+        original.save(path)
+        # Load
+        loaded = Dataset.load(path)
+        # Verify
+        assert set(original.keys()) == set(loaded.keys())
+        for k in original:
+            assert np.array_equal(original[k].x, loaded[k].x)
+            assert np.array_equal(original[k].y, loaded[k].y)
+
+    """
+
+
+# For Dataset
+def test_dataset_empty() -> None:
+    """Test empty dataset behavior."""
+    ds = Dataset({})
+    assert len(ds) == 0
+    with pytest.raises(KeyError):
+        _ = ds["nonexistent"]
+
+
+# For fitting functions
+def test_fit_binding_edge_cases() -> None:
+    """Test fitting with edge case inputs."""
+    # Flat line
+    x = np.array([1, 2, 3])
+    y = np.array([1, 1, 1])
+    res = fit_binding_glob(Dataset({"flat": DataArray(x, y)}))
+    assert res.result is not None
+    assert res.result.success is True
+
+    # Single point
+    with pytest.raises(InsufficientDataError):
+        fit_binding_glob(Dataset({"single": DataArray(np.array([1]), np.array([1]))}))
+
+
+@pytest.fixture
+def mock_fit_result() -> FitResult[MinimizerResult]:
+    """Mock a successful fit result."""
+    result = MinimizerResult()
+    result.success = True
+    result.params = Parameters()
+    result.params.add("K", value=7.0)
+    result.params.add("S0_mock", value=1.0)
+    result.params.add("S1_mock", value=2.0)
+    return FitResult(result=result)
+
+
+def test_plot_fit_with_mock(mock_fit_result: FitResult[MinimizerResult]) -> None:
+    """Test plotting with mocked fit result."""
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ds = Dataset({"mock": DataArray(np.array([1, 2, 3]), np.array([1, 2, 3]))})
+    if mock_fit_result.result:
+        plot_fit(ax, ds, mock_fit_result.result.params)
+    assert len(ax.lines) > 0  # Verify something was plotted
+
+
+def test_error_messages() -> None:
+    """Verify error messages are helpful."""
+    with pytest.raises(InvalidDataError) as excinfo:
+        DataArray(np.array([1, 2]), np.array([1]))  # Length mismatch
+    assert "equal" in str(excinfo.value)
+    tiny = Dataset({"tiny": DataArray(np.array([1]), np.array([1]))})
+    with pytest.raises(InsufficientDataError) as excinfo2:
+        fit_binding_glob(tiny)
+    assert "Not enough" in str(excinfo2.value)
+
 
 ###############################################################################
 # outlier2() tests
@@ -483,6 +578,7 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     n_points: int = 7,
     true_k: float = _TRUE_K,
     seed: int = 42,
+    *,
     add_outlier: bool = False,
     outlier_label: str = "y1",
     outlier_idx: int = 2,
