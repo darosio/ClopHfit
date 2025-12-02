@@ -2,9 +2,9 @@
 
 This suite builds realistic pH datasets with x-errors from list.pH.csv test
 fixtures and compares several fitting procedures side-by-side:
-- Standard LM
-- Robust LM (Huber)
-- Robust LM with IRLS and outlier removal
+- Standard LM (fit_binding_glob)
+- Robust LM with Huber loss (fit_binding_glob with robust=True)
+- IRLS with outlier removal (fit_binding_glob_recursive_outlier)
 
 The goal is to enable long-term, objective comparisons across changes.
 """
@@ -17,7 +17,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from clophfit.fitting.core import fit_lm, weight_multi_ds_titration
+from clophfit.fitting.core import (
+    fit_binding_glob,
+    fit_binding_glob_recursive_outlier,
+    weight_multi_ds_titration,
+)
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
 from clophfit.fitting.models import binding_1site
 
@@ -78,15 +82,15 @@ def test_compare_lm_variants(
     weight_multi_ds_titration(ds)
 
     # Baselines
-    fr_std = fit_lm(ds, robust=False)
+    fr_std = fit_binding_glob(ds, robust=False)
     assert fr_std.result is not None
     assert fr_std.result.success
 
-    fr_robust = fit_lm(ds, robust=True)
+    fr_robust = fit_binding_glob(ds, robust=True)
     assert fr_robust.result is not None
     assert fr_robust.result.success
 
-    fr_iter = fit_lm(ds, robust=True, iterative=True, outlier_threshold=3.0)
+    fr_iter = fit_binding_glob_recursive_outlier(ds, threshold=3.0)
     assert fr_iter.result is not None
     assert fr_iter.result.success
 
@@ -134,7 +138,7 @@ def test_iterative_outlier_removal_is_stable(csv_name: str) -> None:
     ds = Dataset({"y1": DataArray(xc=x, yc=y, x_errc=x_err)}, is_ph=True)
     weight_multi_ds_titration(ds)
 
-    fr = fit_lm(ds, robust=True, iterative=True, outlier_threshold=2.5)
+    fr = fit_binding_glob_recursive_outlier(ds, threshold=2.5)
     assert fr.result is not None
     assert fr.result.success
     # K should remain within a reasonable band

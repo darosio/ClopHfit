@@ -19,7 +19,7 @@ from scipy import optimize
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
-from .core import N_BOOT  # local to avoid circular import
+from .core import N_BOOT, fit_binding_glob  # local to avoid circular import
 from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
 
 if typing.TYPE_CHECKING:
@@ -246,13 +246,35 @@ def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
 
 
 def fit_binding_pymc(
-    fr: FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
 ) -> FitResult[az.InferenceData]:
-    """Analyze multi-label titration datasets using PyMC (single model)."""
+    """Analyze multi-label titration datasets using PyMC (single model).
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+    n_sd : float
+        Number of standard deviations for parameter priors.
+    n_xerr : float
+        Scaling factor for x-error.
+    ye_scaling : float
+        Scaling factor for y-error magnitude prior.
+    n_samples : int
+        Number of MCMC samples.
+
+    Returns
+    -------
+    FitResult[az.InferenceData]
+        Bayesian fitting results.
+    """
+    # Handle both Dataset and FitResult inputs
+    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
+
     if fr.result is None or fr.dataset is None:
         return FitResult()
     params = fr.result.params
@@ -288,12 +310,32 @@ def fit_binding_pymc(
 
 
 def fit_binding_pymc2(
-    fr: FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
 ) -> FitResult[az.InferenceData]:
-    """Analyze multi-label titration datasets using PyMC with separate ye_mag per label."""
+    """Analyze multi-label titration datasets using PyMC with separate ye_mag per label.
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+    n_sd : float
+        Number of standard deviations for parameter priors.
+    n_xerr : float
+        Scaling factor for x-error.
+    n_samples : int
+        Number of MCMC samples.
+
+    Returns
+    -------
+    FitResult[az.InferenceData]
+        Bayesian fitting results with per-label error scaling.
+    """
+    # Handle both Dataset and FitResult inputs
+    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
+
     if fr.result is None or fr.dataset is None:
         return FitResult()
     params = fr.result.params

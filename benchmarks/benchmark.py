@@ -14,7 +14,6 @@ import numpy as np
 from clophfit import prtecan
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_robust,
     outlier2,
 )
 from clophfit.testing.synthetic import make_realistic_dataset
@@ -45,7 +44,7 @@ def run_benchmark():
     methods = {
         "outlier2": lambda ds: outlier2(ds, error_model="uniform"),
         "lm_standard": fit_binding_glob,
-        "lm_robust": fit_binding_glob_robust,
+        "lm_robust": lambda ds: fit_binding_glob(ds, robust=True),
     }
 
     # Run synthetic benchmark

@@ -28,7 +28,6 @@ from clophfit.fitting.core import (
     fit_binding_glob_recursive,
     fit_binding_glob_recursive_outlier,
     fit_binding_glob_reweighted,
-    fit_binding_glob_robust,
     outlier2,
 )
 from clophfit.fitting.data_structures import DataArray, Dataset
@@ -436,8 +435,6 @@ def run_synthetic_comparison(
             ),
             "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
             "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
-            "unified_reweight": lambda d: fit_binding_glob_robust(d, error_model="uniform"),
-            "unified_noreweight": lambda d: fit_binding_glob_robust(d, error_model="none"),
         }
 
         for method_name, method_func in methods.items():
@@ -590,8 +587,6 @@ def run_real_data_comparison(data_dir: Path) -> pd.DataFrame:
                 ),
                 "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
                 "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
-                "unified_reweight": lambda d: fit_binding_glob_robust(d, error_model="uniform"),
-            "unified_noreweight": lambda d: fit_binding_glob_robust(d, error_model="none"),
             }
 
             for method_name, method_func in methods.items():
@@ -779,8 +774,6 @@ def run_synthetic_with_outliers(
             ),
             "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
             "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
-            "unified_reweight": lambda d: fit_binding_glob_robust(d, error_model="uniform"),
-            "unified_noreweight": lambda d: fit_binding_glob_robust(d, error_model="none"),
         }
 
         for method_name, method_func in methods.items():

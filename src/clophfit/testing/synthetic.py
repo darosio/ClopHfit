@@ -35,13 +35,25 @@ L2_PH_ERRORS = np.array([0.005, 0.045, 0.087, 0.026, 0.16, 0.157, 0.157])
 
 # Real data distributions from L4 dataset (92 wells)
 # Used for randomize_signals option
+# Updated from analysis of 250 valid wells across L1-L4 datasets
 REAL_DATA_STATS: dict[str, dict[str, float]] = {
-    "K": {"mean": 6.93, "std": 0.38, "min": 5.31, "max": 8.13},
-    "S0_y1": {"mean": 633.0, "std": 537.0, "min": 50.0, "max": 2700.0},
-    "S1_y1": {"mean": 901.0, "std": 799.0, "min": 50.0, "max": 4300.0},
-    "S0_y2": {"mean": 800.0, "std": 749.0, "min": 50.0, "max": 4400.0},
-    "S1_y2": {"mean": 105.0, "std": 91.0, "min": 10.0, "max": 460.0},
+    "K": {"mean": 6.8, "std": 1.35, "min": 5.3, "max": 8.2},
+    "S0_y1": {"mean": 634.0, "std": 567.0, "min": 30.0, "max": 2700.0},
+    "S1_y1": {"mean": 1024.0, "std": 989.0, "min": 36.0, "max": 5142.0},
+    "S0_y2": {"mean": 903.0, "std": 740.0, "min": 136.0, "max": 4416.0},
+    "S1_y2": {"mean": 177.0, "std": 198.0, "min": 6.0, "max": 1212.0},
 }
+
+# Log-space covariance matrix for correlated signal sampling
+# Rows/cols: [log10(S0_y1), log10(S1_y1), log10(S0_y2), log10(S1_y2)]
+# From real data: strong correlation between y1 and y2 signals (r~0.76-0.78)
+REAL_DATA_LOG_MEAN = np.array([2.54, 2.70, 2.80, 1.95])  # log10 scale
+REAL_DATA_LOG_COV = np.array([
+    [0.329, 0.339, 0.188, 0.256],  # log_S0_y1
+    [0.339, 0.408, 0.213, 0.305],  # log_S1_y1
+    [0.188, 0.213, 0.185, 0.192],  # log_S0_y2
+    [0.256, 0.305, 0.192, 0.372],  # log_S1_y2
+])
 
 
 @dataclass
@@ -94,6 +106,25 @@ class StressScenario:
     x_error_large: float = 0.0
     x_systematic_offset: float = 0.0
     seed: int = 42
+
+
+def _sample_correlated_signals(rng: np.random.Generator) -> dict[str, float]:
+    """Sample correlated S0/S1 signals for y1/y2 from real data distribution.
+
+    Uses multivariate normal in log-space to capture correlations
+    observed in real experimental data (r~0.76-0.78 between y1 and y2).
+    """
+    # Sample in log-space
+    log_samples = rng.multivariate_normal(REAL_DATA_LOG_MEAN, REAL_DATA_LOG_COV)
+
+    # Convert to linear scale with clipping
+    signals = 10.0**log_samples
+    return {
+        "S0_y1": float(np.clip(signals[0], 30, 3000)),
+        "S1_y1": float(np.clip(signals[1], 36, 5500)),
+        "S0_y2": float(np.clip(signals[2], 100, 4500)),
+        "S1_y2": float(np.clip(signals[3], 5, 1300)),
+    }
 
 
 def _sample_from_real(
@@ -238,20 +269,17 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
     """
     rng = np.random.default_rng(seed)
 
-    # Handle randomize_signals mode
+    # Handle randomize_signals mode with correlated sampling
     if randomize_signals:
         if k is None:
             k = _sample_from_real(rng, "K", clip_min=5.0)
-        if s0 is None:
-            s0 = {
-                "y1": _sample_from_real(rng, "S0_y1"),
-                "y2": _sample_from_real(rng, "S0_y2"),
-            }
-        if s1 is None:
-            s1 = {
-                "y1": _sample_from_real(rng, "S1_y1"),
-                "y2": _sample_from_real(rng, "S1_y2"),
-            }
+        if s0 is None or s1 is None:
+            # Sample correlated signals for realistic y1/y2 relationship
+            corr_signals = _sample_correlated_signals(rng)
+            if s0 is None:
+                s0 = {"y1": corr_signals["S0_y1"], "y2": corr_signals["S0_y2"]}
+            if s1 is None:
+                s1 = {"y1": corr_signals["S1_y1"], "y2": corr_signals["S1_y2"]}
     else:
         # Require k, s0, s1 when not randomizing
         if k is None:
@@ -648,6 +676,8 @@ def plot_synthetic_dataset(
 __all__ = [
     "L2_PH_ERRORS",
     "L2_PH_VALUES",
+    "REAL_DATA_LOG_COV",
+    "REAL_DATA_LOG_MEAN",
     "REAL_DATA_STATS",
     "STRESS_SCENARIOS",
     "StressScenario",

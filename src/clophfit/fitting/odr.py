@@ -14,7 +14,8 @@ from scipy import odr
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
-from .data_structures import FitResult, MiniT, _Result  # Local import to avoid cycle
+from .core import fit_binding_glob
+from .data_structures import Dataset, FitResult, MiniT, _Result
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask
@@ -64,10 +65,27 @@ def generalized_combined_model(
     return np.concatenate(results)
 
 
-def fit_binding_odr(fr: FitResult[MiniT]) -> FitResult[odr.Output]:
-    """Analyze multi-label titration datasets using ODR."""
+def fit_binding_odr(
+    ds_or_fr: Dataset | FitResult[MiniT],
+) -> FitResult[odr.Output]:
+    """Analyze multi-label titration datasets using ODR.
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+
+    Returns
+    -------
+    FitResult[odr.Output]
+        ODR fitting results.
+    """
+    # Handle both Dataset and FitResult inputs
+    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
+
     if fr.result is None or fr.dataset is None:
         return FitResult()
+
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
     for da in ds.values():
@@ -112,14 +130,37 @@ def fit_binding_odr(fr: FitResult[MiniT]) -> FitResult[odr.Output]:
 
 
 def fit_binding_odr_recursive(
-    fr: FitResult[MiniT], max_iterations: int = 15, tol: float = 0.1
+    ds_or_fr: Dataset | FitResult[MiniT],
+    max_iterations: int = 15,
+    tol: float = 0.1,
 ) -> FitResult[odr.Output]:
-    """Analyze multi-label titration datasets using ODR."""
-    result = copy.deepcopy(fr)
-    if result.result is None or result.dataset is None:
+    """Analyze multi-label titration datasets using iterative ODR.
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+    max_iterations : int
+        Maximum number of iterations.
+    tol : float
+        Convergence tolerance for residual variance.
+
+    Returns
+    -------
+    FitResult[odr.Output]
+        ODR fitting results.
+    """
+    # Handle both Dataset and FitResult inputs
+    if isinstance(ds_or_fr, Dataset):
+        fr = fit_binding_glob(ds_or_fr)
+    else:
+        fr = copy.deepcopy(ds_or_fr)
+
+    if fr.result is None or fr.dataset is None:
         return FitResult()
+
     # Initial fit
-    ro = fit_binding_odr(result)
+    ro = fit_binding_odr(fr)
     residual_variance = ro.mini.res_var if isinstance(ro.mini, odr.Output) else 0.0
     for _ in range(max_iterations):
         rn = fit_binding_odr(ro)
@@ -151,19 +192,42 @@ def outlier(
 
 
 def fit_binding_odr_recursive_outlier(
-    fr: FitResult[MiniT], tol: float = 0.5, threshold: float = 2.0
+    ds_or_fr: Dataset | FitResult[MiniT],
+    tol: float = 0.5,
+    threshold: float = 2.0,
 ) -> FitResult[odr.Output]:
-    """Analyze multi-label titration datasets using ODR."""
-    result = copy.deepcopy(fr)
-    if result.result is None or result.dataset is None:
+    """Analyze multi-label titration datasets using ODR with outlier removal.
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+    tol : float
+        Convergence tolerance for residual variance.
+    threshold : float
+        Z-score threshold for outlier detection.
+
+    Returns
+    -------
+    FitResult[odr.Output]
+        ODR fitting results.
+    """
+    # Handle both Dataset and FitResult inputs
+    if isinstance(ds_or_fr, Dataset):
+        fr = fit_binding_glob(ds_or_fr)
+    else:
+        fr = copy.deepcopy(ds_or_fr)
+
+    if fr.result is None or fr.dataset is None:
         return FitResult()
+
     # Initial fit
-    ro = fit_binding_odr_recursive(result, tol=tol)
+    ro = fit_binding_odr_recursive(fr, tol=tol)
     if ro.mini:
         omask = outlier(ro.mini, threshold=threshold)
     while omask.any() and ro.dataset:
-        result.dataset.apply_mask(~omask)
-        ro = fit_binding_odr_recursive(result, tol=tol)
+        fr.dataset.apply_mask(~omask)
+        ro = fit_binding_odr_recursive(fr, tol=tol)
         if ro.mini:
             omask = outlier(ro.mini, threshold=3.0)
     return ro
