@@ -7,25 +7,31 @@ Classes:
   support for pH-specific datasets.
 """
 
+from __future__ import annotations
+
 import copy
 import warnings
 from collections import UserDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 
 import arviz as az
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from lmfit import Parameters  # type: ignore[import-untyped]
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
-from matplotlib.figure import Figure
 from scipy import odr
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit.clophfit_types import ArrayF, ArrayMask
-
 from .errors import InvalidDataError
+
+if TYPE_CHECKING:
+    from lmfit import Parameters  # type: ignore[import-untyped]
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+    from clophfit.clophfit_types import ArrayF, ArrayMask
 
 
 @dataclass
@@ -202,7 +208,7 @@ class Dataset(UserDict[str, DataArray]):
     @classmethod
     def from_da(
         cls, da: DataArray | list[DataArray], *, is_ph: bool = False
-    ) -> "Dataset":
+    ) -> Dataset:
         """Alternative constructor to create Dataset from a list of DataArray.
 
         Parameters
@@ -247,7 +253,7 @@ class Dataset(UserDict[str, DataArray]):
             da.mask[da.mask] &= combined_mask[start_idx:end_idx]
             start_idx = end_idx
 
-    def copy(self, keys: list[str] | set[str] | None = None) -> "Dataset":
+    def copy(self, keys: list[str] | set[str] | None = None) -> Dataset:
         """Return a copy of the Dataset.
 
         If keys are provided, only data associated with those keys are copied.
@@ -335,6 +341,64 @@ class Dataset(UserDict[str, DataArray]):
                 data["y_errc"] = da.y_errc
             data["mask"] = da.mask
             pd.DataFrame(data).to_csv(fp.with_stem(f"{fp.stem}_{lbl}"), index=False)
+
+    def plot(
+        self,
+        *,
+        title: str | None = None,
+        ax: Axes | None = None,
+    ) -> Figure:
+        """Plot the dataset with error bars.
+
+        Parameters
+        ----------
+        title : str | None
+            Plot title.
+        ax : Axes | None
+            Axes to plot on. If None, creates a new figure.
+
+        Returns
+        -------
+        Figure
+            The figure containing the plot.
+        """
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 5))
+        else:
+            fig = cast("Figure", ax.get_figure())
+
+        colors = {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}
+        for label, da in self.items():
+            color = colors.get(label)
+            ax.errorbar(
+                da.x,
+                da.y,
+                yerr=da.y_err,
+                xerr=da.x_err,
+                fmt="o",
+                label=f"{label} data",
+                color=color,
+                capsize=3,
+                alpha=0.8,
+            )
+            # Plot masked points
+            if not np.all(da.mask):
+                ax.plot(
+                    da.xc[~da.mask],
+                    da.yc[~da.mask],
+                    "x",
+                    color=color,
+                    markersize=10,
+                    alpha=0.5,
+                    label=f"{label} masked",
+                )
+        ax.set_xlabel("pH" if self.is_ph else "[Cl] (mM)")
+        ax.set_ylabel("Signal")
+        if title:
+            ax.set_title(title)
+        ax.legend(loc="best", fontsize="small")
+        ax.grid(visible=True, alpha=0.3)
+        return fig
 
 
 # --- Data Structures for Fit Results ---

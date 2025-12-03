@@ -26,6 +26,7 @@ def test_fitters_converge_and_agree(*, is_ph: bool, labels: int, noise: float) -
     k_true = 7.0 if is_ph else 10.0
     s0 = {f"y{i}": (2.0 + 0.2 * i) if is_ph else (1.5 + 0.2 * i) for i in range(labels)}
     s1 = {f"y{i}": (1.0 + 0.1 * i) if is_ph else (0.1 * i) for i in range(labels)}
+    # Use the legacy minimal generator for this comparison test
     ds, truth = make_synthetic_ds(
         k_true, s0, s1, is_ph=is_ph, noise=noise, seed=42, rel_x_err=0.03
     )

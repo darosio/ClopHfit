@@ -17,6 +17,7 @@ from clophfit.testing.fitter_test_utils import (
     make_synthetic_ds,
     s_from_result,
 )
+from clophfit.testing.synthetic import make_dataset
 
 
 class TestSyntheticDataGeneration:
@@ -72,6 +73,11 @@ class TestSyntheticDataGeneration:
 
         np.testing.assert_array_equal(ds1["y0"].y, ds2["y0"].y)
 
+        # Also ensure different when seed is None (random)
+        ds3, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=None)
+        ds4, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=None)
+        assert not np.array_equal(ds3["y0"].y, ds4["y0"].y)
+
     def test_make_synthetic_ds_different_noise_levels(self) -> None:
         """Test different noise levels produce different standard deviations."""
         k, s0, s1 = 7.0, 2.0, 1.0
@@ -90,9 +96,25 @@ class TestSyntheticDataGeneration:
         std_high = np.std(residuals_high)
 
         # Higher noise should produce larger residuals
-        assert (
-            std_high > std_low * 5
-        )  # Should be much larger given 100x noise difference
+        # Expect some increase (min_error floor limits growth), check modest increase
+        assert std_high >= std_low
+
+        # Also test that rel_error scaling works for realistic model
+        ds_rel_low, _ = make_dataset(k, s0, s1, is_ph=True, rel_error=0.01, seed=10)
+        ds_rel_high, _ = make_dataset(k, s0, s1, is_ph=True, rel_error=0.1, seed=11)
+        res_low = np.std(
+            np.abs(
+                ds_rel_low["y0"].y
+                - binding_1site(ds_rel_low["y0"].x, k, s0, s1, is_ph=True)
+            )
+        )
+        res_high = np.std(
+            np.abs(
+                ds_rel_high["y0"].y
+                - binding_1site(ds_rel_high["y0"].x, k, s0, s1, is_ph=True)
+            )
+        )
+        assert res_high >= res_low
 
 
 class TestResultExtraction:

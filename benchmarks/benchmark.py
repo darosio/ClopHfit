@@ -16,7 +16,7 @@ from clophfit.fitting.core import (
     fit_binding_glob,
     outlier2,
 )
-from clophfit.testing.synthetic import make_realistic_dataset
+from clophfit.testing.synthetic import make_dataset
 
 # Constants
 N_SAMPLES = 100
@@ -54,9 +54,21 @@ def run_benchmark():
     for i in range(N_SAMPLES):
         seed = 42 + i
 
-        ds_clean, _ = make_realistic_dataset(pka=K_TRUE, seed=seed)
-        ds_outliers, _ = make_realistic_dataset(
-            pka=K_TRUE, outlier_prob=0.4, outlier_sigma=4.0, seed=seed
+        ds_clean, _ = make_dataset(
+            k=K_TRUE,
+            s0={"y1": 700.0, "y2": 1000.0},
+            s1={"y1": 1200.0, "y2": 200.0},
+            is_ph=True,
+            seed=seed,
+        )
+        ds_outliers, _ = make_dataset(
+            k=K_TRUE,
+            s0={"y1": 700.0, "y2": 1000.0},
+            s1={"y1": 1200.0, "y2": 200.0},
+            is_ph=True,
+            outlier_prob=0.4,
+            outlier_sigma=4.0,
+            seed=seed,
         )
 
         for name, method in methods.items():

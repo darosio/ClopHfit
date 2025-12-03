@@ -266,6 +266,7 @@ max-complexity = 12
   "PLR0913",
   "PLR0917", # Too many positional arguments - common in scientific functions
   "PLR2004",
+  "PLC2701",
   "SLF001",
   "T20",
 ]

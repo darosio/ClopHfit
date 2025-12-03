@@ -74,7 +74,6 @@ def run_benchmark(
     error_model: str = "realistic",
     rel_error: float | dict[str, float] = 0.035,
     outlier_prob: float = 0.0,
-    noise_multiplier: float = 1.0,
     verbose: bool = True,
 ) -> dict[str, FitterStats]:
     """Run benchmark comparison of fitting methods.
@@ -91,8 +90,6 @@ def run_benchmark(
         Relative error. Use dict for per-label scaling, e.g., {"y1": 0.07, "y2": 0.025}.
     outlier_prob : float
         Probability of outlier per label (0-1).
-    noise_multiplier : float
-        Stress factor for noise.
     verbose : bool
         Print progress.
 
@@ -115,7 +112,6 @@ def run_benchmark(
             error_model=error_model,
             rel_error=rel_error,
             outlier_prob=outlier_prob,
-            noise_multiplier=noise_multiplier,
         )
 
         for name, run in fitters.items():

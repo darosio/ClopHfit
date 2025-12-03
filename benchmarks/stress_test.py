@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Stress test all fitting methods with challenging synthetic scenarios.
 
-Creates datasets with:
-1. High outlier rates (10-30%)
-2. Low-pH signal drops (acidic tail collapse)
-3. High noise levels
-4. Correlated channel errors
-5. Missing/saturated points
+Creates datasets with increasing difficulty:
+1. Clean baseline
+2. High noise (increased rel_error)
+3. Outliers (10-30%)
+4. Low-pH signal drops
+5. Combined stress factors
 
 These scenarios reveal which methods are truly robust vs. which only work on clean data.
 """
 
+from __future__ import annotations
+
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -21,21 +24,89 @@ from clophfit.fitting.core import (
     fit_binding_glob,
     outlier2,
 )
-from clophfit.testing.synthetic import (
-    STRESS_SCENARIOS,
-    StressScenario,
-    make_stress_dataset,
-)
+from clophfit.testing.synthetic import make_dataset
+
+
+@dataclass
+class ScenarioConfig:
+    """Configuration for a stress test scenario."""
+
+    name: str
+    description: str
+    rel_error: float = 0.035
+    outlier_prob: float = 0.0
+    outlier_sigma: float = 4.0
+    low_ph_drop: bool = False
+    low_ph_drop_magnitude: float = 0.4
+    saturation_prob: float = 0.0
+    x_error_large: float = 0.0
+
+
+# Define stress scenarios with increasing difficulty
+SCENARIOS = [
+    ScenarioConfig(
+        name="Clean",
+        description="Baseline: no stress factors",
+    ),
+    ScenarioConfig(
+        name="HighNoise",
+        description="3x normal noise level",
+        rel_error=0.105,  # 3x baseline
+    ),
+    ScenarioConfig(
+        name="Outliers-10%",
+        description="10% outliers (4-sigma magnitude)",
+        outlier_prob=0.10,
+    ),
+    ScenarioConfig(
+        name="Outliers-30%",
+        description="30% outliers (4-sigma magnitude)",
+        outlier_prob=0.30,
+    ),
+    ScenarioConfig(
+        name="pH-Drop",
+        description="Low-pH signal drop (40% reduction)",
+        low_ph_drop=True,
+        low_ph_drop_magnitude=0.4,
+    ),
+    ScenarioConfig(
+        name="Saturation",
+        description="20% saturated points (masked)",
+        saturation_prob=0.20,
+    ),
+    ScenarioConfig(
+        name="Combined-Moderate",
+        description="15% outliers + 2x noise + pH drop",
+        rel_error=0.07,
+        outlier_prob=0.15,
+        low_ph_drop=True,
+        low_ph_drop_magnitude=0.3,
+    ),
+    ScenarioConfig(
+        name="Combined-Severe",
+        description="30% outliers + 4x noise + pH drop + saturation",
+        rel_error=0.14,
+        outlier_prob=0.30,
+        low_ph_drop=True,
+        low_ph_drop_magnitude=0.5,
+        saturation_prob=0.15,
+    ),
+    ScenarioConfig(
+        name="X-Error-Large",
+        description="Large x-errors (±0.3 pH units)",
+        x_error_large=0.3,
+    ),
+]
 
 
 def run_all_methods_on_scenario(
-    scenario: StressScenario, n_replicates: int = 10
+    scenario: ScenarioConfig, n_replicates: int = 33
 ) -> pd.DataFrame:
     """Test all fitting methods on a stress scenario with multiple replicates.
 
     Parameters
     ----------
-    scenario : StressScenario
+    scenario : ScenarioConfig
         Scenario definition describing stressors to apply.
     n_replicates : int, optional
         Number of independently simulated datasets to evaluate per method.
@@ -63,8 +134,8 @@ def run_all_methods_on_scenario(
         "Standard LM": lambda ds: fit_binding_glob(ds, robust=False),
         "Robust Huber": lambda ds: fit_binding_glob(ds, robust=True),
         "Outlier2": lambda ds: outlier2(ds, key="stress"),
-        "Bayesian-Shared": run_bayesian_shared,
-        "Bayesian-PerLabel": run_bayesian_perlabel,
+        # "Bayesian-Shared": run_bayesian_shared,
+        # "Bayesian-PerLabel": run_bayesian_perlabel,
     }
 
     results = []
@@ -75,21 +146,21 @@ def run_all_methods_on_scenario(
         times = []
 
         for rep in range(n_replicates):
-            # Generate new dataset for each replicate using the new module
-            rep_scenario = StressScenario(
-                name=scenario.name,
-                description=scenario.description,
+            # Generate dataset using make_dataset directly
+            ds, truth = make_dataset(
+                k=7.0,
+                s0={"y1": 700.0, "y2": 1000.0},
+                s1={"y1": 1200.0, "y2": 200.0},
+                is_ph=True,
+                seed=142 + rep,
+                rel_error=scenario.rel_error,
                 outlier_prob=scenario.outlier_prob,
-                outlier_magnitude=scenario.outlier_magnitude,
-                low_ph_drop_prob=scenario.low_ph_drop_prob,
+                outlier_sigma=scenario.outlier_sigma,
+                low_ph_drop=scenario.low_ph_drop,
                 low_ph_drop_magnitude=scenario.low_ph_drop_magnitude,
-                noise_multiplier=scenario.noise_multiplier,
                 saturation_prob=scenario.saturation_prob,
                 x_error_large=scenario.x_error_large,
-                x_systematic_offset=scenario.x_systematic_offset,
-                seed=scenario.seed + rep,
             )
-            ds, truth = make_stress_dataset(rep_scenario)
 
             try:
                 start = time.time()
@@ -156,12 +227,9 @@ def main():
     print("=" * 80)
     print()
 
-    # Use predefined scenarios from the synthetic module
-    scenarios = list(STRESS_SCENARIOS.values())
-
     all_results = []
 
-    for scenario in scenarios:
+    for scenario in SCENARIOS:
         print(f"Testing scenario: {scenario.name}")
         print(f"  {scenario.description}")
         df = run_all_methods_on_scenario(scenario, n_replicates=20)
@@ -199,7 +267,7 @@ def main():
 
     # Best method per scenario
     print("BEST METHOD PER SCENARIO (by success rate, then error):")
-    for scenario in scenarios:
+    for scenario in SCENARIOS:
         scenario_df = full_df[full_df["scenario"] == scenario.name]
         # Sort by success rate (desc), then mean error (asc)
         scenario_df = scenario_df.sort_values(

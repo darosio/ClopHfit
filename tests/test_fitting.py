@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from lmfit import Parameters  # type: ignore[import-untyped]
 from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
+from matplotlib.figure import Figure
 
 from clophfit.fitting.core import (
     analyze_spectra,
@@ -465,6 +466,69 @@ def test_export_ds(multi_dataset: Dataset, tmp_path: Path) -> None:
     np.testing.assert_allclose(
         multi_dataset["y1"].x, read_df.xc.to_numpy().astype(float)
     )
+
+
+def test_dataset_plot(multi_dataset: Dataset) -> None:
+    """Test Dataset.plot() method returns a figure."""
+    fig = multi_dataset.plot()
+    assert fig is not None
+    assert isinstance(fig, Figure)
+    # Check axes labels
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "pH"  # multi_dataset.is_ph is True
+    assert ax.get_ylabel() == "Signal"
+    plt.close(fig)
+
+
+def test_dataset_plot_ph() -> None:
+    """Test Dataset.plot() with pH data."""
+    x = np.array([5.0, 6.0, 7.0, 8.0])
+    y = np.array([100.0, 150.0, 180.0, 195.0])
+    ds = Dataset({"y0": DataArray(x, y)}, is_ph=True)
+    fig = ds.plot()
+    ax = fig.axes[0]
+    assert ax.get_xlabel() == "pH"
+    plt.close(fig)
+
+
+def test_dataset_plot_with_errors() -> None:
+    """Test Dataset.plot() with error bars."""
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    y = np.array([10.0, 20.0, 30.0, 40.0])
+    x_err = np.array([0.1, 0.1, 0.1, 0.1])
+    y_err = np.array([1.0, 2.0, 3.0, 4.0])
+    ds = Dataset({"test": DataArray(x, y, x_errc=x_err, y_errc=y_err)})
+    fig = ds.plot(title="Test Plot")
+    ax = fig.axes[0]
+    assert ax.get_title() == "Test Plot"
+    plt.close(fig)
+
+
+def test_dataset_plot_with_mask() -> None:
+    """Test Dataset.plot() shows masked points."""
+    x = np.array([1.0, 2.0, 3.0, 4.0])
+    y = np.array([10.0, 20.0, 30.0, 40.0])
+    da = DataArray(x, y)
+    da.mask = np.array([True, True, False, True])  # mask out point 3
+    ds = Dataset({"test": da})
+    fig = ds.plot()
+    # Should have plotted masked point with 'x' marker
+    assert fig is not None
+    # ensure that a masked point exists on the axes as a Line2D with marker 'x'
+    lines = [line for line in fig.axes[0].get_lines() if line.get_marker() == "x"]
+    assert lines, "Expected masked points plotted with marker x"
+    plt.close(fig)
+
+
+def test_dataset_plot_custom_ax() -> None:
+    """Test Dataset.plot() with custom axes."""
+    x = np.array([1.0, 2.0, 3.0])
+    y = np.array([10.0, 20.0, 30.0])
+    ds = Dataset({"test": DataArray(x, y)})
+    fig, ax = plt.subplots()
+    result_fig = ds.plot(ax=ax)
+    assert result_fig is fig
+    plt.close(fig)
 
     # Additional
     # For DataArray

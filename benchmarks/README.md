@@ -63,9 +63,8 @@ python benchmarks/outlier_magnitude_benchmark.py
 
 Synthetic data is generated using `clophfit.testing.synthetic` module which provides:
 
-- `make_simple_dataset()` - Fast, minimal generation for unit tests
-- `make_realistic_dataset()` - Reuses the L2/L4/140220 pH grid, instrument errors, and common acidic tail behavior (rare outliers plus frequent pH=5.5 drop and occasional pH=6.0 drop)
-- `make_stress_dataset()` - Configurable stress scenarios
+- `make_dataset()` - Unified function for all synthetic data generation with configurable error models, outliers, and stress factors
+- `make_simple_dataset()` - Simplified interface for unit tests
 
 ## Key Results
 
