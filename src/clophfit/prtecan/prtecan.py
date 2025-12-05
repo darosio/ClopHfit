@@ -35,7 +35,7 @@ from clophfit.fitting.core import (
 )
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.odr import fit_binding_odr_recursive_outlier, format_estimate
+from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 
 if TYPE_CHECKING:
@@ -1690,9 +1690,7 @@ class Titration(TecanfilesGroup):
         with warnings.catch_warnings(record=True) as caught_warnings:
             warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
             try:
-                result_odr = fit_binding_odr_recursive_outlier(
-                    result_glob, threshold=2.5
-                )
+                result_odr = fit_binding_odr(result_glob)
             except Exception:
                 logger.exception("Error during ODR fitting for well '%s'", key)
                 result_odr = FitResult()

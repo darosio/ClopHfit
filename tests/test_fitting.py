@@ -11,6 +11,10 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
 
+from clophfit.fitting.bayes import (
+    fit_binding_pymc,
+    fit_binding_pymc2,
+)
 from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
@@ -21,6 +25,11 @@ from clophfit.fitting.core import (
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.errors import InsufficientDataError, InvalidDataError
 from clophfit.fitting.models import binding_1site, kd
+from clophfit.fitting.odr import (
+    fit_binding_odr,
+    fit_binding_odr_recursive,
+    fit_binding_odr_recursive_outlier,
+)
 from clophfit.fitting.plotting import plot_fit
 
 ###############################################################################
@@ -782,3 +791,159 @@ class TestOutlier2:
             fr2.result.params["K"].value,
             rtol=1e-10,
         )
+
+
+###############################################################################
+# Tests for ODR Fitter
+###############################################################################
+
+
+def test_fit_binding_odr_ph(ph_dataset: Dataset) -> None:
+    """Test ODR fitting on pH dataset."""
+    fr = fit_binding_odr(ph_dataset)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    assert np.isclose(fr.result.params["K"].value, 7.0, atol=0.5)
+    # Check that residuals are computed
+    assert fr.result.residual is not None
+    assert len(fr.result.residual) > 0
+
+
+def test_fit_binding_odr_from_fitresult(ph_dataset: Dataset) -> None:
+    """Test ODR fitting starting from a FitResult."""
+    # First get initial fit
+    fr_init = fit_binding_glob(ph_dataset)
+    assert fr_init.result is not None
+
+    # Then use ODR
+    fr_odr = fit_binding_odr(fr_init)
+    assert fr_odr.result is not None
+    assert "K" in fr_odr.result.params
+    assert np.isclose(fr_odr.result.params["K"].value, 7.0, atol=0.5)
+    assert fr_odr.result.residual is not None
+
+
+def test_fit_binding_odr_recursive_ph(ph_dataset: Dataset) -> None:
+    """Test iterative ODR fitting."""
+    fr = fit_binding_odr_recursive(ph_dataset, max_iterations=3)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    assert np.isclose(fr.result.params["K"].value, 7.0, atol=0.5)
+    assert fr.result.residual is not None
+
+
+def test_fit_binding_odr_recursive_outlier_ph(ph_dataset: Dataset) -> None:
+    """Test ODR fitting with outlier removal."""
+    fr = fit_binding_odr_recursive_outlier(ph_dataset, threshold=3.0)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+
+
+def test_fit_binding_odr_multi(multi_dataset: Dataset) -> None:
+    """Test ODR fitting on multi-label dataset."""
+    fr = fit_binding_odr(multi_dataset)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    assert "S0_y1" in fr.result.params
+    assert "S1_y1" in fr.result.params
+    assert "S0_y2" in fr.result.params
+    assert "S1_y2" in fr.result.params
+    assert np.isclose(fr.result.params["K"].value, 7.0, atol=0.5)
+    assert fr.result.residual is not None
+    # Total residuals should match concatenated y data
+    total_y_points = len(multi_dataset["y1"].y) + len(multi_dataset["y2"].y)
+    assert len(fr.result.residual) == total_y_points
+
+
+###############################################################################
+# Tests for Bayesian Fitter
+###############################################################################
+
+
+def test_fit_binding_pymc_ph(ph_dataset: Dataset) -> None:
+    """Test PyMC Bayesian fitting on pH dataset."""
+    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    # Check K value is reasonable
+    assert 6.0 < fr.result.params["K"].value < 8.0
+    # Check residuals are computed
+    assert fr.result.residual is not None
+    assert len(fr.result.residual) > 0
+
+
+def test_fit_binding_pymc_from_fitresult(ph_dataset: Dataset) -> None:
+    """Test PyMC starting from a FitResult."""
+    fr_init = fit_binding_glob(ph_dataset)
+    assert fr_init.result is not None
+
+    fr_pymc = fit_binding_pymc(fr_init, n_samples=50, n_sd=1.0)
+    assert fr_pymc.result is not None
+    assert "K" in fr_pymc.result.params
+
+
+def test_fit_binding_pymc2_ph(ph_dataset: Dataset) -> None:
+    """Test PyMC with per-label noise scaling."""
+    fr = fit_binding_pymc2(ph_dataset, n_samples=100, n_sd=1.0)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    assert fr.result.residual is not None
+
+
+def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
+    """Test PyMC on multi-label dataset."""
+    fr = fit_binding_pymc(multi_dataset, n_samples=50, n_sd=1.0)
+    assert fr.result is not None
+    assert "K" in fr.result.params
+    assert "S0_y1" in fr.result.params
+    assert "S1_y1" in fr.result.params
+    assert fr.result.residual is not None
+
+
+###############################################################################
+# Tests for Result Consistency
+###############################################################################
+
+
+def test_all_fitters_return_residuals(ph_dataset: Dataset) -> None:
+    """All fitter functions should return residuals in result."""
+    fr_lm = fit_binding_glob(ph_dataset)
+    assert fr_lm.result is not None
+    assert fr_lm.result.residual is not None
+    assert len(fr_lm.result.residual) > 0
+
+    fr_odr = fit_binding_odr(ph_dataset)
+    assert fr_odr.result is not None
+    assert fr_odr.result.residual is not None
+    assert len(fr_odr.result.residual) > 0
+
+
+def test_residual_computation_consistency(ph_dataset: Dataset) -> None:
+    """Check that residuals are computed consistently across backends."""
+    fr_lm = fit_binding_glob(ph_dataset)
+    fr_odr = fit_binding_odr(ph_dataset)
+
+    assert fr_lm.result is not None
+    assert fr_odr.result is not None
+
+    # Both should have same number of residuals
+    assert len(fr_lm.result.residual) == len(fr_odr.result.residual)
+
+
+def test_fit_result_attributes(ph_dataset: Dataset) -> None:
+    """Test that FitResult has all expected attributes."""
+    fr = fit_binding_glob(ph_dataset)
+
+    # Should have all attributes
+    assert fr.figure is not None
+    assert fr.result is not None
+    assert fr.mini is not None
+    assert fr.dataset is not None
+
+    # Result should have key attributes
+    assert hasattr(fr.result, "params")
+    assert hasattr(fr.result, "residual")
+
+    # Parameters should be accessible
+    assert "K" in fr.result.params
+    assert fr.result.params["K"].value is not None

@@ -141,6 +141,8 @@ def process_trace(
     -------
     FitResult[az.InferenceData]
         The updated fit result with extracted parameter values and datasets.
+        Residuals are WEIGHTED (weight * (obs - pred)) where weight = 1/y_err,
+        computed using posterior mean parameter estimates.
 
     Raises
     ------
@@ -178,8 +180,30 @@ def process_trace(
     rename_keys(rpars)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
+    # Compute weighted residuals from posterior mean predictions
+    # Weighted residuals = (1/y_err) * (observed - predicted)
+    # Use masked values (.x, .y, .y_err) for consistency
+    residuals_list: list[np.ndarray] = []
+    for lbl, da in ds.items():
+        model = binding_1site(
+            da.x,
+            rpars["K"].value,
+            rpars[f"S0_{lbl}"].value,
+            rpars[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+        raw_residuals = da.y - model
+        # Weight by precision (1/y_err)
+        if da.y_err.size > 0:
+            weight = 1 / da.y_err
+            weighted = weight * raw_residuals
+        else:
+            weighted = raw_residuals
+        residuals_list.append(weighted)
+    residuals = np.concatenate(residuals_list)
+
     # Return the fit result
-    return FitResult(fig, _Result(rpars), trace, ds)
+    return FitResult(fig, _Result(rpars, residual=residuals), trace, ds)
 
 
 def extract_fit(
@@ -212,7 +236,30 @@ def extract_fit(
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-    return FitResult(fig, _Result(rpars), az.InferenceData(), ds)
+
+    # Compute weighted residuals from posterior mean predictions
+    # Weighted residuals = (1/y_err) * (observed - predicted)
+    # Use masked values (.x, .y, .y_err) for consistency
+    residuals_list: list[np.ndarray] = []
+    for lbl, da in ds.items():
+        model = binding_1site(
+            da.x,
+            rpars["K"].value,
+            rpars[f"S0_{lbl}"].value,
+            rpars[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+        raw_residuals = da.y - model
+        # Weight by precision (1/y_err)
+        if da.y_err.size > 0:
+            weight = 1 / da.y_err
+            weighted = weight * raw_residuals
+        else:
+            weighted = raw_residuals
+        residuals_list.append(weighted)
+    residuals = np.concatenate(residuals_list)
+
+    return FitResult(fig, _Result(rpars, residual=residuals), az.InferenceData(), ds)
 
 
 def _extract_x_true_from_trace_df(

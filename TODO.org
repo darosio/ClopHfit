@@ -40,7 +40,6 @@ Synthetic data shows higher coverage (87%) → real data has additional systemat
 
 Plot: docs/residuals_all_methods.png
 Results: comprehensive_fitting_results_with_L1.csv
-* DONE leave a trace in the linear git history of the simulation/analysis before clean (functions removal)
 * DONE Comprehensive comparison of fitting methods (2024-11-30)
 benchmarks/compare_fitting_methods.py - Statistical comparison with synthetic & real data
 
@@ -161,19 +160,7 @@ outlier2's Bayesian approach produces the most Gaussian residuals with outliers.
 - fit_binding_glob_recursive(ds) - conservative uncertainty estimates
 - outlier2(ds, error_model="uniform") - Bayesian with explicit outlier detection
 
-* TODO Check docs/tutorial/prtecan.ipynb
-that is in not using directly unavailable fitting methods
-* TODO Refactor fitting API for uniform error model handling
-Current design inconsistency:
-- fit_binding_glob(ds: Dataset) - takes Dataset directly, controls y_err
-- fit_binding_odr(fr: FitResult) - takes FitResult, inherits y_err from preliminary fit
-- fit_binding_pymc(fr: FitResult) - takes FitResult, inherits y_err from preliminary fit
-
-This makes it hard to systematically compare error models for ODR/PyMC.
-
-Proposed fix: Add Dataset input option or error_model parameter to ODR/PyMC functions
-so all fitting methods can be tested with the same error model consistently.
-* TODO for manuscript
+* for manuscript
    Key observations:
 
      - Coverage is similar (~85-88%) regardless of whether data was generated with physics or uniform errors
@@ -212,56 +199,12 @@ Results from benchmarks/compare_error_models.py
 5. Real data's lower coverage for outlier2 (50%) suggests additional systematic
    effects not captured in synthetic simulation (reference pKa uncertainty, etc.)
 
-* TODO Review refactor_benchmark branch
-The origin/refactor_benchmark branch has diverged significantly from main.
-Contains improvements but also outdated code. When ready:
-- Compare file by file with: git diff main...origin/refactor_benchmark -- <file>
-- Consider deleting branch after extracting any remaining useful parts
-- Most synthetic data utilities already in src/clophfit/testing/
-
-** Already ported to main:
-- [X] Dataset.__repr__() for readable output
-- [X] make_synthetic_ds() in testing/fitter_test_utils.py
-- [X] outlier2() with error_model parameter
-
-** May still be useful:
-- [ ] fit_binding_glob_recursive_outlier (if needed)
-- [ ] Additional benchmark scripts
-- [ ] Memory efficiency improvements (check perf: memory efficiency commit)
-
 * TODO Next Steps
 +1. Analyze real experimental data characteristics
 +1. Refine synthetic data generation to match real data
 +1. Run comprehensive benchmarks
 +1. Validate recommendations
 +1. Implement cleanup based on validated results
-
-* removed core helper
-#+begin_src jupyter-python
-# --- LMfit Backend: Helpers and Fitting Functions ---
-def _binding_1site_models(params: Parameters, x: ArrayDict, is_ph: bool) -> ArrayDict:
-    "Compute models for the given input data and parameters."
-    models = {}
-    for lbl, x_data in x.items():
-        models[lbl] = binding_1site(
-            x_data,
-            params["K"].value,
-            params[f"S0_{lbl}"].value,
-            params[f"S1_{lbl}"].value,
-            is_ph,
-        )
-    return models
-
-
-def _init_from_dataset(ds: Dataset) -> tuple[ArrayDict, ArrayDict, ArrayDict, bool]:
-    x = {k: da.x for k, da in ds.items()}
-    y = {k: da.y for k, da in ds.items()}
-    w = {
-        k: 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
-        for k, da in ds.items()
-    }
-    return x, y, w, ds.is_ph
-#+end_src
 
 * optimized
 #+begin_src jupyter-python

@@ -302,6 +302,11 @@ def fit_binding_glob(ds: Dataset, *, robust: bool = False) -> FitResult[Minimize
     Parameter uncertainties are scaled by sqrt(reduced_chi_sq) via lmfit's
     Minimizer(scale_covar=True), which improves coverage when errors are
     underestimated.
+
+    Residuals returned are WEIGHTED (weight * (observed - predicted)) where
+    weight = 1/y_err. This is appropriate for heteroscedastic data where
+    different observations have different uncertainties. For homoscedastic data,
+    weighted and raw residuals are proportional.
     """
     params = _build_params_1site(ds)
     if len(params) > len(np.concatenate([da.y for da in ds.values()])):
@@ -313,6 +318,9 @@ def fit_binding_glob(ds: Dataset, *, robust: bool = False) -> FitResult[Minimize
         result = mini.minimize(method="least_squares", loss="huber")
     else:
         result = mini.minimize()
+
+    # Use the weighted residuals from lmfit (already available in result.residual)
+    # This is appropriate for heteroscedastic data where y_err varies
 
     fig = figure.Figure()
     ax = fig.add_subplot(111)

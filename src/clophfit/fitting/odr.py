@@ -21,6 +21,53 @@ if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask
 
 
+def _compute_odr_residuals(
+    ds: Dataset, params: Parameters, original_y_err: np.ndarray
+) -> np.ndarray:
+    """Compute weighted residuals from ODR output using ORIGINAL y_err.
+
+    Uses the original (pre-ODR) y_err for weighting, not the ODR-estimated y_err.
+    ODR estimates y_err from residuals (y_err = 2*|eps|), so using ODR's y_err
+    would be circular and always produce ±0.5.
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset (with ODR-modified y_err, but we don't use it)
+    params : Parameters
+        Fitted parameters from ODR
+    original_y_err : np.ndarray
+        The y_err BEFORE ODR modified it (physics-based or user-provided)
+
+    Returns
+    -------
+    np.ndarray
+        Weighted residuals = raw_residual / original_y_err
+    """
+    residuals_list: list[np.ndarray] = []
+    K = params["K"].value  # noqa: N806
+
+    idx = 0
+    for lbl, da in ds.items():
+        n_points = len(da.y)
+        # Use masked values (.x, .y) for consistency
+        model = binding_1site(
+            da.x,
+            K,
+            params[f"S0_{lbl}"].value,
+            params[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+        raw_residuals = da.y - model
+        # Weight by ORIGINAL y_err (not ODR-modified)
+        label_y_err = original_y_err[idx : idx + n_points]
+        weighted = raw_residuals / label_y_err
+        residuals_list.append(weighted)
+        idx += n_points
+
+    return np.concatenate(residuals_list)
+
+
 def format_estimate(
     value: float, error: float, significant_digit_limit: int = 5
 ) -> str:
@@ -78,7 +125,8 @@ def fit_binding_odr(
     Returns
     -------
     FitResult[odr.Output]
-        ODR fitting results.
+        ODR fitting results. Residuals are WEIGHTED by the ORIGINAL y_err
+        (before ODR modified it), making them comparable to LM residuals.
     """
     # Handle both Dataset and FitResult inputs
     fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
@@ -88,10 +136,17 @@ def fit_binding_odr(
 
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
+
+    # Store ORIGINAL y_err from LM fit (for residual weighting)
+    # These are physics-based errors, not inflated by shot_factor
+    original_y_err = np.concatenate([da.y_err for da in ds.values()])
+
+    # Apply shot_factor for ODR fitting (not for residual weighting)
     for da in ds.values():
         # even if da.y_err is set to [1,1,..] array y_errc remains []
         shot_factor = 1 + np.sqrt(np.abs(da.yc))
         da.y_err = da.y_errc * shot_factor if da.y_errc.size > 0 else 1.0 * shot_factor
+
     # Collect dataset lengths
     dataset_lengths = [len(da.y) for da in ds.values()]
     x_data, y_data, x_err, y_err = ds.concatenate_data()
@@ -108,7 +163,7 @@ def fit_binding_odr(
     combined_model = odr.Model(combined_model_odr)  # type: ignore[arg-type]
     odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
     output = odr_obj.run()
-    # reassign x_err and y_err to ds
+    # reassign x_err and y_err to ds (ODR-estimated values)
     start_idx = 0
     for da in ds.values():
         end_idx = start_idx + len(da.y)
@@ -123,10 +178,17 @@ def fit_binding_odr(
     for name, value, error in zip(p_names, output.beta, output.sd_beta, strict=True):
         params.add(name, value=value)
         params[name].stderr = error
+
+    # Compute weighted residuals using ORIGINAL y_err (not ODR-modified)
+    residuals = _compute_odr_residuals(ds, params, original_y_err)
+
+    # Create figure and result
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, params, nboot=20, pp=PlotParameters(ds.is_ph))
-    return FitResult(fig, _Result(params), output, ds)
+    return FitResult(
+        fig, _Result(params, residual=residuals, redchi=output.res_var), output, ds
+    )
 
 
 def fit_binding_odr_recursive(
