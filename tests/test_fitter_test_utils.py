@@ -17,7 +17,75 @@ from clophfit.testing.fitter_test_utils import (
     make_synthetic_ds,
     s_from_result,
 )
-from clophfit.testing.synthetic import make_dataset
+from clophfit.testing.synthetic import make_benchmark_dataset, make_dataset
+
+
+class TestMakeBenchmarkDataset:
+    """Test the unified benchmark dataset generator."""
+
+    def test_single_label_clean(self) -> None:
+        """Test single label clean data generation."""
+        ds, truth = make_benchmark_dataset(k=7.0, n_labels=1, seed=42)
+
+        assert len(ds) == 1
+        assert "y1" in ds
+        assert truth.K == 7.0
+        assert len(ds["y1"].y) == 7
+        assert np.all(ds["y1"].y_err > 0)
+
+    def test_two_labels_clean(self) -> None:
+        """Test two label clean data generation."""
+        ds, _truth = make_benchmark_dataset(k=7.0, n_labels=2, seed=42)
+
+        assert len(ds) == 2
+        assert "y1" in ds
+        assert "y2" in ds
+        assert len(ds["y1"].y) == 7
+        assert len(ds["y2"].y) == 7
+
+    def test_error_ratio(self) -> None:
+        """Test that error_ratio correctly scales y2 errors."""
+        ds1, _ = make_benchmark_dataset(n_labels=2, error_ratio=1.0, seed=42)
+        ds2, _ = make_benchmark_dataset(n_labels=2, error_ratio=0.2, seed=42)
+
+        # With ratio=1.0, errors should be similar
+        ratio1 = ds1["y2"].y_err.mean() / ds1["y1"].y_err.mean()
+        assert 0.8 < ratio1 < 1.2
+
+        # With ratio=0.2, y2 errors should be smaller
+        ratio2 = ds2["y2"].y_err.mean() / ds2["y1"].y_err.mean()
+        assert ratio2 < 0.6
+
+    def test_low_ph_drop(self) -> None:
+        """Test that low-pH drop is correctly applied."""
+        ds_clean, _ = make_benchmark_dataset(n_labels=1, seed=42, add_outlier=False)
+        ds_drop, _ = make_benchmark_dataset(
+            n_labels=1, seed=42, add_outlier=True, outlier_sigma=0.4
+        )
+
+        # Low-pH drop should reduce the signal at the lowest pH point
+        # The lowest pH is at the highest index (since pH is sorted high to low)
+        idx_low = int(np.argmin(ds_clean["y1"].x))
+        ratio = ds_drop["y1"].y[idx_low] / ds_clean["y1"].y[idx_low]
+        # With 40% drop, ratio should be around 0.6
+        assert 0.5 < ratio < 0.8
+
+    def test_reproducibility(self) -> None:
+        """Test that seed produces reproducible results."""
+        ds1, truth1 = make_benchmark_dataset(k=7.0, n_labels=2, seed=123)
+        ds2, truth2 = make_benchmark_dataset(k=7.0, n_labels=2, seed=123)
+
+        np.testing.assert_array_equal(ds1["y1"].y, ds2["y1"].y)
+        np.testing.assert_array_equal(ds1["y2"].y, ds2["y2"].y)
+        assert truth1.K == truth2.K
+
+    def test_rng_parameter(self) -> None:
+        """Test that passing rng works."""
+        rng = np.random.default_rng(42)
+        ds, _ = make_benchmark_dataset(k=7.0, n_labels=1, rng=rng)
+
+        assert len(ds) == 1
+        assert len(ds["y1"].y) == 7
 
 
 class TestSyntheticDataGeneration:
