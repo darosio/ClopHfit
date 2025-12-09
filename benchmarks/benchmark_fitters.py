@@ -111,7 +111,6 @@ def run_benchmark(
             seed=i,
             error_model=error_model,
             rel_error=rel_error,
-            outlier_prob=outlier_prob,
         )
 
         for name, run in fitters.items():

@@ -948,9 +948,9 @@ class Buffer:
                 fit_resultd[label] = BufferFit()
             else:
                 mean = buf_df.mean(axis=1).to_numpy().astype(float)
-                sem = buf_df.sem(axis=1).to_numpy().astype(float)
+                std = buf_df.std(axis=1).to_numpy().astype(float)
                 # y_err estimate is important when using 2 ds and x_err for ODR
-                data = RealData(self.tit.x, mean, sy=sem, sx=self.tit.x_err)
+                data = RealData(self.tit.x, mean, sy=std, sx=self.tit.x_err)
                 model = Model(linear_model)
                 # Initial guess for slope and intercept
                 odr = ODR(data, model, beta0=[0.0, mean.mean()])
@@ -966,7 +966,7 @@ class Buffer:
                 buf_df["fit"] = m_best * self.tit.x + q_best
                 buf_df["fit_err"] = fit_error(self.tit.x, cov_matrix)
                 buf_df["mean"] = mean
-                buf_df["sem"] = sem
+                buf_df["sem"] = std
         return fit_resultd
 
     def plot(self, *, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:

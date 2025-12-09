@@ -2,135 +2,231 @@
 
 This directory contains scripts for evaluating and benchmarking the robust fitting methods in ClopHfit.
 
+## Setup
+
+All benchmarks use the `clophfit.testing.synthetic.make_dataset()` function for synthetic data generation with configurable error models, outliers, and stress factors.
+
+Real data benchmarks require test fixtures in `tests/Tecan/` (L1, L2, L4, 140220 datasets).
+
+## Shared Utilities
+
+`benchmark_utils.py` provides common infrastructure:
+
+- NaN-safe metric computation (RMSE, coverage, summary stats)
+- Provenance tracking (timestamps, git commits)
+- Logging configuration
+- Statistical comparison utilities
+
 ## Scripts
 
-### `benchmark.py`
+### Core Benchmarks
 
-Quick benchmark comparing fitting methods on synthetic and real data (L2 dataset).
+#### `benchmark.py`
 
-```bash
-python benchmarks/benchmark.py
-```
-
-### `stress_test.py`
-
-**Time-consuming.** Comprehensive stress test comparing fit methods under challenging scenarios:
-
-- 10-30% outlier rates
-- Low-pH signal drops (acidic tail collapse)
-- Large x-errors
-- Correlated channel errors
-- Missing/saturated points
-- Compares PyMC Bayesian methods
+Quick benchmark comparing fitting methods on synthetic and real data.
 
 ```bash
-python benchmarks/stress_test.py
+python benchmarks/benchmark.py [--n-samples N] [--seed SEED] [--verbose]
 ```
 
-### `compare_real_data.py`
+Results: `benchmarks/benchmark_results.png`, `benchmarks/benchmark_summary.csv`
 
-Loads all real experimental data (L1, L2, L4, 140220) including controls and unknowns using the full `Titration` pipeline (buffer subtraction + dilution correction).
+#### `benchmark_fitters.py`
+
+Benchmark multiple fitters on synthetic datasets with randomized signal parameters matching real L4 data.
 
 ```bash
-python benchmarks/compare_real_data.py
+python benchmarks/benchmark_fitters.py
 ```
 
-### `compare_fitting_methods.py`
+Features:
 
-Comprehensive comparison of all fitting methods generating relevant graphics.
+- Realistic signal magnitude randomization
+- Per-label error scaling (y1 vs y2 differential noise)
+- Statistical significance testing
+
+### Comprehensive Comparisons
+
+#### `focused_comparison.py`
+
+Focused comparison of `fit_binding_glob` variants evaluating 95% CI coverage.
+
+```bash
+python benchmarks/focused_comparison.py
+```
+
+Results: `benchmarks/focused_comparison_*.csv`
+
+#### `comprehensive_fitter_comparison.py`
+
+Comprehensive comparison including ODR methods with residual normality analysis.
+
+```bash
+python benchmarks/comprehensive_fitter_comparison.py
+```
+
+**Note**: Large script (524 lines), includes deprecated methods.
+
+#### `compare_fitting_methods.py`
+
+Compare `outlier2` vs `fit_binding_glob` variants on synthetic and real data.
 
 ```bash
 python benchmarks/compare_fitting_methods.py
 ```
 
-### `compare_error_models.py`
+**Note**: Very large script (849 lines), may reference removed methods.
 
-Evaluates error modeling approaches using residual distribution analysis on both real and synthetic data.
+#### `compare_error_models.py`
+
+Evaluates error modeling approaches (uniform, shot-noise, physics-based) using residual distribution analysis.
 
 ```bash
 python benchmarks/compare_error_models.py
 ```
 
-### `outlier_magnitude_benchmark.py`
+**Note**: Massive script (825 lines) testing 16+ methods including Bayesian.
 
-Tests how methods perform as outlier severity increases from 0σ to 10σ.
+### Stress Testing
+
+#### `stress_test.py`
+
+**Time-consuming.** Tests fitting methods under challenging scenarios:
+
+- High noise (3-4x normal)
+- Outliers (10-30%)
+- Low-pH signal drops (acidic tail collapse)
+- Saturation
+- Combined stress factors
+
+```bash
+python benchmarks/stress_test.py
+```
+
+Results: `stress_test_results.csv`
+
+#### `outlier_magnitude_benchmark.py`
+
+Tests performance vs outlier severity (0σ to 10σ).
 
 ```bash
 python benchmarks/outlier_magnitude_benchmark.py
 ```
 
-### Synthetic Data Generation
+Results: `benchmarks/outlier_magnitude_comparison.png`
 
-Synthetic data is generated using `clophfit.testing.synthetic` module which provides:
+### Production Testing
 
-- `make_dataset()` - Unified function for all synthetic data generation with configurable error models, outliers, and stress factors
-- `make_simple_dataset()` - Simplified interface for unit tests
+#### `compare_real_data.py`
+
+Tests all fitting methods using the full `Titration` pipeline (buffer subtraction + dilution correction) on real experimental data.
+
+```bash
+python benchmarks/compare_real_data.py
+```
+
+Results: `comprehensive_fitting_comparison.csv`
+
+### Visualization
+
+#### `visualize_analysis.py`
+
+Regenerate publication-ready plots from saved CSV results.
+
+```bash
+python benchmarks/visualize_analysis.py
+```
+
+Requires: `fitting_comparison_*.csv` files from `compare_fitting_methods.py`
+
+## Synthetic Data Generation
+
+All synthetic data uses `clophfit.testing.synthetic.make_dataset()` with configurable:
+
+- Error models: `"simple"`, `"realistic"`, `"physics"`
+- Outlier probability and magnitude
+- Signal parameter randomization
+- Stress factors (low-pH drops, saturation, large x-errors)
 
 ## Key Results
 
-### Residual Normality Analysis
+**Note**: Results below are from historical benchmarks. Re-run scripts to generate current results with provenance tracking.
 
-Checks if standardized residuals follow Gaussian distribution (critical for valid uncertainty estimates):
+### Coverage Analysis (95% CI)
 
-**Real Data (38 controls):**
+Best methods maintain ~94-96% coverage on clean synthetic data and >90% with outliers.
 
-| Method      | Shapiro p-value | Excess Kurtosis | Normality |
-| ----------- | --------------- | --------------- | --------- |
-| lm_standard | 0.003           | 1.2             | Rejected  |
-| lm_robust   | 0.008           | 0.9             | Rejected  |
-| outlier2    | 0.015           | 0.8             | Rejected  |
+**Typical performance**:
 
-**Synthetic with Outliers (N=100):**
-
-| Method      | Shapiro p-value | Excess Kurtosis | Normality |
-| ----------- | --------------- | --------------- | --------- |
-| lm_standard | \<0.001         | 2.5             | Rejected  |
-| lm_robust   | 0.02            | 1.1             | Rejected  |
-| outlier2    | 0.08            | 0.5             | Marginal  |
-
-**Conclusion**: All methods show deviation from normality on real data, indicating the error model may need refinement. `outlier2`'s approach produces the most Gaussian residuals on synthetic data with outliers.
+- Standard WLS: ~94% clean, ~99% with outliers (good heteroscedastic weighting)
+- Robust (Huber): ~95% clean, ~90% with outliers
+- `outlier2`: ~95% clean, ~90% with outliers (explicit outlier masking)
 
 ### Outlier Magnitude Sensitivity
 
-| Method         | Bias @10σ | RMSE @10σ | Coverage @10σ |
-| -------------- | --------- | --------- | ------------- |
-| Standard WLS   | ~0        | ~0.09     | ~95%          |
-| Robust (Huber) | +0.06     | ~0.12     | ~95%          |
+Methods tested with outliers from 0σ to 10σ magnitude:
 
-### Scale Covariance Analysis
+- Standard WLS: maintains low bias (~0) and ~95% coverage even at 10σ
+- Robust (Huber): slight positive bias (+0.06) at 10σ, maintains ~95% coverage
 
-| Method       | Clean Coverage | Outlier Coverage | Outlier Bias |
-| ------------ | -------------- | ---------------- | ------------ |
-| lm_standard  | 94%            | 99%              | +0.002       |
-| lm_recursive | 100%           | 100%             | +0.037       |
-| lm_robust    | 56%            | 61%              | +0.084       |
+### Stress Test Performance
+
+Methods maintaining >95% success rate under severe stress (30% outliers + 4x noise + pH drop):
+
+- Check `stress_test_results.csv` for current results
 
 ## Recommendations
 
 ### Primary: `fit_binding_glob()` (Standard WLS)
 
-- Excellent 95% CI coverage (~94-99%)
-- Near-zero bias
-- Fast execution
-- Proper error weighting handles heteroscedastic noise
+Best for most use cases:
 
-### Alternative: `outlier2()` (Robust with outlier detection)
+- Excellent 95% CI coverage (~94-99%)
+- Near-zero bias on synthetic data
+- Fast execution (~0.01s per fit)
+- Proper error weighting handles heteroscedastic noise
+- No data discarded
+
+**Why it works**: When y1_err >> y2_err (typical in FRET), heteroscedastic weighting naturally downweights outliers in noisy channels.
+
+### Robust variant: `fit_binding_glob(robust=True)`
+
+Use when outliers suspected:
+
+- Huber loss for outlier resistance
+- ~95% coverage maintained
+- Slight performance cost (~10% slower)
+
+### Explicit outlier detection: `outlier2()`
 
 Use when:
 
-- Explicit outlier identification and masking needed
-- Residual normality important for downstream analysis
-- Datasets with "acidic tail collapse"
+- Explicit outlier identification needed for reporting
+- Residual normality critical for downstream analysis
+- Datasets with systematic "acidic tail collapse"
+- Visual inspection of masked points desired
 
-### Why Standard WLS Works Well
+## Result Provenance
 
-1. **Heteroscedastic weighting**: When y1_err >> y2_err, outliers in y1 naturally have less influence
-1. **No information loss**: Robust methods may discard valid data
-1. **Proper uncertainty**: Covariance scaling (`scale_covar=True`) ensures honest estimates
+All benchmark results saved with:
+
+- ISO 8601 timestamp
+- Git commit hash
+- Script name and parameters
+- Reproducible random seeds
+
+Check CSV file headers for metadata.
+
+## Known Issues
+
+1. Some scripts reference deprecated methods (`fit_binding_glob_reweighted`, `fit_binding_glob_recursive_outlier`)
+1. `compare_fitting_methods.py` and `compare_error_models.py` are very large (>800 lines) and should be modularized
+1. Bayesian methods (PyMC) are slow and often commented out in stress tests
 
 ## Future Work
 
-1. **Method selection logic** based on estimated error ratios
-1. **Error scaling characterization** across experimental conditions
-1. **Error estimation tools** to guide method selection
-1. **Adaptive fitting pipelines** that select methods based on data characteristics
+1. Modularize large comparison scripts
+1. Unified CLI interface for all benchmarks
+1. Automated regression testing for fitting method changes
+1. Method selection logic based on estimated error ratios
+1. Real-time benchmark dashboard
