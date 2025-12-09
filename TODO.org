@@ -239,3 +239,14 @@ Results from benchmarks/compare_error_models.py
               start_idx = end_idx
 
     #+end_src
+
+* weighting
+prtecan builds each DataArray in Titration._create_data_array (src/clophfit/prtecan/prtecan.py) with y_errc = sqrt(signal + bg_err[label]^2) when buffer SEM exists (from Buffer
+   fits/means), otherwise sqrt(signal) from the raw intensities. If no bg_err is provided, _create_ds calls weight_da (src/clophfit/fitting/core.py) to prefit each label with a 1-site model
+   and replace y_err by the residual SEM (fallback = ones), while _create_global_ds calls weight_multi_ds_titration to do the same across labels and assigns any failed label a fallback error
+   = (max successful y_err)×10. The downstream fitter fit_binding_glob uses residuals weighted by 1 / y_err, and outlier2 can optionally reweight uniformly or by shot-noise after a robust
+   pass.
+
+* simulation
+1. 1 label s0 s1 fissi no drop
+2. 1 lab
