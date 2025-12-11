@@ -51,7 +51,7 @@ jobs:
 
       - name: Create PR
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: "chore/template-update"
           title: "chore(template): apply latest template updates"
