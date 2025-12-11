@@ -201,6 +201,8 @@ def compare_methods_statistical(
     method2_errors: Sequence[float],
     method1_name: str = "Method 1",
     method2_name: str = "Method 2",
+    *,
+    verbose: bool = True,
 ) -> dict[str, float | bool | str]:
     """Perform statistical comparison between two methods.
 
@@ -216,6 +218,8 @@ def compare_methods_statistical(
         Name of method 1
     method2_name : str
         Name of method 2
+    verbose : bool, optional
+        Whether to print detailed comparison info, defaults to True.
 
     Returns
     -------
@@ -224,11 +228,11 @@ def compare_methods_statistical(
         - 'test': Name of the statistical test.
         - 'statistic': Test statistic value.
         - 'p_value': Computed p-value.
-        - 'significant': Whether the difference is significant at alpha=0.05.
-        - 'better_method': Method with lower MAE (or 'Equivalent').
-        - 'mae1': Mean absolute error for method1.
-        - 'mae2': Mean absolute error for method2.
-        - 'error': Only present when comparison cannot be performed.
+        - `significant`: Whether the difference is significant at alpha=0.05.
+        - `better_method`: Method with lower MAE (or 'Equivalent').
+        - `mae1`: Mean absolute error for method1.
+        - `mae2`: Mean absolute error for method2.
+        - `error`: Only present when comparison cannot be performed.
     """
     m1 = np.asarray(method1_errors)
     m2 = np.asarray(method2_errors)
@@ -237,8 +241,9 @@ def compare_methods_statistical(
     m2_valid = m2[np.isfinite(m2)]
 
     if len(m1_valid) == 0 or len(m2_valid) == 0:
-        print(f"\n--- Statistical Comparison: {method1_name} vs {method2_name} ---")
-        print("  Insufficient data for comparison")
+        if verbose:
+            print(f"\n--- Statistical Comparison: {method1_name} vs {method2_name} ---")
+            print("  Insufficient data for comparison")
         return {
             "test": "mann_whitney_u",
             "statistic": np.nan,
@@ -271,14 +276,15 @@ def compare_methods_statistical(
         "mae2": mae2,
     }
 
-    print(f"\n--- Statistical Comparison: {method1_name} vs {method2_name} ---")
-    print(f"  {method1_name}: MAE={mae1:.4f}, N={len(m1_abs)}")
-    print(f"  {method2_name}: MAE={mae2:.4f}, N={len(m2_abs)}")
-    print(f"  Mann-Whitney U: stat={stat:.1f}, p={p_value:.4f}")
-    if significant:
-        better = result["better_method"]
-        print(f"  → Significant difference (p<0.05): {better} is better")
-    else:
-        print("  → No significant difference (p≥0.05)")
+    if verbose:
+        print(f"\n--- Statistical Comparison: {method1_name} vs {method2_name} ---")
+        print(f"  {method1_name}: MAE={mae1:.4f}, N={len(m1_abs)}")
+        print(f"  {method2_name}: MAE={mae2:.4f}, N={len(m2_abs)}")
+        print(f"  Mann-Whitney U: stat={stat:.1f}, p={p_value:.4f}")
+        if significant:
+            better = result["better_method"]
+            print(f"  → Significant difference (p<0.05): {better} is better")
+        else:
+            print("  → No significant difference (p≥0.05)")
 
     return result

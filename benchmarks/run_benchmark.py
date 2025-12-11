@@ -60,6 +60,7 @@ class FitterStats:
     name: str
     k_errors: List[float] = field(default_factory=list)
     covered: List[bool] = field(default_factory=list)
+    residuals: List[float] = field(default_factory=list)
     n_success: int = 0
     n_total: int = 0
 
@@ -91,8 +92,14 @@ class FitterStats:
             return float("nan")
         return 100.0 * (sum(self.covered) / len(self.covered))
 
+    @property
+    def residual_stats(self) -> dict[str, float]:
+        if not self.residuals:
+            return {"shapiro_p": np.nan, "mean": np.nan, "std": np.nan}
+        return evaluate_residuals(np.asarray(self.residuals))
 
-def summarize_fitters(df: pd.DataFrame) -> Dict[str, FitterStats]:
+
+def summarize_fitters(df: pd.DataFrame, residuals: pd.DataFrame | None = None) -> Dict[str, FitterStats]:
     """Summarize errors and success rates per fitter."""
     stats: Dict[str, FitterStats] = {}
     if df.empty:
@@ -116,6 +123,10 @@ def summarize_fitters(df: pd.DataFrame) -> Dict[str, FitterStats]:
             valid = np.isfinite(est) & np.isfinite(err) & np.isfinite(true)
             covered = np.abs(est[valid] - true[valid]) <= err[valid]
             st.covered.extend(bool(c) for c in covered)
+        if residuals is not None and not residuals.empty:
+            method_res = residuals[residuals["method"] == method]
+            if not method_res.empty:
+                st.residuals.extend(method_res["residual"].dropna().tolist())
         stats[str(method)] = st
 
     return stats
@@ -129,24 +140,29 @@ def log_fitter_summary(stats: Dict[str, FitterStats]) -> None:
 
     logger.info("Fitter summary:")
     for name, st in sorted(stats.items(), key=lambda x: x[0]):
+        res_stats = st.residual_stats
         logger.info(
-            "  %-20s success=%5.1f%%  MAE=%.4f  RMSE=%.4f  median=%.4f  coverage=%5.1f%%",
+            "  %-20s success=%5.1f%%  MAE=%.4f  RMSE=%.4f  median=%.4f  coverage=%5.1f%%  resid_mean=%+.3f std=%.3f shapiro_p=%.3f",
             name,
             st.success_rate,
             st.k_mae,
             st.k_rmse,
             st.k_median,
             st.coverage_rate,
+            res_stats.get("mean", np.nan),
+            res_stats.get("std", np.nan),
+            res_stats.get("shapiro_p", np.nan),
         )
 
 
-def compare_fitters_statistically(stats: Dict[str, FitterStats]) -> None:
+def compare_fitters_statistically(stats: Dict[str, FitterStats]) -> pd.DataFrame:
     """Run pairwise statistical comparisons on fitter errors."""
     methods = sorted(stats.keys())
     if len(methods) < 2:
         logger.info("Not enough fitters for statistical comparison.")
-        return
+        return pd.DataFrame()
 
+    table = pd.DataFrame(0, index=methods, columns=methods, dtype=int)
     logger.info("Pairwise fitter comparisons (Mann-Whitney U on |error|):")
     for a, b in combinations(methods, 2):
         sa, sb = stats[a], stats[b]
@@ -154,16 +170,86 @@ def compare_fitters_statistically(stats: Dict[str, FitterStats]) -> None:
             logger.info("  %s vs %s: insufficient data", a, b)
             continue
         result = compare_methods_statistical(
-            sa.k_errors, sb.k_errors, method1_name=a, method2_name=b
+            sa.k_errors, sb.k_errors, method1_name=a, method2_name=b, verbose=False
         )
-        logger.info(
-            "  %s vs %s: p=%.4f, significant=%s, better=%s",
-            a,
-            b,
-            result["p_value"],
-            result["significant"],
-            result["better_method"],
+
+        score = 0
+        if result["significant"]:
+            winner = result.get("better_method")
+            if winner == a:
+                score = 1
+            elif winner == b:
+                score = -1
+
+        table.loc[a, b] = score
+        table.loc[b, a] = -score
+
+        if result["significant"]:
+            logger.info("  %s beats %s (p=%.4f)", winner, b if winner == a else a, result["p_value"])
+        else:
+            logger.info("  %s vs %s: no significant difference (p=%.4f)", a, b, result["p_value"])
+
+    sum_scores = table[methods].sum(axis=1)
+    table["sum"] = sum_scores
+    table["rank"] = table["sum"].rank(method="dense", ascending=False).astype(int)
+
+    logger.info(
+        "Pairwise comparison matrix (+1 better, -1 worse, 0 tie):\n%s",
+        table.to_string(),
+    )
+    return table
+
+
+def build_stats_df(df_subset: pd.DataFrame, ranking: pd.Series | None = None) -> pd.DataFrame:
+    rows = []
+    for (method, noise), group in df_subset.groupby(["method", "noise"]):
+        rmse = calculate_rmse(group["estimated_k"].values, group["true_k"].iloc[0])
+        coverage = group["coverage"].dropna()
+        shapiro = group["shapiro_p"].dropna()
+        rank = ranking.get(method, np.nan) if isinstance(ranking, pd.Series) else np.nan
+        rows.append(
+            {
+                "method": method,
+                "noise": round(float(noise), 4),
+                "bias": float(np.mean(group["bias"])),
+                "rmse": rmse,
+                "coverage": float(coverage.mean()) if not coverage.empty else np.nan,
+                "shapiro_p": float(shapiro.mean()) if not shapiro.empty else np.nan,
+                "rank": int(rank) if np.isfinite(rank) else np.nan,
+            }
         )
+    return pd.DataFrame(rows)
+
+
+def summarize_and_compare(
+    label: str,
+    df_subset: pd.DataFrame,
+    df_residuals: pd.DataFrame,
+    output_dir: Path,
+) -> None:
+    """Log fitter summary and pairwise comparison for one subset."""
+    if df_subset.empty:
+        logger.info("No results for %s", label)
+        return
+
+    residuals_filtered = df_residuals
+    if label.startswith("noise="):
+        try:
+            noise_value = float(label.split("=", 1)[1])
+        except ValueError:
+            noise_value = None
+        if noise_value is not None:
+            residuals_filtered = residuals_filtered[residuals_filtered["noise"] == noise_value]
+
+    logger.info("=== Summary for %s ===", label)
+    stats = summarize_fitters(df_subset, residuals=residuals_filtered)
+    log_fitter_summary(stats)
+    table = compare_fitters_statistically(stats)
+    suffix = label.replace("=", "_").replace(" ", "_")
+    if not table.empty:
+        plot_pairwise_matrix(table, output_dir, suffix)
+    stats_df = build_stats_df(df_subset, table["rank"] if not table.empty else None)
+    plot_dot_grid(stats_df, output_dir, suffix)
 
 
 def run_benchmark(
@@ -205,6 +291,7 @@ def run_benchmark(
                 "s0": s0,
                 "s1": s1,
                 "n_labels": n_labels,
+                "randomize_signals": True,
                 "error_model": "simple",
                 "noise": noise,
                 "seed": seed,
@@ -313,33 +400,120 @@ def generate_plots(
         # Residual Distribution
         if not df_res_noise.empty:
             plot_residual_distribution(df_res_noise, output_dir, suffix)
-            plot_qq_plots(df_res_noise, output_dir, suffix)
+            residual_stats = {
+                method: evaluate_residuals(group["residual"].to_numpy())
+                for method, group in df_res_noise.groupby("method")
+            }
+            plot_qq_plots(
+                df_res_noise,
+                output_dir,
+                suffix,
+                residual_stats=residual_stats,
+            )
+
+        # Coverage per noise
+        plot_coverage(df_noise, output_dir, suffix)
 
     # 3. Coverage
     plot_coverage(df_clean, output_dir, scenario_name)
 
 
 def plot_trends(df: pd.DataFrame, output_dir: Path, suffix: str) -> None:
-    """Plot Bias and RMSE vs Noise."""
-    # Bias
-    plt.figure(figsize=(10, 6))
-    sns.lineplot(data=df, x="noise", y="bias", hue="method", marker="o")
-    plt.axhline(0, color="k", linestyle="--", alpha=0.5)
-    plt.title("Bias vs Noise Level")
-    plt.savefig(output_dir / f"bias_vs_noise_{suffix}.png")
-    plt.close()
-
-    # RMSE
+    """Plot Bias and RMSE vs Noise in a single figure."""
     rmse_data = []
     for (method, noise), group in df.groupby(["method", "noise"]):
         rmse = calculate_rmse(group["estimated_k"].values, group["true_k"].iloc[0])
         rmse_data.append({"method": method, "noise": noise, "rmse": rmse})
 
     df_rmse = pd.DataFrame(rmse_data)
-    plt.figure(figsize=(10, 6))
-    sns.lineplot(data=df_rmse, x="noise", y="rmse", hue="method", marker="o")
-    plt.title("RMSE vs Noise Level")
-    plt.savefig(output_dir / f"rmse_vs_noise_{suffix}.png")
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharex=True)
+
+    sns.lineplot(data=df, x="noise", y="bias", hue="method", marker="o", ax=axes[0])
+    axes[0].axhline(0, color="k", linestyle="--", alpha=0.01)
+    axes[0].set_title("Bias vs Noise Level")
+    axes[0].set_xlabel("Noise")
+    axes[0].set_ylabel("Bias")
+
+    sns.lineplot(data=df_rmse, x="noise", y="rmse", hue="method", marker="o", ax=axes[1])
+    axes[1].set_title("RMSE vs Noise Level")
+    axes[1].set_xlabel("Noise")
+    axes[1].set_ylabel("RMSE")
+
+    plt.tight_layout()
+    plt.savefig(output_dir / f"trends_vs_noise_{suffix}.png")
+    plt.close()
+
+
+def plot_dot_grid(stats_df: pd.DataFrame, output_dir: Path, suffix: str) -> None:
+    """Build dot plots inspired by seaborn PairGrid dotplot example."""
+    if stats_df.empty:
+        return
+
+    metrics = ["bias", "rmse", "coverage", "shapiro_p", "rank"]
+    melt = stats_df.melt(
+        id_vars=["method", "noise"],
+        value_vars=[m for m in metrics if m in stats_df.columns],
+        var_name="metric",
+        value_name="value",
+    )
+
+    g = sns.FacetGrid(
+        melt,
+        row="noise",
+        col="metric",
+        sharey="row",
+        sharex=False,
+        height=2.3,
+        aspect=1.2,
+        margin_titles=True,
+    )
+    g.map_dataframe(
+        sns.stripplot,
+        x="value",
+        y="method",
+        order=sorted(stats_df["method"].unique()),
+        orient="h",
+        size=7,
+        color="tab:blue",
+        alpha=0.7,
+        jitter=0.15,
+    )
+    g.fig.subplots_adjust(hspace=0.4)
+    plt.tight_layout()
+    plt.savefig(output_dir / f"dotgrid_{suffix}.png")
+    plt.close()
+
+
+def plot_pairwise_matrix(table: pd.DataFrame, output_dir: Path, suffix: str) -> None:
+    """Visualize pairwise comparison matrix."""
+    methods = [idx for idx in table.index if idx in table.columns]
+    if not methods:
+        return
+
+    matrix = table.loc[methods, methods]
+    fig, ax = plt.subplots(
+        figsize=(len(methods) * 1.2 + 1, len(methods) * 1.2 + 1)
+    )
+    sns.heatmap(
+        matrix,
+        annot=True,
+        fmt="d",
+        cmap="vlag",
+        center=0,
+        cbar=False,
+        linewidths=0.5,
+        vmin=-1,
+        vmax=1,
+        ax=ax,
+    )
+    ax.set_title("Pairwise Comparison Matrix")
+    ax.set_xlabel("Method")
+    ax.set_ylabel("Method")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    plt.tight_layout()
+    plt.savefig(output_dir / f"pairwise_matrix_{suffix}.png")
     plt.close()
 
 
@@ -380,7 +554,12 @@ def plot_residual_distribution(df: pd.DataFrame, output_dir: Path, suffix: str) 
     plt.close()
 
 
-def plot_qq_plots(df: pd.DataFrame, output_dir: Path, suffix: str) -> None:
+def plot_qq_plots(
+    df: pd.DataFrame,
+    output_dir: Path,
+    suffix: str,
+    residual_stats: dict[str, dict[str, float]] | None = None,
+) -> None:
     """Q-Q plots with R^2 statistic."""
     methods = df["method"].unique()
     n_methods = len(methods)
@@ -396,9 +575,16 @@ def plot_qq_plots(df: pd.DataFrame, output_dir: Path, suffix: str) -> None:
         # stats.probplot returns (osm, osr), (slope, intercept, r)
         (osm, osr), (slope, intercept, r) = stats.probplot(method_res, dist="norm", plot=ax)
         ax.set_title(f"Q-Q Plot: {method}")
-        # Add R^2 stat
-        ax.text(0.05, 0.95, f"$R^2 = {r**2:.4f}$", transform=ax.transAxes, va='top',
-                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8))
+        stats_info = residual_stats.get(method) if residual_stats else {}
+        shapiro = stats_info.get("shapiro_p", np.nan)
+        ax.text(
+            0.05,
+            0.95,
+            f"$R^2 = {r**2:.4f}$\nShapiro p={shapiro:.3f}",
+            transform=ax.transAxes,
+            va="top",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
 
     for j in range(i+1, len(axes)):
         fig.delaxes(axes[j])
@@ -491,7 +677,7 @@ def plot_coverage(df: pd.DataFrame, output_dir: Path, suffix: str) -> None:
     plt.close()
 
 
-def plot_hist_kde_gaussian(x: Sequence[float], **kwargs)->None:
+def plot_hist_kde_gaussian(x: Sequence[float], **kwargs) -> None:
     """Helper to plot histogram, KDE and Gaussian fit."""
     vals = np.asarray(x)
     vals = vals[np.isfinite(vals)]
@@ -542,10 +728,18 @@ def cli(n_repeats: int, noise_levels: str, labels: int, outliers: bool, output_d
     # Generate plots
     generate_plots(df, df_residuals, out_path, scenario_name, noises)
 
+    df_clean = df.dropna(subset=["estimated_k"])
+    summarize_and_compare("overall", df_clean, df_residuals, out_path)
+    for noise in noises:
+        summarize_and_compare(
+            f"noise={noise}",
+            df_clean[df_clean["noise"] == noise],
+            df_residuals,
+            out_path,
+        )
+
     # Log aggregated stats
-    summary = summarize_fitters(df)
-    log_fitter_summary(summary)
-    compare_fitters_statistically(summary)
+    # (summary already logged above per subset)
 
     logger.info(f"Benchmark complete. Results saved to {out_path}")
     logger.info(f"Individual plots are in {plots_dir}")
