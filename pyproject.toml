@@ -257,6 +257,7 @@ max-complexity = 12
   "ARG",
   "D103",
   "ERA",
+  "F821", # Undefined names in notebooks (cells may define variables in execution order)
   "ICN001",
   "N802",
   "N803",
@@ -267,6 +268,7 @@ max-complexity = 12
   "PLR0917", # Too many positional arguments - common in scientific functions
   "PLR2004",
   "PLC2701",
+  "RUF001", # Ambiguous unicode characters (e.g., Greek letters in scientific notebooks)
   "SLF001",
   "T20",
 ]

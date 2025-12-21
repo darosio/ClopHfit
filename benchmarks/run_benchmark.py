@@ -15,11 +15,10 @@ Supports:
 
 import logging
 import tempfile
-import warnings
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
-from typing import Callable, Dict, List, Sequence, TYPE_CHECKING
+from typing import Callable, List, Sequence
 
 import click
 import matplotlib.pyplot as plt
@@ -35,7 +34,7 @@ from clophfit.testing.evaluation import (
     extract_params,
 )
 from clophfit.testing.fitter_test_utils import build_fitters
-from clophfit.testing.synthetic import TruthParams, make_dataset
+from clophfit.testing.synthetic import make_dataset
 from clophfit.fitting.data_structures import Dataset, FitResult, MiniT
 
 # Configure logging
@@ -99,9 +98,12 @@ class FitterStats:
         return evaluate_residuals(np.asarray(self.residuals))
 
 
-def summarize_fitters(df: pd.DataFrame, residuals: pd.DataFrame | None = None) -> Dict[str, FitterStats]:
+def summarize_fitters(
+    df: pd.DataFrame,
+    residuals: pd.DataFrame | None = None,
+) -> dict[str, FitterStats]:
     """Summarize errors and success rates per fitter."""
-    stats: Dict[str, FitterStats] = {}
+    stats: dict[str, FitterStats] = {}
     if df.empty:
         return stats
 
@@ -132,7 +134,7 @@ def summarize_fitters(df: pd.DataFrame, residuals: pd.DataFrame | None = None) -
     return stats
 
 
-def log_fitter_summary(stats: Dict[str, FitterStats]) -> None:
+def log_fitter_summary(stats: dict[str, FitterStats]) -> None:
     """Log per-fitter summary to the console."""
     if not stats:
         logger.info("No fitter statistics available.")
@@ -155,7 +157,7 @@ def log_fitter_summary(stats: Dict[str, FitterStats]) -> None:
         )
 
 
-def compare_fitters_statistically(stats: Dict[str, FitterStats]) -> pd.DataFrame:
+def compare_fitters_statistically(stats: dict[str, FitterStats]) -> pd.DataFrame:
     """Run pairwise statistical comparisons on fitter errors."""
     methods = sorted(stats.keys())
     if len(methods) < 2:
@@ -252,6 +254,22 @@ def summarize_and_compare(
     plot_dot_grid(stats_df, output_dir, suffix)
 
 
+def _signal_params(n_labels: int) -> tuple[dict[str, float], dict[str, float]]:
+    if n_labels == 1:
+        return {"y1": 1000.0}, {"y1": 200.0}
+    return {"y1": 1000.0, "y2": 800.0}, {"y1": 200.0, "y2": 300.0}
+
+
+def _coverage_interval(
+    est: float, err: float, *, true: float, z: float = 2.0
+) -> tuple[float, float, bool]:
+    if not (np.isfinite(est) and np.isfinite(err)):
+        return np.nan, np.nan, False
+    lower = est - z * err
+    upper = est + z * err
+    return lower, upper, bool(lower <= true <= upper)
+
+
 def run_benchmark(
     n_repeats: int,
     noise_levels: List[float],
@@ -260,32 +278,30 @@ def run_benchmark(
     output_dir: Path,
     fitters: dict[str, Callable[[Dataset], FitResult[MiniT]]],
     plots_dir: Path,
-    seed: int|None,
+    seed: int | None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run benchmark for a given configuration."""
     scenario_name = f"{n_labels}label_{'outliers' if outliers else 'clean'}"
-    logger.info(f"Running scenario: {scenario_name}")
-    logger.info(f"Noise levels: {noise_levels}")
+    logger.info("Running scenario: %s", scenario_name)
+    logger.info("Noise levels: %s", noise_levels)
 
     true_k = 7.0
-    # Define signal parameters based on n_labels
-    if n_labels == 1:
-        s0 = {"y1": 1000.0}
-        s1 = {"y1": 200.0}
-    else:
-        s0 = {"y1": 1000.0, "y2": 800.0}
-        s1 = {"y1": 200.0, "y2": 300.0}
+    s0, s1 = _signal_params(n_labels)
 
-    results = []
-    all_residuals = []
+    results: list[dict[str, object]] = []
+    all_residuals: list[dict[str, object]] = []
+
+    seed_counter = 0
 
     for noise in noise_levels:
-        logger.info(f"Processing noise level: {noise}")
+        logger.info("Processing noise level: %s", noise)
 
         for i in range(n_repeats):
-            if seed:
-                seed +=1
-            # Configure dataset generation
+            seed_i = None
+            if seed is not None:
+                seed_counter += 1
+                seed_i = seed + seed_counter
+
             ds_kwargs = {
                 "k": true_k,
                 "s0": s0,
@@ -294,68 +310,76 @@ def run_benchmark(
                 "randomize_signals": True,
                 "error_model": "simple",
                 "noise": noise,
-                "seed": seed,
+                "seed": seed_i,
+                "low_ph_drop": outliers,
             }
-
             if outliers:
-                ds_kwargs.update({
-                    "low_ph_drop": True,
-                    "low_ph_drop_magnitude": 0.4,
-                    "low_ph_drop_label": "y1"
-                })
-            else:
-                ds_kwargs["low_ph_drop"] = False
+                ds_kwargs.update(
+                    {
+                        "low_ph_drop_magnitude": 0.4,
+                        "low_ph_drop_label": "y1",
+                    }
+                )
 
-            ds, truth = make_dataset(**ds_kwargs)
+            ds, _ = make_dataset(**ds_kwargs)
 
             for name, fitter in fitters.items():
                 try:
                     fr = fitter(ds)
                     k_est, k_err = extract_params(fr, "K")
 
-                    # Save individual fit plot
                     if fr.figure:
-                        plot_filename = f"{scenario_name}_noise_{noise}_rep_{i}_{name.replace(' ', '_')}.png"
+                        plot_filename = (
+                            f"{scenario_name}_noise_{noise}_rep_{i}_{name.replace(' ', '_')}.png"
+                        )
                         fr.figure.savefig(plots_dir / plot_filename)
                         plt.close(fr.figure)
 
-                    residuals_stats = {}
-                    if fr.result and hasattr(fr.result, "residual"):
-                        residuals_stats = evaluate_residuals(fr.result.residual)
-                        # Collect raw residuals
-                        for r in fr.result.residual:
-                            all_residuals.append({
+                    residuals = None
+                    if fr.result is not None:
+                        residuals = getattr(fr.result, "residual", None)
+
+                    residuals_stats: dict[str, float] = {}
+                    if residuals is not None:
+                        residuals_stats = evaluate_residuals(residuals)
+                        all_residuals += [
+                            {
                                 "method": name,
-                                "residual": r,
+                                "residual": float(r),
                                 "noise": noise,
-                                "repeat": i
-                            })
+                                "repeat": i,
+                            }
+                            for r in residuals
+                        ]
 
-                    k_lower = np.nan
-                    k_upper = np.nan
-                    coverage = False
-                    if np.isfinite(k_est):
-                        if np.isfinite(k_err):
-                            k_lower = k_est - 2*k_err
-                            k_upper = k_est + 2*k_err
-                            coverage = k_lower <= true_k <= k_upper
+                    k_lower, k_upper, coverage = _coverage_interval(
+                        k_est, k_err, true=true_k
+                    )
 
-                    results.append({
-                        "repeat": i,
-                        "method": name,
-                        "noise": noise,
-                        "true_k": true_k,
-                        "estimated_k": k_est,
-                        "k_error": k_err,
-                        "k_lower": k_lower,
-                        "k_upper": k_upper,
-                        "coverage": coverage,
-                        "bias": k_est - true_k if np.isfinite(k_est) else np.nan,
-                        "success": fr.result is not None and fr.result.success,
-                        "shapiro_p": residuals_stats.get("shapiro_p", np.nan),
-                    })
-                except Exception as e:
-                    logger.debug(f"Error in {name} noise {noise} repeat {i}: {e}")
+                    results.append(
+                        {
+                            "repeat": i,
+                            "method": name,
+                            "noise": noise,
+                            "true_k": true_k,
+                            "estimated_k": k_est,
+                            "k_error": k_err,
+                            "k_lower": k_lower,
+                            "k_upper": k_upper,
+                            "coverage": coverage,
+                            "bias": k_est - true_k if np.isfinite(k_est) else np.nan,
+                            "success": bool(fr.result is not None and fr.result.success),
+                            "shapiro_p": residuals_stats.get("shapiro_p", np.nan),
+                        }
+                    )
+                except Exception:
+                    logger.debug(
+                        "Error in %s noise %s repeat %s",
+                        name,
+                        noise,
+                        i,
+                        exc_info=True,
+                    )
 
     df = pd.DataFrame(results)
     df_residuals = pd.DataFrame(all_residuals)
@@ -372,7 +396,7 @@ def generate_plots(
     df_residuals: pd.DataFrame,
     output_dir: Path,
     scenario_name: str,
-    noise_levels: List[float]
+    noise_levels: List[float],
 ) -> None:
     """Generate all requested plots."""
     df_clean = df.dropna(subset=["estimated_k"])
@@ -701,19 +725,31 @@ def plot_hist_kde_gaussian(x: Sequence[float], **kwargs) -> None:
 @click.option("--labels", default=1, help="Number of labels (1 or 2).")
 @click.option("--outliers/--no-outliers", default=False, help="Include outliers.")
 @click.option("--output-dir", default="benchmarks", help="Output directory.")
-@click.option("--seed", type=click.INT, default=None, show_default=True, help="Random seed for reproducibility.")
-def cli(n_repeats: int, noise_levels: str, labels: int, outliers: bool, output_dir: str, seed: int) -> None:
+@click.option(
+    "--seed",
+    type=click.INT,
+    default=None,
+    show_default=True,
+    help="Random seed for reproducibility.",
+)
+def cli(
+    n_repeats: int,
+    noise_levels: str,
+    labels: int,
+    outliers: bool,
+    output_dir: str,
+    seed: int | None,
+) -> None:
     """Run flexible benchmark."""
     out_path = Path(output_dir)
-    out_path.mkdir(exist_ok=True)
-    # Create temporary directory for plots
+    out_path.mkdir(parents=True, exist_ok=True)
+
     plots_dir = Path(tempfile.mkdtemp(prefix="fit_plots_", dir=out_path))
-    logger.info(f"Saving individual fit plots to: {plots_dir}")
-    # Parse noise levels
-    noises = [float(x) for x in noise_levels.split(",")]
-    # Define fitters using shared builder to avoid duplication
+    logger.info("Saving individual fit plots to: %s", plots_dir)
+
+    noises = [float(x.strip()) for x in noise_levels.split(",") if x.strip()]
+
     fitters_dict = build_fitters(include_odr=True)
-    fitters = list(fitters_dict.items())
 
     # Run benchmark
     df, df_residuals = run_benchmark(
@@ -738,11 +774,8 @@ def cli(n_repeats: int, noise_levels: str, labels: int, outliers: bool, output_d
             out_path,
         )
 
-    # Log aggregated stats
-    # (summary already logged above per subset)
-
-    logger.info(f"Benchmark complete. Results saved to {out_path}")
-    logger.info(f"Individual plots are in {plots_dir}")
+    logger.info("Benchmark complete. Results saved to %s", out_path)
+    logger.info("Individual plots are in %s", plots_dir)
 
 
 if __name__ == "__main__":
