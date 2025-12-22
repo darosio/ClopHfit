@@ -272,6 +272,7 @@ max-complexity = 12
   "RUF001", # Ambiguous unicode characters (e.g., Greek letters in scientific notebooks)
   "SLF001",
   "T20",
+  "W391",
 ]
 "__init__.py" = ["I002"] # don't need annotations
 "docs/*" = ["INP"]
