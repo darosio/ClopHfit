@@ -26,6 +26,14 @@ if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, FloatFunc
     from clophfit.prtecan import PlateScheme
 
+# Try to use nutpie for faster sampling (3-5x speedup on CPU, more on GPU)
+try:
+    import nutpie
+
+    HAS_NUTPIE = True
+except ImportError:
+    HAS_NUTPIE = False
+
 
 def create_x_true(
     xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
@@ -328,7 +336,7 @@ def fit_binding_pymc(
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc  # # TODO: move up out
     x_errc = next(iter(ds.values())).x_errc
-    with pm.Model():
+    with pm.Model() as model:
         pars = create_parameter_priors(params, n_sd)
         x_true = create_x_true(xc, x_errc, n_xerr)
         # Add likelihoods for each dataset
@@ -345,14 +353,25 @@ def fit_binding_pymc(
             )
         # Inference
         tune = n_samples // 2
-        trace = pm.sample(
-            n_samples,
-            tune=tune,
-            target_accept=0.9,
-            cores=4,
-            return_inferencedata=True,
-            idata_kwargs={"log_likelihood": True},
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled,
+                draws=n_samples,
+                tune=tune,
+                chains=4,
+                target_accept=0.9,
+                progress_bar=False,
+            )
+        else:
+            trace = pm.sample(
+                n_samples,
+                tune=tune,
+                target_accept=0.9,
+                cores=4,
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
@@ -389,7 +408,7 @@ def fit_binding_pymc2(
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc  # # TODO: move up out
     x_errc = next(iter(ds.values())).x_errc
-    with pm.Model():
+    with pm.Model() as model:
         pars = create_parameter_priors(params, n_sd)
         x_true = create_x_true(xc, x_errc, n_xerr)
         # Add likelihoods for each dataset
@@ -408,14 +427,25 @@ def fit_binding_pymc2(
             )
         # Inference
         tune = n_samples // 2
-        trace = pm.sample(
-            n_samples,
-            tune=tune,
-            target_accept=0.9,
-            cores=4,
-            return_inferencedata=True,
-            idata_kwargs={"log_likelihood": True},
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled,
+                draws=n_samples,
+                tune=tune,
+                chains=4,
+                target_accept=0.9,
+                progress_bar=False,
+            )
+        else:
+            trace = pm.sample(
+                n_samples,
+                tune=tune,
+                target_accept=0.9,
+                cores=4,
+                return_inferencedata=True,
+                idata_kwargs={"log_likelihood": True},
+            )
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
@@ -466,7 +496,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
 
-    with pm.Model():
+    with pm.Model() as model:
         # Create priors for all parameters (K, S0_y1, S1_y1, etc.)
         pars = create_parameter_priors(params, n_sd)
         # Model the x-values with their uncertainties
@@ -525,13 +555,23 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
                 )
         # ---------------------------------------------------------------------
         # Run MCMC sampling
-        trace: az.InferenceData = pm.sample(
-            n_samples,
-            cores=4,
-            return_inferencedata=True,
-            target_accept=0.9,
-            idata_kwargs={"log_likelihood": True},
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled,
+                draws=n_samples,
+                chains=4,
+                target_accept=0.9,
+                progress_bar=False,
+            )
+        else:
+            trace: az.InferenceData = pm.sample(
+                n_samples,
+                cores=4,
+                return_inferencedata=True,
+                target_accept=0.9,
+                idata_kwargs={"log_likelihood": True},
+            )
     return trace
 
 
@@ -559,7 +599,7 @@ def fit_binding_pymc_odr(
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
-    with pm.Model() as _:
+    with pm.Model() as model:
         pars = create_parameter_priors(params, n_sd)
         # Add likelihoods for each dataset
         ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
@@ -609,6 +649,11 @@ def fit_binding_pymc_odr(
                 observed=np.zeros(len(distances[mask].eval())),
             )
         # Inference
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            return nutpie.sample(
+                compiled, draws=n_samples, chains=4, progress_bar=False
+            )
         return pm.sample(n_samples, cores=4, return_inferencedata=True)
     # TODO:  return process_trace(trace, params.keys(), ds, 0)
 
@@ -693,7 +738,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
         ]
     ctr_ks = weighted_stats(values, stderr)
 
-    with pm.Model():
+    with pm.Model() as model:
         ye_mag: dict[str, pm.Distribution] = {
             label: pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
             for label in labels
@@ -735,9 +780,16 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
-        trace: az.InferenceData = pm.sample(
-            n_samples, target_accept=0.9, return_inferencedata=True
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+            )
+            # trace already is az.InferenceData from nutpie.sample
+        else:
+            trace: az.InferenceData = pm.sample(
+                n_samples, target_accept=0.9, return_inferencedata=True
+            )
 
     # Process trace into per-well FitResults
     trace_df = az.summary(trace)
@@ -828,7 +880,7 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
     ctr_ks = weighted_stats(values, stderr)
     # MAYBE: Restore logger.info(f"Weighted K stats for control groups: {ctr_ks}")
 
-    with pm.Model():
+    with pm.Model() as model:
         # --- Common Priors / Variables for the entire model ---
         x_true = create_x_true(xc, x_errc, n_xerr)
         # Global scaling factors for the signal-dependent noise for each label (band)
@@ -923,9 +975,16 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
-        trace: az.InferenceData = pm.sample(
-            n_samples, target_accept=0.9, return_inferencedata=True
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+            )
+            # trace already is az.InferenceData from nutpie.sample
+        else:
+            trace: az.InferenceData = pm.sample(
+                n_samples, target_accept=0.9, return_inferencedata=True
+            )
 
     # Process trace into per-well FitResults
     trace_df = az.summary(trace)
@@ -1119,7 +1178,7 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
     }
     print(k_stderr)
 
-    with pm.Model():
+    with pm.Model() as model:
         x_true = create_x_true(xc, x_errc, n_xerr)
 
         # --- Priors for noise model ---
@@ -1181,7 +1240,21 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
-        trace: az.InferenceData = pm.sample(
-            n_samples, tune=n_samples // 2, target_accept=0.9, return_inferencedata=True
-        )
+        if HAS_NUTPIE:
+            compiled = nutpie.compile_pymc_model(model)
+            trace = nutpie.sample(
+                compiled,
+                draws=n_samples,
+                tune=n_samples // 2,
+                target_accept=0.9,
+                progress_bar=False,
+            )
+            # trace already is az.InferenceData from nutpie.sample
+        else:
+            trace: az.InferenceData = pm.sample(
+                n_samples,
+                tune=n_samples // 2,
+                target_accept=0.9,
+                return_inferencedata=True,
+            )
     return trace
