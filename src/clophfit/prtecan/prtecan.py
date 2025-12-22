@@ -21,7 +21,6 @@ from matplotlib import figure
 from scipy.odr import ODR, Model, RealData
 
 from clophfit.fitting.bayes import (
-    extract_fit,
     fit_binding_pymc,
     fit_binding_pymc_multi,
     fit_binding_pymc_multi2,
@@ -1724,12 +1723,23 @@ class Titration(TecanfilesGroup):
         return result_pymc
 
     @cached_property
-    def result_multi_trace(self) -> tuple[az.InferenceData, pd.DataFrame]:
-        """Perform global MCMC fitting and x_true."""
+    def result_multi_trace(
+        self,
+    ) -> tuple[dict[str, FitResult[az.InferenceData]], pd.DataFrame]:
+        """Perform global MCMC fitting and x_true.
+
+        Returns
+        -------
+        tuple[dict[str, FitResult[az.InferenceData]], pd.DataFrame]
+            Dictionary of per-well FitResults and summary DataFrame.
+        """
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
-        trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
+        fit_results = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
+        # Get the full trace from any result (they all share the same trace)
+        first_result = next(iter(fit_results.values()))
+        trace = typing.cast("az.InferenceData", first_result.result_object)  # type: ignore[attr-defined]
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
@@ -1738,17 +1748,28 @@ class Titration(TecanfilesGroup):
             "x": da_true.x,
             "x_err": da_true.x_err,
         }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
+        return fit_results, trace_df
 
     @cached_property
-    def result_multi_trace2(self) -> tuple[az.InferenceData, pd.DataFrame]:
-        """Perform global MCMC fitting and x_true."""
+    def result_multi_trace2(
+        self,
+    ) -> tuple[dict[str, FitResult[az.InferenceData]], pd.DataFrame]:
+        """Perform global MCMC fitting and x_true with heteroscedastic noise.
+
+        Returns
+        -------
+        tuple[dict[str, FitResult[az.InferenceData]], pd.DataFrame]
+            Dictionary of per-well FitResults and summary DataFrame.
+        """
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
-        trace = fit_binding_pymc_multi2(
+        fit_results = fit_binding_pymc_multi2(
             results, self.scheme, self.buffer.bg_err, n_sd=n_sd
         )
+        # Get the full trace from any result (they all share the same trace)
+        first_result = next(iter(fit_results.values()))
+        trace = typing.cast("az.InferenceData", first_result.result_object)  # type: ignore[attr-defined]
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
@@ -1757,7 +1778,7 @@ class Titration(TecanfilesGroup):
             "x": da_true.x,
             "x_err": da_true.x_err,
         }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
+        return fit_results, trace_df
 
     @cached_property
     def result_multi_mcmc(self) -> TitrationResults:
@@ -1770,11 +1791,14 @@ class Titration(TecanfilesGroup):
 
     def _compute_multi_mcmc_fit(self, key: str) -> FitResult[az.InferenceData]:
         """Compute individual dataset fit for a single key."""
-        ctr = self.get_scheme_name(key, self.scheme.names)
-        ds = self.result_global[key].dataset
-        if ds:
-            return extract_fit(key, ctr, self.result_multi_trace[1], ds)
-        return FitResult()
+        # FIXme: /ctr = self.get_scheme_name(key, self.scheme.names)
+        # FIXme: /ds = self.result_global[key].dataset
+        # FIXme: if ds:
+        # FIXme:    return extract_fit(key, ctr, self.result_multi_trace[1], ds)
+        # FIXme: return FitResult()
+        # Now we can directly return the FitResult from result_multi_trace
+        fit_results = self.result_multi_trace[0]
+        return fit_results.get(key, FitResult())
 
     @staticmethod
     def get_scheme_name(key: str, scheme_map: dict[str, set[str]]) -> str:

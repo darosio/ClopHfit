@@ -639,8 +639,36 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     n_xerr: float = 1.0,
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
-) -> az.InferenceData:
-    """Multi-well PyMC with shared K per control group and per-label noise."""
+) -> dict[str, FitResult[az.InferenceData]]:
+    """Multi-well PyMC with shared K per control group and per-label noise.
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        Dictionary of per-well fit results from initial fitting.
+    scheme : PlateScheme
+        Plate scheme defining control groups.
+    n_sd : float
+        Number of standard deviations for parameter priors.
+    n_xerr : float
+        Scaling factor for x-error.
+    ye_scaling : float
+        Scaling factor for y-error magnitude prior.
+    n_samples : int
+        Number of MCMC samples.
+
+    Returns
+    -------
+    dict[str, FitResult[az.InferenceData]]
+        Dictionary of FitResult for each well with trace and residuals.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset found in results.
+    TypeError
+        If az.summary does not return a DataFrame.
+    """
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next((r.dataset for r in results.values() if r.dataset), None)
     if ds is None:
@@ -711,7 +739,27 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             n_samples, target_accept=0.9, return_inferencedata=True
         )
 
-    return trace
+    # Process trace into per-well FitResults
+    trace_df = az.summary(trace)
+    if not isinstance(trace_df, pd.DataFrame):
+        msg = "az.summary did not return a DataFrame"
+        raise TypeError(msg)
+
+    fit_results: dict[str, FitResult[az.InferenceData]] = {}
+    for key, r in results.items():
+        if r.result and r.dataset:
+            # Determine control group for this well
+            ctr_name = next(
+                (name for name, wells in scheme.names.items() if key in wells), ""
+            )
+            # Extract per-well fit result with residuals
+            fit_results[key] = extract_fit(
+                key, ctr_name, trace_df, copy.deepcopy(r.dataset)
+            )
+            # Store the full trace for reference
+            fit_results[key].result_object = trace  # type: ignore[attr-defined]
+
+    return fit_results
 
 
 def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
@@ -722,8 +770,36 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
     n_xerr: float = 1.0,
     # Ponder this: ye_scaling: float = 1.0, # This parameter is no longer needed in the same way
     n_samples: int = 2000,
-) -> az.InferenceData:
-    """Multi-well PyMC with heteroscedastic noise combining buffer and signal."""
+) -> dict[str, FitResult[az.InferenceData]]:
+    """Multi-well PyMC with heteroscedastic noise combining buffer and signal.
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        Dictionary of per-well fit results from initial fitting.
+    scheme : PlateScheme
+        Plate scheme defining control groups.
+    bg_err : dict[int, ArrayF]
+        Buffer error estimates by label index.
+    n_sd : float
+        Number of standard deviations for parameter priors.
+    n_xerr : float
+        Scaling factor for x-error.
+    n_samples : int
+        Number of MCMC samples.
+
+    Returns
+    -------
+    dict[str, FitResult[az.InferenceData]]
+        Dictionary of FitResult for each well with trace and residuals.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset found in results.
+    TypeError
+        If az.summary does not return a DataFrame.
+    """
     ds_example = next((r.dataset for r in results.values() if r.dataset), None)
     ds = next((result.dataset for result in results.values() if result.dataset), None)
 
@@ -851,7 +927,27 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
             n_samples, target_accept=0.9, return_inferencedata=True
         )
 
-    return trace
+    # Process trace into per-well FitResults
+    trace_df = az.summary(trace)
+    if not isinstance(trace_df, pd.DataFrame):
+        msg = "az.summary did not return a DataFrame"
+        raise TypeError(msg)
+
+    fit_results: dict[str, FitResult[az.InferenceData]] = {}
+    for key, r in results.items():
+        if r.result and r.dataset:
+            # Determine control group for this well
+            ctr_name = next(
+                (name for name, wells in scheme.names.items() if key in wells), ""
+            )
+            # Extract per-well fit result with residuals
+            fit_results[key] = extract_fit(
+                key, ctr_name, trace_df, copy.deepcopy(r.dataset)
+            )
+            # Store the full trace for reference
+            fit_results[key].result_object = trace  # type: ignore[attr-defined]
+
+    return fit_results
 
 
 # ------------------------------------------------------------------
