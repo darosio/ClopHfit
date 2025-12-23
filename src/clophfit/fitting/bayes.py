@@ -28,7 +28,7 @@ if typing.TYPE_CHECKING:
 
 # Try to use nutpie for faster sampling (3-5x speedup on CPU, more on GPU)
 try:
-    import nutpie
+    import nutpie  # type: ignore[import-untyped]
 
     HAS_NUTPIE = True
 except ImportError:
@@ -555,17 +555,21 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
                 )
         # ---------------------------------------------------------------------
         # Run MCMC sampling
+        trace: az.InferenceData
         if HAS_NUTPIE:
             compiled = nutpie.compile_pymc_model(model)
-            trace = nutpie.sample(
-                compiled,
-                draws=n_samples,
-                chains=4,
-                target_accept=0.9,
-                progress_bar=False,
+            trace = typing.cast(
+                "az.InferenceData",
+                nutpie.sample(
+                    compiled,
+                    draws=n_samples,
+                    chains=4,
+                    target_accept=0.9,
+                    progress_bar=False,
+                ),
             )
         else:
-            trace: az.InferenceData = pm.sample(
+            trace = pm.sample(
                 n_samples,
                 cores=4,
                 return_inferencedata=True,
@@ -780,16 +784,17 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
+        trace: az.InferenceData
         if HAS_NUTPIE:
             compiled = nutpie.compile_pymc_model(model)
-            trace = nutpie.sample(
-                compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+            trace = typing.cast(
+                "az.InferenceData",
+                nutpie.sample(
+                    compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+                ),
             )
-            # trace already is az.InferenceData from nutpie.sample
         else:
-            trace: az.InferenceData = pm.sample(
-                n_samples, target_accept=0.9, return_inferencedata=True
-            )
+            trace = pm.sample(n_samples, target_accept=0.9, return_inferencedata=True)
 
     # Process trace into per-well FitResults
     trace_df = az.summary(trace)
@@ -975,16 +980,17 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
+        trace: az.InferenceData
         if HAS_NUTPIE:
             compiled = nutpie.compile_pymc_model(model)
-            trace = nutpie.sample(
-                compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+            trace = typing.cast(
+                "az.InferenceData",
+                nutpie.sample(
+                    compiled, draws=n_samples, target_accept=0.9, progress_bar=False
+                ),
             )
-            # trace already is az.InferenceData from nutpie.sample
         else:
-            trace: az.InferenceData = pm.sample(
-                n_samples, target_accept=0.9, return_inferencedata=True
-            )
+            trace = pm.sample(n_samples, target_accept=0.9, return_inferencedata=True)
 
     # Process trace into per-well FitResults
     trace_df = az.summary(trace)
@@ -1240,18 +1246,21 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
                         observed=da.y,
                     )
 
+        trace: az.InferenceData
         if HAS_NUTPIE:
             compiled = nutpie.compile_pymc_model(model)
-            trace = nutpie.sample(
-                compiled,
-                draws=n_samples,
-                tune=n_samples // 2,
-                target_accept=0.9,
-                progress_bar=False,
+            trace = typing.cast(
+                "az.InferenceData",
+                nutpie.sample(
+                    compiled,
+                    draws=n_samples,
+                    tune=n_samples // 2,
+                    target_accept=0.9,
+                    progress_bar=False,
+                ),
             )
-            # trace already is az.InferenceData from nutpie.sample
         else:
-            trace: az.InferenceData = pm.sample(
+            trace = pm.sample(
                 n_samples,
                 tune=n_samples // 2,
                 target_accept=0.9,
