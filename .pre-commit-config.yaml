@@ -105,7 +105,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.9.20
+    rev: 0.9.21
     hooks:
       - id: uv-lock
         stages: [pre-commit]
