@@ -86,17 +86,19 @@ class TestResidualPoint:
             x=7.0,
             resid_weighted=0.5,
             resid_raw=5.0,
-            i=0,
+            raw_i=0,
         )
         assert point.label == "y1"
         assert point.x == 7.0
         assert point.resid_weighted == 0.5
         assert point.resid_raw == 5.0
-        assert point.i == 0
+        assert point.raw_i == 0
 
     def test_frozen(self) -> None:
         """Test that ResidualPoint is immutable."""
-        point = ResidualPoint(label="y1", x=7.0, resid_weighted=0.5, resid_raw=5.0, i=0)
+        point = ResidualPoint(
+            label="y1", x=7.0, resid_weighted=0.5, resid_raw=5.0, raw_i=0
+        )
         with pytest.raises(AttributeError):
             point.x = 8.0  # type: ignore[misc]
 
@@ -142,12 +144,12 @@ class TestExtractResidualPoints:
         expected_x = {9.0, 8.0, 7.0, 6.0, 5.0}
         assert x_values == expected_x
 
-    def test_indices_sequential(
+    def test_raw_indices_sequential(
         self, simple_fit_result: FitResult[MinimizerResult]
     ) -> None:
-        """Test that indices are sequential within each label."""
+        """Test that raw indices are sequential when no masking is applied."""
         points = extract_residual_points(simple_fit_result)
-        indices = [p.i for p in points]
+        indices = [p.raw_i for p in points]
         assert indices == list(range(5))
 
 
@@ -162,7 +164,7 @@ class TestResidualDataframe:
     def test_columns(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test that DataFrame has correct columns."""
         df = residual_dataframe(simple_fit_result)
-        expected_cols = {"label", "x", "resid_weighted", "resid_raw", "i"}
+        expected_cols = {"label", "x", "resid_weighted", "resid_raw", "raw_i"}
         assert set(df.columns) == expected_cols
 
     def test_row_count(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
@@ -182,7 +184,7 @@ class TestResidualDataframe:
         assert df["x"].dtype == np.float64
         assert df["resid_weighted"].dtype == np.float64
         assert df["resid_raw"].dtype == np.float64
-        assert df["i"].dtype == np.int64
+        assert df["raw_i"].dtype == np.int64
 
 
 ###############################################################################

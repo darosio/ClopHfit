@@ -129,6 +129,33 @@ def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
     return renamed_dict
 
 
+def _hdi_bounds_or_none(row: pd.Series) -> tuple[float | None, float | None]:
+    try:
+        lo = float(row["hdi_3%"])
+        hi = float(row["hdi_97%"])
+    except Exception:  # noqa: BLE001
+        return None, None
+
+    if not (np.isfinite(lo) and np.isfinite(hi)):
+        return None, None
+    if lo > hi:
+        lo, hi = hi, lo
+    if np.isclose(lo, hi, atol=1e-13, rtol=1e-13):
+        return None, None
+    return lo, hi
+
+
+def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> None:
+    mean = float(row["mean"])
+    lo, hi = _hdi_bounds_or_none(row)
+    if lo is None or hi is None:
+        rpars.add(name, value=mean)
+    else:
+        rpars.add(name, value=mean, min=lo, max=hi)
+    rpars[name].stderr = float(row["sd"])
+    rpars[name].init_value = row.get("r_hat", np.nan)
+
+
 def process_trace(
     trace: az.InferenceData, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
 ) -> FitResult[az.InferenceData]:
@@ -165,9 +192,7 @@ def process_trace(
     rpars = Parameters()
     for name, row in rdf.iterrows():
         if name in p_names:
-            rpars.add(name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"])
-            rpars[name].stderr = row["sd"]
-            rpars[name].init_value = row.get("r_hat", np.nan)
+            _add_param_from_summary(rpars, str(name), row)
     # x_true and x_errc
     nxc, nx_errc = _extract_x_true_from_trace_df(rdf)
     if nxc.size > 0:
@@ -222,20 +247,12 @@ def extract_fit(
     rdf = trace_df[trace_df.index.str.endswith(key)]
     for name, row in rdf.iterrows():
         extracted_name = str(name).replace(f"_{key}", "")
-        rpars.add(
-            extracted_name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"]
-        )
-        rpars[extracted_name].stderr = row["sd"]
-        rpars[extracted_name].init_value = row.get("r_hat", np.nan)
+        _add_param_from_summary(rpars, extracted_name, row)
     if ctr:
         rdf = trace_df[trace_df.index.str.endswith(ctr)]
         for name, row in rdf.iterrows():
             extracted_name = str(name).replace(f"_{ctr}", "")
-            rpars.add(
-                extracted_name, value=row["mean"], min=row["hdi_3%"], max=row["hdi_97%"]
-            )
-            rpars[extracted_name].stderr = row["sd"]
-            rpars[extracted_name].init_value = row.get("r_hat", np.nan)
+            _add_param_from_summary(rpars, extracted_name, row)
     nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
     for da in ds.values():
         da.xc = nxc
