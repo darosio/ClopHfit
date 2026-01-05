@@ -27,6 +27,8 @@ BIAS_P_VALUE_THRESHOLD = 0.01
 DW_LOWER_BOUND = 1.5
 DW_UPPER_BOUND = 2.5
 
+MIN_POINTS_FOR_TREND = 3  # Minimum points needed to detect trends
+
 
 @dataclass(frozen=True)
 class ResidualPoint:
@@ -42,15 +44,15 @@ class ResidualPoint:
         Weighted residual: (y - model) / y_err
     resid_raw : float
         Raw residual: (y - model)
-    i : int
-        Index within the label's data (after masking)
+    raw_i : int
+        Index into the original (unmasked) arrays for this label (`DataArray.xc/yc`).
     """
 
     label: str
     x: float
     resid_weighted: float
     resid_raw: float
-    i: int
+    raw_i: int
 
 
 def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
@@ -100,6 +102,7 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
         rw = r[start : start + n]
         rr = rw * da.y_err  # undo weighting: raw = weighted * y_err
         xs = da.x
+        raw_is = np.flatnonzero(da.mask)
 
         pts.extend(
             ResidualPoint(
@@ -107,7 +110,7 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
                 x=float(xs[i]),
                 resid_weighted=float(rw[i]),
                 resid_raw=float(rr[i]),
-                i=i,
+                raw_i=int(raw_is[i]),
             )
             for i in range(n)
         )
@@ -131,7 +134,7 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        DataFrame with columns: label, x, resid_weighted, resid_raw, i
+        DataFrame with columns: label, x, resid_weighted, resid_raw, raw_i
 
     Examples
     --------
@@ -167,7 +170,7 @@ def collect_multi_residuals(
     Returns
     -------
     pd.DataFrame
-        Combined DataFrame with columns: well, label, x, resid_weighted, resid_raw, i
+        Combined DataFrame with columns: well, label, x, resid_weighted, resid_raw, raw_i
 
     Examples
     --------
@@ -312,3 +315,143 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
             print(f"⚠️  Serial correlation detected (DW={dw_stat:.2f})")
 
     return checks
+
+
+def compute_residual_covariance(
+    all_res: pd.DataFrame, value_col: str = "resid_weighted"
+) -> dict[str, pd.DataFrame]:
+    """Compute covariance matrix of residuals for each label."""
+    cov_by_label: dict[str, pd.DataFrame] = {}
+    for lbl, g in all_res.groupby("label"):
+        pivot_table = g.pivot_table(
+            index="well", columns="x", values=value_col, aggfunc="mean"
+        )
+        # drop wells missing any x (to make a clean covariance across x points)
+        pivot_table = pivot_table.dropna(axis=0, how="any")
+        data = pivot_table.to_numpy(dtype=float)
+        # covariance across x-points (features), so rowvar=False
+        cov = np.cov(data, rowvar=False, ddof=1)
+        cov_by_label[str(lbl)] = pd.DataFrame(
+            cov,
+            index=pivot_table.columns.to_list(),
+            columns=pivot_table.columns.to_list(),
+        )
+    return cov_by_label
+
+
+def compute_correlation_matrices(
+    cov_by_label: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """Convert covariance matrices to correlation matrices."""
+    corr_by_label: dict[str, pd.DataFrame] = {}
+    for lbl, cov_df in cov_by_label.items():
+        cov = cov_df.to_numpy()
+        std_outer = np.outer(np.sqrt(np.diag(cov)), np.sqrt(np.diag(cov)))
+        corr = cov / std_outer
+        corr_by_label[lbl] = pd.DataFrame(
+            corr, index=cov_df.index, columns=cov_df.columns
+        )
+    return corr_by_label
+
+
+def analyze_label_bias(
+    all_res: pd.DataFrame, n_bins: int = 5
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Detect systematic bias by label and x-range."""
+    outlier_threshold = 3.0  # Standard deviations
+    strong_negative_threshold = -0.5
+
+    all_res = all_res.copy()
+    all_res["x_bin"] = pd.cut(all_res["x"], bins=n_bins)
+
+    mean_resid = all_res["resid_weighted"].mean()
+    std_resid = all_res["resid_weighted"].std()
+    all_res["std_res"] = (all_res["resid_weighted"] - mean_resid) / std_resid
+
+    bias_summary = all_res.groupby(["label", "x_bin"], observed=False).agg(
+        mean_resid=("resid_weighted", "mean"),
+        std_resid=("resid_weighted", "std"),
+        count=("resid_weighted", "count"),
+        outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
+        mean_std_res=("std_res", "mean"),
+    )
+
+    label_bias = all_res.groupby("label", observed=False).agg(
+        mean_resid=("resid_weighted", "mean"),
+        std_resid=("resid_weighted", "std"),
+        median_resid=("resid_weighted", "median"),
+        outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
+        negative_bias_frac=(
+            "resid_weighted",
+            lambda x: (x < strong_negative_threshold).mean(),
+        ),
+    )
+
+    return bias_summary, label_bias
+
+
+def detect_adjacent_correlation(
+    all_res: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
+    """Detect correlation between adjacent residuals within wells."""
+    correlations = []
+    correlations_by_label: dict[str, list[float]] = {}
+
+    for (lbl, well), group in all_res.groupby(["label", "well"]):
+        g = group.sort_values("x")
+        res = g["resid_weighted"].to_numpy()
+
+        if len(res) > 1:
+            corr = np.corrcoef(res[:-1], res[1:])[0, 1]
+            if not np.isnan(corr):
+                correlations.append({
+                    "label": lbl,
+                    "well": well,
+                    "lag1_corr": corr,
+                    "n_points": len(res),
+                })
+                correlations_by_label.setdefault(str(lbl), []).append(corr)
+
+    correlation_stats = pd.DataFrame(correlations)
+    correlations_by_label_arr = {
+        k: np.array(v) for k, v in correlations_by_label.items()
+    }
+
+    return correlation_stats, correlations_by_label_arr
+
+
+def estimate_x_shift_statistics(
+    all_res: pd.DataFrame,
+    fit_results: dict[str, Any],  # noqa: ARG001
+) -> pd.DataFrame:
+    """Estimate potential systematic x-shifts per well (heuristics)."""
+    shift_stats = []
+
+    for (lbl, well), group in all_res.groupby(["label", "well"]):
+        sorted_group = group.sort_values("x")
+
+        if len(sorted_group) > MIN_POINTS_FOR_TREND:
+            x_vals = sorted_group["x"].to_numpy()
+            res_vals = sorted_group["resid_weighted"].to_numpy()
+
+            try:
+                slope, intercept = np.polyfit(x_vals, res_vals, 1)
+                trend_strength = np.abs(slope) * (x_vals.max() - x_vals.min())
+            except (np.linalg.LinAlgError, ValueError):
+                slope = intercept = trend_strength = np.nan
+
+            pos_mean = res_vals[res_vals > 0].mean() if (res_vals > 0).any() else 0
+            neg_mean = res_vals[res_vals < 0].mean() if (res_vals < 0).any() else 0
+            asymmetry = pos_mean + neg_mean
+
+            shift_stats.append({
+                "label": lbl,
+                "well": well,
+                "residual_slope": slope,
+                "residual_intercept": intercept,
+                "trend_strength": trend_strength,
+                "asymmetry": asymmetry,
+                "n_points": len(sorted_group),
+            })
+
+    return pd.DataFrame(shift_stats)
