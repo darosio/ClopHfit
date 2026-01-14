@@ -11,6 +11,7 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 
+import os
 import sys
 from pathlib import Path
 
@@ -77,6 +78,16 @@ latex_elements = {
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+
+# -- nbsphinx ---------------------------------------------------------------
+
+# Execute notebooks by default, but allow opting out for fast/CI builds:
+#   NBSPHINX_EXECUTE=never make docs
+nbsphinx_execute = os.environ.get("NBSPHINX_EXECUTE", "auto")
+
+# Avoid multiprocessing in notebooks during Sphinx builds (pickling issues with
+# functions defined in notebook cells under newer Python versions).
+os.environ.setdefault("CLOPHFIT_EMCEE_WORKERS", "1")
 
 
 # -- Options for HTML output -------------------------------------------------

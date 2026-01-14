@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 import typing
 from sys import float_info
 
@@ -384,8 +385,13 @@ def _plot_spectra_glob_emcee(
     params = f_res.result.params if f_res.result else Parameters()
     plot_fit(ax4, ds, params, nboot=N_BOOT, pp=pparams)
     if f_res.mini:
+        workers = int(os.environ.get("CLOPHFIT_EMCEE_WORKERS", "4"))
         result_emcee = f_res.mini.emcee(
-            steps=EMCEE_STEPS * 3, workers=8, burn=100, nwalkers=30, progress=False
+            steps=EMCEE_STEPS * 3,
+            workers=workers,
+            burn=100,
+            nwalkers=30,
+            progress=False,
         )
         plot_emcee_k_on_ax(ax5, result_emcee)
     return fig
