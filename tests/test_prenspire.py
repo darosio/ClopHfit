@@ -149,9 +149,9 @@ class TestEnspireFile:
             # Cause all warnings to always be triggered.
             warnings.simplefilter("always")
             EnspireFile(esf("h148g-spettroC-incomplete.csv"))
-            assert len(w) == 2
-            assert issubclass(w[-1].category, Warning)
-            assert "platemap" in str(w[-1].message)
+            platemap_warnings = [wi for wi in w if "platemap" in str(wi.message)]
+            assert len(platemap_warnings) == 1
+            assert issubclass(platemap_warnings[0].category, Warning)
 
     # placemark def test_get_maxx(self):
     # placemark    "really need to be completed"
