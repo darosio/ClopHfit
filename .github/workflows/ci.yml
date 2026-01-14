@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ["3.13", "3.12"]
+        python: ["3.14", "3.13", "3.12"]
         tests: [test, type, xdoc]
     steps:
       - name: Checkout Repository

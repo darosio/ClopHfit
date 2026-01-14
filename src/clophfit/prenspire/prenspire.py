@@ -121,7 +121,8 @@ class EnspireFile:
     @staticmethod
     def _read_csv_file(file: Path, verboseprint: Callable[..., Any]) -> list[list[str]]:
         """Read EnSpire exported file into csvl."""
-        csvl = list(csv.reader(file.open(encoding="iso-8859-1"), dialect="excel-tab"))
+        with file.open(encoding="iso-8859-1") as f:
+            csvl = list(csv.reader(f, dialect="excel-tab"))
         verboseprint("read file csv")
         return csvl
 
@@ -320,7 +321,11 @@ class EnspireFile:
         csvl_post: list[list[str]], verboseprint: Callable[..., Any]
     ) -> dict[str, Any]:
         """Initialize measurements with metadata for each label."""
-        pyparsing.ParserElement.setDefaultWhitespaceChars(" \t")
+        pe = pyparsing.ParserElement
+        if hasattr(pe, "set_default_whitespace_chars"):
+            pe.set_default_whitespace_chars(" \t")
+        else:  # pragma: no cover
+            pe.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> pyparsing.ParserElement:
             EOL = pyparsing.LineEnd().suppress()  # noqa: N806
@@ -367,10 +372,16 @@ class EnspireFile:
             | line("Number of flashes")
             | line("Flash power")
         )
-        pr = block_lines.setParseAction(aa)
+        if hasattr(block_lines, "set_parse_action"):
+            pr = block_lines.set_parse_action(aa)
+        else:  # pragma: no cover
+            pr = block_lines.setParseAction(aa)
         ps1 = ["\t".join(line) for line in csvl_post]
         ps2 = "\n".join(ps1)
-        pr.searchString(ps2)
+        if hasattr(pr, "search_string"):
+            pr.search_string(ps2)
+        else:  # pragma: no cover
+            pr.searchString(ps2)
         return measurements
 
     @staticmethod
