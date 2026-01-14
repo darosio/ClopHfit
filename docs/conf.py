@@ -89,6 +89,12 @@ nbsphinx_execute = os.environ.get("NBSPHINX_EXECUTE", "auto")
 # functions defined in notebook cells under newer Python versions).
 os.environ.setdefault("CLOPHFIT_EMCEE_WORKERS", "1")
 
+# Keep notebooks fast when executed by Sphinx.
+os.environ.setdefault("CLOPHFIT_DOCS_EMCEE_STEPS", "300")
+os.environ.setdefault("CLOPHFIT_DOCS_EMCEE_BURN", "50")
+os.environ.setdefault("CLOPHFIT_DOCS_EMCEE_THIN", "10")
+os.environ.setdefault("CLOPHFIT_DOCS_EMCEE_NWALKERS", "10")
+
 
 # -- Options for HTML output -------------------------------------------------
 
