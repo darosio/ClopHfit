@@ -32,6 +32,42 @@
   },
   "packageRules": [
     {
+      "description": "Disable GitHub Actions updates - managed by cookiecutter template",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable dev/lint/test dependency updates - managed by cookiecutter template",
+      "matchFileNames": [
+        "**/pyproject.toml"
+      ],
+      "matchDepTypes": [
+        "dependency-groups"
+      ],
+      "matchDepNames": [
+        "git-cliff",
+        "mdformat",
+        "mdformat-gfm",
+        "pylsp-mypy",
+        "ruff",
+        "python-lsp-ruff",
+        "cruft",
+        "pre-commit",
+        "coverage",
+        "mypy",
+        "pandas-stubs",
+        "pygments",
+        "pytest",
+        "scipy-stubs",
+        "types-click",
+        "types-setuptools",
+        "xdoctest"
+      ],
+      "enabled": false
+    },
+    {
       "matchDepTypes": [
         "project.optional-dependencies",
         "dependency-groups"
