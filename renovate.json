@@ -4,6 +4,12 @@
     "config:recommended",
     ":dependencyDashboard"
   ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 9am on thursday"
+    ]
+  },
   "prHourlyLimit": 0,
   "prConcurrentLimit": 0,
   "prFooter": " (#{{prNumber}})",
