@@ -44,13 +44,17 @@ jobs:
             fi
           fi
 
-      - name: Create PR
+      - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         uses: peter-evans/create-pull-request@v8
         with:
+          token: ${{ secrets.PAT_WORKFLOWS || github.token }}
           branch: "chore/template-update"
           title: "chore(template): apply latest template updates"
-          commit-message: "chore: apply latest cookiecutter updates via Cruft"
-          body: "Automated Cruft update from cookiecutter template."
+          commit-message: "chore(template): apply latest cookiecutter updates via Cruft"
+          body: |
+            Automated Cruft update from cookiecutter template.
+
+            ${{ secrets.PAT_WORKFLOWS && '✅ Updated with workflow permissions' || '⚠️ Workflow files may need manual review - add PAT_WORKFLOWS secret for automatic updates' }}
           delete-branch: true
           base: main
