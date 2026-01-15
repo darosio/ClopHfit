@@ -150,6 +150,7 @@ strict = true
 
 [tool.ruff]
 extend-exclude = ["src/clophfit/old/", "scripts/", "benchmarks/"]
+extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true
 line-length = 88

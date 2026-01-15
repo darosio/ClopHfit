@@ -39,11 +39,12 @@
       "enabled": false
     },
     {
-      "description": "Disable dev/lint/test dependency updates - managed by cookiecutter template",
+      "description": "Disable dev/lint/test/docs dependency updates - managed by cookiecutter template",
       "matchFileNames": [
         "**/pyproject.toml"
       ],
       "matchDepTypes": [
+        "project.optional-dependencies",
         "dependency-groups"
       ],
       "matchDepNames": [
@@ -63,7 +64,27 @@
         "scipy-stubs",
         "types-click",
         "types-setuptools",
-        "xdoctest"
+        "xdoctest",
+        "autodocsumm",
+        "graphviz",
+        "ipykernel",
+        "jupyter",
+        "nbsphinx",
+        "pydata-sphinx-theme",
+        "sphinx-autodoc-typehints",
+        "sphinx-click",
+        "sphinx",
+        "sphinxcontrib-plantuml"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Disable click updates - managed by cookiecutter template",
+      "matchFileNames": [
+        "**/pyproject.toml"
+      ],
+      "matchDepNames": [
+        "click"
       ],
       "enabled": false
     },

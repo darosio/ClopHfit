@@ -171,6 +171,22 @@ To use clophfit in your python:
 from clophfit import prenspire, prtecan, binding
 ```
 
+## Development
+
+Requires Python `uv`.
+
+With uv:
+
+```bash
+# one-time
+pre-commit install
+# dev tools and deps
+uv sync --group dev
+# lint/test
+uv run ruff check .  (or: make lint)
+uv run pytest -q  (or: make test)
+```
+
 ## Dependency updates (Renovate)
 
 We use Renovate to keep dependencies current.
