@@ -38,13 +38,8 @@ jobs:
           set -e
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
           if ! uv run cruft check; then
-            git switch -c chore/template-update || git switch chore/template-update
-            uv run cruft update -y
+            uv run cruft update -y --allow-untracked-files
             if ! git diff --quiet; then
-              git add -A
-              git -c user.name="github-actions[bot]" \
-                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-                  commit -m "chore(template): apply latest cookiecutter updates via Cruft"
               echo "has_changes=true" >> "$GITHUB_OUTPUT"
             fi
           fi
@@ -55,6 +50,7 @@ jobs:
         with:
           branch: "chore/template-update"
           title: "chore(template): apply latest template updates"
-          commit-message: "chore(template): apply latest template updates"
-          body: "Automated Cruft update."
+          commit-message: "chore: apply latest cookiecutter updates via Cruft"
+          body: "Automated Cruft update from cookiecutter template."
           delete-branch: true
+          base: main
