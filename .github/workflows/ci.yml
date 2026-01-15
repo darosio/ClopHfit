@@ -74,7 +74,7 @@ jobs:
           make cov
       - name: Upload coverage report
         if: matrix.tests == 'test'
-        uses: codecov/codecov-action@v5.5.1
+        uses: codecov/codecov-action@v5.5.2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: Run mypy
@@ -142,11 +142,15 @@ jobs:
     needs: [pre-commit, tests, docs_build]
     # Run only on pull_request labeled "dependencies"
     if: >
+      github.event_name == 'pull_request' &&
+      (
       startsWith(github.event.pull_request.title, 'build(pre-commit): update hooks') ||
       contains(github.event.pull_request.labels.*.name, 'dependencies')
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
