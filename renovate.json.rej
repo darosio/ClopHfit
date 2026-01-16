@@ -1,0 +1,10 @@
+diff a/renovate.json b/renovate.json	(rejected hunks)
+@@ -23,7 +23,7 @@
+     "dependencies"
+   ],
+   "pre-commit": {
+-    "enabled": true,
++    "enabled": false,
+     "managerFilePatterns": [
+       "/^\\.pre-commit-config\\.yaml$/"
+     ],

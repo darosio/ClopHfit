@@ -1,0 +1,37 @@
+diff a/.github/workflows/cruft-update.yml b/.github/workflows/cruft-update.yml	(rejected hunks)
+@@ -38,24 +38,24 @@ jobs:
+           set -e
+           echo "has_changes=false" >> "$GITHUB_OUTPUT"
+           if ! uv run cruft check; then
+-            git switch -c chore/template-update || git switch chore/template-update
+-            uv run cruft update -y
++            uv run cruft update -y --allow-untracked-files
+             if ! git diff --quiet; then
+-              git add -A
+-              git -c user.name="github-actions[bot]" \
+-                  -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+-                  commit -m "chore(template): apply latest cookiecutter updates via Cruft"
+               echo "has_changes=true" >> "$GITHUB_OUTPUT"
+             fi
+           fi
+ 
+-      - name: Create PR
++      - name: Create Pull Request
+         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
+-        # if: ${{ !cancelled() && !failure() }}
+         uses: peter-evans/create-pull-request@v8
+         with:
++          token: ${{ secrets.PAT_WORKFLOWS || github.token }}
+           branch: "chore/template-update"
+-          title: "chore(template): apply latest template updates"
+-          commit-message: "chore(template): apply latest template updates"
+-          body: "Automated Cruft update."
++          title: "chore(template): apply latest cookiecutter updates"
++          commit-message: "chore(template): apply cookiecutter updates via Cruft"
++          body: |
++            Automated Cruft update from cookiecutter template.
++
++            ${{ secrets.PAT_WORKFLOWS && '✅ Updated with workflow permissions' || '⚠️ Workflow files may need manual review - add PAT_WORKFLOWS secret for automatic updates' }}
+           delete-branch: true
++          base: main
++          labels: template-update

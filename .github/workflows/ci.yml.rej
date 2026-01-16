@@ -1,0 +1,18 @@
+diff a/.github/workflows/ci.yml b/.github/workflows/ci.yml	(rejected hunks)
+@@ -137,13 +137,14 @@ jobs:
+         uses: actions/deploy-pages@v4
+ 
+   auto_merge_deps:
+-    name: Auto Merge dependencies labeled PRs
++    name: Auto Merge dependencies and template updates
+     needs: [pre-commit, tests, docs_build]
+-    # Run only on pull_request labeled "dependencies"
++    # Run only on pull_request labeled "dependencies" or template updates
+     if: >
+       github.event_name == 'pull_request' &&
+       (
+       startsWith(github.event.pull_request.title, 'build(pre-commit): update hooks') ||
++      startsWith(github.event.pull_request.title, 'chore(template):') ||
+       contains(github.event.pull_request.labels.*.name, 'dependencies')
+       )
+     runs-on: ubuntu-latest
