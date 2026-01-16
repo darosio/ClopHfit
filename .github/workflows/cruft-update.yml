@@ -50,11 +50,12 @@ jobs:
         with:
           token: ${{ secrets.PAT_WORKFLOWS || github.token }}
           branch: "chore/template-update"
-          title: "chore(template): apply latest template updates"
-          commit-message: "chore(template): apply latest cookiecutter updates via Cruft"
+          title: "chore(template): apply latest cookiecutter updates"
+          commit-message: "chore(template): apply cookiecutter updates via Cruft"
           body: |
             Automated Cruft update from cookiecutter template.
 
             ${{ secrets.PAT_WORKFLOWS && '✅ Updated with workflow permissions' || '⚠️ Workflow files may need manual review - add PAT_WORKFLOWS secret for automatic updates' }}
           delete-branch: true
           base: main
+          labels: template-update
