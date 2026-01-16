@@ -1,0 +1,19 @@
+diff a/.pre-commit-config.yaml b/.pre-commit-config.yaml	(rejected hunks)
+@@ -71,7 +71,7 @@ repos:
+         args: [--autofix]
+ 
+   - repo: https://github.com/astral-sh/ruff-pre-commit
+-    rev: v0.14.11
++    rev: v0.14.13
+     hooks:
+       - id: ruff
+         types_or: [python, pyi, jupyter]
+@@ -116,7 +116,7 @@ repos:
+         args: [-i, "4"] # Use 4 spaces for indentation
+ 
+   - repo: https://github.com/astral-sh/uv-pre-commit
+-    rev: 0.9.25
++    rev: 0.9.26
+     hooks:
+       - id: uv-lock
+         stages: [pre-commit]
