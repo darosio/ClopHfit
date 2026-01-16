@@ -23,7 +23,7 @@
     "dependencies"
   ],
   "pre-commit": {
-    "enabled": true,
+    "enabled": false,
     "managerFilePatterns": [
       "/^\\.pre-commit-config\\.yaml$/"
     ],
