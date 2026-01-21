@@ -38,6 +38,8 @@ jobs:
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
           if ! uv run cruft check; then
             uv run cruft update -y --allow-untracked-files
+            # Remove any leftover .rej files from conflicts
+            find . -name "*.rej" -type f -delete
             # Regenerate lock file if pyproject.toml changed
             if git diff --quiet pyproject.toml; then
               echo "No pyproject.toml changes"
