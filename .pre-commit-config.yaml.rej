@@ -1,0 +1,10 @@
+diff a/.pre-commit-config.yaml b/.pre-commit-config.yaml	(rejected hunks)
+@@ -94,7 +94,7 @@ repos:
+       - id: pydoclint
+ 
+   - repo: https://github.com/crate-ci/typos
+-    rev: v1.42.0
++    rev: v1.42.1
+     hooks:
+       - id: typos
+         # args: [] # Turn off automatic fixing
