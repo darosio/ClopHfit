@@ -38,6 +38,13 @@ jobs:
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
           if ! uv run cruft check; then
             uv run cruft update -y --allow-untracked-files
+            # Regenerate lock file if pyproject.toml changed
+            if git diff --quiet pyproject.toml; then
+              echo "No pyproject.toml changes"
+            else
+              echo "pyproject.toml changed, regenerating lock file"
+              uv lock
+            fi
             if ! git diff --quiet; then
               echo "has_changes=true" >> "$GITHUB_OUTPUT"
             fi
