@@ -60,5 +60,4 @@ Yes—migrating from nbsphinx → myst-nb first is a good incremental step, and 
 1. consider code-cells.el
 2. add jupyter.cache (see gemini)
 3. add jupytext conf in pyproject
-4. add .pre-commit hooks nbstripout and  metadatafilter/cell metadata normalization (optional; reduces noisy diffs)
-5.
+4. update sphinx remove blocks in renovate
