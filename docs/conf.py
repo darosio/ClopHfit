@@ -36,7 +36,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinxcontrib.plantuml",
-    "nbsphinx",
+    "myst_nb",
     "sphinx_click",
     # "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',

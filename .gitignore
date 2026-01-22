@@ -45,6 +45,7 @@ docs/_build/
 .ipynb*
 .ob-jupyter/
 .virtual_documents/
+jupyter_execute/
 
 # R
 .Rhistory
