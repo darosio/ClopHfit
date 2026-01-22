@@ -7,7 +7,7 @@
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
-      "at 1pm on thursday"
+      "at 7am on friday"
     ]
   },
   "prHourlyLimit": 0,
