@@ -86,11 +86,21 @@ exclude_patterns = [
     "**/.ipynb_checkpoints",
 ]
 
-# -- nbsphinx ---------------------------------------------------------------
+# -- nbsphinx / myst-nb -----------------------------------------------------
 
 # Execute notebooks by default, but allow opting out for fast/CI builds:
 #   NBSPHINX_EXECUTE=never make docs
+#   NB_EXECUTION_MODE=cache make docs
 nbsphinx_execute = os.environ.get("NBSPHINX_EXECUTE", "auto")
+
+# myst-nb configuration
+nb_execution_mode = os.environ.get(
+    "NB_EXECUTION_MODE", os.environ.get("NBSPHINX_EXECUTE", "auto")
+)
+nb_execution_timeout = 300  # Increase timeout to 5 minutes (was 30 seconds)
+nb_execution_allow_errors = False
+nb_execution_raise_on_error = True
+nb_execution_show_tb = True
 
 # Avoid multiprocessing in notebooks during Sphinx builds (pickling issues with
 # functions defined in notebook cells under newer Python versions).
