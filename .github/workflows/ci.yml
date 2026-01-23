@@ -121,8 +121,6 @@ jobs:
           make docs
         env:
           NB_EXECUTION_MODE: cache
-      - name: List files to find cache
-        run: find . -name ".jupyter_cache"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
