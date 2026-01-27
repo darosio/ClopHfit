@@ -34,6 +34,14 @@ repos:
         args: [--autofix, --indent, "2", --no-sort-keys]
         exclude: \.ipynb$
 
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.0
+    hooks:
+      - id: nbstripout
+        files: \.ipynb$
+        args:
+          - '--extra-keys=metadata.language_info.version metadata.signature metadata.widgets cell.metadata.ExecuteTime cell.metadata.execution cell.metadata.collapsed cell.metadata.scrolled'
+
   - repo: https://github.com/google/yamlfmt
     rev: v0.21.0
     hooks:

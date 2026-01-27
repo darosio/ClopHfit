@@ -36,7 +36,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
     "sphinxcontrib.plantuml",
-    "nbsphinx",
+    "myst_nb",
     "sphinx_click",
     # "myst_parser",
     # 'IPython.sphinxext.ipython_console_highlighting',
@@ -77,13 +77,30 @@ latex_elements = {
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "jupyter_execute",
+    "**/.virtual_documents",
+    "**/.ipynb_checkpoints",
+]
 
-# -- nbsphinx ---------------------------------------------------------------
+# -- nbsphinx / myst-nb -----------------------------------------------------
 
 # Execute notebooks by default, but allow opting out for fast/CI builds:
 #   NBSPHINX_EXECUTE=never make docs
+#   NB_EXECUTION_MODE=cache make docs
 nbsphinx_execute = os.environ.get("NBSPHINX_EXECUTE", "auto")
+
+# myst-nb configuration
+nb_execution_mode = os.environ.get(
+    "NB_EXECUTION_MODE", os.environ.get("NBSPHINX_EXECUTE", "auto")
+)
+nb_execution_timeout = 300  # Increase timeout to 5 minutes (was 30 seconds)
+nb_execution_allow_errors = False
+nb_execution_raise_on_error = True
+nb_execution_show_tb = True
 
 # Avoid multiprocessing in notebooks during Sphinx builds (pickling issues with
 # functions defined in notebook cells under newer Python versions).

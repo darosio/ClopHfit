@@ -63,7 +63,7 @@
         "graphviz",
         "ipykernel",
         "jupyter",
-        "nbsphinx",
+        "myst-nb",
         "pydata-sphinx-theme",
         "sphinx-autodoc-typehints",
         "sphinx-click",
@@ -112,17 +112,6 @@
         "python"
       ],
       "enabled": false
-    },
-    {
-      "matchDepNames": [
-        "sphinx",
-        "sphinx-autodoc-typehints"
-      ],
-      "enabled": false,
-      "labels": [
-        "dependencies",
-        "manual-update"
-      ]
     }
   ]
 }

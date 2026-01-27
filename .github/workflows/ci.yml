@@ -107,9 +107,20 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Sync project with docs deps
         run: uv sync --locked --extra docs
+      - name: Cache Jupyter-Cache
+        uses: actions/cache@v4
+        with:
+          path: docs/.jupyter_cache
+          key: ${{ runner.os }}-jupyter-${{ hashFiles('**/*.md', '**/*.ipynb') }}
+          restore-keys: |
+            ${{ runner.os }}-jupyter-
+        continue-on-error: true
       - name: Build docs
         run: |
+          mkdir -p docs/.jupyter_cache
           make docs
+        env:
+          NB_EXECUTION_MODE: cache
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
