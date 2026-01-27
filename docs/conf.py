@@ -4,19 +4,7 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-# -- Path setup --------------------------------------------------------------
-
-# If extensions (or modules to document with autodoc) are in another directory,
-# add these directories to sys.path here. If the directory is relative to the
-# documentation root, use os.path.abspath to make it absolute, like shown here.
-#
-
 import os
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path("../..").resolve()))
-
 
 # -- Project information -----------------------------------------------------
 
@@ -38,8 +26,6 @@ extensions = [
     "sphinxcontrib.plantuml",
     "myst_nb",
     "sphinx_click",
-    # "myst_parser",
-    # 'IPython.sphinxext.ipython_console_highlighting',
 ]
 
 # Napoleon settings to Default
@@ -87,17 +73,11 @@ exclude_patterns = [
 ]
 
 # -- nbsphinx / myst-nb -----------------------------------------------------
-
-# Execute notebooks by default, but allow opting out for fast/CI builds:
-#   NBSPHINX_EXECUTE=never make docs
-#   NB_EXECUTION_MODE=cache make docs
-nbsphinx_execute = os.environ.get("NBSPHINX_EXECUTE", "auto")
-
 # myst-nb configuration
 nb_execution_mode = os.environ.get(
     "NB_EXECUTION_MODE", os.environ.get("NBSPHINX_EXECUTE", "auto")
 )
-nb_execution_timeout = 300  # Increase timeout to 5 minutes (was 30 seconds)
+nb_execution_timeout = 300  # Increase timeout to 5 minutes
 nb_execution_allow_errors = False
 nb_execution_raise_on_error = True
 nb_execution_show_tb = True

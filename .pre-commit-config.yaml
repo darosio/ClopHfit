@@ -67,7 +67,7 @@ repos:
         # - id: taplo-lint
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.13
+    rev: v0.14.14
     hooks:
       - id: ruff
         types_or: [python, pyi, jupyter]
@@ -91,7 +91,7 @@ repos:
         exclude: "^benchmarks/"
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.42.1
+    rev: v1.42.2
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
