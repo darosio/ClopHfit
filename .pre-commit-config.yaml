@@ -91,7 +91,7 @@ repos:
         exclude: "^benchmarks/"
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.42.2
+    rev: v1.42.3
     hooks:
       - id: typos
         # args: [] # Turn off automatic fixing
@@ -113,7 +113,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.10.0
+    rev: 0.10.2
     hooks:
       - id: uv-lock
         stages: [pre-commit]

@@ -4,6 +4,12 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+# -- Path setup --------------------------------------------------------------
+
+# If extensions (or modules to document with autodoc) are in another directory,
+# add these directories to sys.path here. If the directory is relative to the
+# documentation root, use os.path.abspath to make it absolute, like shown here.
+
 import os
 
 # -- Project information -----------------------------------------------------
@@ -37,15 +43,14 @@ autodoc_default_options = {
     "undoc-members": False,
     "autosummary": True,
 }
-
-autodoc_typehints = "description"
+autodoc_typehints = "signature"  # signature(default), combined, description
 
 # The suffix of source filenames.
 source_suffix = {
     ".rst": "restructuredtext",
-    # ".md": "markdown",
+    ".md": "myst-nb",
+    ".ipynb": "myst-nb",
 }
-
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

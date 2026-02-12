@@ -2,7 +2,7 @@ name: Lockfile update
 
 on:
   schedule:
-    - cron: "30 11 * * 2" # 11:30 UTC (12:30 Europe/Rome) on Tuesdays
+    - cron: "10 15 * * 4" # 11:30 UTC (12:30 Europe/Rome) on Tuesdays
   workflow_dispatch:
 
 permissions:
@@ -37,11 +37,13 @@ jobs:
         if: steps.check.outputs.has_changes == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_WORKFLOWS || secrets.GITHUB_TOKEN }}
           commit-message: "chore(deps): update uv.lock"
           title: "chore(deps): update uv.lock"
           body: |
             Automated lockfile update using `uv lock --upgrade`.
+
+            ${{ secrets.PAT_WORKFLOWS && '✅ CI will run (PAT_WORKFLOWS used)' || '⚠️ CI will not run automatically (using GITHUB_TOKEN). Add PAT_WORKFLOWS secret to trigger CI.' }}
           branch: "chore/update-lockfile"
           delete-branch: true
           labels: dependencies

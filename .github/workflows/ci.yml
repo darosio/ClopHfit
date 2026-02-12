@@ -166,10 +166,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
       - name: Merge PR
-        uses: pascalgn/automerge-action@v0.16.4
         env:
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-          MERGE_LABELS: ""
-          MERGE_METHOD: squash
-          DELETE_BRANCH_AFTER_MERGE: true
-          LOG: "TRACE" # or DEBUG
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge --auto --squash --delete-branch "$PR_URL"
