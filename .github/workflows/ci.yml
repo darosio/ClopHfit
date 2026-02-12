@@ -155,7 +155,7 @@ jobs:
       github.event_name == 'pull_request' &&
       (
       startsWith(github.event.pull_request.title, 'build(pre-commit): update hooks') ||
-      startsWith(github.event.pull_request.title, 'chore(template):') ||
+      contains(github.event.pull_request.labels.*.name, 'update-template') ||
       contains(github.event.pull_request.labels.*.name, 'dependencies')
       )
     runs-on: ubuntu-latest
