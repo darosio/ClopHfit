@@ -2,7 +2,7 @@ name: Template update (Cruft)
 
 on:
   schedule:
-    - cron: "30 15 * * 4" # weekly, Mondays 03:00 UTC
+    - cron: "0 18 * * 5" # 18:00 UTC (19:00 Europe/Rome) on Fridays
   workflow_dispatch:
 permissions:
   contents: write
@@ -56,13 +56,12 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.PAT_WORKFLOWS || github.token }}
-          branch: "chore/template-update"
+          branch: "chore/update-template"
           title: "chore(template): apply latest cookiecutter updates"
           commit-message: "chore(template): apply cookiecutter updates via Cruft"
           body: |
             Automated Cruft update from cookiecutter template.
-
             ${{ secrets.PAT_WORKFLOWS && '✅ Updated with workflow permissions' || '⚠️ Workflow files may need manual review - add PAT_WORKFLOWS secret for automatic updates' }}
           delete-branch: true
           base: main
-          labels: template-update
+          labels: update-template

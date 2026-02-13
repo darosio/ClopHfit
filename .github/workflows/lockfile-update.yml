@@ -2,7 +2,7 @@ name: Lockfile update
 
 on:
   schedule:
-    - cron: "10 15 * * 4" # 11:30 UTC (12:30 Europe/Rome) on Tuesdays
+    - cron: "00 2 * * 6" # 02:00 UTC (03:00 Europe/Rome) on Saturdays
   workflow_dispatch:
 
 permissions:
@@ -42,7 +42,6 @@ jobs:
           title: "chore(deps): update uv.lock"
           body: |
             Automated lockfile update using `uv lock --upgrade`.
-
             ${{ secrets.PAT_WORKFLOWS && '✅ CI will run (PAT_WORKFLOWS used)' || '⚠️ CI will not run automatically (using GITHUB_TOKEN). Add PAT_WORKFLOWS secret to trigger CI.' }}
           branch: "chore/update-lockfile"
           delete-branch: true
