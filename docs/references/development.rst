@@ -3,185 +3,99 @@
 Development
 -----------
 
-You need the following requirements:
+Prerequisites:
 
-- ``hatch`` for test automation and package dependency managements. If you don’t
-   have hatch, you can use ``pipx run hatch`` to run it without installing, or
-   ``pipx install hatch``. Dependencies and their versions are specified in the
-   pyproject.toml file and updated in GitHub with Dependabot.
+- `uv <https://docs.astral.sh/uv/>`__ for package management and virtual
+  environments.
+- `direnv <https://direnv.net/>`__ (recommended) for automatic environment
+  activation.
+- ``make`` for running development tasks.
 
-   You can run ``hatch env show`` to list available environments and scripts.
+Dependencies and their versions are specified in ``pyproject.toml`` (with
+dependency groups for dev, lint, tests and docs) and locked in ``uv.lock``.
+Lockfile updates are automated via GitHub Actions and Renovate.
 
-   ::
+Setting up a development environment with direnv
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-      hatch env create
-      hatch run init  # init repo with pre-commit hooks
+The project includes an ``.envrc`` file that automatically creates a virtual
+environment (honoring ``.python-version``), activates it and syncs all
+dependencies::
 
-      hatch run lint
-      hatch run tests.py3.13:all
-
-   Hatch handles everything for you, including setting up an temporary
-   virtual environment for each run.
-
--  ``pre-commit`` for all style and consistency checking. While you can
-   run it with nox, this is such an important tool that it deserves to
-   be installed on its own. If pre-commit fails during pushing upstream
-   then stage changes, Commit Extend (into previous commit), and repeat
-   pushing.
-
-``pip`` and ``hatch`` are pinned in .github/workflows/constraints.txt for
-consistency with CI/CD.
-
-If you like install hatch and required deps in archlinux with::
-
-   pacman -S python-hatch python-hyperlink python-httpx
-
-While ``pre-commit`` is listed as a ’dev’ dependency, you also have the option
-to install it globally using pipx. This can be done with the following command::
-
-      pipx install pre-commit
-
-Setting up a development with direnv
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-::
-
-   echo "layout hatch" > .envrc
-   hatch run init
+   direnv allow
+   make init  # install pre-commit hooks
 
 Setting up a development environment manually
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-You can set up a development environment by running:
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
 
-   python3 -m venv .venv
-   source ./.venv/bin/activate
-   pip install -v -e .[dev,tests,docs]
+   uv venv
+   uv sync --locked --all-groups --all-extras
+   uv run pre-commit install
 
-With direnv for using `Jupyter <https://jupyter.org/>`__ during
-development:
+Available Make targets
+~~~~~~~~~~~~~~~~~~~~~~
 
-::
+Run ``make help`` to see all available targets. Key commands::
 
-   jupyter notebook
+   make lint       # run pre-commit on all files
+   make test       # run pytest with coverage
+   make cov        # combine and report coverage
+   make type       # run mypy type checking
+   make xdoc       # run xdoctest
+   make test-all   # run all of the above
+   make docs       # build Sphinx documentation
+   make docs-serve # serve docs locally
 
-And only in case you need a system wide easy accessible kernel:
-
-::
-
-   python -m ipykernel install --user --name="clop"
-
-Testing and coverage
-~~~~~~~~~~~~~~~~~~~~
-
-Use pytest to run the unit checks:
-
-::
-
-   pytest
-
-Use ``coverage`` to generate coverage reports:
-
-::
-
-   coverage run --branch -p -m pytest
-
-Or use hatch:
-
-::
-
-   hatch run tests:all
-   (hatch run tests:cov)
+If ``pre-commit`` fails during a push, stage changes, amend the commit, and
+push again.
 
 Building docs
 ~~~~~~~~~~~~~
 
-You can build the docs using:
-
 ::
 
-   hatch run docs
+   make docs
+   make docs-serve
 
-You can see a preview with:
+When needed (e.g. API updates)::
 
-::
-
-   hatch run docserve
-
-When needed (e.g. API updates):
-
-::
-
-   sphinx-apidoc -f -o docs/api/ src/clophfit/
+   uv run sphinx-apidoc -f -o docs/api/ src/clophfit/
 
 Bump and releasing
 ~~~~~~~~~~~~~~~~~~
 
-To bump version and upload build to test.pypi using:
+Version bumping uses ``git-cliff`` for changelog generation and ``uv version``
+for version management::
 
-::
+   make bump   # bump version, update changelog, commit and tag
+   make ch     # update CHANGELOG.md only
 
-   hatch run bump
-   hatch run bump "--increment PATCH" "--files-only" \
-       ["--no-verify" to bypass pre-commit and commit-msg hooks]
-   git push
+``make bump`` will refuse to run on a dirty working tree. After bumping, push
+the commit and tag::
 
-while to update only the CHANGELOG.md file:
+   git push && git push --tags
 
-::
+Release to PyPI is automated via GitHub Actions on tag push.
 
-   hatch run ch
-
-Release will automatically occur after pushing.
-
-(Otherwise)
-
-::
-
-   pipx run --spec commitizen cz bump --changelog-to-stdout --files-only \
-       (--prerelease alpha) --increment MINOR
-
-To keep clean development history use branches and pr:
-
-::
+To keep a clean development history, use branches and PRs::
 
    gh pr create --fill
-   gh pr merge --squash --delete-branch [-t “fix|ci|feat: msg”]
+   gh pr merge --squash --delete-branch [-t "fix|ci|feat: msg"]
 
 Configuration files
 ~~~~~~~~~~~~~~~~~~~
 
-Manually updated pinned dependencies for CI/CD:
-
--  .github/workflows/constraints.txt (testing dependabot)
-
 Configuration files:
 
 -  pre-commit configured in .pre-commit-config.yaml;
--  bandit (sys) configured in bandit.yml;
--  pylint (sys) configured in pyproject.toml;
--  isort (sys) configured in pyproject.toml;
--  black configured in pyproject.toml (pinned in pre-commit);
--  ruff configured in pyproject.toml (pinned in pre-commit);
--  darglint configured in .darglint (pinned in pre-commit);
--  codespell configured in .codespellrc (pinned in pre-commit);
--  coverage configured in pyproject.toml (tests deps);
--  mypy configured in pyproject.toml (tests deps);
--  commitizen in pyproject.toml (dev deps and pinned in pre-commit).
-
-While the exact dependencies and their versions are specified in the
-pyproject.toml file and updated in GitHub with Dependabot, a complete list of
-all the required packages and their versions (including transitive dependencies)
-can be generated by pip-deepfreeze in the requirements-[dev,docs,tests].txt
-files. This makes it possible to maintain a clear and detailed record of the
-project's dependency requirements, aiding in maintaining a stable and
-predictable environment across different setups.
-
-Other manual actions:
-
-::
-
-   pylint src/ tests/
-   bandit -r src/
+-  ruff (linting and formatting) configured in pyproject.toml;
+-  pydoclint configured in pyproject.toml;
+-  typos configured in pyproject.toml;
+-  coverage configured in pyproject.toml;
+-  mypy configured in pyproject.toml;
+-  git-cliff configured in cliff.toml;
+-  yamlfmt configured in .yamlfmt.yml;
+-  taplo (TOML formatting) configured in .taplo.toml;
+-  mdformat configured in .mdformat.toml.
