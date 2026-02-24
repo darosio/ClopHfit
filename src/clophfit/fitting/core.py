@@ -484,7 +484,7 @@ def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
         # residuals not masked to reduce weight of dataset with outliers
         sigma = np.mean(np.abs(label_residuals))
         # Avoid division by zero if all residuals are 0
-        sigma = max(sigma, 1e-3)
+        sigma = max(sigma, np.float64(1e-3))
         da.y_err = np.full(da.y.shape, sigma)
     return updated_ds
 
