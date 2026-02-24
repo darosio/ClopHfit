@@ -35,7 +35,7 @@ repos:
         exclude: \.ipynb$
 
   - repo: https://github.com/kynan/nbstripout
-    rev: 0.9.0
+    rev: 0.9.1
     hooks:
       - id: nbstripout
         files: \.ipynb$
@@ -48,7 +48,7 @@ repos:
       - id: yamlfmt
 
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.10
+    rev: v1.7.11
     hooks:
       - id: actionlint
 
@@ -113,7 +113,7 @@ repos:
         args: [-i, "4"] # Use 4 spaces for indentation
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.10.2
+    rev: 0.10.5
     hooks:
       - id: uv-lock
         stages: [pre-commit]
@@ -121,7 +121,7 @@ repos:
         pass_filenames: false
 
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.3.0
+    rev: v4.4.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]

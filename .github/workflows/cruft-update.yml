@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install uv
         run: |
@@ -53,15 +54,24 @@ jobs:
 
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
-        uses: peter-evans/create-pull-request@v8
-        with:
-          token: ${{ secrets.PAT_WORKFLOWS || github.token }}
-          branch: "chore/update-template"
-          title: "chore(template): apply latest cookiecutter updates"
-          commit-message: "chore(template): apply cookiecutter updates via Cruft"
-          body: |
-            Automated Cruft update from cookiecutter template.
-            ${{ secrets.PAT_WORKFLOWS && '✅ Updated with workflow permissions' || '⚠️ Workflow files may need manual review - add PAT_WORKFLOWS secret for automatic updates' }}
-          delete-branch: true
-          base: main
-          labels: update-template
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://darosio:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          BRANCH="chore/update-template"
+          git checkout -B "$BRANCH"
+          git add -A
+          git commit -m "chore(template): apply cookiecutter updates via Cruft"
+          git push -f origin "$BRANCH"
+          if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q "OPEN"; then
+            echo "PR already exists, updated branch."
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(template): apply latest cookiecutter updates" \
+              --body "Automated Cruft update from cookiecutter template." \
+              --label "update-template"
+          fi
