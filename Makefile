@@ -61,23 +61,24 @@ test-all: test type xdoc cov  ## Runs all tests: testing, type checking, xdoctes
 
 
 # Release management
-ch:  ## Bumps the project version number and tags it in Git.
+ch:  ## Updates CHANGELOG.md with condensed release notes.
 	set -euo pipefail; \
 	git cliff --bump --unreleased -o RELEASE.md; \
 	$(UV) run python scripts/update_changelog.py --raw RELEASE.md --changelog CHANGELOG.md; \
 	rm -f RELEASE.md; \
 	echo "CHANGELOG.md updated."
-	# git cliff --bump --unreleased --prepend CHANGELOG.md
 
-bump:  ## Bumps the project version number and tags it in Git. It also runs the ch target to create a new release note.
+bump:  ## Bumps version, updates changelog, commits and tags.
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "Error: working tree is dirty. Commit or stash changes first." >&2; exit 1; \
+	fi
 	set -euo pipefail; \
 	NEXT_VERSION=$$(git cliff --bumped-version); \
 	echo "Bumping to $$NEXT_VERSION"; \
 	$(UV) version "$$NEXT_VERSION"; \
 	$(UV) lock; \
-	$(UV) sync --locked --all-groups; \
 	$(MAKE) ch; \
-	if ! git diff --quiet; then git add -A && git commit -m "chore: release $$NEXT_VERSION"; else echo "No changes to commit"; fi; \
+	git add -u && git commit -m "chore: release $$NEXT_VERSION"; \
 	git tag -a "$$NEXT_VERSION" -m "Release $$NEXT_VERSION"
 	# git push; \
 	# git push --tags
