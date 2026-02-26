@@ -86,7 +86,7 @@ bump:  ## Bumps version, updates changelog, commits and tags.
 
 # Project cleanup
 clean:  ## Project cleanup
-	rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__
+	rm -rf ./build .coverage ./__pycache__ ./.mypy_cache ./.ruff_cache ./.pytest_cache ./docs/_build ./tests/__pycache__ ./dist ./src/clophfit/__pycache__
 
 
 # Help target to show all available commands

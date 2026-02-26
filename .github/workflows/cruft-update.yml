@@ -22,9 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        uses: astral-sh/setup-uv@v7
 
       - name: Sync dev tools (installs cruft from dev group)
         run: uv sync --group dev
