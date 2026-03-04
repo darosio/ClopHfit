@@ -51,6 +51,7 @@ repos:
     rev: v1.7.11
     hooks:
       - id: actionlint
+        files: \.github/workflows/
 
   - repo: https://github.com/executablebooks/mdformat
     rev: 1.0.0
@@ -58,7 +59,7 @@ repos:
       - id: mdformat
         additional_dependencies:
           - mdformat-gfm
-        exclude: CHANGELOG\.md$
+        exclude: CHANGELOG\.md$|.github/agents/
 
   - repo: https://github.com/ComPWA/taplo-pre-commit
     rev: v0.9.3
@@ -113,7 +114,7 @@ repos:
         args: ["-w", "-i", "2", "-ci", "-sr"] # 2 spaces, indent case, simplify redirects
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.10.6
+    rev: 0.10.8
     hooks:
       - id: uv-lock
         stages: [pre-commit]

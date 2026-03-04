@@ -38,14 +38,9 @@ jobs:
             uv run cruft update -y --allow-untracked-files
             # Remove any leftover .rej files from conflicts
             find . -name "*.rej" -type f -delete
-            # Regenerate lock file if pyproject.toml changed
-            if git diff --quiet pyproject.toml; then
-              echo "No pyproject.toml changes"
-            else
-              echo "pyproject.toml changed, regenerating lock file"
+            # Always regenerate lock file to ensure consistency after template update
               uv lock
-            fi
-            if ! git diff --quiet; then
+            if ! git diff --quiet HEAD; then
               echo "has_changes=true" >> "$GITHUB_OUTPUT"
             fi
           fi
@@ -66,6 +61,7 @@ jobs:
           if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q "OPEN"; then
             echo "PR already exists, updated branch."
           else
+            gh label create "update-template" --color "0075ca" --description "Template update via Cruft" --force
             gh pr create \
               --base main \
               --head "$BRANCH" \
