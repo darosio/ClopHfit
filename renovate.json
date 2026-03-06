@@ -17,12 +17,7 @@
     "dependencies"
   ],
   "pre-commit": {
-    "enabled": false,
-    "managerFilePatterns": [
-      "/^\\.pre-commit-config\\.yaml$/"
-    ],
-    "commitMessagePrefix": "build(hooks):",
-    "groupName": "pre-commit hooks"
+    "enabled": false
   },
   "packageRules": [
     {
@@ -93,16 +88,6 @@
         "optional"
       ],
       "commitMessagePrefix": "chore(dep):"
-    },
-    {
-      "matchManagers": [
-        "pre-commit"
-      ],
-      "labels": [
-        "dependencies",
-        "pre-commit"
-      ],
-      "commitMessagePrefix": "chore(hooks):"
     },
     {
       "matchFileNames": [
