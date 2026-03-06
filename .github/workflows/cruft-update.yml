@@ -39,7 +39,7 @@ jobs:
             # Remove any leftover .rej files from conflicts
             find . -name "*.rej" -type f -delete
             # Always regenerate lock file to ensure consistency after template update
-              uv lock
+            uv lock
             if ! git diff --quiet HEAD; then
               echo "has_changes=true" >> "$GITHUB_OUTPUT"
             fi
@@ -52,7 +52,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://darosio:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           BRANCH="chore/update-template"
           git checkout -B "$BRANCH"
           git add -A
