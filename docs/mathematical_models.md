@@ -313,6 +313,6 @@ For systems that violate these assumptions, more complex models may be needed.
 
 ## See Also
 
-- [API Reference](api/binding.rst) - Detailed function documentation
+- [API Reference](autoapi/clophfit/fitting/models/index.rst) - Detailed function documentation
 - [Tutorial](tutorials/tutorials.rst) - Worked examples
 - [Data Structures](api/api.rst) - DataArray and Dataset classes

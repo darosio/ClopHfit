@@ -262,7 +262,7 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
 
     The model predicts that deprotonation completely abolishes binding,
     which is consistent with many pH-sensitive biosensors where a critical
-    ionizable residue must be protonated for ligand coordination.
+    ionizable residue must be protonated for ligand coordination [1]_.
 
     **Applications**
 

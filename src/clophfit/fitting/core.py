@@ -13,24 +13,27 @@ Core Functionality:
 2.  **Spectral Data Processing**:
     -   Processes raw spectral data (e.g., from fluorescence spectroscopy).
     -   Offers two methods for data reduction:
+
         -   Singular Value Decomposition (SVD) to extract the most significant
-          spectral component.
+            spectral component.
         -   Band integration over a specified wavelength range.
 
 3.  **Curve Fitting**: Provides three distinct fitting backends to determine the
     dissociation constant (K) and other parameters:
+
     -   **Least-Squares (LM)**: Utilizes the `lmfit` library for robust non-linear
-      least-squares minimization. Supports iterative reweighting and outlier
-      removal.
+        least-squares minimization. Supports iterative reweighting and outlier
+        removal.
     -   **Orthogonal Distance Regression (ODR)**: Employs `scipy.odr` to account
-      for uncertainties in both x and y variables, which is crucial when x-values
-      (e.g., pH measurements) have errors.
+        for uncertainties in both x and y variables, which is crucial when x-values
+        (e.g., pH measurements) have errors.
     -   **Bayesian Modeling (PyMC)**: Implements a hierarchical Bayesian model
-      using `pymc`. This approach is powerful for:
+        using `pymc`. This approach is powerful for:
+
         -   Quantifying parameter uncertainties as full posterior distributions.
         -   Modeling errors in x-values as latent variables.
         -   Sharing information between multiple experiments (hierarchical fitting)
-          to obtain more robust parameter estimates.
+            to obtain more robust parameter estimates.
 
 4.  **Result Visualization**: Includes extensive plotting functions to visualize:
     -   Raw and processed spectra.
