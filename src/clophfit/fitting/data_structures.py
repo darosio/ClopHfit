@@ -36,15 +36,23 @@ if TYPE_CHECKING:
 
 @dataclass
 class DataArray:
-    """Represent matched `x`, `y`, and optional `w` (weight) arrays."""
+    """Represent matched `x`, `y`, and optional `w` (weight) arrays.
 
-    #: x at creation
+    Parameters
+    ----------
+    xc : ArrayF
+        x at creation.
+    yc : ArrayF
+        y at creation.
+    x_errc : ArrayF, optional
+        x_err at creation.
+    y_errc : ArrayF, optional
+        y_err at creation.
+    """
+
     xc: ArrayF
-    #: y at creation
     yc: ArrayF
-    #: x_err at creation
     x_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
-    #: y_err at creation
     y_errc: ArrayF = field(init=True, default_factory=lambda: np.array([]))
     _mask: ArrayMask = field(init=False)
 
@@ -130,12 +138,12 @@ class Dataset(UserDict[str, DataArray]):
     Parameters
     ----------
     data : dict[str, DataArray]
-        Maps string keys to `DataArray` instances.
-    is_ph : bool, optional
-        Indicates whether `x` values represent pH. Default is False.
+        Maps keys to `DataArray` instances.
+    is_ph : bool
     """
 
     is_ph: bool = False
+    """Indicates whether `x` values represent pH. Default is False."""
 
     def __init__(self, data: dict[str, DataArray], *, is_ph: bool = False) -> None:
         super().__init__(data or {})
@@ -423,27 +431,19 @@ MiniT = Minimizer | odr.Output | az.InferenceData
 
 @dataclass
 class FitResult[MiniType: MiniProtocol]:
-    """Result container of a fitting procedure.
-
-    Attributes
-    ----------
-    figure : Figure | None
-        Matplotlib figure visualizing the fit, if generated.
-    result : MinimizerResult | _Result | None
-        Backend-agnostic fit result exposing a .params attribute along with
-        residual, redchi, and success fields (as in lmfit). For lmfit this is a
-        MinimizerResult.
-    mini : MiniT | None
-        The primary backend object (e.g., lmfit.Minimizer, scipy.odr.Output, or
-        az.InferenceData for PyMC).
-    dataset : Dataset | None
-        Dataset used for the fit (typically a deep copy of the input dataset).
-    """
+    """Result container of a fitting procedure."""
 
     figure: Figure | None = None
+    """Matplotlib figure visualizing the fit, if generated."""
     result: MinimizerResult | _Result | None = None
+    """Backend-agnostic fit result exposing a .params attribute along with
+    residual, redchi, and success fields (as in lmfit). For lmfit this is a
+    MinimizerResult."""
     mini: MiniType | None = None
+    """The primary backend object (e.g., lmfit.Minimizer, scipy.odr.Output, or
+    az.InferenceData for PyMC)."""
     dataset: Dataset | None = None
+    """Dataset used for the fit (typically a deep copy of the input dataset)."""
 
     def pprint(self) -> str:
         """Provide a brief summary of the fit, focusing on the K value."""
@@ -468,21 +468,14 @@ class FitResult[MiniType: MiniProtocol]:
 
 @dataclass
 class SpectraGlobResults:
-    """A dataclass representing the results of both svd and bands fits.
-
-    Attributes
-    ----------
-    svd : FitResult | None
-        The `FitResult` object representing the outcome of the concatenated svd
-        fit, or `None` if the svd fit was not performed.
-    gsvd : FitResult | None
-        The `FitResult` object representing the outcome of the svd fit, or
-        `None` if the svd fit was not performed.
-    bands : FitResult | None
-        The `FitResult` object representing the outcome of the bands fit, or
-        `None` if the bands fit was not performed.
-    """
+    """A dataclass representing the results of both svd and bands fits."""
 
     svd: FitResult[Minimizer] | None = field(default=None)
+    """The `FitResult` object representing the outcome of the concatenated svd
+    fit, or `None` if the svd fit was not performed."""
     gsvd: FitResult[Minimizer] | None = field(default=None)
+    """The `FitResult` object representing the outcome of the global svd fit,
+    or `None` if the svd fit was not performed."""
     bands: FitResult[Minimizer] | None = field(default=None)
+    """The `FitResult` object representing the outcome of the bands fit, or
+    `None` if the bands fit was not performed."""

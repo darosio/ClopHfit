@@ -49,8 +49,7 @@ class EnspireFile:
     ----------
     file : Path
         Path to the EnSpire csv file
-    verbose : int
-        Level of verbosity; 0 is silent, higher values are more verbose (default=0).
+    verbose :
 
     Raises
     ------
@@ -68,12 +67,13 @@ class EnspireFile:
 
     file: Path
     verbose: int = 0
-    #: General metadata.
+    """Level of verbosity; 0 is silent."""
     metadata: dict[str, str | list[str]] = field(default_factory=dict, init=False)
-    #: Spectra and metadata for each label, such as "MeasB".
+    """General metadata."""
     measurements: dict[str, Any] = field(default_factory=dict, init=False)
-    #: List of exported wells.
+    """Spectra and metadata for each label, such as "MeasB"."""
     wells: list[str] = field(default_factory=list, init=False)
+    """List of exported wells."""
 
     def __post_init__(self) -> None:
         """Complete initialization."""
@@ -410,8 +410,7 @@ class Note:
     ----------
     fpath : Path
         The path to the Experimental Note file to be processed.
-    verbose : int
-        Level of verbosity; 0 is silent, higher values are more verbose (default=0).
+    verbose :
 
     Example
     -------
@@ -423,12 +422,13 @@ class Note:
 
     fpath: Path
     verbose: int = 0
-    #: A list of wells generated from the note file.
+    """Level of verbosity; 0 is silent."""
     wells: list[str] = field(init=False, default_factory=list)
+    """A list of wells generated from the note file."""
     # A list of lines extracted from the note file.
     _note: pd.DataFrame = field(init=False, default_factory=pd.DataFrame)
-    #: A list of titrations extracted from the note file.
     titrations: dict[Any, Any] = field(init=False, default_factory=dict)
+    """A list of titrations extracted from the note file."""
 
     def __post_init__(self) -> None:
         """Complete the initialization generating wells and _note_list."""

@@ -55,6 +55,7 @@ Thumbs.db
 
 # Sphinx documentation
 docs/_build/
+docs/autoapi/
 
 # Jupyter- notebook, lab and org-babel
 .ipynb_checkpoints/

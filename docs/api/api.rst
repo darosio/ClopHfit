@@ -7,8 +7,6 @@ This part of the documentation lists the full API reference of all public
 classes and functions.
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 3
 
-   binding
-   prtecan
-   prenspire
+   ../autoapi/clophfit/index

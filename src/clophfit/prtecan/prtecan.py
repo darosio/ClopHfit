@@ -156,13 +156,11 @@ class Metadata:
     ----------
     value : int | str | float | None
         The value for the dictionary key.
-    unit : Sequence[str | float | int] | None, optional
-        The first element represents the unit, while the following elements are
-        only listed.
     """
 
     value: int | str | float | None
     unit: Sequence[str | float | int] | None = None
+    """The first element represents the unit, while the following elements are only listed."""
 
 
 def extract_metadata(
@@ -327,8 +325,7 @@ class Labelblock:
 
     Parameters
     ----------
-    _lines : list[list[str | int | float]]
-        Lines to create this Labelblock.
+    lines :
 
     Raises
     ------
@@ -337,21 +334,21 @@ class Labelblock:
     TypeError
         When normalization parameters are not numerical.
 
-    Logging
-    -------
-    Logs a warning
-        When it replaces "OVER" with ``np.nan`` for saturated values.
+    Notes
+    -----
+    Logs a warning when it replaces "OVER" with ``np.nan`` for saturated values.
     """
 
-    _lines: InitVar[list[list[str | int | float]]]
-    #: Path of the corresponding Tecan file.
+    lines: InitVar[list[list[str | int | float]]]
+    """Lines to create this Labelblock."""
     filename: str = ""
-    #: Metadata specific for this Labelblock.
+    """Path of the corresponding Tecan file."""
     metadata: dict[str, Metadata] = field(init=False, repr=True)
-    #: Plate data values as {'well_name', value}.
+    """Metadata specific for this Labelblock."""
     data: dict[str, float] = field(init=False, repr=True)
-    #: Plate data values normalized as {'well_name', value}.
+    """Plate data values as {'well_name', value}."""
     data_nrm: dict[str, float] = field(init=False, repr=True)
+    """Plate data values normalized as {'well_name', value}."""
     _KEYS: typing.ClassVar[list[str]] = [
         "Emission Bandwidth",
         "Emission Wavelength",
@@ -496,12 +493,12 @@ class Tecanfile:
     """
 
     path: Path
-    #: General metadata for Tecanfile, like `Date` and `Shaking Duration`.
     metadata: dict[str, Metadata] = field(init=False, repr=False)
-    #: All labelblocks contained in this file.
+    """General metadata for Tecanfile, like `Date` and `Shaking Duration`."""
     labelblocks: dict[int, Labelblock] = field(
         init=False, repr=False, default_factory=dict
     )
+    """All labelblocks contained in this file."""
 
     def __post_init__(self) -> None:
         """Initialize."""
@@ -537,8 +534,7 @@ class LabelblocksGroup:
     ----------
     labelblocks: list[Labelblock]
         Labelblocks to be grouped.
-    allequal: bool
-        True if labelblocks already tested equal.
+    allequal:
 
     Raises
     ------
@@ -548,8 +544,9 @@ class LabelblocksGroup:
 
     labelblocks: list[Labelblock] = field(repr=False)
     allequal: bool = False
-    #: Metadata shared by all labelblocks.
+    """True if labelblocks already tested equal."""
     metadata: dict[str, Metadata] = field(init=False, repr=True)
+    """Metadata shared by all labelblocks."""
 
     @cached_property
     def data(self) -> dict[str, list[float]]:
@@ -603,22 +600,20 @@ class TecanfilesGroup:
     ValueError
         When no common Labelblock is found across all Tecanfiles.
 
-    Logging
-    -------
-    Logs a warning
-        If the Tecanfiles do not contain the same number of Labelblocks that
-        can be merged in the same order, a warning is logged. In such cases,
-        fewer LabelblocksGroup may be created.
+    Notes
+    -----
+    Logs a warning if the Tecanfiles do not contain the same number of
+    Labelblocks that can be merged in the same order. In such cases,
+    fewer LabelblocksGroup may be created.
     """
 
     tecanfiles: list[Tecanfile]
-
-    #: Each group contains its own data like a titration. ??
     labelblocksgroups: dict[int, LabelblocksGroup] = field(
         init=False, default_factory=dict
     )
-    #: Metadata shared by all tecanfiles.
+    """Each group contains its own data like a titration."""
     metadata: dict[str, Metadata] = field(init=False, repr=True)
+    """Metadata shared by all tecanfiles."""
 
     def __post_init__(self) -> None:
         """Initialize metadata and labelblocksgroups."""
@@ -672,6 +667,7 @@ class PlateScheme:
     ----------
     file: Path
         File path to the scheme file [<well Id, sample name>].
+
     """
 
     file: Path | None = None
@@ -1233,10 +1229,8 @@ class Titration(TecanfilesGroup):
         List of Tecanfiles.
     x : ArrayF
         Concentration or pH values.
-    is_ph : bool
-        Indicate if x values represent pH (default is False).
-    x_err : ArrayF | None
-        Uncertainties of concentration or pH values.
+    is_ph :
+    x_err :
 
     Raises
     ------
@@ -1245,9 +1239,12 @@ class Titration(TecanfilesGroup):
     """
 
     x: ArrayF
-    is_ph: bool
+    is_ph: bool = False
+    """Indicate if x values represent pH."""
     x_err: ArrayF = field(default_factory=lambda: np.array([]))
+    """Uncertainties for x values (default is empty array)."""
     buffer: Buffer = field(init=False)
+    """Buffer wells data and fit results. Set during initialization."""
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
@@ -1256,7 +1253,6 @@ class Titration(TecanfilesGroup):
     _bg_err: dict[int, ArrayF] = field(init=False, default_factory=dict)
     _data: dict[int, dict[str, ArrayF]] = field(init=False, default_factory=dict)
 
-    #: A list of wells containing samples that are neither buffer nor CTR samples.
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
 
     def __post_init__(self) -> None:
