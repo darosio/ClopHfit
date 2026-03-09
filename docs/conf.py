@@ -39,6 +39,7 @@ autodoc_typehints = "description"  # signature(default), combined
 
 # -- sphinx-autoapi configuration --------------------------------------------
 autoapi_dirs = ["../src"]
+autoapi_ignore = ["**/.ipynb_checkpoints/*"]
 autoapi_options = [
     "members",
     "show-inheritance",
