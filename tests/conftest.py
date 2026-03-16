@@ -7,10 +7,32 @@ Read more about conftest.py under:
 - https://docs.pytest.org/en/stable/writing_plugins.html
 """
 
+import os
+import tempfile
+
 import numpy as np
 import pytest
 
 from clophfit.fitting.data_structures import DataArray, Dataset
+
+# Ensure PyTensor writes its compilation cache to a writable location during tests.
+# This runs at conftest import time (before test module imports), which matters
+# because `clophfit.fitting.bayes` imports PyMC/PyTensor at import time.
+_PYTENSOR_COMPILEDIR = tempfile.mkdtemp(prefix="clophfit-pytensor-compiledir-")
+os.environ.setdefault("PYTENSOR_BASE_COMPILEDIR", _PYTENSOR_COMPILEDIR)
+existing_flags = os.environ.get("PYTENSOR_FLAGS", "")
+if "compiledir=" not in existing_flags:
+    os.environ["PYTENSOR_FLAGS"] = (
+        f"{existing_flags}," if existing_flags else ""
+    ) + f"compiledir={_PYTENSOR_COMPILEDIR}"
+
+# PyMC may use Python multiprocessing and create temp files; some environments
+# restrict `/dev/shm` or other default temp locations. Force a writable temp dir
+# for the test process (and child processes) via standard tempfile env vars.
+_TEST_TMPDIR = tempfile.mkdtemp(prefix="clophfit-tmp-")
+os.environ.setdefault("TMPDIR", _TEST_TMPDIR)
+os.environ.setdefault("TEMP", _TEST_TMPDIR)
+os.environ.setdefault("TMP", _TEST_TMPDIR)
 
 
 @pytest.fixture

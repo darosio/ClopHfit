@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import typing
 
 import arviz as az
@@ -25,6 +26,13 @@ from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, FloatFunc
     from clophfit.prtecan import PlateScheme
+
+
+def _pymc_sample_parallel_args() -> dict[str, int]:
+    """Return sampling args to avoid multiprocessing in restricted test environments."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return {"cores": 1, "chains": 1}
+    return {}
 
 
 def create_x_true(
@@ -349,9 +357,9 @@ def fit_binding_pymc(
             n_samples,
             tune=tune,
             target_accept=0.9,
-            cores=4,
             return_inferencedata=True,
             idata_kwargs={"log_likelihood": True},
+            **_pymc_sample_parallel_args(),
         )
     return process_trace(trace, params.keys(), ds, n_xerr)
 
@@ -412,9 +420,9 @@ def fit_binding_pymc2(
             n_samples,
             tune=tune,
             target_accept=0.9,
-            cores=4,
             return_inferencedata=True,
             idata_kwargs={"log_likelihood": True},
+            **_pymc_sample_parallel_args(),
         )
     return process_trace(trace, params.keys(), ds, n_xerr)
 
@@ -527,10 +535,10 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
         # Run MCMC sampling
         trace: az.InferenceData = pm.sample(
             n_samples,
-            cores=4,
             return_inferencedata=True,
             target_accept=0.9,
             idata_kwargs={"log_likelihood": True},
+            **_pymc_sample_parallel_args(),
         )
     return trace
 
@@ -609,7 +617,9 @@ def fit_binding_pymc_odr(
                 observed=np.zeros(len(distances[mask].eval())),
             )
         # Inference
-        return pm.sample(n_samples, cores=4, return_inferencedata=True)
+        return pm.sample(
+            n_samples, return_inferencedata=True, **_pymc_sample_parallel_args()
+        )
     # TODO:  return process_trace(trace, params.keys(), ds, 0)
 
 
@@ -708,7 +718,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                     )
 
         trace: az.InferenceData = pm.sample(
-            n_samples, target_accept=0.9, return_inferencedata=True
+            n_samples,
+            target_accept=0.9,
+            return_inferencedata=True,
+            **_pymc_sample_parallel_args(),
         )
 
     return trace
@@ -848,7 +861,10 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
                     )
 
         trace: az.InferenceData = pm.sample(
-            n_samples, target_accept=0.9, return_inferencedata=True
+            n_samples,
+            target_accept=0.9,
+            return_inferencedata=True,
+            **_pymc_sample_parallel_args(),
         )
 
     return trace
@@ -1086,6 +1102,10 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
                     )
 
         trace: az.InferenceData = pm.sample(
-            n_samples, tune=n_samples // 2, target_accept=0.9, return_inferencedata=True
+            n_samples,
+            tune=n_samples // 2,
+            target_accept=0.9,
+            return_inferencedata=True,
+            **_pymc_sample_parallel_args(),
         )
     return trace

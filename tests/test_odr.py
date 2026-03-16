@@ -39,7 +39,7 @@ def test_generalized_combined_model_mixed_lengths() -> None:
     x = np.array([5.0, 6.0, 7.0, 1.0, 2.0])
     # pars are: [K, S0_1, S1_1, S0_2, S1_2]
     pars = [7.0, 2.0, 1.0, 0.0, 1.0]
-    y = generalized_combined_model(pars, x, [3, 2])
+    y = generalized_combined_model(pars, x, [3, 2], is_ph=True)
     y1 = binding_1site(x[:3], 7.0, 2.0, 1.0, is_ph=True)
     y2 = binding_1site(x[3:], 7.0, 0.0, 1.0, is_ph=True)
     np.testing.assert_allclose(y, np.concatenate([y1, y2]))

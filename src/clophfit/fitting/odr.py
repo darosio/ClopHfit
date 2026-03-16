@@ -94,7 +94,7 @@ def format_estimate(
 
 
 def generalized_combined_model(
-    pars: list[float], x: ArrayF, dataset_lengths: list[int]
+    pars: list[float], x: ArrayF, dataset_lengths: list[int], *, is_ph: bool
 ) -> ArrayF:
     """Handle multiple datasets with different lengths and masks."""
     start_idx = 0
@@ -106,7 +106,7 @@ def generalized_combined_model(
         current_x = x[start_idx:end_idx]
         S0 = pars[1 + 2 * i]  # S0 for dataset i # noqa: N806
         S1 = pars[2 + 2 * i]  # S1 for dataset i # noqa: N806
-        model_output = binding_1site(current_x, K, S0, S1, is_ph=True)
+        model_output = binding_1site(current_x, K, S0, S1, is_ph=is_ph)
         results.append(model_output)
         start_idx = end_idx
     return np.concatenate(results)
@@ -158,7 +158,7 @@ def fit_binding_odr(
 
     # Define the combined model
     def combined_model_odr(p: list[float], x: ArrayF) -> ArrayF:
-        return generalized_combined_model(p, x, dataset_lengths)
+        return generalized_combined_model(p, x, dataset_lengths, is_ph=ds.is_ph)
 
     combined_model = odr.Model(combined_model_odr)  # type: ignore[arg-type]
     odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
