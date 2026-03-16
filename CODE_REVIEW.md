@@ -53,23 +53,6 @@ The test layout mirrors the implementation:
 
 This is good architecture hygiene. It makes it easy to see which subsystem is protected and where additional tests belong.
 
-## Highest-confidence issues to fix soon
-
-### Likely correctness bug in ODR backend
-
-- `src/clophfit/fitting/odr.py:96-112`
-- `generalized_combined_model()` hardcodes `is_ph=True` in the call to `binding_1site(...)`
-
-Impact: non-pH fits can silently use the wrong model form inside the ODR path.
-
-### Likely correctness bug in `fit_enspire()`
-
-- `src/clophfit/__main__.py:432-435`
-- pH titrations assign `is_ph = False`
-- chloride titrations assign `is_ph = True`
-
-Impact: EnSpire titration fitting can be routed through the wrong model semantics.
-
 ## Architecture and maintainability risks
 
 ### `prtecan.py` is a god module
