@@ -812,7 +812,10 @@ class BufferFit:
 
 @dataclass
 class Buffer:
-    """Buffer handling for a titration."""
+    """Buffer handling for a titration.
+
+    Manages background correction and fitting for buffer wells.
+    """
 
     tit: Titration
 
@@ -1340,7 +1343,20 @@ class Titration(TecanfilesGroup):
 
     @classmethod
     def fromlistfile(cls, list_file: Path | str, *, is_ph: bool) -> Titration:
-        """Build `Titration` from a list[.pH|.Cl] file."""
+        """Build `Titration` from a list[.pH|.Cl] file.
+
+        Parameters
+        ----------
+        list_file : Path | str
+            Path to the list file containing [filenames x x_err].
+        is_ph : bool
+            Whether x values represent pH (True) or concentrations (False).
+
+        Returns
+        -------
+        Titration
+            The constructed Titration object.
+        """
         tecanfiles, x, x_err = cls._listfile(Path(list_file))
         return cls(tecanfiles, x, is_ph, x_err=x_err)
 
@@ -1375,7 +1391,16 @@ class Titration(TecanfilesGroup):
         self._data = {}
 
     def load_additions(self, additions_file: Path) -> None:
-        """Load additions from file."""
+        """Load additions from file.
+
+        Reads a CSV file with a single column 'add' containing addition volumes,
+        and updates the Titration's additions property.
+
+        Parameters
+        ----------
+        additions_file : Path
+            Path to the additions CSV file.
+        """
         additions = pd.read_csv(additions_file, names=["add"])
         self.additions = additions["add"].tolist()
 
@@ -1466,7 +1491,16 @@ class Titration(TecanfilesGroup):
         return self._scheme
 
     def load_scheme(self, schemefile: Path) -> None:
-        """Load scheme from file. Set buffer_wells."""
+        """Load scheme from file and set buffer wells.
+
+        Reads a scheme file to define buffer wells, known samples,
+        and control wells, then updates the Titration's scheme and buffer wells.
+
+        Parameters
+        ----------
+        schemefile : Path
+            Path to the scheme CSV file.
+        """
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
@@ -1529,12 +1563,32 @@ class Titration(TecanfilesGroup):
             f.savefig(outfit / f"K{i}.png")
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
-        """Export dat files [x,y1,..,yN] from copy of self.data."""
+        """Export dat files [x,y1,..,yN] from copy of self.data.
+
+        Creates data files for fitting with columns [x, y1, y2, ...].
+
+        Parameters
+        ----------
+        tecan_config : TecanConfig
+            Configuration object with export options.
+        """
 
         def write(
             x: ArrayF, data: dict[int, dict[str, ArrayF]], out_folder: Path
         ) -> None:
-            """Write data."""
+            """Write datasets to CSV files in the specified output folder.
+
+            Creates CSV files for each well in the format [x, y1, y2, ...].
+
+            Parameters
+            ----------
+            x : ArrayF
+                Concentration or pH values (independent variable).
+            data : dict[int, dict[str, ArrayF]]
+                Dictionary mapping label indices to well data dictionaries.
+            out_folder : Path
+                Output directory for the CSV files.
+            """
             if any(data):
                 out_folder.mkdir(parents=True, exist_ok=True)
                 columns = ["x"] + [f"y{i}" for i in data]
@@ -1781,7 +1835,21 @@ class Titration(TecanfilesGroup):
         return ""
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
-        """Plot temperatures of all labelblocksgroups."""
+        """Plot temperatures of all labelblocksgroups.
+
+        Creates a line plot showing measured temperatures versus
+        concentration/pH values, with statistics overlays.
+
+        Parameters
+        ----------
+        title : str, optional
+            Additional title text to append to the plot.
+
+        Returns
+        -------
+        figure.Figure
+            The matplotlib Figure object containing the plot.
+        """
         temperatures: dict[str | int, list[float | int | str | None]] = {}
         for label_n, lbg in self.labelblocksgroups.items():
             temperatures[label_n] = [
