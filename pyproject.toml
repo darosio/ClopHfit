@@ -23,6 +23,7 @@ dependencies = [
   "emcee>=3.1.6",
   "lmfit>=1.3.4",
   "matplotlib>=3.10.8",
+  "odrpack>=0.5.0",
   "openpyxl>=3.1.5",
   "pandas>=3.0.1",
   "pyparsing>=3.3.2",

@@ -7,12 +7,13 @@ import typing
 
 import matplotlib.pyplot as plt
 import numpy as np
+import odrpack
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import odr
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
+from clophfit.utils import weights_from_sigma
 
 from .core import fit_binding_glob
 from .data_structures import Dataset, FitResult, MiniT, _Result
@@ -94,7 +95,7 @@ def format_estimate(
 
 
 def generalized_combined_model(
-    pars: list[float], x: ArrayF, dataset_lengths: list[int], *, is_ph: bool
+    pars: ArrayF | list[float], x: ArrayF, dataset_lengths: list[int], *, is_ph: bool
 ) -> ArrayF:
     """Handle multiple datasets with different lengths and masks."""
     start_idx = 0
@@ -114,7 +115,7 @@ def generalized_combined_model(
 
 def fit_binding_odr(
     ds_or_fr: Dataset | FitResult[MiniT],
-) -> FitResult[odr.Output]:
+) -> FitResult[odrpack.OdrResult]:
     """Analyze multi-label titration datasets using ODR.
 
     Parameters
@@ -124,7 +125,7 @@ def fit_binding_odr(
 
     Returns
     -------
-    FitResult[odr.Output]
+    FitResult[odrpack.OdrResult]
         ODR fitting results. Residuals are WEIGHTED by the ORIGINAL y_err
         (before ODR modified it), making them comparable to LM residuals.
     """
@@ -150,19 +151,25 @@ def fit_binding_odr(
     # Collect dataset lengths
     dataset_lengths = [len(da.y) for da in ds.values()]
     x_data, y_data, x_err, y_err = ds.concatenate_data()
-    data = odr.RealData(x_data, y_data, sx=x_err, sy=y_err)
+    weight_x = weights_from_sigma(x_err)
+    weight_y = weights_from_sigma(y_err)
     # Initial parameters setup
     initial_params = [params["K"].value]
     for lbl in ds:
         initial_params.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
 
     # Define the combined model
-    def combined_model_odr(p: list[float], x: ArrayF) -> ArrayF:
+    def combined_model_odr(x: ArrayF, p: ArrayF) -> ArrayF:
         return generalized_combined_model(p, x, dataset_lengths, is_ph=ds.is_ph)
 
-    combined_model = odr.Model(combined_model_odr)  # type: ignore[arg-type]
-    odr_obj = odr.ODR(data, combined_model, beta0=initial_params)
-    output = odr_obj.run()
+    output = odrpack.odr_fit(
+        combined_model_odr,
+        x_data,
+        y_data,
+        initial_params,
+        weight_x=weight_x,
+        weight_y=weight_y,
+    )
     # reassign x_err and y_err to ds (ODR-estimated values)
     start_idx = 0
     for da in ds.values():
@@ -195,7 +202,7 @@ def fit_binding_odr_recursive(
     ds_or_fr: Dataset | FitResult[MiniT],
     max_iterations: int = 15,
     tol: float = 0.1,
-) -> FitResult[odr.Output]:
+) -> FitResult[odrpack.OdrResult]:
     """Analyze multi-label titration datasets using iterative ODR.
 
     Parameters
@@ -209,7 +216,7 @@ def fit_binding_odr_recursive(
 
     Returns
     -------
-    FitResult[odr.Output]
+    FitResult[odrpack.OdrResult]
         ODR fitting results.
     """
     # Handle both Dataset and FitResult inputs
@@ -223,7 +230,7 @@ def fit_binding_odr_recursive(
 
     # Initial fit
     ro = fit_binding_odr(fr)
-    residual_variance = ro.mini.res_var if isinstance(ro.mini, odr.Output) else 0.0
+    residual_variance = ro.mini.res_var if ro.mini else 0.0
     for _ in range(max_iterations):
         rn = fit_binding_odr(ro)
         if rn.mini and rn.mini.res_var == 0:
@@ -238,7 +245,7 @@ def fit_binding_odr_recursive(
 
 
 def outlier(
-    output: odr.Output, *, threshold: float = 2.0, plot_z_scores: bool = False
+    output: odrpack.OdrResult, *, threshold: float = 2.0, plot_z_scores: bool = False
 ) -> ArrayMask:
     """Identify outliers."""
     residuals_x = output.delta
@@ -257,7 +264,7 @@ def fit_binding_odr_recursive_outlier(
     ds_or_fr: Dataset | FitResult[MiniT],
     tol: float = 0.5,
     threshold: float = 2.0,
-) -> FitResult[odr.Output]:
+) -> FitResult[odrpack.OdrResult]:
     """Analyze multi-label titration datasets using ODR with outlier removal.
 
     Parameters
@@ -271,7 +278,7 @@ def fit_binding_odr_recursive_outlier(
 
     Returns
     -------
-    FitResult[odr.Output]
+    FitResult[odrpack.OdrResult]
         ODR fitting results.
     """
     # Handle both Dataset and FitResult inputs

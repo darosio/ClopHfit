@@ -6,7 +6,7 @@ ClopHfit is a scientific Python package for fitting pH titration and
 chloride-binding assay data from Tecan and EnSpire plate readers. The primary
 model is a single-site binding isotherm (Henderson-Hasselbalch for pH). The
 package provides CLI tools, data parsers, SVD analysis, and **multiple fitting
-backends** (LMFit, scipy.odr, PyMC).
+backends** (LMFit, odrpack, PyMC).
 
 ## Build, Lint, Test, and Type-Check
 
@@ -72,7 +72,7 @@ src/clophfit/
 │   ├── data_structures.py  # DataArray, Dataset, FitResult[MiniT]
 │   ├── errors.py        # Custom exceptions
 │   ├── core.py          # LMFit backend: fit_binding_glob(), outlier2(), etc.
-│   ├── odr.py           # scipy.odr backend: fit_binding_odr(), etc.
+│   ├── odr.py           # odrpack backend: fit_binding_odr(), etc.
 │   ├── bayes.py         # PyMC backend: fit_binding_pymc*(), hierarchical, etc.
 │   └── plotting.py      # Result visualisation
 ├── prtecan/

@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
+import odrpack
 import pandas as pd
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
-from scipy import odr
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
 from .errors import InvalidDataError
@@ -426,7 +426,7 @@ class MiniProtocol(Protocol):
 
 
 MiniType = TypeVar("MiniType", bound=MiniProtocol)
-MiniT = Minimizer | odr.Output | az.InferenceData
+MiniT = Minimizer | odrpack.OdrResult | az.InferenceData
 
 
 @dataclass
@@ -440,7 +440,7 @@ class FitResult[MiniType: MiniProtocol]:
     residual, redchi, and success fields (as in lmfit). For lmfit this is a
     MinimizerResult."""
     mini: MiniType | None = None
-    """The primary backend object (e.g., lmfit.Minimizer, scipy.odr.Output, or
+    """The primary backend object (e.g., lmfit.Minimizer, odrpack.Output, or
     az.InferenceData for PyMC)."""
     dataset: Dataset | None = None
     """Dataset used for the fit (typically a deep copy of the input dataset)."""

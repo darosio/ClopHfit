@@ -24,7 +24,7 @@ Core Functionality:
     -   **Least-Squares (LM)**: Utilizes the `lmfit` library for robust non-linear
         least-squares minimization. Supports iterative reweighting and outlier
         removal.
-    -   **Orthogonal Distance Regression (ODR)**: Employs `scipy.odr` to account
+    -   **Orthogonal Distance Regression (ODR)**: Employs `odrpack` to account
         for uncertainties in both x and y variables, which is crucial when x-values
         (e.g., pH measurements) have errors.
     -   **Bayesian Modeling (PyMC)**: Implements a hierarchical Bayesian model

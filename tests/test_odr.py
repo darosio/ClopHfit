@@ -19,7 +19,7 @@ from clophfit.fitting.odr import (
 )
 
 if TYPE_CHECKING:
-    from scipy import odr
+    from odrpack import OdrResult
 
 
 def test_format_estimate_fixed_and_scientific() -> None:
@@ -73,7 +73,7 @@ def test_outlier_threshold_behavior() -> None:
     eps = np.array([0.0, 0.0, 0.0, 0.0])
     # Build a minimal odr.Output-like object with required attributes
     output = types.SimpleNamespace(delta=delta, eps=eps)
-    mask = outlier(cast("odr.Output", output), threshold=1.5)
+    mask = outlier(cast("OdrResult", output), threshold=1.5)
     assert mask.shape == delta.shape
     assert bool(mask[-1])
     assert mask[:3].sum() == 0

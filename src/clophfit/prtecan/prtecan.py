@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
+import odrpack
 import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy.odr import ODR, Model, RealData
 
 from clophfit.fitting.bayes import (
     extract_fit,
@@ -37,12 +37,13 @@ from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, Mini
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
+from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
-    from scipy import odr
+    from odrpack import OdrResult
 
     from clophfit.clophfit_types import ArrayF
 
@@ -929,9 +930,9 @@ class Buffer:
     def _fit_buffer(self, dataframed: dict[int, pd.DataFrame]) -> dict[int, BufferFit]:
         """Fit buffers of all labelblocksgroups."""
 
-        def linear_model(pars: ArrayF, x: ArrayF) -> ArrayF:
+        def linear_model(x: ArrayF, beta: ArrayF) -> ArrayF:
             """Define linear model function."""
-            return typing.cast("ArrayF", pars[0] * x + pars[1])
+            return typing.cast("ArrayF", beta[0] * x + beta[1])
 
         def fit_error(x: ArrayF, cov_matrix: ArrayF) -> ArrayF:
             x = x[:, np.newaxis]  # Ensure x is a 2D array
@@ -949,15 +950,21 @@ class Buffer:
                 mean = buf_df.mean(axis=1).to_numpy().astype(float)
                 sem = buf_df.sem(axis=1).to_numpy().astype(float)
                 # y_err estimate is important when using 2 ds and x_err for ODR
-                data = RealData(self.tit.x, mean, sy=sem, sx=self.tit.x_err)
-                model = Model(linear_model)
+                weight_x = weights_from_sigma(self.tit.x_err)
+                weight_y = weights_from_sigma(sem)
                 # Initial guess for slope and intercept
-                odr = ODR(data, model, beta0=[0.0, mean.mean()])
-                output = odr.run()
+                output = odrpack.odr_fit(
+                    linear_model,
+                    self.tit.x,
+                    mean,
+                    beta0=[0.0, mean.mean()],
+                    weight_x=weight_x,
+                    weight_y=weight_y,
+                )
                 # Extract the best-fit parameters and their standard errors
                 m_best, q_best = output.beta
                 m_err, q_err = output.sd_beta
-                cov_matrix = typing.cast("ArrayF", output.cov_beta)
+                cov_matrix = output.cov_beta
                 fit_resultd[label] = BufferFit(
                     float(m_best), float(q_best), float(m_err), float(q_err)
                 )
@@ -1728,7 +1735,7 @@ class Titration(TecanfilesGroup):
             weight_multi_ds_titration(ds)
         return ds
 
-    def _compute_odr_fit(self, key: str) -> FitResult[odr.Output]:
+    def _compute_odr_fit(self, key: str) -> FitResult[OdrResult]:
         """Compute global ODR fit for a single key.
 
         if not self.result_global[key]:

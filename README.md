@@ -28,7 +28,7 @@ tool, users can easily analyze their data and obtain accurate fitting results.
 
 ClopHfit provides multiple fitting algorithms validated on 364+ real experimental wells:
 
-- **ODR-Recursive**: Orthogonal Distance Regression (best error bar precision) ✅ **Recommended**
+- **ODR-Recursive**: Orthogonal Distance Regression (best error bar precision) ✅ **Recommended**. ODR is provided by `odrpack`.
 - **outlier2**: Two-stage outlier detection (good precision, fast)
 - **IRLS**: Iteratively Reweighted Least Squares
 - **Recursive**: Iterative reweighting
