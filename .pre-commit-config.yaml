@@ -48,7 +48,7 @@ repos:
       - id: yamlfmt
 
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.11
+    rev: v1.7.12
     hooks:
       - id: actionlint
         files: \.github/workflows/
@@ -114,7 +114,7 @@ repos:
         args: ["-w", "-i", "2", "-ci", "-sr"] # 2 spaces, indent case, simplify redirects
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.10.11
+    rev: 0.11.3
     hooks:
       - id: uv-lock
         stages: [pre-commit]

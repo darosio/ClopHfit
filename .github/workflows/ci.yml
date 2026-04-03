@@ -74,7 +74,7 @@ jobs:
           make cov
       - name: Upload coverage report
         if: matrix.tests == 'test'
-        uses: codecov/codecov-action@v5.5.3
+        uses: codecov/codecov-action@v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
       - name: Run mypy
@@ -145,7 +145,7 @@ jobs:
           name: github-pages
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   auto_merge_deps:
     name: Auto Merge dependencies and template updates
