@@ -114,7 +114,7 @@ repos:
         args: ["-w", "-i", "2", "-ci", "-sr"] # 2 spaces, indent case, simplify redirects
 
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.11.3
+    rev: 0.11.7
     hooks:
       - id: uv-lock
         stages: [pre-commit]
