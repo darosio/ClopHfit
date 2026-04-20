@@ -263,7 +263,15 @@ class TestFitterBuilding:
         """Test default fitter construction."""
         fitters = build_fitters(include_odr=False)
 
-        expected_keys = {"glob_ls", "glob_huber", "glob_irls_outlier", "outlier2"}
+        expected_keys = {
+            "glob_ls",
+            "glob_huber",
+            "glob_huber_outlier",
+            "glob_irls",
+            "glob_iterative",
+            "glob_iterative_outlier",
+            "outlier2",
+        }
         assert set(fitters.keys()) == expected_keys
 
         # All should be callable
@@ -277,7 +285,10 @@ class TestFitterBuilding:
         expected_keys = {
             "glob_ls",
             "glob_huber",
-            "glob_irls_outlier",
+            "glob_huber_outlier",
+            "glob_irls",
+            "glob_iterative",
+            "glob_iterative_outlier",
             "outlier2",
             "odr_recursive_outlier",
         }

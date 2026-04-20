@@ -247,6 +247,70 @@ prtecan builds each DataArray in Titration._create_data_array (src/clophfit/prte
    = (max successful y_err)×10. The downstream fitter fit_binding_glob uses residuals weighted by 1 / y_err, and outlier2 can optionally reweight uniformly or by shot-noise after a robust
    pass.
 
+* DONE Final Unified Benchmark (2025)
+benchmarks/final_comparison.py — N=100 repeats × 5 pKa (6.0–8.0) × 4 scenarios × 8 methods
+Uses unified fit_binding_glob() API with physics error model (err = sqrt(signal + buffer_sd^2))
+
+** Scenarios
+- 2label_heteroscedastic: y1 10X noisier (error_ratio=0.1), no outliers
+- 2label_hetero_outlier: same + 40% low-pH drop in y1
+- 1label_clean: single label, no outliers
+- 1label_outlier: single label + 40% low-pH drop
+
+** Results Summary (averaged over K values)
+| Scenario               | Method            | Cov95 | Cov90 |   Bias  |  RMSE  | SE/SD |
+|------------------------+-------------------+-------+-------+---------+--------+-------|
+| 2label_heteroscedastic | glob_huber        | 91.7% | 87.4% | +0.009  | 0.146  | 0.69x |
+|                        | glob_ls           | 90.2% | 85.2% | +0.004  | 0.097  | 0.90x |
+|                        | glob_irls         | 85.2% | 78.8% | +0.003  | 0.121  | 0.77x |
+|                        | outlier2          | 84.4% | 80.2% | +0.005  | 0.100  | 0.81x |
+|                        | odr_recursive     | 41.4% | 35.4% | +0.002  | 0.109  | 0.29x |
+| 2label_hetero_outlier  | glob_huber        | 91.0% | 85.0% | -0.032  | 0.141  | 0.79x |
+|                        | glob_ls           | 89.4% | 82.6% | -0.049  | 0.110  | 0.95x |
+|                        | outlier2          | 84.8% | 75.8% | -0.043  | 0.113  | 0.82x |
+|                        | glob_irls         | 77.6% | 69.8% | -0.095  | 0.156  | 0.80x |
+|                        | odr_recursive     | 40.2% | 34.4% | -0.052  | 0.122  | 0.31x |
+| 1label_clean           | glob_irls         | 89.2% | 84.2% | -0.007  | 0.169  | 0.93x |
+|                        | glob_ls           | 88.2% | 84.2% | -0.008  | 0.168  | 0.92x |
+|                        | odr_recursive     | 46.0% | 40.2% | -0.014  | 0.204  | 0.34x |
+| 1label_outlier         | glob_irls         | 80.0% | 73.6% | -0.156  | 0.239  | 0.96x |
+|                        | glob_ls           | 78.6% | 71.8% | -0.162  | 0.243  | 0.96x |
+|                        | odr_recursive     | 27.8% | 23.4% | -0.251  | 0.341  | 0.30x |
+
+** Methodological Findings
+1. *glob_huber_outlier ≡ glob_huber*: After Huber fit, no residuals exceed
+   zscore threshold — outlier removal adds nothing on top of Huber loss.
+2. *glob_irls ≡ glob_iterative*: Both reweight branches execute the same
+   code (set y_err = mean |residual|). Should differentiate or merge.
+3. *Huber stderr unreliable* for 1-label at K=6.0: lmfit Huber loss sometimes
+   returns absurd stderr (1e7). For 2-label, stderr is well-behaved.
+4. *ODR consistently underestimates uncertainty*: SE/SD ≈ 0.29–0.34x → only
+   ~40% coverage. Known issue: assumes orthogonal errors.
+
+** Key Conclusions
+1. *Best overall*: glob_ls (standard WLS) — best SE/SD calibration (0.90x),
+   lowest RMSE, 90% coverage. The physics error model (sqrt(signal + buffer^2))
+   already downweights noisy y1 points proportionally.
+2. *Best with outliers*: glob_huber — gains ~2% coverage over glob_ls when
+   outliers present, with reasonable SE/SD (0.79x).
+3. *IRLS/iterative hurt*: reweighting amplifies bias (-0.095 vs -0.049 for
+   glob_ls) and drops coverage by ~12% in the outlier scenario.
+4. *outlier2 underperforms*: coverage ~84% (clean) and ~85% (outlier), worse
+   than glob_ls in both cases. Inherited from pre-refactor implementation.
+5. *No method reaches 95% CI*: best is 91.7% (Huber, 2-label clean). The
+   7-point titration with 3+ params per label inherently limits precision.
+6. *SE/SD < 1 everywhere*: all methods underestimate stderr by 10–30%,
+   confirming the need for scale_covar=True (sqrt(reduced_chi_sq) inflation).
+
+** Updated Recommendation
+- *PRIMARY*: fit_binding_glob(ds) — standard WLS with physics weights
+  is the best default. scale_covar=True handles mild outliers.
+- *ROBUST*: fit_binding_glob(ds, method="huber") — use when y1 outliers
+  are suspected. Slightly inflated RMSE but better coverage.
+- *AVOID*: reweight="irls"/"iterative" — amplifies outlier bias.
+- *RETIRE*: outlier2() — no coverage advantage over glob_ls.
+- *FIX*: ODR stderr (SE/SD 0.3x) before using for production.
+
 * simulation
 1. 1 label s0 s1 fissi no drop
 2. 1 lab

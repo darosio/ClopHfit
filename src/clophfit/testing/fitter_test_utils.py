@@ -8,7 +8,6 @@ import numpy as np
 
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_recursive_outlier,
     outlier2,
 )
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier
@@ -58,12 +57,40 @@ def build_fitters(
     *,
     include_odr: bool = True,
 ) -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
-    """Builder of fitters."""
+    """Build dictionary of fitting methods for benchmarking.
+
+    Returns a registry of named fitters using the unified ``fit_binding_glob``
+    API with different method/reweight/remove_outliers combinations.
+
+    Parameters
+    ----------
+    include_odr : bool
+        Whether to include ODR-based fitters (requires odrpack).
+
+    Returns
+    -------
+    dict[str, Callable[[Dataset], FitResult[MiniT]]]
+        Named fitters mapping.
+    """
     fitters: dict[str, Callable[[Dataset], FitResult[MiniT]]] = {
+        # --- Standard WLS ---
         "glob_ls": fit_binding_glob,
-        "glob_huber": lambda ds: fit_binding_glob(ds, robust=True),
-        "glob_irls_outlier": fit_binding_glob_recursive_outlier,
-        "outlier2": lambda ds: outlier2(ds, key="default"),
+        # --- Huber robust ---
+        "glob_huber": lambda ds: fit_binding_glob(ds, method="huber"),
+        # --- Huber + outlier removal ---
+        "glob_huber_outlier": lambda ds: fit_binding_glob(
+            ds, method="huber", remove_outliers="zscore:2.5:5"
+        ),
+        # --- IRLS reweighting ---
+        "glob_irls": lambda ds: fit_binding_glob(ds, reweight="irls"),
+        # --- Iterative reweighting ---
+        "glob_iterative": lambda ds: fit_binding_glob(ds, reweight="iterative"),
+        # --- Iterative + outlier removal ---
+        "glob_iterative_outlier": lambda ds: fit_binding_glob(
+            ds, reweight="iterative", remove_outliers="zscore:3.0:5"
+        ),
+        # --- Legacy outlier2 (for backward comparison) ---
+        "outlier2": lambda ds: outlier2(ds, key="bench"),
     }
 
     if include_odr:
