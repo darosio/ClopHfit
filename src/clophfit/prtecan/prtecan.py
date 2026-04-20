@@ -29,7 +29,6 @@ from clophfit.fitting.bayes import (
 )
 from clophfit.fitting.core import (
     fit_binding_glob,
-    outlier2,
     weight_da,
     weight_multi_ds_titration,
 )
@@ -1695,12 +1694,16 @@ class Titration(TecanfilesGroup):
             return FitResult()
 
     def _compute_global_fit(self, key: str) -> FitResult[Minimizer]:
-        """Compute global fit for a single key."""
+        """Compute global fit for a single key.
+
+        Uses Huber-loss WLS which naturally downweights outlier points
+        (e.g. y1 at low pH) without masking data.  The physics-based
+        errors from ``_create_data_array`` already encode heteroscedasticity
+        (y1 ~2-6x noisier than y2), so standard WLS weighting is correct.
+        """
         try:
             ds = self._create_global_ds(key)
-            # FIXME: return fit_binding_glob_reweighted(ds, key)
-            # FIXME: return fit_binding_glob(ds, robust=True)
-            return outlier2(ds, key)
+            return fit_binding_glob(ds, method="huber")
         except InsufficientDataError:
             logger.warning("Skipping global fit for well %s.", key)
             return FitResult()
