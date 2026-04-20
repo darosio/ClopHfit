@@ -116,6 +116,7 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
     low_ph_drop: bool = False,
     low_ph_drop_magnitude: float = 0.4,
     low_ph_drop_label: str = "y1",
+    n_low_ph_drops: int = 1,
     # Saturation/masking
     saturation_prob: float = 0.0,
     # X-axis perturbations
@@ -183,6 +184,9 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         Fraction of signal to drop at lowest pH (0-1).
     low_ph_drop_label : str
         Which label to apply the pH drop to ("y1" or "y2").
+    n_low_ph_drops : int
+        Number of low-pH points to drop (default 1). Points are selected by
+        ascending pH (lowest first).
     saturation_prob : float
         Probability of masking points (saturation).
     x_error_large : float
@@ -349,10 +353,11 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         # Add Gaussian noise (only if y_err_arr is set)
         y = clean + rng.normal(0, y_err_arr) if y_err_arr is not None else clean.copy()
 
-        # Acidic tail collapse (low-pH drop)
+        # Acidic tail collapse (low-pH drop at N lowest pH points)
         if is_ph and low_ph_drop and label == low_ph_drop_label:
-            idx_low = int(np.argmin(x))
-            y[idx_low] *= 1.0 - low_ph_drop_magnitude
+            sorted_idx = np.argsort(x)
+            for drop_i in range(min(n_low_ph_drops, len(x))):
+                y[sorted_idx[drop_i]] *= 1.0 - low_ph_drop_magnitude
 
         # Create DataArray (y_errc only if y_err_arr is set)
         if y_err_arr is not None:
@@ -423,6 +428,7 @@ def make_benchmark_dataset(  # noqa: PLR0913
     add_outlier: bool = False,
     outlier_label: str = "y1",
     outlier_sigma: float = 4.0,
+    n_outliers: int = 1,
     seed: int | None = None,
     rng: np.random.Generator | None = None,
 ) -> tuple[Dataset, TruthParams]:
@@ -449,6 +455,9 @@ def make_benchmark_dataset(  # noqa: PLR0913
     outlier_sigma : float
         Magnitude of low-pH drop (fraction of signal, 0-1).
         Default 4.0 is converted to 0.4 (40% drop).
+    n_outliers : int
+        Number of low-pH points to corrupt (default 1). Points are selected
+        by ascending pH (lowest first).
     seed : int | None
         Random seed for reproducibility.
     rng : np.random.Generator | None
@@ -501,6 +510,7 @@ def make_benchmark_dataset(  # noqa: PLR0913
         low_ph_drop=add_outlier,
         low_ph_drop_magnitude=drop_magnitude,
         low_ph_drop_label=outlier_label,
+        n_low_ph_drops=n_outliers,
         n_points=n_points,
     )
 
