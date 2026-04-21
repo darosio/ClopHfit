@@ -1566,10 +1566,8 @@ class Titration(TecanfilesGroup):
             export_list.append(self.result_multi_mcmc)
         elif self.params.mcmc == "multi-noise":
             export_list.append(self.result_multi_noise_mcmc)
-            self._export_noise_extras(outfit)
         elif self.params.mcmc == "multi-noise-xrw":
             export_list.append(self.result_multi_noise_xrw_mcmc)
-            self._export_noise_xrw_extras(outfit)
         for i, results in enumerate(export_list):
             png_dir = outfit / f"lb{i}"
             data_dir = png_dir / "ds"
@@ -1591,6 +1589,12 @@ class Titration(TecanfilesGroup):
             f = results.plot_k(xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
             self._export_residuals(outfit, results.results, i)
+        # Write trace files after all per-well results are exported so that
+        # lb0-lb3 stream without waiting for the MCMC to complete.
+        if self.params.mcmc == "multi-noise":
+            self._export_noise_extras(outfit)
+        elif self.params.mcmc == "multi-noise-xrw":
+            self._export_noise_xrw_extras(outfit)
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data.
