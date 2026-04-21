@@ -272,9 +272,34 @@ def process_trace(
 
 
 def extract_fit(
-    key: str, ctr: str, trace_df: pd.DataFrame, ds: Dataset
+    key: str,
+    ctr: str,
+    trace_df: pd.DataFrame,
+    ds: Dataset,
+    well_key: str = "",
 ) -> FitResult[az.InferenceData]:
-    """Compute individual dataset fit from a multi-well trace summary."""
+    """Compute individual dataset fit from a multi-well trace summary.
+
+    Parameters
+    ----------
+    key : str
+        Well identifier used to filter per-well parameters in *trace_df*.
+    ctr : str
+        Control group name used to filter shared K parameters.
+    trace_df : pd.DataFrame
+        ArviZ summary DataFrame (``fmt="wide"``) from the multi-well MCMC run.
+    ds : Dataset
+        Per-well dataset whose x values are updated in-place from the trace.
+    well_key : str, optional
+        When provided, per-well x posteriors (``x_per_well[step, well_key]``)
+        are used instead of the global ``x_true``.  Pass the well identifier
+        for xrw fits so each well's .dat/.png uses its own inferred pH axis.
+
+    Returns
+    -------
+    FitResult[az.InferenceData]
+        Fit result with figure, parameters, and dataset using posterior x.
+    """
     rpars = Parameters()
     rdf = trace_df[trace_df.index.str.endswith(key)]
     for name, row in rdf.iterrows():
@@ -285,7 +310,14 @@ def extract_fit(
         for name, row in rdf.iterrows():
             extracted_name = str(name).replace(f"_{ctr}", "")
             _add_param_from_summary(rpars, extracted_name, row)
-    nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
+    # Use per-well x (xrw model) when available; fall back to global x_true.
+    nxc, nx_errc = (
+        _extract_x_per_well_from_trace_df(trace_df, well_key)
+        if well_key
+        else (np.array([]), np.array([]))
+    )
+    if nxc.size == 0:
+        nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
     for da in ds.values():
         da.xc = nxc
         da.x_errc = nx_errc
@@ -340,6 +372,50 @@ def _extract_x_true_from_trace_df(
         if isinstance(name, str) and name.startswith("x_true"):
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
+    return np.array(nxc), np.array(nx_errc)
+
+
+def _extract_x_per_well_from_trace_df(
+    trace_df: pd.DataFrame,
+    well_key: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract per-well x values for *well_key* from an xrw trace summary.
+
+    ArviZ names the ``x_per_well`` deterministic (with dims ``step`` x ``well``)
+    as ``x_per_well[{step}, {well}]``.  This function collects those rows for a
+    specific well and returns them sorted by step index.
+
+    Parameters
+    ----------
+    trace_df : pd.DataFrame
+        ArviZ summary DataFrame from ``fit_binding_pymc_multi_noise_xrw``.
+    well_key : str
+        Well identifier used as the ``well`` coord (e.g. ``"A01"``).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Arrays of per-well x posterior means and standard deviations ordered
+        by step.  Both arrays are empty if ``x_per_well`` rows are absent.
+    """
+    suffix = f", {well_key}]"
+    rows: dict[int, tuple[float, float]] = {}
+    for name, row in trace_df.iterrows():
+        if (
+            isinstance(name, str)
+            and name.startswith("x_per_well[")
+            and name.endswith(suffix)
+        ):
+            step_str = name[len("x_per_well[") : -len(suffix)]
+            try:
+                step = int(step_str)
+                rows[step] = (float(row["mean"]), float(row["sd"]))
+            except ValueError:
+                pass
+    if not rows:
+        return np.array([]), np.array([])
+    nxc = [rows[s][0] for s in sorted(rows)]
+    nx_errc = [rows[s][1] for s in sorted(rows)]
     return np.array(nxc), np.array(nx_errc)
 
 

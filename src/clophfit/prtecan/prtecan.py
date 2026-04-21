@@ -2015,8 +2015,11 @@ class Titration(TecanfilesGroup):
         Writes into *outfit*:
 
         - ``trace_multi_noise_xrw.nc``: full ``az.InferenceData`` in NetCDF.
-        - ``shared_noise_xrw_params.csv``: arviz summary for noise parameters,
-          group-level K values, ``sigma_pip``, and ``x_per_well`` per step/well.
+        - ``shared_noise_xrw_params.csv``: arviz summary for noise/gain/alpha
+          parameters, group-level K values, ``sigma_pip``, and the global
+          ``x_true`` / ``x_diff`` / ``x_start`` pH steps.  Per-well
+          ``x_per_well`` is omitted here — it is stored in the per-well
+          dataset files under ``lb4/ds/``.
 
         Parameters
         ----------
@@ -2036,7 +2039,6 @@ class Titration(TecanfilesGroup):
             "x_true",
             "x_diff",
             "x_start",
-            "x_per_well",
         )
         group_k_names = {f"K_{name}" for name in self.scheme.names}
         mask = trace_df.index.map(
@@ -2070,7 +2072,9 @@ class Titration(TecanfilesGroup):
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset
         if ds:
-            return extract_fit(key, ctr, self.result_multi_noise_xrw[1], ds)
+            return extract_fit(
+                key, ctr, self.result_multi_noise_xrw[1], ds, well_key=key
+            )
         return FitResult()
 
     @staticmethod
