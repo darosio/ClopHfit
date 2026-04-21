@@ -716,6 +716,10 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
     # Verify output files were created
     assert (tmp_path / "dat_bg_dil_nrm").exists()
     assert (tmp_path / "dat_bg_dil_nrm/fit").exists()
+    # Residual CSVs should be written for each result slot
+    fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
+    assert any(fit_dir.glob("residuals_*.csv")), "residuals CSV missing"
+    assert any(fit_dir.glob("residual_stats_*.csv")), "residual_stats CSV missing"
 
 
 # =============================================================================

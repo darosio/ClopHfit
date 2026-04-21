@@ -37,6 +37,7 @@ from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, Mini
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
+from clophfit.fitting.residuals import collect_multi_residuals, residual_statistics
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -1571,6 +1572,7 @@ class Titration(TecanfilesGroup):
             title = config.title + f"lb:{i}"
             f = results.plot_k(xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
+            self._export_residuals(outfit, results.results, i)
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data.
@@ -1860,6 +1862,36 @@ class Titration(TecanfilesGroup):
             compute_func=partial(self._compute_multi_noise_fit),
         )
 
+    @staticmethod
+    def _export_residuals(
+        outfit: Path,
+        fit_results: dict[str, FitResult[MiniT]],
+        index: int,
+    ) -> None:
+        """Save per-well residuals and label-level statistics alongside fit results.
+
+        Writes two CSV files into *outfit*:
+
+        - ``residuals_{index}.csv``: all weighted/raw residuals per well and label
+        - ``residual_stats_{index}.csv``: mean, std, median, MAD, outlier count by label
+
+        Parameters
+        ----------
+        outfit : Path
+            Output directory (the ``fit/`` subfolder).
+        fit_results : dict[str, FitResult[MiniT]]
+            Per-well fit results (already computed).
+        index : int
+            Export slot index used to distinguish multiple result sets.
+        """
+        try:
+            all_res = collect_multi_residuals(fit_results)
+        except (ValueError, KeyError):
+            return
+        all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)
+        stats = residual_statistics(all_res)
+        stats.to_csv(outfit / f"residual_stats_{index}.csv")
+
     def _export_noise_extras(self, outfit: Path) -> None:
         """Save the noise-model trace and shared parameters for multi-noise MCMC.
 
@@ -1881,7 +1913,14 @@ class Titration(TecanfilesGroup):
         trace.to_netcdf(str(outfit / "trace_multi_noise.nc"))
         logger.info("Saved MCMC trace to %s", outfit / "trace_multi_noise.nc")
 
-        shared_prefixes = ("alpha_", "gain_", "sigma_read_")
+        shared_prefixes = (
+            "alpha_",
+            "gain_",
+            "sigma_read_",
+            "x_true",
+            "x_diff",
+            "x_start",
+        )
         group_k_names = {f"K_{name}" for name in self.scheme.names}
         mask = trace_df.index.map(
             lambda n: n.startswith(shared_prefixes) or n in group_k_names
