@@ -12,8 +12,11 @@ from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
 
 from clophfit.fitting.bayes import (
+    NoisePriors,
+    _noise_priors_from_buffer,  # noqa: PLC2701
     fit_binding_pymc,
     fit_binding_pymc2,
+    fit_binding_pymc_multi_noise,
 )
 from clophfit.fitting.core import (
     analyze_spectra,
@@ -31,6 +34,7 @@ from clophfit.fitting.odr import (
     fit_binding_odr_recursive_outlier,
 )
 from clophfit.fitting.plotting import plot_fit
+from clophfit.prtecan import PlateScheme
 
 ###############################################################################
 # Fixtures
@@ -898,6 +902,62 @@ def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
     assert "S0_y1" in fr.result.params
     assert "S1_y1" in fr.result.params
     assert fr.result.residual is not None
+
+
+def test_noise_priors_from_buffer() -> None:
+    """NoisePriors are derived from buffer replicates."""
+    rng = np.random.default_rng(0)
+    n_ph = 7
+    # Simulate 4 buffer wells with ~5% CV for y1 and ~10% CV for y2
+    y1_mean = 10000.0
+    y2_mean = 60.0
+    buf1 = pd.DataFrame(
+        rng.normal(y1_mean, y1_mean * 0.05, (n_ph, 4)),
+        columns=["A01", "A02", "A03", "A04"],
+    )
+    buf2 = pd.DataFrame(
+        rng.normal(y2_mean, y2_mean * 0.10, (n_ph, 4)),
+        columns=["A01", "A02", "A03", "A04"],
+    )
+    buffer_df = {1: buf1, 2: buf2}
+    priors = _noise_priors_from_buffer(buffer_df, ["y1", "y2"])
+
+    assert isinstance(priors["y1"], NoisePriors)
+    assert isinstance(priors["y2"], NoisePriors)
+    assert priors["y1"].alpha > 0
+    assert priors["y2"].alpha > 0
+    # y2 has higher CV so alpha prior should be larger for y2
+    assert priors["y2"].alpha > priors["y1"].alpha
+
+
+@pytest.mark.slow
+def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
+    """Smoke test for multi-well noise-learning PyMC fit."""
+    # Build two minimal wells sharing K via a control group
+    fr_init = fit_binding_glob(multi_dataset)
+    assert fr_init.result is not None
+
+    results = {"A01": fr_init, "A02": fr_init}
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    # Minimal buffer DataFrames (2 pH points, 3 replicate wells)
+    rng = np.random.default_rng(42)
+    buf1 = pd.DataFrame(
+        rng.normal(5000.0, 250.0, (5, 3)), columns=["B01", "B02", "B03"]
+    )
+    buf2 = pd.DataFrame(rng.normal(50.0, 5.0, (5, 3)), columns=["B01", "B02", "B03"])
+    buffer_df = {1: buf1, 2: buf2}
+
+    trace = fit_binding_pymc_multi_noise(
+        results, scheme, buffer_df, n_sd=3.0, n_xerr=0.0, n_samples=50
+    )
+
+    assert hasattr(trace, "posterior")
+    assert "alpha_y1" in trace.posterior
+    assert "alpha_y2" in trace.posterior
+    assert "gain_y1" in trace.posterior
+    assert "sigma_read_y1" in trace.posterior
 
 
 ###############################################################################
