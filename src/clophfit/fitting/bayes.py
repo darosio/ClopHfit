@@ -30,11 +30,30 @@ if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
 
 
-def _pymc_sample_parallel_args() -> dict[str, int]:
-    """Return sampling args to avoid multiprocessing in restricted test environments."""
+def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, object]:
+    """Return sampling kwargs for pm.sample(), including optional nuts_sampler."""
+    kwargs: dict[str, object] = {}
+    if nuts_sampler != "default":
+        sampler_import_check = {
+            "blackjax": ("blackjax", "pip install clophfit[gpu]"),
+            "numpyro": ("numpyro", "pip install clophfit[gpu]"),
+            "nutpie": ("nutpie", "pip install clophfit[gpu]"),
+        }
+        if nuts_sampler in sampler_import_check:
+            pkg, install_hint = sampler_import_check[nuts_sampler]
+            try:
+                __import__(pkg)
+            except ImportError as e:
+                msg = (
+                    f"NUTS sampler '{nuts_sampler}' requires package '{pkg}'. "
+                    f"Install it with: {install_hint}  "
+                    f"(or: uv sync --extra gpu)"
+                )
+                raise ImportError(msg) from e
+        kwargs["nuts_sampler"] = nuts_sampler
     if "PYTEST_CURRENT_TEST" in os.environ:
-        return {"cores": 1, "chains": 1}
-    return {}
+        kwargs.update({"cores": 1, "chains": 1})
+    return kwargs
 
 
 def create_x_true(
@@ -321,12 +340,13 @@ def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
     return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
 
 
-def fit_binding_pymc(
+def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
+    nuts_sampler: str = "default",
 ) -> FitResult[az.InferenceData]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -342,6 +362,9 @@ def fit_binding_pymc(
         Scaling factor for y-error magnitude prior.
     n_samples : int
         Number of MCMC samples.
+    nuts_sampler : str
+        NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
+        ``"numpyro"``, or ``"nutpie"``.
 
     Returns
     -------
@@ -380,7 +403,7 @@ def fit_binding_pymc(
             target_accept=0.9,
             return_inferencedata=True,
             idata_kwargs={"log_likelihood": True},
-            **_pymc_sample_parallel_args(),
+            **_pymc_sample_parallel_args(nuts_sampler),
         )
     return process_trace(trace, params.keys(), ds, n_xerr)
 
@@ -670,6 +693,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     n_xerr: float = 1.0,
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
+    nuts_sampler: str = "default",
 ) -> az.InferenceData:
     """Multi-well PyMC with shared K per control group and per-label noise."""
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
@@ -742,7 +766,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             n_samples,
             target_accept=0.9,
             return_inferencedata=True,
-            **_pymc_sample_parallel_args(),
+            **_pymc_sample_parallel_args(nuts_sampler),
         )
 
     return trace
@@ -996,6 +1020,7 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
+    nuts_sampler: str = "default",
 ) -> az.InferenceData:
     """Multi-well PyMC fit with shared learnable heteroscedastic noise model.
 
@@ -1027,6 +1052,9 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
         Scaling factor applied to x-value uncertainties.
     n_samples : int
         Number of MCMC posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
+        (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
 
     Returns
     -------
@@ -1124,7 +1152,7 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
             tune=n_samples // 2,
             target_accept=0.9,
             return_inferencedata=True,
-            **_pymc_sample_parallel_args(),
+            **_pymc_sample_parallel_args(nuts_sampler),
         )
     return trace
 
@@ -1137,6 +1165,7 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
     n_xerr: float = 1.0,
     n_samples: int = 2000,
     sigma_pip_prior: float = 0.02,
+    nuts_sampler: str = "default",
 ) -> az.InferenceData:
     """Multi-well PyMC fit with shared noise model and per-well pH random walk.
 
@@ -1170,6 +1199,9 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
     sigma_pip_prior : float
         Prior scale (HalfNormal sigma) for the per-step pipetting SD,
         in the same units as the x-axis (pH units by default).
+    nuts_sampler : str
+        NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
+        (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
 
     Returns
     -------
@@ -1294,7 +1326,7 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
             tune=n_samples // 2,
             target_accept=0.9,
             return_inferencedata=True,
-            **_pymc_sample_parallel_args(),
+            **_pymc_sample_parallel_args(nuts_sampler),
         )
     return trace
 

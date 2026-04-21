@@ -779,6 +779,7 @@ class TitrationConfig:
     nrm: bool = True
     bg_mth: str = "mean"
     mcmc: str = "None"
+    nuts_sampler: str = "default"
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -1795,15 +1796,25 @@ class Titration(TecanfilesGroup):
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         return TitrationResults(
-            self.scheme, self.fit_keys, partial(self._compute_mcmc_fit, n_sd=n_sd)
+            self.scheme,
+            self.fit_keys,
+            partial(
+                self._compute_mcmc_fit, n_sd=n_sd, nuts_sampler=self.params.nuts_sampler
+            ),
         )
 
-    def _compute_mcmc_fit(self, key: str, n_sd: float) -> FitResult[az.InferenceData]:
+    def _compute_mcmc_fit(
+        self, key: str, n_sd: float, nuts_sampler: str = "default"
+    ) -> FitResult[az.InferenceData]:
         """Compute global MCMC fit for a single key."""
         # Calculate n_sd from the previous global fitting results
         logger.info("Starting PyMC sampling for key: %s", key)
         try:  # FIXME: Global vs. ODR
-            result_pymc = fit_binding_pymc(self.result_global[key], n_sd=n_sd, n_xerr=1)
+            result_pymc = fit_binding_pymc(
+                self.result_global[key], n_sd=n_sd, n_xerr=1, nuts_sampler=nuts_sampler
+            )
+        except ImportError:
+            raise
         except Exception:
             logger.exception("Error during MCMC sampling for key: %s", key)
             result_pymc = FitResult()  # empty result
@@ -1817,7 +1828,9 @@ class Titration(TecanfilesGroup):
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
-        trace = fit_binding_pymc_multi(results, self.scheme, n_sd=n_sd)
+        trace = fit_binding_pymc_multi(
+            results, self.scheme, n_sd=n_sd, nuts_sampler=self.params.nuts_sampler
+        )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
@@ -1854,7 +1867,11 @@ class Titration(TecanfilesGroup):
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
         trace = fit_binding_pymc_multi_noise(
-            results, self.scheme, self.buffer.dataframes, n_sd=n_sd
+            results,
+            self.scheme,
+            self.buffer.dataframes,
+            n_sd=n_sd,
+            nuts_sampler=self.params.nuts_sampler,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
@@ -1873,7 +1890,11 @@ class Titration(TecanfilesGroup):
         logger.info("n_sd[Global] estimated for MCMC XRW fitting: %.3f", n_sd)
         results = self.result_global.results
         trace = fit_binding_pymc_multi_noise_xrw(
-            results, self.scheme, self.buffer.dataframes, n_sd=n_sd
+            results,
+            self.scheme,
+            self.buffer.dataframes,
+            n_sd=n_sd,
+            nuts_sampler=self.params.nuts_sampler,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import pprint
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -15,7 +16,16 @@ import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
 
-from clophfit import __enspire_out_dir__, __tecan_out_dir__, configure_logging, fitting
+# Set unique pytensor compile dir per process to avoid atexit filelock race
+# when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock
+os.environ.setdefault("PYTENSOR_FLAGS", f"base_compiledir=/tmp/pytensor_{os.getpid()}")
+
+from clophfit import (
+    __enspire_out_dir__,
+    __tecan_out_dir__,
+    configure_logging,
+    fitting,
+)
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import (
     DataValidationError,
@@ -78,6 +88,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Whether to perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Whether to export PNG files.")  # fmt: skip
 @click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, multi-noise (learned noise model), multi-noise-xrw (noise + per-well pH random walk), or single.")  # fmt: skip
+@click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS sampler backend: default (pytensor/CPU), blackjax (JAX/GPU), numpyro (JAX/GPU), or nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,  # Click context object.
@@ -96,6 +107,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     fit: bool,
     png: bool,
     mcmc: str,
+    nuts_sampler: str,
     dry_run: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
@@ -169,6 +181,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
     tit.params.mcmc = mcmc
+    tit.params.nuts_sampler = nuts_sampler
     logger.info("%s", tit.params)
 
     # Load additions file with error handling
