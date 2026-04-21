@@ -1559,6 +1559,7 @@ class Titration(TecanfilesGroup):
             export_list.append(self.result_multi_mcmc)
         elif self.params.mcmc == "multi-noise":
             export_list.append(self.result_multi_noise_mcmc)
+            self._export_noise_extras(outfit)
         for i, results in enumerate(export_list):
             results.compute_all()
             fit = results.dataframe
@@ -1857,6 +1858,38 @@ class Titration(TecanfilesGroup):
             scheme=self.scheme,
             fit_keys=self.fit_keys,
             compute_func=partial(self._compute_multi_noise_fit),
+        )
+
+    def _export_noise_extras(self, outfit: Path) -> None:
+        """Save the noise-model trace and shared parameters for multi-noise MCMC.
+
+        Writes two files into *outfit*:
+
+        - ``trace_multi_noise.nc``: full ``az.InferenceData`` in NetCDF format
+          (can be reloaded with ``az.from_netcdf``).
+        - ``shared_noise_params.csv``: arviz summary (mean, sd, HDI 94%) for
+          the per-label noise parameters (``alpha_*``, ``gain_*``,
+          ``sigma_read_*``) and group-level K parameters.
+
+        Parameters
+        ----------
+        outfit : Path
+            Directory where the files are written (created by ``_export_fit``).
+        """
+        trace, trace_df = self.result_multi_noise
+
+        trace.to_netcdf(str(outfit / "trace_multi_noise.nc"))
+        logger.info("Saved MCMC trace to %s", outfit / "trace_multi_noise.nc")
+
+        shared_prefixes = ("alpha_", "gain_", "sigma_read_")
+        group_k_names = {f"K_{name}" for name in self.scheme.names}
+        mask = trace_df.index.map(
+            lambda n: n.startswith(shared_prefixes) or n in group_k_names
+        )
+        shared_df = trace_df.loc[mask]
+        shared_df.to_csv(outfit / "shared_noise_params.csv")
+        logger.info(
+            "Saved shared noise parameters to %s", outfit / "shared_noise_params.csv"
         )
 
     def _compute_multi_mcmc_fit(self, key: str) -> FitResult[az.InferenceData]:
