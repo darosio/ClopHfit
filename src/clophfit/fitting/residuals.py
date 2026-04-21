@@ -11,11 +11,14 @@ import typing
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
 if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
     from clophfit.clophfit_types import ArrayF
     from clophfit.fitting.data_structures import FitResult
 
@@ -28,6 +31,9 @@ DW_LOWER_BOUND = 1.5
 DW_UPPER_BOUND = 2.5
 
 MIN_POINTS_FOR_TREND = 3  # Minimum points needed to detect trends
+MIN_POINTS_FOR_BIN = 2  # Minimum points needed in a bin to include it
+MIN_POINTS_FOR_BINNING = 10  # Minimum total points needed before binning
+MAX_BINS = 15  # Maximum number of bins for binned diagnostics
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,10 @@ class ResidualPoint:
         Raw residual: (y - model)
     raw_i : int
         Index into the original (unmasked) arrays for this label (`DataArray.xc/yc`).
+    y_err : float
+        Measurement uncertainty used during fitting.
+    predicted : float
+        Model-predicted signal value (y - resid_raw).
     """
 
     label: str
@@ -53,6 +63,8 @@ class ResidualPoint:
     resid_weighted: float
     resid_raw: float
     raw_i: int
+    y_err: float
+    predicted: float
 
 
 def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
@@ -111,6 +123,8 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
                 resid_weighted=float(rw[i]),
                 resid_raw=float(rr[i]),
                 raw_i=int(raw_is[i]),
+                y_err=float(da.y_err[i]),
+                predicted=float(da.y[i]) - float(rr[i]),
             )
             for i in range(n)
         )
@@ -134,7 +148,7 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        DataFrame with columns: label, x, resid_weighted, resid_raw, raw_i
+        DataFrame with columns: label, x, resid_weighted, resid_raw, raw_i, y_err, predicted
 
     Examples
     --------
@@ -458,3 +472,129 @@ def estimate_x_shift_statistics(
             })
 
     return pd.DataFrame(shift_stats)
+
+
+def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure:
+    """Plot |standardized residual| vs predicted signal per label.
+
+    A flat trend at ~0.80 (expected |N(0,1)|) confirms the error model is
+    correctly calibrated.  A rising trend indicates under-estimated errors
+    at high signals (multiplicative noise).
+
+    Parameters
+    ----------
+    all_res : pd.DataFrame
+        Residual DataFrame from ``collect_multi_residuals``.  Must contain
+        columns ``label``, ``predicted``, and ``resid_weighted``.
+    title : str, optional
+        Figure suptitle suffix.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure (one panel per label).
+    """
+    labels = sorted(all_res["label"].unique())
+    fig, axes = plt.subplots(
+        1, len(labels), figsize=(7 * len(labels), 5), squeeze=False
+    )
+
+    for ax, label in zip(axes[0], labels, strict=False):
+        grp = all_res[all_res["label"] == label]
+        pred = grp["predicted"].to_numpy(dtype=float)
+        std_res = grp["resid_weighted"].to_numpy(dtype=float)
+        ax.scatter(pred, np.abs(std_res), s=8, alpha=0.3, color="C0")
+
+        valid = np.isfinite(pred) & np.isfinite(std_res)
+        if valid.sum() > MIN_POINTS_FOR_BINNING:
+            n_bins = min(MAX_BINS, valid.sum() // 5)
+            bins = np.linspace(
+                np.nanmin(pred[valid]), np.nanmax(pred[valid]), n_bins + 1
+            )
+            bin_centers, bin_means = [], []
+            for j in range(len(bins) - 1):
+                in_bin = valid & (pred >= bins[j]) & (pred < bins[j + 1])
+                if in_bin.sum() > MIN_POINTS_FOR_BIN:
+                    bin_centers.append((bins[j] + bins[j + 1]) / 2)
+                    bin_means.append(float(np.mean(np.abs(std_res[in_bin]))))
+            if bin_centers:
+                ax.plot(bin_centers, bin_means, "r-o", lw=2, ms=5, label="Binned mean")
+        ax.axhline(
+            0.798, color="green", ls="--", lw=1.5, label="Expected |N(0,1)| = 0.80"
+        )
+        ax.set_xlabel("Predicted signal")
+        ax.set_ylabel("|Standardized residual|")
+        ax.set_title(f"Label {label}")
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
+
+    suptitle = "Residual vs predicted: flat = correct error model"
+    if title:
+        suptitle = f"{suptitle} — {title}"
+    fig.suptitle(suptitle, fontsize=13)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig
+
+
+def plot_residual_vs_yerr(all_res: pd.DataFrame, title: str = "") -> Figure:
+    """Plot raw residual² vs y_err² per label (error calibration check).
+
+    Points should scatter around the y=x line if the assigned uncertainties
+    match the actual scatter.  A slope < 1 means errors are over-estimated;
+    slope > 1 means under-estimated.
+
+    Parameters
+    ----------
+    all_res : pd.DataFrame
+        Residual DataFrame from ``collect_multi_residuals``.  Must contain
+        columns ``label``, ``y_err``, and ``resid_raw``.
+    title : str, optional
+        Figure suptitle suffix.
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure (one panel per label).
+    """
+    labels = sorted(all_res["label"].unique())
+    fig, axes = plt.subplots(
+        1, len(labels), figsize=(7 * len(labels), 5), squeeze=False
+    )
+
+    for ax, label in zip(axes[0], labels, strict=False):
+        grp = all_res[all_res["label"] == label]
+        y_err = grp["y_err"].to_numpy(dtype=float)
+        raw_res = grp["resid_raw"].to_numpy(dtype=float)
+        valid = np.isfinite(y_err) & np.isfinite(raw_res) & (y_err > 0)
+        ye_v, rr_v = y_err[valid], raw_res[valid]
+
+        ax.scatter(ye_v**2, rr_v**2, s=8, alpha=0.3, color="C0")
+
+        n_bins = min(MAX_BINS, valid.sum() // 5)
+        if n_bins > MIN_POINTS_FOR_BIN:
+            bins = np.linspace(np.min(ye_v**2), np.max(ye_v**2), n_bins + 1)
+            bc, bm = [], []
+            for j in range(len(bins) - 1):
+                in_bin = (ye_v**2 >= bins[j]) & (ye_v**2 < bins[j + 1])
+                if in_bin.sum() > MIN_POINTS_FOR_BIN:
+                    bc.append((bins[j] + bins[j + 1]) / 2)
+                    bm.append(float(np.mean(rr_v[in_bin] ** 2)))
+            if bc:
+                ax.plot(bc, bm, "r-o", lw=2, ms=5, label="Binned mean(res²)")
+
+        lim = max(float(np.max(ye_v**2)), float(np.max(rr_v**2)))
+        ax.plot([0, lim], [0, lim], "g--", lw=1.5, label="Perfect: res² = y_err²")
+        ax.set_xlabel("y_err² (model variance)")
+        ax.set_ylabel("residual² (observed variance)")
+        ax.set_title(f"Label {label}")
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.3)
+
+    suptitle = "Error calibration: res² vs y_err²"
+    if title:
+        suptitle = f"{suptitle} — {title}"
+    fig.suptitle(suptitle, fontsize=13)
+    fig.tight_layout()
+    plt.close(fig)
+    return fig

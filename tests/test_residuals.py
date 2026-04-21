@@ -87,17 +87,27 @@ class TestResidualPoint:
             resid_weighted=0.5,
             resid_raw=5.0,
             raw_i=0,
+            y_err=10.0,
+            predicted=995.0,
         )
         assert point.label == "y1"
         assert point.x == 7.0
         assert point.resid_weighted == 0.5
         assert point.resid_raw == 5.0
         assert point.raw_i == 0
+        assert point.y_err == 10.0
+        assert point.predicted == 995.0
 
     def test_frozen(self) -> None:
         """Test that ResidualPoint is immutable."""
         point = ResidualPoint(
-            label="y1", x=7.0, resid_weighted=0.5, resid_raw=5.0, raw_i=0
+            label="y1",
+            x=7.0,
+            resid_weighted=0.5,
+            resid_raw=5.0,
+            raw_i=0,
+            y_err=10.0,
+            predicted=995.0,
         )
         with pytest.raises(AttributeError):
             point.x = 8.0  # type: ignore[misc]
@@ -164,7 +174,15 @@ class TestResidualDataframe:
     def test_columns(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test that DataFrame has correct columns."""
         df = residual_dataframe(simple_fit_result)
-        expected_cols = {"label", "x", "resid_weighted", "resid_raw", "raw_i"}
+        expected_cols = {
+            "label",
+            "x",
+            "resid_weighted",
+            "resid_raw",
+            "raw_i",
+            "y_err",
+            "predicted",
+        }
         assert set(df.columns) == expected_cols
 
     def test_row_count(self, simple_fit_result: FitResult[MinimizerResult]) -> None:

@@ -37,7 +37,12 @@ from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, Mini
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.residuals import collect_multi_residuals, residual_statistics
+from clophfit.fitting.residuals import (
+    collect_multi_residuals,
+    plot_residual_vs_predicted,
+    plot_residual_vs_yerr,
+    residual_statistics,
+)
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -1868,12 +1873,14 @@ class Titration(TecanfilesGroup):
         fit_results: dict[str, FitResult[MiniT]],
         index: int,
     ) -> None:
-        """Save per-well residuals and label-level statistics alongside fit results.
+        """Save per-well residuals, statistics, and diagnostic plots alongside fit results.
 
-        Writes two CSV files into *outfit*:
+        Writes the following files into *outfit*:
 
         - ``residuals_{index}.csv``: all weighted/raw residuals per well and label
         - ``residual_stats_{index}.csv``: mean, std, median, MAD, outlier count by label
+        - ``residual_vs_predicted_{index}.png``: |standardized residual| vs predicted signal
+        - ``residual_vs_yerr_{index}.png``: raw residual² vs assigned y_err²
 
         Parameters
         ----------
@@ -1891,6 +1898,11 @@ class Titration(TecanfilesGroup):
         all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)
         stats = residual_statistics(all_res)
         stats.to_csv(outfit / f"residual_stats_{index}.csv")
+        label = str(index)
+        fig_pred = plot_residual_vs_predicted(all_res, title=label)
+        fig_pred.savefig(outfit / f"residual_vs_predicted_{index}.png", dpi=150)
+        fig_yerr = plot_residual_vs_yerr(all_res, title=label)
+        fig_yerr.savefig(outfit / f"residual_vs_yerr_{index}.png", dpi=150)
 
     def _export_noise_extras(self, outfit: Path) -> None:
         """Save the noise-model trace and shared parameters for multi-noise MCMC.
