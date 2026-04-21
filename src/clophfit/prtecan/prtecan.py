@@ -1557,6 +1557,8 @@ class Titration(TecanfilesGroup):
             export_list.append(self.result_mcmc)
         elif self.params.mcmc == "multi":
             export_list.append(self.result_multi_mcmc)
+        elif self.params.mcmc == "multi-noise":
+            export_list.append(self.result_multi_noise_mcmc)
         for i, results in enumerate(export_list):
             results.compute_all()
             fit = results.dataframe
@@ -1848,12 +1850,29 @@ class Titration(TecanfilesGroup):
             compute_func=partial(self._compute_multi_mcmc_fit),
         )
 
+    @cached_property
+    def result_multi_noise_mcmc(self) -> TitrationResults:
+        """Perform multi-well MCMC with learned noise model, return per-well results."""
+        return TitrationResults(
+            scheme=self.scheme,
+            fit_keys=self.fit_keys,
+            compute_func=partial(self._compute_multi_noise_fit),
+        )
+
     def _compute_multi_mcmc_fit(self, key: str) -> FitResult[az.InferenceData]:
         """Compute individual dataset fit for a single key."""
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset
         if ds:
             return extract_fit(key, ctr, self.result_multi_trace[1], ds)
+        return FitResult()
+
+    def _compute_multi_noise_fit(self, key: str) -> FitResult[az.InferenceData]:
+        """Compute per-well fit from the noise-model MCMC trace."""
+        ctr = self.get_scheme_name(key, self.scheme.names)
+        ds = self.result_global[key].dataset
+        if ds:
+            return extract_fit(key, ctr, self.result_multi_noise[1], ds)
         return FitResult()
 
     @staticmethod
