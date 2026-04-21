@@ -51,6 +51,15 @@ def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, objec
                 )
                 raise ImportError(msg) from e
         kwargs["nuts_sampler"] = nuts_sampler
+        # JAX-based samplers (blackjax, numpyro) use jax.pmap by default which
+        # requires N devices for N chains.  On a single GPU, use chain_method=
+        # "vectorized" (jax.vmap) so all chains run on one device.
+        # The blackjax inner progress bar uses JAX IO callbacks which are not
+        # supported inside jax.vmap ("IO effect not supported in vmap-of-cond"),
+        # so disable it via progressbar=False.
+        if nuts_sampler in {"blackjax", "numpyro"}:
+            kwargs["nuts_sampler_kwargs"] = {"chain_method": "vectorized"}
+            kwargs["progressbar"] = False
     if "PYTEST_CURRENT_TEST" in os.environ:
         kwargs.update({"cores": 1, "chains": 1})
     return kwargs
