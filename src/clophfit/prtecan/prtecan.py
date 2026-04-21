@@ -1567,13 +1567,22 @@ class Titration(TecanfilesGroup):
             export_list.append(self.result_multi_noise_mcmc)
             self._export_noise_extras(outfit)
         for i, results in enumerate(export_list):
-            results.compute_all()
+            png_dir = outfit / f"lb{i}"
+            data_dir = png_dir / "ds"
+            # Iterate keys one-by-one: write each well's PNG+data immediately
+            # after its fit completes, before moving on to the next well.
+            for key in results.fit_keys:
+                fr = results[key]
+                if config.png:
+                    if fr.figure:
+                        png_dir.mkdir(parents=True, exist_ok=True)
+                        fr.figure.savefig(png_dir / f"{key}.png")
+                    if fr.dataset:
+                        data_dir.mkdir(parents=True, exist_ok=True)
+                        fr.dataset.export(data_dir / f"{key}.csv")
+            # Aggregate outputs require all wells to be done first
             fit = results.dataframe
-            # CSV tables
-            fit.sort_index().to_csv(outfit / Path("ffit" + str(i) + ".csv"))
-            if config.png:
-                results.export_pngs(outfit / f"lb{i}")
-                results.export_data(outfit / f"lb{i}")
+            fit.sort_index().to_csv(outfit / f"ffit{i}.csv")
             title = config.title + f"lb:{i}"
             f = results.plot_k(xlim=config.lim, title=title)
             f.savefig(outfit / f"K{i}.png")
