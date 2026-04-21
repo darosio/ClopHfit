@@ -1192,7 +1192,12 @@ class TitrationResults:
                 for name, wells in self.scheme.names.items():
                     for well in wells:
                         df_ctr.loc[well, "ctrl"] = name
-                df_ctr = df_ctr.sort_values("ctrl")
+                df_ctr = (
+                    df_ctr
+                    .assign(_well=df_ctr.index)
+                    .sort_values(["ctrl", "_well"])
+                    .drop(columns=["_well"])
+                )
                 ax1 = plt.subplot2grid((8, 1), loc=(0, 0))
                 x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
                 sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
