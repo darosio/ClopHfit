@@ -17,6 +17,7 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc,
     fit_binding_pymc2,
     fit_binding_pymc_multi_noise,
+    fit_binding_pymc_multi_noise_xrw,
 )
 from clophfit.fitting.core import (
     analyze_spectra,
@@ -958,6 +959,37 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     assert "alpha_y2" in trace.posterior
     assert "gain_y1" in trace.posterior
     assert "sigma_read_y1" in trace.posterior
+
+
+@pytest.mark.slow
+def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
+    """Smoke test for multi-well noise+per-well pH random-walk PyMC fit."""
+    fr_init = fit_binding_glob(multi_dataset)
+    assert fr_init.result is not None
+
+    results = {"A01": fr_init, "A02": fr_init}
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    rng = np.random.default_rng(42)
+    buf1 = pd.DataFrame(
+        rng.normal(5000.0, 250.0, (5, 3)), columns=["B01", "B02", "B03"]
+    )
+    buf2 = pd.DataFrame(rng.normal(50.0, 5.0, (5, 3)), columns=["B01", "B02", "B03"])
+    buffer_df = {1: buf1, 2: buf2}
+
+    trace = fit_binding_pymc_multi_noise_xrw(
+        results, scheme, buffer_df, n_sd=3.0, n_xerr=0.0, n_samples=50
+    )
+
+    assert hasattr(trace, "posterior")
+    assert "sigma_pip" in trace.posterior
+    assert "x_per_well" in trace.posterior
+    assert "alpha_y1" in trace.posterior
+    assert "alpha_y2" in trace.posterior
+    # x_per_well has dims (step, well)
+    assert "step" in trace.posterior["x_per_well"].dims
+    assert "well" in trace.posterior["x_per_well"].dims
 
 
 ###############################################################################

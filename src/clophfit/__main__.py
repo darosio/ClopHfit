@@ -77,7 +77,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Whether to perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Whether to export PNG files.")  # fmt: skip
-@click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, multi-noise (learned noise model), or single.")  # fmt: skip
+@click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, multi-noise (learned noise model), multi-noise-xrw (noise + per-well pH random walk), or single.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,  # Click context object.

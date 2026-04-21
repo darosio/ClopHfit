@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
+import pytensor.tensor as pt
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
@@ -1100,6 +1101,176 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
             for lbl, da in ds.items():
                 mu_pred = binding_1site(
                     x_true,
+                    K,
+                    pars[f"S0_{lbl}_{key}"],
+                    pars[f"S1_{lbl}_{key}"],
+                    is_ph=ds.is_ph,
+                )
+                mu_nn = pm_math.maximum(0.0, mu_pred)
+                sigma_obs = pm_math.sqrt(
+                    sigma_read[lbl] ** 2
+                    + gain[lbl] * mu_nn
+                    + alpha[lbl] ** 2 * mu_pred**2
+                )
+                pm.Normal(
+                    f"y_likelihood_{lbl}_{key}",
+                    mu=mu_pred[da.mask],
+                    sigma=sigma_obs[da.mask],
+                    observed=da.y,
+                )
+
+        trace: az.InferenceData = pm.sample(
+            n_samples,
+            tune=n_samples // 2,
+            target_accept=0.9,
+            return_inferencedata=True,
+            **_pymc_sample_parallel_args(),
+        )
+    return trace
+
+
+def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
+    results: dict[str, FitResult[MiniT]],
+    scheme: PlateScheme,
+    buffer_df: dict[int, pd.DataFrame],
+    n_sd: float = 5.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+    sigma_pip_prior: float = 0.02,
+) -> az.InferenceData:
+    """Multi-well PyMC fit with shared noise model and per-well pH random walk.
+
+    Extends :func:`fit_binding_pymc_multi_noise` with a hierarchical
+    random-walk model for per-well pH deviations.  The first titration step
+    is common to all wells (same buffer).  Each subsequent acid addition
+    introduces independent Normal(0, sigma_pip²) deviations that accumulate,
+    so the variance of the pH deviation at step *t* is *t · sigma_pip²*.
+
+    Non-centred parameterisation is used for numerical efficiency::
+
+        z_pip[t, w] ~ Normal(0, 1)  (shape: n_steps-1 x n_wells)
+        x_dev[:, w] = concat([0, cumsum(sigma_pip * z_pip[:, w])])
+        x_per_well  = x_nominal[:, None] + x_dev   (shape: n_steps x n_wells)
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        Per-well initial fit results, typically from ``fit_binding_glob``.
+    scheme : PlateScheme
+        Plate scheme defining control groups for shared-K priors.
+    buffer_df : dict[int, pd.DataFrame]
+        Buffer DataFrames (integer label index -> DataFrame with well
+        columns), used to derive noise priors from replicate variance.
+    n_sd : float
+        Prior width multiplier for per-well S0/S1 parameters.
+    n_xerr : float
+        Scaling factor applied to x-value uncertainties.
+    n_samples : int
+        Number of MCMC posterior samples per chain.
+    sigma_pip_prior : float
+        Prior scale (HalfNormal sigma) for the per-step pipetting SD,
+        in the same units as the x-axis (pH units by default).
+
+    Returns
+    -------
+    az.InferenceData
+        Posterior trace.  Per-well x is accessible as
+        ``trace.posterior["x_per_well"]`` with dims ``("chain", "draw",
+        "step", "well")``.  Noise parameters are accessible as
+        ``trace.posterior["sigma_read_<lbl>"]`` etc.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset is found in *results*.
+    """
+    ds_template = next((r.dataset for r in results.values() if r.dataset), None)
+    if ds_template is None:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
+
+    xc = next(iter(ds_template.values())).xc
+    x_errc = next(iter(ds_template.values())).x_errc * n_xerr
+    labels = list(ds_template.keys())
+    n_steps = len(xc)
+
+    wells = [key for key, r in results.items() if r.result and r.dataset]
+    n_wells = len(wells)
+    well_idx = {key: i for i, key in enumerate(wells)}
+
+    noise_priors = _noise_priors_from_buffer(buffer_df, labels)
+
+    values: dict[str, list[float]] = {}
+    stderr_: dict[str, list[float]] = {}
+    for name, scheme_wells in scheme.names.items():
+        values[name] = [
+            r.result.params["K"].value
+            for well, r in results.items()
+            if r.result and well in scheme_wells
+        ]
+        stderr_[name] = [
+            r.result.params["K"].stderr
+            for well, r in results.items()
+            if r.result
+            and well in scheme_wells
+            and r.result.params["K"].stderr is not None
+        ]
+    ctr_ks = weighted_stats(values, stderr_)
+
+    coords: dict[str, list[int] | list[str]] = {
+        "well": wells,
+        "step": list(range(n_steps)),
+        "step_diff": list(range(n_steps - 1)),
+    }
+
+    with pm.Model(coords=coords):
+        x_true = create_x_true(xc, x_errc, n_xerr)
+
+        sigma_pip = pm.HalfNormal("sigma_pip", sigma=sigma_pip_prior)
+        z_pip = pm.Normal(
+            "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
+        )
+        cum_dev = pt.cumsum(sigma_pip * z_pip, axis=0)
+        x_dev = pt.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
+        x_per_well = pm.Deterministic(
+            "x_per_well",
+            x_true[:, None] + x_dev,
+            dims=("step", "well"),
+        )
+
+        sigma_read = {
+            lbl: pm.HalfNormal(f"sigma_read_{lbl}", sigma=noise_priors[lbl].sigma_read)
+            for lbl in labels
+        }
+        gain = {
+            lbl: pm.HalfNormal(f"gain_{lbl}", sigma=noise_priors[lbl].gain)
+            for lbl in labels
+        }
+        alpha = {
+            lbl: pm.HalfNormal(f"alpha_{lbl}", sigma=noise_priors[lbl].alpha)
+            for lbl in labels
+        }
+
+        k_params = {
+            name: pm.Normal(f"K_{name}", mu=ctr_ks[name][0], sigma=0.2)
+            for name in scheme.names
+        }
+
+        for key, r in results.items():
+            if not (r.result and r.dataset):
+                continue
+            ds = r.dataset
+            ctr_name = next(
+                (name for name, sw in scheme.names.items() if key in sw), ""
+            )
+            pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+            K = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]  # noqa: N806
+            w_idx = well_idx[key]
+            x_w = x_per_well[:, w_idx]
+
+            for lbl, da in ds.items():
+                mu_pred = binding_1site(
+                    x_w,
                     K,
                     pars[f"S0_{lbl}_{key}"],
                     pars[f"S1_{lbl}_{key}"],
