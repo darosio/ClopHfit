@@ -26,6 +26,8 @@ from .core import N_BOOT, fit_binding_glob  # local to avoid circular import
 from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from clophfit.clophfit_types import ArrayF, FloatFunc
     from clophfit.prtecan import PlateScheme
 
@@ -758,15 +760,25 @@ def fit_binding_pymc_odr(
 
 
 def weighted_stats(
-    values: dict[str, list[float]], stderr: dict[str, list[float]]
+    values: Mapping[str, Sequence[float | None]],
+    stderr: Mapping[str, Sequence[float | None]],
 ) -> dict[str, tuple[float, float]]:
     """Weighted mean and stderr for control priors."""
     results: dict[str, tuple[float, float]] = {}
-    for sample in values:  # noqa:PLC0206
-        x = np.array(values[sample])
-        se = np.array(stderr[sample])
-        weighted_mean = np.average(x, weights=1 / se**2)
-        weighted_stderr = np.sqrt(1 / np.sum(1 / se**2))
+    for sample in values:
+        pairs = [
+            (v, s)
+            for v, s in zip(values[sample], stderr[sample], strict=True)
+            if v is not None and s is not None
+        ]
+        if not pairs:
+            msg = f"No valid (value, stderr) pairs for sample '{sample}'"
+            raise ValueError(msg)
+        x, se = zip(*pairs, strict=True)
+        x_arr = np.array(x, dtype=float)
+        se_arr = np.array(se, dtype=float)
+        weighted_mean = np.average(x_arr, weights=1 / se_arr**2)
+        weighted_stderr = np.sqrt(1 / np.sum(1 / se_arr**2))
         results[sample] = (weighted_mean, weighted_stderr)
     return results
 
@@ -892,8 +904,8 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
     labels = list(ds.keys())
-    values: dict[str, list[float]] = {}
-    stderr: dict[str, list[float]] = {}
+    values: dict[str, list[float | None]] = {}
+    stderr: dict[str, list[float | None]] = {}
 
     for name, wells in scheme.names.items():
         values[name] = [
@@ -976,8 +988,8 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
     x_errc = next(iter(ds_example.values())).x_errc * n_xerr
     labels = list(ds_example.keys())  # e.g., ['y1', 'y2']
     # --- Pre-calculate weighted stats for K priors (remains the same) ---
-    values: dict[str, list[float]] = {}
-    stderr: dict[str, list[float]] = {}
+    values: dict[str, list[float | None]] = {}
+    stderr: dict[str, list[float | None]] = {}
     for name, wells in scheme.names.items():
         values[name] = [
             v.result.params["K"].value
@@ -1270,8 +1282,8 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
 
     noise_priors = _noise_priors_from_buffer(buffer_df, labels)
 
-    values: dict[str, list[float]] = {}
-    stderr_: dict[str, list[float]] = {}
+    values: dict[str, list[float | None]] = {}
+    stderr_: dict[str, list[float | None]] = {}
     for name, wells in scheme.names.items():
         values[name] = [
             r.result.params["K"].value
@@ -1281,7 +1293,7 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
         stderr_[name] = [
             r.result.params["K"].stderr
             for well, r in results.items()
-            if r.result and well in wells and r.result.params["K"].stderr is not None
+            if r.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr_)
     active_wells = {key for key, r in results.items() if r.result and r.dataset}

@@ -1136,13 +1136,19 @@ class TitrationResults:
         """Compute median of K."""
         if not self.all_computed():
             self.compute_all()
+        stderr_vals = [
+            v.result.params[par].stderr
+            for v in self.results.values()
+            if v.result and v.result.params[par].stderr is not None
+        ]
+        if not stderr_vals:
+            logger.warning("Unable to calculate n_sd; defaulting to 1.0")
+            return 1.0
         try:
-            n_sd: float = expected_sd / np.nanmedian([
-                v.result.params[par].stderr for v in self.results.values() if v.result
-            ])
+            n_sd: float = expected_sd / np.nanmedian(stderr_vals)
         except ZeroDivisionError:
             logger.warning("Unable to calculate n_sd; defaulting to 1.0")
-            n_sd = 1.0  # Fallback if stderr values are missing
+            n_sd = 1.0
         return n_sd
 
     def all_computed(self) -> bool:
