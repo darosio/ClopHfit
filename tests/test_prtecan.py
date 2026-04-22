@@ -531,6 +531,7 @@ class TestTitrationConfig:
         assert config.bg_mth == "mean"
         assert config.fit_method == "huber"
         assert config.outlier is None
+        assert config.ctr_free_k is False
 
     def test_callback(self) -> None:
         """It triggers callback on parameter change."""

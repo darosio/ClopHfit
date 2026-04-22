@@ -782,6 +782,7 @@ class TitrationConfig:
     outlier: str | None = None
     mcmc: str = "None"
     nuts_sampler: str = "default"
+    ctr_free_k: bool = False
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -1852,7 +1853,11 @@ class Titration(TecanfilesGroup):
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
         trace = fit_binding_pymc_multi(
-            results, self.scheme, n_sd=n_sd, nuts_sampler=self.params.nuts_sampler
+            results,
+            self.scheme,
+            n_sd=n_sd,
+            nuts_sampler=self.params.nuts_sampler,
+            ctr_free_k=self.params.ctr_free_k,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
@@ -1895,6 +1900,7 @@ class Titration(TecanfilesGroup):
             self.buffer.dataframes,
             n_sd=n_sd,
             nuts_sampler=self.params.nuts_sampler,
+            ctr_free_k=self.params.ctr_free_k,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
@@ -1918,6 +1924,7 @@ class Titration(TecanfilesGroup):
             self.buffer.dataframes,
             n_sd=n_sd,
             nuts_sampler=self.params.nuts_sampler,
+            ctr_free_k=self.params.ctr_free_k,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)

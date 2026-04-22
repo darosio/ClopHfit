@@ -771,6 +771,72 @@ def weighted_stats(
     return results
 
 
+def _build_ctr_k_params(
+    scheme: PlateScheme,
+    ctr_ks: dict[str, tuple[float, float]],
+    active_wells: set[str],
+    *,
+    ctr_free_k: bool,
+) -> tuple[dict[str, typing.Any], dict[str, typing.Any]]:
+    """Build K parameters for control groups.
+
+    Parameters
+    ----------
+    scheme : PlateScheme
+        Plate scheme with named control groups.
+    ctr_ks : dict[str, tuple[float, float]]
+        Weighted K mean and stderr per control name.
+    active_wells : set[str]
+        Well keys that have valid results and datasets.
+    ctr_free_k : bool
+        If True, each CTR replicate gets its own K drawn from a hierarchical
+        prior ``Normal(K_mu_{name}, K_tau_{name})``.  If False (default),
+        all replicates of the same CTR share a single K.
+
+    Returns
+    -------
+    k_params : dict[str, typing.Any]
+        Maps CTR name → shared PyMC K variable (populated only when
+        ``ctr_free_k=False``).
+    k_replicate : dict[str, typing.Any]
+        Maps well key → individual PyMC K variable (populated only when
+        ``ctr_free_k=True``).
+    """
+    k_params: dict[str, typing.Any] = {}
+    k_replicate: dict[str, typing.Any] = {}
+    if ctr_free_k:
+        for name, scheme_wells in scheme.names.items():
+            k_mu = pm.Normal(f"K_mu_{name}", mu=ctr_ks[name][0], sigma=0.2)
+            k_tau = pm.HalfNormal(f"K_tau_{name}", sigma=0.1)
+            for well in scheme_wells:
+                if well in active_wells:
+                    k_replicate[well] = pm.Normal(
+                        f"K_{name}_{well}", mu=k_mu, sigma=k_tau
+                    )
+    else:
+        k_params = {
+            name: pm.Normal(f"K_{name}", mu=ctr_ks[name][0], sigma=0.2)
+            for name in scheme.names
+        }
+    return k_params, k_replicate
+
+
+def _resolve_well_k(  # noqa: PLR0913
+    key: str,
+    ctr_name: str,
+    pars: dict[str, typing.Any],
+    k_params: dict[str, typing.Any],
+    k_replicate: dict[str, typing.Any],
+    *,
+    ctr_free_k: bool,
+) -> typing.Any:  # noqa: ANN401
+    """Return the PyMC K variable for *key* given the current CTR-K mode."""
+    if ctr_free_k:
+        k_rep = k_replicate.get(key)
+        return k_rep if k_rep is not None else pars[f"K_{key}"]
+    return k_params[ctr_name] if ctr_name else pars[f"K_{key}"]
+
+
 def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
@@ -779,8 +845,45 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
     nuts_sampler: str = "default",
+    *,
+    ctr_free_k: bool = False,
 ) -> az.InferenceData:
-    """Multi-well PyMC with shared K per control group and per-label noise."""
+    """Multi-well PyMC with shared K per control group and per-label noise.
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        Per-well initial fit results.
+    scheme : PlateScheme
+        Plate scheme defining control groups for shared-K priors.
+    n_sd : float
+        Prior width multiplier for per-well S0/S1 parameters.
+    n_xerr : float
+        Scaling factor applied to x-value uncertainties.
+    ye_scaling : float
+        HalfNormal sigma for the per-label y-error scaling factor.
+    n_samples : int
+        Number of MCMC posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
+        ``"nutpie"``).
+    ctr_free_k : bool
+        If True, each CTR replicate well gets its own K drawn from a
+        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
+        spread of K posteriors across replicates then quantifies
+        between-replicate accuracy.  If False (default), all replicates of
+        the same CTR share a single K.
+
+    Returns
+    -------
+    az.InferenceData
+        The PyMC posterior trace.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset is found in results.
+    """
     # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next((r.dataset for r in results.values() if r.dataset), None)
     if ds is None:
@@ -804,6 +907,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
+    active_wells = {key for key, r in results.items() if r.result and r.dataset}
 
     with pm.Model():
         ye_mag: dict[str, pm.Distribution] = {
@@ -811,26 +915,20 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             for label in labels
         }
         x_true = create_x_true(xc, x_errc, n_xerr)
+        k_params, k_replicate = _build_ctr_k_params(
+            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+        )
 
-        # Create shared K parameters for each control group
-        k_params = {
-            control_name: pm.Normal(
-                f"K_{control_name}",
-                mu=ctr_ks[control_name][0],
-                sigma=0.2,  # FIXME: use var
-            )
-            for control_name in scheme.names
-        }
         for key, r in results.items():
             if r.result and r.dataset:
                 ds = r.dataset
-                # Determine if the well is associated with a control group
                 ctr_name = next(
                     (name for name, wells in scheme.names.items() if key in wells), ""
                 )
                 pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
-                # Use shared K for control group wells or create a unique K otherwise
-                K = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]  # noqa: N806
+                K = _resolve_well_k(  # noqa: N806
+                    key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
+                )
 
                 for lbl, da in ds.items():
                     y_model = binding_1site(
@@ -1106,6 +1204,8 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
     n_xerr: float = 1.0,
     n_samples: int = 2000,
     nuts_sampler: str = "default",
+    *,
+    ctr_free_k: bool = False,
 ) -> az.InferenceData:
     """Multi-well PyMC fit with shared learnable heteroscedastic noise model.
 
@@ -1140,6 +1240,11 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
     nuts_sampler : str
         NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
         (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
+    ctr_free_k : bool
+        If True, each CTR replicate well gets its own K drawn from a
+        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
+        spread of K posteriors across replicates quantifies between-replicate
+        accuracy.  If False (default), all replicates share a single K.
 
     Returns
     -------
@@ -1179,6 +1284,7 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
             if r.result and well in wells and r.result.params["K"].stderr is not None
         ]
     ctr_ks = weighted_stats(values, stderr_)
+    active_wells = {key for key, r in results.items() if r.result and r.dataset}
 
     with pm.Model():
         x_true = create_x_true(xc, x_errc, n_xerr)
@@ -1196,10 +1302,9 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
             for lbl in labels
         }
 
-        k_params = {
-            name: pm.Normal(f"K_{name}", mu=ctr_ks[name][0], sigma=0.2)
-            for name in scheme.names
-        }
+        k_params, k_replicate = _build_ctr_k_params(
+            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+        )
 
         for key, r in results.items():
             if not (r.result and r.dataset):
@@ -1209,7 +1314,9 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
                 (name for name, wells in scheme.names.items() if key in wells), ""
             )
             pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
-            K = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]  # noqa: N806
+            K = _resolve_well_k(  # noqa: N806
+                key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
+            )
 
             for lbl, da in ds.items():
                 mu_pred = binding_1site(
@@ -1251,6 +1358,8 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
     n_samples: int = 2000,
     sigma_pip_prior: float = 0.02,
     nuts_sampler: str = "default",
+    *,
+    ctr_free_k: bool = False,
 ) -> az.InferenceData:
     """Multi-well PyMC fit with shared noise model and per-well pH random walk.
 
@@ -1287,6 +1396,11 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
     nuts_sampler : str
         NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
         (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
+    ctr_free_k : bool
+        If True, each CTR replicate well gets its own K drawn from a
+        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
+        spread of K posteriors across replicates quantifies between-replicate
+        accuracy.  If False (default), all replicates share a single K.
 
     Returns
     -------
@@ -1314,6 +1428,7 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
     wells = [key for key, r in results.items() if r.result and r.dataset]
     n_wells = len(wells)
     well_idx = {key: i for i, key in enumerate(wells)}
+    active_wells = set(wells)
 
     noise_priors = _noise_priors_from_buffer(buffer_df, labels)
 
@@ -1368,10 +1483,9 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
             for lbl in labels
         }
 
-        k_params = {
-            name: pm.Normal(f"K_{name}", mu=ctr_ks[name][0], sigma=0.2)
-            for name in scheme.names
-        }
+        k_params, k_replicate = _build_ctr_k_params(
+            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+        )
 
         for key, r in results.items():
             if not (r.result and r.dataset):
@@ -1381,7 +1495,9 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
                 (name for name, sw in scheme.names.items() if key in sw), ""
             )
             pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
-            K = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]  # noqa: N806
+            K = _resolve_well_k(  # noqa: N806
+                key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
+            )
             w_idx = well_idx[key]
             x_w = x_per_well[:, w_idx]
 
