@@ -1474,8 +1474,8 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
         z_pip = pm.Normal(
             "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
         )
-        cum_dev = pt.cumsum(sigma_pip * z_pip, axis=0)
-        x_dev = pt.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
+        cum_dev = pm.math.cumsum(sigma_pip * z_pip, axis=0)
+        x_dev = pm.math.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
         x_per_well = pm.Deterministic(
             "x_per_well",
             x_true[:, None] + x_dev,
