@@ -45,10 +45,10 @@ version = "0.12.0"
 
 [project.optional-dependencies]
 gpu = [
-  "blackjax>=1.2.4",
-  "jax[cuda12]>=0.4.35",
-  "numpyro>=0.16.1",
-  "nutpie>=0.14.0",
+  "blackjax>=1.5",
+  "jax[cuda12]>=0.10.0",
+  "numpyro>=0.20.1",
+  "nutpie>=0.16.8",
 ]
 docs = [
   "graphviz>=0.21",
