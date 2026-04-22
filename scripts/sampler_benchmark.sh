@@ -44,11 +44,11 @@ for mode in "${MODES[@]}"; do
       --nuts-sampler "$sampler" \
       --mcmc-samples "$SAMPLES" \
       --no-png \
-      2>&1 | grep -v "DEBUG\|PIL\|STREAM\|IDAT\|sBIT\|pHYs\|IHDR\|loop.fusion" |
-      grep -i "error\|warning\|diverge" |
-      head -5
+      > /tmp/ppr_bench_out.txt 2>&1
     status=$?
     set -e
+    grep -iv "DEBUG\|PIL\|STREAM\|IDAT\|sBIT\|pHYs\|IHDR\|loop.fusion" /tmp/ppr_bench_out.txt |
+      grep -i "error\|warning\|diverge\|cuda" | head -5 || true
     t_end=$(date +%s)
     elapsed=$((t_end - t_start))
     result_status="ok"
