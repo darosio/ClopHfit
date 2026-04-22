@@ -90,6 +90,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'zscore:3.0:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single.")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/GPU), nutpie (Rust/CPU).")  # fmt: skip
+@click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
@@ -111,6 +112,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     outlier: str | None,
     mcmc: str,
     nuts_sampler: str,
+    mcmc_samples: int,
     ctr_free_k: bool,
     dry_run: bool,
 ) -> None:
@@ -191,6 +193,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.outlier = outlier
     tit.params.mcmc = mcmc
     tit.params.nuts_sampler = nuts_sampler
+    tit.params.n_mcmc_samples = mcmc_samples
     tit.params.ctr_free_k = ctr_free_k
     logger.info("%s", tit.params)
 

@@ -782,6 +782,7 @@ class TitrationConfig:
     outlier: str | None = None
     mcmc: str = "None"
     nuts_sampler: str = "default"
+    n_mcmc_samples: int = 2000
     ctr_free_k: bool = False
 
     _callback: Callable[[], None] | None = field(
@@ -796,7 +797,7 @@ class TitrationConfig:
         if self._callback is not None:
             self._callback()
 
-    def __setattr__(self, name: str, value: bool | str | None) -> None:  # noqa: FBT001
+    def __setattr__(self, name: str, value: bool | str | int | None) -> None:  # noqa: FBT001
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
             super().__setattr__(name, value)
@@ -1829,19 +1830,29 @@ class Titration(TecanfilesGroup):
             self.scheme,
             self.fit_keys,
             partial(
-                self._compute_mcmc_fit, n_sd=n_sd, nuts_sampler=self.params.nuts_sampler
+                self._compute_mcmc_fit,
+                n_sd=n_sd,
+                n_samples=self.params.n_mcmc_samples,
+                nuts_sampler=self.params.nuts_sampler,
             ),
         )
 
     def _compute_mcmc_fit(
-        self, key: str, n_sd: float, nuts_sampler: str = "default"
+        self,
+        key: str,
+        n_sd: float,
+        n_samples: int = 2000,
+        nuts_sampler: str = "default",
     ) -> FitResult[az.InferenceData]:
         """Compute global MCMC fit for a single key."""
-        # Calculate n_sd from the previous global fitting results
         logger.info("Starting PyMC sampling for key: %s", key)
         try:  # FIXME: Global vs. ODR
             result_pymc = fit_binding_pymc(
-                self.result_global[key], n_sd=n_sd, n_xerr=1, nuts_sampler=nuts_sampler
+                self.result_global[key],
+                n_sd=n_sd,
+                n_xerr=1,
+                n_samples=n_samples,
+                nuts_sampler=nuts_sampler,
             )
         except ImportError:
             raise
@@ -1862,6 +1873,7 @@ class Titration(TecanfilesGroup):
             results,
             self.scheme,
             n_sd=n_sd,
+            n_samples=self.params.n_mcmc_samples,
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,
         )
@@ -1905,6 +1917,7 @@ class Titration(TecanfilesGroup):
             self.scheme,
             self.buffer.dataframes,
             n_sd=n_sd,
+            n_samples=self.params.n_mcmc_samples,
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,
         )
@@ -1929,6 +1942,7 @@ class Titration(TecanfilesGroup):
             self.scheme,
             self.buffer.dataframes,
             n_sd=n_sd,
+            n_samples=self.params.n_mcmc_samples,
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,
         )
