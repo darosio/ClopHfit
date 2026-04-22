@@ -778,6 +778,8 @@ class TitrationConfig:
     dil: bool = True
     nrm: bool = True
     bg_mth: str = "mean"
+    fit_method: str = "huber"
+    outlier: str | None = None
     mcmc: str = "None"
     nuts_sampler: str = "default"
 
@@ -793,7 +795,7 @@ class TitrationConfig:
         if self._callback is not None:
             self._callback()
 
-    def __setattr__(self, name: str, value: bool | str) -> None:  # noqa: FBT001
+    def __setattr__(self, name: str, value: bool | str | None) -> None:  # noqa: FBT001
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
             super().__setattr__(name, value)
@@ -1718,11 +1720,28 @@ class Titration(TecanfilesGroup):
         """Perform global ODR fitting."""
         return TitrationResults(self.scheme, self.fit_keys, self._compute_odr_fit)
 
+    def _fit(self, ds: Dataset) -> FitResult[Minimizer]:
+        """Call fit_binding_glob with parameters from current config."""
+        method_map: dict[str, tuple[str, str | None]] = {
+            "lm": ("lm", None),
+            "huber": ("huber", None),
+            "irls": ("lm", "irls"),
+            "wls": ("lm", "wls"),
+            "iterative": ("lm", "iterative"),
+        }
+        method, reweight = method_map.get(self.params.fit_method, ("huber", None))
+        return fit_binding_glob(
+            ds,
+            method=method,
+            reweight=reweight,
+            remove_outliers=self.params.outlier,
+        )
+
     def _compute_fit(self, key: str, label: int) -> FitResult[Minimizer]:
         """Compute individual dataset fit for a single key."""
         try:
             ds = self._create_ds(key, label)
-            return fit_binding_glob(ds)
+            return self._fit(ds)
         except InsufficientDataError:
             logger.warning("Skip fit for well %s for Label:%s.", key, label)
             return FitResult()
@@ -1730,14 +1749,13 @@ class Titration(TecanfilesGroup):
     def _compute_global_fit(self, key: str) -> FitResult[Minimizer]:
         """Compute global fit for a single key.
 
-        Uses Huber-loss WLS which naturally downweights outlier points
-        (e.g. y1 at low pH) without masking data.  The physics-based
-        errors from ``_create_data_array`` already encode heteroscedasticity
-        (y1 ~2-6x noisier than y2), so standard WLS weighting is correct.
+        The physics-based errors from ``_create_data_array`` already encode
+        heteroscedasticity (y1 ~2-6x noisier than y2).  The fitting method
+        is controlled by ``TitrationConfig.fit_method`` (default: Huber loss).
         """
         try:
             ds = self._create_global_ds(key)
-            return fit_binding_glob(ds, method="huber")
+            return self._fit(ds)
         except InsufficientDataError:
             logger.warning("Skipping global fit for well %s.", key)
             return FitResult()

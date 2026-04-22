@@ -75,20 +75,21 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.pass_context
 @click.argument("list_file", type=cPath(exists=True))
 @click.option("--cl", type=float, help="Cl stock concentration (mM) of added aliquots.")
-@click.option("--bg", is_flag=True, help="Whether to subtract buffer (from scheme.txt).")  # fmt: skip
-@click.option("--bg-adj", is_flag=True, help="Whether to heuristically adjust negative background values.")  # fmt: skip
-@click.option("--dil", is_flag=True, help="Whether to apply dilution correction.")
-@click.option("--nrm", is_flag=True, help="Whether to normalize using metadata.")
-@click.option("--bg-mth", default="mean", show_default=True, help="Method for background calculation.")  # fmt: skip
+@click.option("--bg", is_flag=True, help="Subtract buffer signal (from scheme.txt).  Implied by --bg-adj.")  # fmt: skip
+@click.option("--bg-adj", is_flag=True, help="Heuristically adjust negative buffer values (implies --bg).")  # fmt: skip
+@click.option("--bg-mth", default="mean", show_default=True, type=click.Choice(["mean", "fit", "meansd"]), help="Buffer calculation method.")  # fmt: skip
+@click.option("--nrm", is_flag=True, help="Normalize using label metadata.")
 @click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
-@click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions).")  # fmt: skip
-@click.option("--all", "comb", is_flag=True, help="Whether to export all data combinations.")  # fmt: skip
-@click.option("--lim", type=(float, float), help="Range MIN, MAX of plot_K.")
+@click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions); enables dilution correction.")  # fmt: skip
+@click.option("--all", "comb", is_flag=True, help="Export all bg/dil/nrm data combinations.")  # fmt: skip
+@click.option("--lim", type=(float, float), help="x-axis range MIN MAX for K plots.")
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
-@click.option("--fit/--no-fit", default=True, show_default=True, help="Whether to perform fitting.")  # fmt: skip
-@click.option("--png/--no-png", default=True, show_default=True, help="Whether to export PNG files.")  # fmt: skip
-@click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="Run MCMC sampling: None, multi, multi-noise (learned noise model), multi-noise-xrw (noise + per-well pH random walk), or single.")  # fmt: skip
-@click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS sampler backend: default (pytensor/CPU), blackjax (JAX/GPU), numpyro (JAX/GPU), or nutpie (Rust/CPU).")  # fmt: skip
+@click.option("--fit/--no-fit", default=True, show_default=True, help="Perform fitting.")  # fmt: skip
+@click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
+@click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls", "wls", "iterative"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls/wls/iterative (iterative reweighting strategies).")  # fmt: skip
+@click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'zscore:3.0:4' (method:threshold:min_keep).")  # fmt: skip
+@click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single.")  # fmt: skip
+@click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/GPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,  # Click context object.
@@ -96,7 +97,6 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     cl: float,
     bg: bool,
     bg_adj: bool,
-    dil: bool,
     nrm: bool,
     bg_mth: str,
     sch: str | None,
@@ -106,6 +106,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     title: str,
     fit: bool,
     png: bool,
+    fit_method: str,
+    outlier: str | None,
     mcmc: str,
     nuts_sampler: str,
     dry_run: bool,
@@ -131,6 +133,9 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     logger.debug("CLI started")
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
     out_fp.mkdir(parents=True, exist_ok=True)
+    # Derived flags: --bg-adj implies --bg; --add implies dilution correction
+    bg = bg or bg_adj
+    dil = add is not None
     # Options validation with clear error messages
     try:
         _validate_tecan_options(cl, bg, dil, add, sch, comb)
@@ -180,6 +185,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.dil = dil
     tit.params.nrm = nrm
     tit.params.bg_mth = bg_mth
+    tit.params.fit_method = fit_method
+    tit.params.outlier = outlier
     tit.params.mcmc = mcmc
     tit.params.nuts_sampler = nuts_sampler
     logger.info("%s", tit.params)
@@ -192,7 +199,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
         except FileNotFoundError:
             msg = (
                 f"Additions file not found: {add}\n"
-                f"This file is required when using --cl or --dil options."
+                f"This file is required when using --cl option."
             )
             raise click.ClickException(msg) from None
         except Exception as e:
@@ -301,12 +308,6 @@ def _validate_tecan_options(  # noqa: PLR0913
             required_by="--cl option",
             reason="Chloride titrations require addition volumes to calculate concentrations.",
         )
-    if dil and not add:
-        raise MissingDependencyError(
-            missing_file="additions file (--add)",
-            required_by="--dil option",
-            reason="Dilution correction requires addition volumes.",
-        )
     if bg and not sch:
         raise MissingDependencyError(
             missing_file="scheme file (--sch)",
@@ -314,11 +315,11 @@ def _validate_tecan_options(  # noqa: PLR0913
             reason="Buffer subtraction requires a plate scheme to identify buffer wells.",
         )
     if comb and not (bg and sch and dil):
-        msg = "All combinations mode requires --bg, --sch, and --dil to be specified."
+        msg = "All combinations mode requires --bg, --sch, and --add to be specified."
         raise DataValidationError(
             msg,
             suggestions=[
-                "Add --bg --sch scheme.txt --dil flags",
+                "Add --bg --sch scheme.txt --add additions.pH flags",
                 "Or remove --all flag if you don't need all combinations",
             ],
         )

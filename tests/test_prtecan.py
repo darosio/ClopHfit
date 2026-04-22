@@ -529,6 +529,8 @@ class TestTitrationConfig:
         assert config.dil is True
         assert config.nrm is True
         assert config.bg_mth == "mean"
+        assert config.fit_method == "huber"
+        assert config.outlier is None
 
     def test_callback(self) -> None:
         """It triggers callback on parameter change."""
@@ -1240,8 +1242,8 @@ class TestTitrationAnalysis:
         # Check 'K' and std error for 'H02' in the second fit result
         assert fres[2]["H02"].result is not None
         k_h02 = fres[2]["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.898, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.026, abs=1e-3)
+        assert k_h02.value == pytest.approx(7.901, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.028, abs=1e-3)
         # Check 'K' and std error for 'H02' in the third fit result
         assert titan.result_global["H02"].result is not None
         k_h02 = titan.result_global["H02"].result.params["K"]
