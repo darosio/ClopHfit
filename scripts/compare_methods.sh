@@ -31,13 +31,15 @@ run_fit_methods() {
       --fit-method "${method}" --no-png 2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
     echo "    done"
   done
-  # Huber + outlier removal
-  outdir="compare/outlier"
-  echo "  → fit-method=huber --outlier zscore:3.0:4  out=${outdir}"
-  "$PPR" -o "${outdir}" tecan list.pH.csv \
-    --bg-adj --nrm --sch scheme.0.txt --add additions.pH \
-    --fit-method huber --outlier "zscore:3.0:4" --no-png 2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
-  echo "    done"
+  # Huber + outlier removal (multiple z-score thresholds)
+  for zscore in 3.0 2.5 2.0; do
+    outdir="compare/outlier_${zscore}"
+    echo "  → fit-method=huber --outlier zscore:${zscore}:4  out=${outdir}"
+    "$PPR" -o "${outdir}" tecan list.pH.csv \
+      --bg-adj --nrm --sch scheme.0.txt --add additions.pH \
+      --fit-method huber --outlier "zscore:${zscore}:4" --no-png 2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
+    echo "    done"
+  done
 }
 
 run_mcmc_modes() {
