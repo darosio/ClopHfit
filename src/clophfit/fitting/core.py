@@ -608,6 +608,9 @@ def outlier2(
     weights = np.concatenate([1.0 / da.y_err for da in reweighted_ds.values()])
     raw_residuals = weighted_residuals / weights
     z_scores = stats.zscore(raw_residuals)
+    # NaN z-scores arise when all residuals are identical (e.g. noise=0, perfect fit).
+    # Treat them as 0 so no points are incorrectly flagged as outliers.
+    z_scores = np.where(np.isnan(z_scores), 0.0, z_scores)
 
     if plot_z_scores:
         plt.scatter(range(len(z_scores)), z_scores)
