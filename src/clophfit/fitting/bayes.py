@@ -1444,8 +1444,8 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
 
     noise_priors = _noise_priors_from_buffer(buffer_df, labels)
 
-    values: dict[str, list[float]] = {}
-    stderr_: dict[str, list[float]] = {}
+    values: dict[str, list[float | None]] = {}
+    stderr_: dict[str, list[float | None]] = {}
     for name, scheme_wells in scheme.names.items():
         values[name] = [
             r.result.params["K"].value
@@ -1455,9 +1455,7 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
         stderr_[name] = [
             r.result.params["K"].stderr
             for well, r in results.items()
-            if r.result
-            and well in scheme_wells
-            and r.result.params["K"].stderr is not None
+            if r.result and well in scheme_wells
         ]
     ctr_ks = weighted_stats(values, stderr_)
 
