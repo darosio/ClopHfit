@@ -353,36 +353,54 @@ scripts/compare_methods.sh + scripts/compare_methods.py
 Sampler: default (pytensor/CPU), 2000 draw samples, 4 chains.
 
 ** Fit-method results (lb0–lb3)
+Plates L1–L4 measured. L1 uses fixed x_err=0.1 (manual pH record, not SD);
+L2–L4 use measured addition SD from multiple wells. n=wells fitted.
 
 *** lb0 (y1 only — noisy, 10× higher uncertainty, frequent low-pH outliers)
-| Method      |  L2 std |  L4 std |
+| Method      |  L1 std (n=90) |  L2 std (n=~96) |  L3 std (n=92) |  L4 std (n=~96) |
+|-------------|----------------|-----------------|----------------|-----------------|
+| lm          |          2.441 |           1.119 |          0.287 |           0.978 |
+| irls        |          2.407 |           1.092 |          0.286 |           0.965 |
+| huber       |          2.432 |           1.010 |          0.287 |           0.913 |
+| outlier_2.5 |          2.432 |           1.010 |          0.287 |           0.913 |
+| outlier_2.0 |          2.308 |           1.005 |          0.287 |           0.894 |
+
+*** lb1 (y2 only — cleaner label)
+| Method      |  L1 std |  L3 std |
 |-------------|---------|---------|
-| lm          |   1.119 |   0.978 |
-| irls/wls/it |   1.092 |   0.965 |
-| huber       |   1.010 |   0.913 |
-| outlier_2.5 |   1.010 |   0.913 |
-| outlier_2.0 |   1.005 |   0.894 |
+| lm          |   0.779 |   0.234 |
+| irls        |   0.654 |   0.241 |
+| huber       |   0.779 |   0.234 |
+| outlier_2.5 |   0.779 |   0.234 |
+| outlier_2.0 |   0.775 |   0.235 |
 
 *** lb2 (global, both labels — production path)
-| Method      |  L2 std |  L4 std |
-|-------------|---------|---------|
-| irls/wls/it |   0.288 |   0.388 |
-| lm          |   0.291 |   0.379 |
-| huber       |   0.281 |   0.378 |
-| outlier_2.5 |   0.281 |   0.378 |
-| outlier_2.0 |   0.281 |   0.380 |
+| Method      |  L1 std |  L2 std |  L3 std |  L4 std |
+|-------------|---------|---------|---------|---------|
+| lm          |   0.619 |   0.291 |   0.227 |   0.379 |
+| irls        |   0.562 |   0.288 |   0.233 |   0.388 |
+| huber       |   0.619 |   0.281 |   0.227 |   0.378 |
+| outlier_2.5 |   0.619 |   0.281 |   0.227 |   0.378 |
+| outlier_2.0 |   0.610 |   0.281 |   0.227 |   0.380 |
 
 ** Key fit-method findings
-1. *huber consistently best*: 10% std reduction vs lm on noisy lb0; equal or
-   slightly better than lm on clean lb1/lb2/lb3 for all plates.
-2. *irls/wls/iterative produce identical outputs* — all three implement the
-   same IRLS algorithm on these data. They are worse than both lm and huber
-   on lb2. → Retire wls and iterative; keep irls as the documented alias.
-3. *Outlier removal at zscore 3.0 and 2.5 is identical to plain huber* — no
-   real outliers are removed at those thresholds in L2/L4 data. zscore 2.0
-   gives marginal improvement on noisy lb0 only (~1% std reduction).
-4. Recommendation: use huber as the sole fit method; offer outlier at zscore
-   2.0 as an optional stricter mode for lb0-only analyses.
+1. *huber consistently best for L2/L4* (calibrated x_err): 10% std reduction
+   vs lm on noisy lb0; equal or slightly better than lm on lb2.
+2. *irls is unexpectedly best for L1* (fixed x_err=0.1 — poorly calibrated):
+   9–16% improvement over lm/huber on lb1 and lb2. When the initial y_err is
+   uniform/poorly calibrated, IRLS adaptive reweighting outperforms Huber's
+   heavy-tail protection. L3 shows no benefit (well-calibrated plate).
+   → The optimal method depends on y_err quality, not just noise magnitude.
+3. *irls/wls/iterative produce identical outputs* — all three implement the
+   same IRLS algorithm. → Retire wls and iterative; keep irls as documented alias.
+4. *Outlier removal at zscore 2.5 is identical to plain huber* — no real
+   outliers detected at that threshold in any plate. zscore 2.0 gives marginal
+   improvement on noisy lb0 for L1/L2/L4 but not L3 (~1–5% reduction).
+5. *L3 is the cleanest plate*: all methods essentially identical (std≈0.227–0.233);
+   the choice of method barely matters when y_err is well-calibrated.
+6. Recommendation: use huber as default for calibrated plates (L2/L3/L4);
+   consider irls when x_err is fixed/poorly-calibrated (L1-type plates).
+   Offer outlier at zscore 2.0 as optional mode for very noisy lb0 data.
 
 ** MCMC-mode results (lb4, huber seeding)
 
