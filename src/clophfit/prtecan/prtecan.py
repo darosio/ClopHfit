@@ -1734,8 +1734,6 @@ class Titration(TecanfilesGroup):
             "lm": ("lm", None),
             "huber": ("huber", None),
             "irls": ("lm", "irls"),
-            "wls": ("lm", "wls"),
-            "iterative": ("lm", "iterative"),
         }
         method, reweight = method_map.get(self.params.fit_method, ("huber", None))
         return fit_binding_glob(

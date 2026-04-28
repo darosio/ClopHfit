@@ -26,7 +26,7 @@ BASE_DIRS = {
     "L4": Path("/home/dati/arslanbaeva/data/raw/L4"),
 }
 
-FIT_METHODS = ["lm", "huber", "irls", "wls", "iterative", "outlier_3.0", "outlier_2.5", "outlier_2.0"]
+FIT_METHODS = ["lm", "huber", "irls", "outlier_3.0", "outlier_2.5", "outlier_2.0"]
 MCMC_MODES = ["single", "multi", "multi_noise", "multi_noise_xrw"]
 
 LB_LABELS = {
@@ -61,6 +61,46 @@ def load_k_with_err(base: Path, compare_dir: str, lb: int) -> pd.DataFrame | Non
         return None
     df = pd.read_csv(path, usecols=["well", "K", "sK"]).set_index("well")
     return df
+
+
+def load_noise_params(base: Path, compare_dir: str) -> pd.DataFrame | None:
+    """Load shared_noise_params.csv for a given MCMC compare directory."""
+    for p in base.rglob(f"compare/{compare_dir}/**/fit/shared_noise_params.csv"):
+        return pd.read_csv(p, index_col=0)
+    return None
+
+
+def print_noise_params(plate: str, base: Path) -> None:
+    """Print noise parameters learned by multi-noise and multi-noise-xrw MCMC."""
+    noise_labels = ["sigma_read", "gain", "alpha"]
+    for mode in ("mcmc_multi_noise", "mcmc_multi_noise_xrw"):
+        df = load_noise_params(base, mode)
+        if df is None:
+            print(f"  [skip] no shared_noise_params for {plate}/{mode}")
+            continue
+        mode_label = mode.replace("mcmc_", "").replace("_", "-")
+        print(f"\n{'='*60}")
+        print(f"  {plate} | noise params | {mode_label}")
+        print(f"{'='*60}")
+        # Extract rows for each noise component × label
+        rows = [r for r in df.index if any(r.startswith(nl) for nl in noise_labels)]
+        if not rows:
+            print("  (no noise rows found)")
+            continue
+        sub = df.loc[rows, ["mean", "sd", "hdi_3%", "hdi_97%"]]
+        # Annotate: proportional noise (alpha) drives y1 vs y2 uncertainty ratio
+        print(sub.to_string(float_format="{:.4f}".format))
+        # Derived: noise ratio alpha_y1 / alpha_y2 if both present
+        for lbl1, lbl2 in [("y1", "y2")]:
+            r1 = f"alpha_{lbl1}"
+            r2 = f"alpha_{lbl2}"
+            if r1 in df.index and r2 in df.index:
+                ratio = df.loc[r1, "mean"] / max(df.loc[r2, "mean"], 1e-9)
+                print(
+                    f"  → alpha_{lbl1}/alpha_{lbl2} ratio = {ratio:.1f}x  "
+                    f"(heuristic lb0/lb1 noise ratio)"
+                )
+
 
 
 def compare_fit_methods(plate: str, base: Path, lb: int = 2) -> pd.DataFrame:
@@ -160,6 +200,9 @@ def run() -> None:
                     title,
                     out_root / f"{plate}_fit_methods_{lb_label.split()[0]}.png",
                 )
+
+        # ---- Multi-noise learned noise parameters ----
+        print_noise_params(plate, base)
 
         # ---- MCMC mode comparison ----
         df_mcmc = compare_mcmc_modes(plate, base)

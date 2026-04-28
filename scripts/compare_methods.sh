@@ -23,7 +23,7 @@ MCMC_SAMPLES="${MCMC_SAMPLES:-2000}"
 run_fit_methods() {
   local dir="$1"
   echo "=== Fit-method comparison: $dir ==="
-  for method in lm huber irls wls iterative; do
+  for method in lm huber irls; do
     outdir="compare/${method}"
     echo "  → fit-method=${method}  out=${outdir}"
     "$PPR" -o "${outdir}" tecan list.pH.csv \

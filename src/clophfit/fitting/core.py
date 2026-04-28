@@ -395,10 +395,6 @@ def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         * ``"irls"`` - iteratively reweighted least-squares (uniform
           scale per label from MA-residual).
-        * ``"wls"`` - weighted least-squares (labels get errors proportional
-          to their residual magnitudes).
-        * ``"iterative"`` - replace errors with max(|residual|, 0.01) per
-          point.
 
         Default is ``None`` (no reweighting).
     remove_outliers : str | None, optional
