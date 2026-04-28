@@ -424,6 +424,50 @@ Sampler: default (pytensor/CPU), 2000 draw samples, 4 chains.
 - MCMC: multi or multi-noise (plate-dependent; multi when pH well-calibrated)
 - Retire: irls, wls, iterative (redundant); single (divergences); multi-noise-xrw
 
-* simulation
+* TODO Heuristic y_err correction via proportional noise α
+** Background
+The current heuristic y_err = sqrt(signal + bg_err²) captures only readout
+noise and Poisson noise. The true variance model revealed by multi-noise MCMC is:
+  Var(y) = σ_read² + gain·μ + α²·μ²
+where the *proportional* term α²·μ² is DOMINANT at typical fluorescence signal
+levels (200-1000 RFU).  This means high-signal y1 wells are systematically
+under-weighted (treated as more reliable than they really are).
+
+** Can α be estimated from input data statistics?
+Three approaches were evaluated, all failing for different reasons:
+1. CV of replicate wells: dominated by biological/concentration variance, not
+   instrument noise.  Estimate: ~0.45 vs MCMC ~0.06 — completely wrong.
+2. Median(|residual|/signal) from single-well fits: S0/S1 absorb proportional
+   noise into plateau parameters.  Result: 0.43 vs MCMC 0.057 for L2 y1.
+3. OLS regression Var(r) ~ σ²+gain·s+α²·s²: works for high-SNR labels where
+   α dominates (L4 y1: 0.104 vs MCMC 0.102; L4 y2: 0.033 vs MCMC 0.046)
+   but fails when σ_read is large (L2 y1: α→0 from regression vs MCMC 0.057).
+   Only 7 pH steps + free S0/S1 make the 3-parameter decomposition ill-conditioned.
+
+*Conclusion*: α cannot be reliably estimated from raw data statistics.
+MCMC multi-noise is the only reliable estimator. α values from MCMC should
+be stored and reused as empirical priors for the heuristic y_err correction.
+
+** True noise per plate (from multi-noise MCMC)
+| Plate | α_y1  | α_y2  | σ_read_y1 | σ_read_y2 | α_y1/α_y2 |
+|-------|-------|-------|-----------|-----------|-----------|
+| L2    | 0.057 | 0.006 |      18.2 |      19.1 |       9.5 |
+| L4    | 0.102 | 0.046 |       2.7 |       1.1 |       2.2 |
+| L3    | TBD   | TBD   |       TBD |       TBD |       TBD |
+| L1    | TBD   | TBD   |       TBD |       TBD |       TBD |
+
+α varies substantially between plates (factor ~2×), suggesting different gain
+settings or concentration-dependent noise. MCMC on L1 and L3 is running to
+complete the picture.
+
+** Implementation plan (deferred until all plates measured)
+1. Add --noise-alpha CLI option (one value per label, in order y1 y2).
+2. Store α in TitrationConfig.noise_alpha: tuple[float, ...].
+3. Update _create_data_array: y_err = sqrt(signal + bg_err² + (α·signal)²).
+4. After multi-noise MCMC on a plate, the pipeline can auto-supply the correct
+   α values for a follow-up deterministic re-run.
+5. Validate: re-run lb0–lb2 with corrected y_err and compare std_K.
+
+
 1. 1 label s0 s1 fissi no drop
 2. 1 lab

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare fit-method and MCMC-mode results across L2 and L4 plates.
+"""Compare fit-method and MCMC-mode results across L1–L4 plates.
 
 Reads ffit{0..4}.csv produced by ppr and assembles side-by-side K comparisons.
 Run AFTER scripts/compare_methods.sh has completed.
@@ -22,7 +22,9 @@ import pandas as pd
 matplotlib.use("Agg")
 
 BASE_DIRS = {
+    "L1": Path("/home/dati/arslanbaeva/data/raw/L1"),
     "L2": Path("/home/dati/arslanbaeva/data/raw/L2"),
+    "L3": Path("/home/dati/arslanbaeva/data/raw/L3"),
     "L4": Path("/home/dati/arslanbaeva/data/raw/L4"),
 }
 
@@ -175,6 +177,38 @@ def print_summary(df: pd.DataFrame, title: str) -> None:
     print(stats.to_string(float_format="{:.4f}".format))
 
 
+def summarize_noise_across_plates() -> None:
+    """Print a cross-plate summary of MCMC-learned noise parameters."""
+    rows = []
+    for plate, base in BASE_DIRS.items():
+        df = load_noise_params(base, "mcmc_multi_noise")
+        if df is None:
+            continue
+        for param in ["sigma_read_y1", "sigma_read_y2", "gain_y1", "gain_y2",
+                      "alpha_y1", "alpha_y2"]:
+            if param in df.index:
+                rows.append({
+                    "plate": plate,
+                    "param": param,
+                    "mean": df.loc[param, "mean"],
+                    "hdi_3%": df.loc[param, "hdi_3%"],
+                    "hdi_97%": df.loc[param, "hdi_97%"],
+                })
+    if not rows:
+        return
+    tbl = pd.DataFrame(rows).pivot(index="plate", columns="param", values="mean")
+    print(f"\n{'='*70}")
+    print("  Cross-plate noise summary (multi-noise MCMC posterior means)")
+    print(f"{'='*70}")
+    print(tbl.to_string(float_format="{:.4f}".format))
+    # Highlight alpha ratio across plates
+    if "alpha_y1" in tbl.columns and "alpha_y2" in tbl.columns:
+        ratio = tbl["alpha_y1"] / tbl["alpha_y2"].clip(lower=1e-9)
+        print("\n  α_y1/α_y2 ratio per plate:")
+        for plate, r in ratio.items():
+            print(f"    {plate}: {r:.1f}x")
+
+
 def run() -> None:
     """Entry point."""
     out_root = Path("/tmp/clophfit_compare")
@@ -215,6 +249,9 @@ def run() -> None:
     if not any_data:
         print("\n⚠  No output CSV files found. Run scripts/compare_methods.sh first.")
         sys.exit(1)
+
+    # Cross-plate noise summary (requires multi-noise MCMC on all plates)
+    summarize_noise_across_plates()
 
     print(f"\n✅ Comparison plots saved to {out_root}/")
 
