@@ -467,25 +467,175 @@ MCMC multi-noise is the only reliable estimator. α values from MCMC should
 be stored and reused as empirical priors for the heuristic y_err correction.
 
 ** True noise per plate (from multi-noise MCMC)
-| Plate | α_y1  | α_y2  | σ_read_y1 | σ_read_y2 | α_y1/α_y2 |
-|-------|-------|-------|-----------|-----------|-----------|
-| L2    | 0.057 | 0.006 |      18.2 |      19.1 |       9.5 |
-| L4    | 0.102 | 0.046 |       2.7 |       1.1 |       2.2 |
-| L3    | TBD   | TBD   |       TBD |       TBD |       TBD |
-| L1    | TBD   | TBD   |       TBD |       TBD |       TBD |
+| Plate | α_y1  | α_y2  | σ_read_y1 | σ_read_y2 | gain_y1 | gain_y2 | α_y1/α_y2 | MCMC quality     |
+|-------|-------|-------|-----------|-----------|---------|---------|-----------|------------------|
+| L2    | 0.057 | 0.006 |      18.2 |      19.1 |    1.53 |    0.03 |       9.5 | BAD (bg contam)  |
+| L3    | 0.042 | 0.019 |       2.9 |       1.1 |    0.06 |    0.14 |       2.2 | GOOD             |
+| L4    | 0.102 | 0.046 |       2.7 |       1.1 |    0.28 |    0.11 |       2.2 | GOOD             |
+| L1    | 0.020 | 0.026 |      22.3 |       6.3 |    0.61 |    0.02 |       0.8 | FAIL (4433 divg) |
 
-α varies substantially between plates (factor ~2×), suggesting different gain
-settings or concentration-dependent noise. MCMC on L1 and L3 is running to
-complete the picture.
+Key observations:
+- α_y1 varies across plates but L1 is anomalously low (0.020) and may be unreliable.
+- L1 MCMC completed (6054 s) but with 4433 divergences and low ESS — ALL L1 noise
+  parameters are unreliable. High gain=94 + very high buffer background create
+  ill-conditioned geometry.
+- L2 and L1 have anomalously high σ_read — traced to specific buffer well contamination
+  (see "Buffer well data quality" section below).
+- L3 and L4: MCMC is trustworthy; σ_read_y1≈2.7-2.9, σ_read_y2≈1.1; gain small.
+- L3 and L4 α_y1/α_y2 ratio identical (2.2) despite different concentrations →
+  proportional noise is label-independent for these plates (same sample prep quality).
+- L2 α_y1/α_y2 = 9.5 is suspicious and may reflect the buffer contamination affecting
+  α estimation indirectly.
 
-** Implementation plan (deferred until all plates measured)
-1. Add --noise-alpha CLI option (one value per label, in order y1 y2).
-2. Store α in TitrationConfig.noise_alpha: tuple[float, ...].
-3. Update _create_data_array: y_err = sqrt(signal + bg_err² + (α·signal)²).
-4. After multi-noise MCMC on a plate, the pipeline can auto-supply the correct
-   α values for a follow-up deterministic re-run.
-5. Validate: re-run lb0–lb2 with corrected y_err and compare std_K.
+** Implementation (DONE)
+1. --noise-alpha CLI option added (one value per label, in sorted order).
+2. TitrationConfig.noise_alpha: tuple[float, ...] field added.
+3. _create_data_array: y_err² = signal + bg_err² + (α·signal)².
+4. Validated: std_K unchanged; mean_sK halved (biology dominates, not noise).
 
+* TODO Instrument metadata and concentration effects
+** Gain settings (from metadata-labels.txt)
+| Plate | y1 gain | y2 gain | y1 median signal | y2 median signal | concentration |
+|-------|---------|---------|-----------------|-----------------|---------------|
+| L1    |      94 |  (auto) |          75 RFU |         180 RFU | LOW (~15× less) |
+| L2    |      79 |      55 |        1285 RFU |         682 RFU | high          |
+| L3    |      77 |      55 |         777 RFU |         546 RFU | medium        |
+| L4    |      76 |      53 |         645 RFU |         376 RFU | medium-low    |
+
+Both labels: Ex=400nm for y1 (ECFP-like), Ex=485nm for y2 (EYFP-like);
+Em=535nm for both. Integration 20µs, 10 flashes averaged.
+
+Key observations:
+- L1 y1 signal is ~15-17× lower than L2-L4 — the higher PMT gain (94) partially
+  compensates but leaves the median at 75 RFU (shot-noise dominated).
+- L1 y2 reaches negative values after background subtraction (−269 minimum)
+  → readout noise is significant at this concentration.
+- L2-L4 gain settings span only 76-79 (y1) and 53-55 (y2): nearly identical,
+  yet signal levels differ 2× → protein concentration is the primary driver.
+- No gain field for L1 y2 → likely auto-gain or single-label optimization.
+
+** Connection to MCMC noise parameters and buffer well data quality
+The Tecan "Gain" (PMT setting) is NOT directly the MCMC "gain" (Poisson
+scaling factor). The MCMC α (proportional noise) does not correlate with
+instrument gain or signal level:
+| Plate | y1 gain | y1 signal | α_y1  | σ_read_y1 |
+|-------|---------|-----------|-------|-----------|
+| L2    |      79 |      1285 | 0.057 |      18.2 |
+| L3    |      77 |       777 | 0.042 |       2.9 |
+| L4    |      76 |       645 | 0.102 |       2.7 |
+
+α_y1 ranking: L4 > L2 > L3 — opposite of signal level. This suggests
+α reflects sample-preparation quality (within-well pipetting consistency)
+rather than detector physics.
+
+*** Buffer well y1 drift: pH-sensitive autofluorescence (NOT evaporation)
+Experiment duration is ~30 min; both labels acquired simultaneously →
+evaporation is negligible. The drift in y1 buffer signals (~3000-4000 RFU)
+across pH steps reflects pH-sensitive autofluorescence of buffer components:
+small acid aliquots are added to buffer wells too (to maintain consistency),
+causing real pH changes → the buffer's intrinsic fluorescence at 400nm
+excitation responds to pH. This is correctly removed by the background
+subtraction at each pH step. The residual is NOT readout noise.
+
+y2 buffer wells (near noise floor, 30-90 RFU) are useful for σ_read estimation:
+| Plate | Clean buffer wells (y2) | σ_read_y2 from buffer | MCMC σ_read_y2 |
+|-------|------------------------|----------------------|----------------|
+| L2    | C12,D12,E12,F01        |               ~4.2   |           19.1 |
+| L3    | D01,D12,E01,E12        |               ~1.6   |            1.1 |
+| L4    | D12,E01,E12 (D01 excl) |               ~0.8   |            1.1 |
+
+For L3 and L4, buffer-derived σ_read_y2 matches MCMC within a factor of 2.
+
+*** Anomalous buffer wells (data quality issues)
+*L2 y2*: D01=146 RFU and E01=97 RFU at pH=6.563 (expected ~70 RFU both).
+Transient contamination at that pH step (bubble? micro-spill?). Background
+inflated by ~20 RFU at that step → all protein well y2 signals over-corrected
+by ~20 RFU at pH=6.56. This systematic residual cannot be fit by the model
+→ MCMC compensates with anomalously high σ_read_y2=19.1.
+Clean buffer (C12,D12,E12,F01) gives σ_read_y2≈4.2 RFU — more realistic.
+
+*L4 y2*: D01 signals decrease 170→137→94→63→48→37 RFU (pH 8.32→4.97) —
+a clear sigmoidal pH-sensitive response. This well contains fluorescent
+protein (likely mislabeled or cross-contaminated). Because D01 is included
+in the background mean, protein well y2 signals are over-corrected at high pH.
+At pH=8.32: bg_mean=70.2 (sd=57.6) vs expected 37 RFU → bg_err_mean=28.8 RFU!
+After excluding D01: bg_err_mean drops to 1.4 RFU. MCMC σ_read_y2=1.1 is
+reasonable and is not affected because the model fits protein signals post-bg.
+
+*L1 y1+y2*: Buffer signals are 16,000-29,000 RFU (y1) and 6,000-15,000 RFU
+(y2) due to very high PMT gain (94). Buffer wells show highly nonlinear
+pH-dependent fluorescence. After linear detrending, residual SD≈700 RFU (y1)
+and ≈350 RFU (y2) — dominated by the nonlinear background shape, not readout
+noise. The MCMC failed with 4433 divergences; L1 noise parameters unreliable.
+
+* TODO Per-well pH variation and CTR K spread
+** Background
+The `multi` MCMC model assumes all wells receive the same pH at each
+addition step (shared x_diff per step). The question is whether this
+assumption is valid or whether per-well pH adjustment is necessary.
+
+** Measured pH SD per step (reference wells, list_x_true.csv)
+pH is measured in 3-4 reference wells per addition step (mean ± SD).
+| Plate | midpoint-range pH SD (RMS) |
+|-------|--------------------------|
+| L2    | 0.018 ± 0.002 pH units   |
+| L3    | 0.018 ± 0.003 pH units   |
+| L4    | 0.021 ± 0.008 pH units   |
+
+MCMC x_diff posteriors are TIGHTER than measured SD — fluorescence data
+constrains pH more than 3-4 reference measurements alone.
+
+** CTR K spread (L3 cleanest plate)
+CTR wells contain the same protein → K spread reflects fitting precision.
+
+| CTR protein | n | std_K | mean_sK |
+|-------------|---|-------|---------|
+| E2GFP       | 4 | 0.113 |   0.064 |
+| V224Q       | 4 | 0.080 |   0.030 |
+| S202N       | 4 | 0.063 |   0.053 |
+
+** Key finding: fitting precision limit with 7 pH points
+The residual K spread in CTR wells (σ ≈ 0.07–0.09) is primarily due to
+the fundamental fitting uncertainty with only 7 pH data points and 3
+free parameters (K, S0, S1). The lmfit-reported sK understates the true
+per-well K uncertainty when the noise model is imperfect (chi²/dof >> 1);
+the true per-well K precision is ~0.07 pH.
+
+This is NOT primarily a pH spatial gradient — the measured pH SD per step
+(0.018) accounts for only ~0.018² / 0.08² ≈ 5% of the K variance.
+The dominant source is the Fisher-information limit with 7 data points.
+
+** Measured pH SD constrains what MCMC can recover
+The x_diff posterior SD ≈ measured pH SD at most steps, confirming MCMC
+recovers the pH uncertainty correctly.
+
+** multi_noise_xrw: physically correct per-well pH model
+The `multi_noise_xrw` model is the correct physical description of the
+titration:
+- Shares global x_true pH values per step (same plate, same buffer)
+- Models per-well cumulative deviations via a random walk:
+    z_pip[t, w] ~ Normal(0, 1)   for each step t>0 and well w
+    x_dev[:,w] = concat([0, cumsum(σ_pip · z_pip[:,w])])
+    x_per_well = x_nominal[:,None] + x_dev
+- σ_pip (default 0.02 pH units) = per-acid-addition pipetting precision
+- Cumulative: if at step i too much acid was added to well w, ALL steps
+  j>=i are shifted by the same direction. This matches the physics.
+
+Previous assessment that xrw "was worse" is likely WRONG — it reflects
+computational convergence issues, not model quality. The nutpie sampler
+failed to complete after 18 hours for multi_noise_xrw (blackjax/numpyro
+should be tried instead for JAX-based NUTS over ~80 wells × 6 steps =
+480 per-well pH parameters). The model is over-parameterized but physically
+motivated.
+
+** Optimal approach (updated)
+Use `multi_noise_xrw` for the primary analysis when computational resources
+allow (blackjax or numpyro recommended). For fast exploration, `multi_noise`
+with shared pH per step is a valid approximation given that pH SD (~0.018 per
+step) is small relative to the K precision limit (~0.07 pH).
+
+Before rerunning: exclude anomalous buffer wells (L2 D01/E01 at pH=6.56;
+L4 D01 y2 protein contamination) from background estimation.
 
 1. 1 label s0 s1 fissi no drop
 2. 1 lab
