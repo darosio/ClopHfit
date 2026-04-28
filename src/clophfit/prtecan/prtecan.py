@@ -784,6 +784,15 @@ class TitrationConfig:
     nuts_sampler: str = "default"
     n_mcmc_samples: int = 2000
     ctr_free_k: bool = False
+    noise_alpha: tuple[float, ...] = ()
+    """Proportional noise coefficients per label (y1, y2, ...).
+
+    When provided, adds an alpha^2*signal^2 term to the y_err^2 estimate so that
+    high-signal wells are appropriately down-weighted:
+        y_err^2 = signal + bg_err^2 + (alpha*signal)^2
+    Values from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).
+    Empty tuple disables the correction (legacy behaviour).
+    """
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -797,7 +806,11 @@ class TitrationConfig:
         if self._callback is not None:
             self._callback()
 
-    def __setattr__(self, name: str, value: bool | str | int | None) -> None:  # noqa: FBT001
+    def __setattr__(
+        self,
+        name: str,
+        value: bool | str | int | tuple[float, ...] | None,  # noqa: FBT001
+    ) -> None:
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
             super().__setattr__(name, value)
@@ -1769,13 +1782,16 @@ class Titration(TecanfilesGroup):
     def _create_data_array(self, key: str, label: int) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
-        alpha = 1
-        beta = 1
-        signal = np.maximum(1.0, alpha * y**beta)  # avoid Sqrt of negative values
+        signal = np.maximum(1.0, y)  # Poisson term (gain ≈ 1)
         if self.bg_err:
             y_errc = np.sqrt(signal + self.bg_err[label] ** 2)
         else:
             y_errc = np.sqrt(signal)
+        if self.params.noise_alpha:
+            label_idx = sorted(self.data.keys()).index(label)
+            if label_idx < len(self.params.noise_alpha):
+                alpha = self.params.noise_alpha[label_idx]
+                y_errc = np.sqrt(y_errc**2 + (alpha * np.abs(y)) ** 2)
         return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def _create_ds(self, key: str, label: int) -> Dataset:
