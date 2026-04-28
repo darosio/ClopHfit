@@ -348,6 +348,82 @@ Extended:
 - *1-label single fit*: fit_binding_glob(ds) — standard WLS, Huber unsafe.
 - *Fallback (no bg_err)*: weight_multi_ds_titration() then glob_ls — safe path.
 
+* DONE Real-data comparison: L2 and L4 plates (2026)
+scripts/compare_methods.sh + scripts/compare_methods.py
+Sampler: default (pytensor/CPU), 2000 draw samples, 4 chains.
+
+** Fit-method results (lb0–lb3)
+
+*** lb0 (y1 only — noisy, 10× higher uncertainty, frequent low-pH outliers)
+| Method      |  L2 std |  L4 std |
+|-------------|---------|---------|
+| lm          |   1.119 |   0.978 |
+| irls/wls/it |   1.092 |   0.965 |
+| huber       |   1.010 |   0.913 |
+| outlier_2.5 |   1.010 |   0.913 |
+| outlier_2.0 |   1.005 |   0.894 |
+
+*** lb2 (global, both labels — production path)
+| Method      |  L2 std |  L4 std |
+|-------------|---------|---------|
+| irls/wls/it |   0.288 |   0.388 |
+| lm          |   0.291 |   0.379 |
+| huber       |   0.281 |   0.378 |
+| outlier_2.5 |   0.281 |   0.378 |
+| outlier_2.0 |   0.281 |   0.380 |
+
+** Key fit-method findings
+1. *huber consistently best*: 10% std reduction vs lm on noisy lb0; equal or
+   slightly better than lm on clean lb1/lb2/lb3 for all plates.
+2. *irls/wls/iterative produce identical outputs* — all three implement the
+   same IRLS algorithm on these data. They are worse than both lm and huber
+   on lb2. → Retire wls and iterative; keep irls as the documented alias.
+3. *Outlier removal at zscore 3.0 and 2.5 is identical to plain huber* — no
+   real outliers are removed at those thresholds in L2/L4 data. zscore 2.0
+   gives marginal improvement on noisy lb0 only (~1% std reduction).
+4. Recommendation: use huber as the sole fit method; offer outlier at zscore
+   2.0 as an optional stricter mode for lb0-only analyses.
+
+** MCMC-mode results (lb4, huber seeding)
+
+| Mode            |  L2 std | L2 div |  L4 std | L4 div |
+|-----------------|---------|--------|---------|--------|
+| single          |   0.289 |   47+  |   0.381 |   44+  |
+| multi           | *0.245* |      0 |   0.364 |      0 |
+| multi-noise     |   0.277 |      0 | *0.355* |      0 |
+| multi-noise-xrw |   0.293 |      0 |   0.381 |      0 |
+| huber-lb2       |   0.281 |    n/a |   0.378 |    n/a |
+
+** Key MCMC findings
+1. *single mode is deprecated*: 44-47+ divergences per plate — posterior
+   geometry is poor (banana-shaped) with only 7-13 pH points per well.
+   Hierarchical models fix the geometry completely (0 divergences).
+2. *multi is best for L2* (std 0.245, −15% vs huber-lb2): tight pH calibration
+   means the shared-pH-per-step model is appropriate.
+3. *multi-noise is best for L4* (std 0.355, −6% vs huber-lb2): the per-step
+   noise term accommodates slightly more pH variability between wells.
+4. *multi-noise-xrw does NOT help*: for L2 it is WORSE than single (std 0.293
+   vs 0.289); for L4 it equals single (both 0.381). The per-well pH random
+   walk adds unnecessary uncertainty when pH is well-calibrated by additions.
+   xrw may be appropriate only when individual well pH was NOT measured.
+5. *Sampler viability*: only the default pytensor/CPU sampler is reliable for
+   all modes. nutpie hangs on hierarchical (multi+), numpyro is broken (JAX
+   version mismatch), blackjax works for single only (CPU fallback after OOM).
+
+** Bugs fixed during this comparison
+- fix(bayes): weighted_stats called with mismatched lengths in
+  fit_binding_pymc_multi_noise_xrw — values included all wells with r.result
+  but stderr_ additionally excluded None-stderr wells, causing
+  "zip() argument 2 is shorter than argument 1" for H04 (OVER values). Fixed
+  in commit b542fa8.
+- fix(scripts): SIGPIPE false-positive in sampler benchmark — head -5 in a
+  pipefail shell caused ppr to appear failed. Fixed via temp file. (commit 68583c2)
+
+** Recommended defaults
+- Deterministic: fit_binding_glob(ds, method="huber")  (lb2, both labels)
+- MCMC: multi or multi-noise (plate-dependent; multi when pH well-calibrated)
+- Retire: irls, wls, iterative (redundant); single (divergences); multi-noise-xrw
+
 * simulation
 1. 1 label s0 s1 fissi no drop
 2. 1 lab
