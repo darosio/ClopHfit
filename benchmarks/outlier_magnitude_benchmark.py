@@ -74,7 +74,7 @@ def run_fits(ds: Dataset) -> dict[str, tuple[float, float]]:
 
     # Standard WLS
     try:
-        r = fit_binding_glob(copy.deepcopy(ds), robust=False)
+        r = fit_binding_glob(copy.deepcopy(ds))
         if r.result:
             results["lm_standard"] = (
                 r.result.params["K"].value,
@@ -85,7 +85,7 @@ def run_fits(ds: Dataset) -> dict[str, tuple[float, float]]:
 
     # Robust (Huber)
     try:
-        r = fit_binding_glob(copy.deepcopy(ds), robust=True)
+        r = fit_binding_glob(copy.deepcopy(ds), method="huber")
         if r.result:
             results["lm_robust"] = (
                 r.result.params["K"].value,

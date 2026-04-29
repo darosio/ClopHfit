@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from lmfit import Parameters  # type: ignore[import-untyped]
-from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
+from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
 
 from clophfit.fitting.bayes import (
@@ -22,7 +22,6 @@ from clophfit.fitting.bayes import (
 from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
-    outlier2,
     weight_da,
     weight_multi_ds_titration,
 )
@@ -642,10 +641,10 @@ def test_error_messages() -> None:
 
 
 ###############################################################################
-# outlier2() tests
+# fit_binding_glob(..., remove_outliers=...) tests
 ###############################################################################
 
-# Test parameters for outlier2
+# Test parameters for outlier-removal coverage
 _TRUE_K = 7.0
 _TRUE_S0_Y1, _TRUE_S1_Y1 = 600.0, 50.0
 _TRUE_S0_Y2, _TRUE_S1_Y2 = 500.0, 40.0
@@ -662,7 +661,7 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     outlier_idx: int = 2,
     outlier_magnitude: float = 5.0,
 ) -> Dataset:
-    """Create synthetic dual-channel pH titration dataset for outlier2 tests."""
+    """Create synthetic dual-channel pH titration dataset for outlier tests."""
     rng = np.random.default_rng(seed)
 
     x = np.linspace(5.5, 9.0, n_points)
@@ -689,13 +688,24 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     return Dataset({"y1": da1, "y2": da2}, is_ph=True)
 
 
-class TestOutlier2:
-    """Tests for outlier2() function."""
+def _fit_binding_glob_huber_outlier(
+    ds: Dataset, *, threshold: float = 2.5
+) -> FitResult[Minimizer]:
+    """Run the supported robust fit with z-score outlier removal."""
+    return fit_binding_glob(
+        ds,
+        method="huber",
+        remove_outliers=f"zscore:{threshold}:5",
+    )
+
+
+class TestFitBindingGlobOutlierRemoval:
+    """Tests for the supported outlier-removal fit configuration."""
 
     def test_returns_fit_result(self) -> None:
-        """outlier2 should return a valid FitResult."""
+        """The robust outlier-removal fit should return a valid FitResult."""
         ds = _create_synthetic_dataset()
-        fr = outlier2(ds, key="test")
+        fr = _fit_binding_glob_huber_outlier(ds)
 
         assert fr.result is not None
         assert "K" in fr.result.params
@@ -703,38 +713,18 @@ class TestOutlier2:
     def test_k_estimate_reasonable(self) -> None:
         """K estimate should be close to true value."""
         ds = _create_synthetic_dataset(seed=123)
-        fr = outlier2(ds, key="test")
+        fr = _fit_binding_glob_huber_outlier(ds)
 
         assert fr.result is not None
         k_est = fr.result.params["K"].value
         assert abs(k_est - _TRUE_K) < 0.5
-
-    def test_uniform_error_model(self) -> None:
-        """Uniform error model should assign constant errors per label."""
-        ds = _create_synthetic_dataset()
-        fr = outlier2(ds, key="test", error_model="uniform")
-
-        assert fr.dataset is not None
-        for da in fr.dataset.values():
-            np.testing.assert_allclose(da.y_err, da.y_err[0] * np.ones_like(da.y_err))
-
-    def test_shotnoise_error_model(self) -> None:
-        """Shot-noise error model should preserve relative error structure."""
-        ds = _create_synthetic_dataset()
-        original_ratio_y1 = ds["y1"].y_err[0] / ds["y1"].y_err[-1]
-
-        fr = outlier2(ds, key="test", error_model="shot-noise")
-
-        assert fr.dataset is not None
-        new_ratio_y1 = fr.dataset["y1"].y_err[0] / fr.dataset["y1"].y_err[-1]
-        np.testing.assert_allclose(original_ratio_y1, new_ratio_y1, rtol=0.1)
 
     def test_detects_outlier_in_y1(self) -> None:
         """Should detect large outlier in y1."""
         ds = _create_synthetic_dataset(
             add_outlier=True, outlier_label="y1", outlier_idx=3, outlier_magnitude=10.0
         )
-        fr = outlier2(ds, key="test", threshold=2.5)
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
 
         assert fr.dataset is not None
         assert len(fr.dataset["y1"].y) < 7
@@ -744,7 +734,7 @@ class TestOutlier2:
         ds = _create_synthetic_dataset(
             add_outlier=True, outlier_label="y2", outlier_idx=4, outlier_magnitude=10.0
         )
-        fr = outlier2(ds, key="test", threshold=2.5)
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
 
         assert fr.dataset is not None
         assert len(fr.dataset["y2"].y) < 7
@@ -752,7 +742,7 @@ class TestOutlier2:
     def test_no_false_positives_clean_data(self) -> None:
         """Should not remove points from clean data."""
         ds = _create_synthetic_dataset(add_outlier=False, seed=42)
-        fr = outlier2(ds, key="test", threshold=3.0)
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=3.0)
 
         assert fr.dataset is not None
         assert len(fr.dataset["y1"].y) == 7
@@ -761,7 +751,7 @@ class TestOutlier2:
     def test_correct_residual_slicing(self) -> None:
         """Residuals should be correctly sliced for each label."""
         ds = _create_synthetic_dataset()
-        fr_init = fit_binding_glob(ds, robust=True)
+        fr_init = fit_binding_glob(ds, method="huber")
         assert fr_init.result is not None
 
         total_residuals = len(fr_init.result.residual)
@@ -778,7 +768,7 @@ class TestOutlier2:
         da = DataArray(x, y, x_errc=0.05 * np.ones_like(x), y_errc=y_err)
         ds = Dataset({"y1": da}, is_ph=True)
 
-        fr = outlier2(ds, key="test")
+        fr = _fit_binding_glob_huber_outlier(ds)
         assert fr.result is not None
 
     def test_deterministic_output(self) -> None:
@@ -786,8 +776,8 @@ class TestOutlier2:
         ds1 = _create_synthetic_dataset(seed=42)
         ds2 = _create_synthetic_dataset(seed=42)
 
-        fr1 = outlier2(ds1, key="test")
-        fr2 = outlier2(ds2, key="test")
+        fr1 = _fit_binding_glob_huber_outlier(ds1)
+        fr2 = _fit_binding_glob_huber_outlier(ds2)
 
         assert fr1.result is not None
         assert fr2.result is not None

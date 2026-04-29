@@ -51,17 +51,14 @@ import copy
 import logging
 import os
 import typing
-import warnings
 from sys import float_info
 
 import lmfit  # type: ignore[import-untyped]
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lmfit import Parameters
 from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
 from matplotlib import figure
-from scipy import stats
 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import InsufficientDataError
@@ -82,7 +79,7 @@ from clophfit.fitting.plotting import (
 from .data_structures import FitResult, SpectraGlobResults
 
 if typing.TYPE_CHECKING:
-    from clophfit.clophfit_types import ArrayF, ArrayMask
+    from clophfit.clophfit_types import ArrayF
 
 
 # --- Globals ---
@@ -366,7 +363,7 @@ def _parse_remove_outliers(spec: str) -> tuple[str, float, int]:
     return method, threshold, min_keep
 
 
-def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def fit_binding_glob(  # noqa: PLR0913, PLR0915
     ds: Dataset,
     *,
     method: str = "lm",
@@ -375,8 +372,6 @@ def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
     max_iter: int = 15,
     tol: float = 0.01,
     scale_covar: bool = True,
-    # -- deprecated aliases --
-    robust: bool | None = None,
 ) -> FitResult[Minimizer]:
     r"""Analyze multi-label titration datasets and visualize the results.
 
@@ -409,11 +404,6 @@ def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
         the improvement drops below this value.  Default is 0.01.
     scale_covar : bool, optional
         Whether to scale the covariance matrix.  Default is ``True``.
-    robust : bool | None, optional
-        .. deprecated::
-            Use ``method="huber"`` instead.
-
-        If ``True``, uses Huber loss.  Defaults to ``False``.
 
     Returns
     -------
@@ -436,17 +426,6 @@ def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
     weight = 1/y_err.  This is appropriate for heteroscedastic data where
     different observations have different uncertainties.
     """
-    # Deprecated *robust* parameter -> method
-    if robust is not None:
-        warnings.warn(
-            "The 'robust' parameter is deprecated.  "
-            "Use fit_binding_glob(ds, method='huber') instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if robust:
-            method = "huber"
-
     params = _build_params_1site(ds)
     total_len = sum(len(da.y) for da in ds.values())
     if len(params) > total_len:
@@ -532,95 +511,6 @@ def fit_binding_glob(  # noqa: C901, PLR0912, PLR0913, PLR0915
     return FitResult(fig, result, mini, copy.deepcopy(ds_working))
 
 
-# ---- outlier2 (deprecated wrapper) ----
-
-
-def outlier2(
-    ds: Dataset,
-    key: str = "",
-    threshold: float = 3.0,
-    *,
-    plot_z_scores: bool = False,
-    error_model: str = "uniform",
-) -> FitResult[Minimizer]:
-    """Remove outliers and reassign weights.
-
-    .. deprecated::
-        Use :func:`fit_binding_glob` with ``method="huber"`` and
-        ``remove_outliers`` instead.
-
-    Parameters
-    ----------
-    ds : Dataset
-        Input dataset.
-    key : str
-        Identifier for logging.
-    threshold : float
-        Z-score threshold for outlier detection.
-    plot_z_scores : bool
-        Whether to plot z-scores.
-    error_model : str
-        Error reweighting model: ``"uniform"`` assigns uniform errors per
-        label, ``"shot-noise"`` rescales physical errors preserving relative
-        structure.
-
-    Returns
-    -------
-    FitResult[Minimizer]
-    """
-    warnings.warn(
-        "outlier2() is deprecated.  Use fit_binding_glob(ds, method='huber', "
-        "remove_outliers='zscore:2.5:5') instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-
-    fr = fit_binding_glob(ds, method="huber")
-    if not fr.result:
-        return FitResult()
-
-    reweighted_ds = copy.deepcopy(ds)
-    start_idx = 0
-    for da0, da in zip(ds.values(), reweighted_ds.values(), strict=True):
-        end_idx = start_idx + len(da.y)
-        reduced_residual = fr.result.residual[start_idx:end_idx]
-        residual_vals = np.abs(reduced_residual) * da0.y_err
-
-        if error_model == "shot-noise":
-            scale = float(np.mean(np.abs(reduced_residual)))
-            scale = max(scale, 1e-3)
-            da.y_errc = da0.y_errc * scale
-        else:
-            sigma = float(np.mean(np.abs(residual_vals)))
-            sigma = max(sigma, 1e-3)
-            da.y_errc = sigma * np.ones_like(da.xc)
-        start_idx = end_idx
-
-    fr = fit_binding_glob(reweighted_ds)
-    if not fr.result:
-        return FitResult()
-
-    weighted_residuals = fr.result.residual
-    weights = np.concatenate([1.0 / da.y_err for da in reweighted_ds.values()])
-    raw_residuals = weighted_residuals / weights
-    z_scores = stats.zscore(raw_residuals)
-    # NaN z-scores arise when all residuals are identical (e.g. noise=0, perfect fit).
-    # Treat them as 0 so no points are incorrectly flagged as outliers.
-    z_scores = np.where(np.isnan(z_scores), 0.0, z_scores)
-
-    if plot_z_scores:
-        plt.scatter(range(len(z_scores)), z_scores)
-        plt.axhline(y=threshold, color="r", linestyle="-")
-        plt.axhline(y=-threshold, color="r", linestyle="-")
-        plt.title("Z-scores")
-    mask = np.abs(z_scores) < threshold
-    n_outliers = int(mask.tolist().count(False))
-    if n_outliers > 0:
-        reweighted_ds.apply_mask(mask)
-        logger.warning("outlier in %s: %s.", key, mask.astype(int))
-    return fit_binding_glob(reweighted_ds)
-
-
 # ---- Legacy helper ----
 
 
@@ -635,183 +525,6 @@ def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
     return updated_ds
 
 
-def outlier_glob(
-    residuals: ArrayF,
-    *,
-    threshold: float = 2.0,
-    plot_z_scores: bool = False,
-) -> ArrayMask:
-    """Identify outliers by z-score."""
-    mean_r = float(np.mean(residuals))
-    std_r = float(np.std(residuals))
-    if std_r == 0:
-        return np.zeros(len(residuals), dtype=bool)
-    z_scores = np.abs((residuals - mean_r) / std_r)
-    if plot_z_scores:
-        plt.scatter(range(len(z_scores)), z_scores)
-        plt.axhline(y=threshold, color="r", linestyle="-")
-        plt.title("Z-scores")
-    return np.array(z_scores > threshold)
-
-
-# ---- Deprecated forwarders ----
-
-
-def fit_binding_glob_reweighted(
-    ds: Dataset, key: str = "", threshold: float = 2.05
-) -> FitResult[Minimizer]:
-    """RLS and outlier removal multi-label titration datasets.
-
-    .. deprecated::
-        Use :func:`fit_binding_glob` with ``reweight="irls"`` and
-        ``remove_outliers="zscore:<threshold>:0"`` instead.
-
-    Parameters
-    ----------
-    ds : Dataset
-        Input dataset.
-    key : str
-        Identifier for logging.
-    threshold : float
-        Z-score threshold for outlier detection.
-
-    Returns
-    -------
-    FitResult[Minimizer]
-    """
-    warnings.warn(
-        "fit_binding_glob_reweighted() is deprecated. "
-        "Use fit_binding_glob(ds, reweight='irls', "
-        f"remove_outliers=f'zscore:{threshold}:0') instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    r = fit_binding_glob(ds)
-    if r.dataset is None or r.result is None:
-        return FitResult()
-
-    start_idx = 0
-    for da0, da in zip(ds.values(), r.dataset.values(), strict=True):
-        end_idx = start_idx + len(da.y)
-        label_res = r.result.residual[start_idx:end_idx]
-        da.y_errc[da.mask] = np.abs(label_res) * da0.y_err
-        mask = outlier_glob(label_res, threshold=threshold)
-        n_outliers = int(mask.tolist().count(True))
-        if n_outliers >= 1:
-            logger.warning("%s outliers in %s.", n_outliers, key or "")
-        da.mask[da.mask] = ~mask
-        start_idx = end_idx
-
-    return fit_binding_glob(r.dataset)
-
-
-def fit_binding_glob_recursive(
-    ds: Dataset, max_iterations: int = 15, tol: float = 0.1
-) -> FitResult[Minimizer]:
-    """Analyze multi-label titration datasets using ODR.
-
-    .. deprecated::
-        Use :func:`fit_binding_glob` with ``reweight="iterative"`` and
-        ``max_iter`` instead.
-
-    Parameters
-    ----------
-    ds : Dataset
-        Input dataset.
-    max_iterations : int
-        Maximum number of iterations.
-    tol : float
-        Convergence tolerance on reduced chi-squared change.
-
-    Returns
-    -------
-    FitResult[Minimizer]
-    """
-    warnings.warn(
-        "fit_binding_glob_recursive() is deprecated. "
-        "Use fit_binding_glob(ds, reweight='iterative', max_iter=max_iterations, "
-        "tol=tol) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    r = fit_binding_glob(ds)
-
-    for _ in range(max_iterations):
-        if r.dataset is None or r.result is None:
-            break
-
-        # Reweight errors using residuals from the CURRENT fit
-        # We compute per-label offsets relative to the start of each label
-        # within the current r.result.residual
-        start_idx = 0
-        for da in r.dataset.values():
-            end_idx = start_idx + len(da.y)
-            # Check that our computed region fits within the available residuals
-            if r.result.residual is not None and end_idx <= len(r.result.residual):
-                label_res = r.result.residual[start_idx:end_idx]
-                n_unmasked = int(da.mask.sum())
-                # Only assign if there are unmasked data points to update
-                if n_unmasked > 0:
-                    da.y_errc[da.mask] = np.maximum(np.abs(label_res), 0.01)
-            start_idx = end_idx
-
-        rn = fit_binding_glob(r.dataset)
-        if rn.result is None or rn.mini is None:
-            break
-        if rn.result.redchi == 0:
-            break
-        if r.result and r.result.redchi - rn.result.redchi < tol:
-            break
-        r = rn
-
-    return r
-
-
-def fit_binding_glob_recursive_outlier(
-    ds: Dataset, tol: float = 0.01, threshold: float = 3.0
-) -> FitResult[Minimizer]:
-    """Analyze multi-label titration datasets using IRLS.
-
-    .. deprecated::
-        Use :func:`fit_binding_glob` with ``reweight="irls"`` and
-        ``remove_outliers="zscore:<threshold>:min_keep"`` instead.
-
-    Parameters
-    ----------
-    ds : Dataset
-        Input dataset.
-    tol : float
-        Convergence tolerance on reduced chi-squared change.
-    threshold : float
-        Z-score threshold for outlier detection.
-
-    Returns
-    -------
-    FitResult[Minimizer]
-    """
-    warnings.warn(
-        "fit_binding_glob_recursive_outlier() is deprecated. "
-        "Use fit_binding_glob(ds, reweight='irls', "
-        f"remove_outliers=f'zscore:{threshold}:0') instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    r = fit_binding_glob_recursive(ds, tol=tol)
-    if r.result is None:
-        mask = np.array([], dtype=bool)
-    else:
-        mask = outlier_glob(r.result.residual, threshold=threshold)
-    while np.any(mask) and getattr(r, "dataset", None) is not None:
-        ds_filtered = copy.deepcopy(ds)
-        ds_filtered.apply_mask(~mask)
-        r = fit_binding_glob_recursive(ds_filtered, tol=tol)
-        if r.result is not None:
-            mask = outlier_glob(r.result.residual, threshold=threshold)
-        else:
-            mask = np.array([], dtype=bool)
-    return r
-
-
 # ---- Public API ----
 
 __all__ = [
@@ -824,12 +537,6 @@ __all__ = [
     "analyze_spectra_glob",
     # Fitting
     "fit_binding_glob",
-    "fit_binding_glob_recursive",
-    "fit_binding_glob_recursive_outlier",
-    # Legacy (deprecated) fitting functions
-    "fit_binding_glob_reweighted",
-    "outlier2",
-    "outlier_glob",
     # Weight estimation
     "weight_da",
     "weight_multi_ds_titration",

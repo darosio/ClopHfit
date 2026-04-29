@@ -20,10 +20,7 @@ import numpy as np
 import pandas as pd
 
 from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    outlier2,
-)
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.testing.synthetic import make_dataset
 
 
@@ -119,21 +116,23 @@ def run_all_methods_on_scenario(
 
     # Define methods to test
     def run_bayesian_shared(ds):
-        lm_result = fit_binding_glob(ds, robust=False)
+        lm_result = fit_binding_glob(ds)
         if lm_result.result and lm_result.result.success:
             return fit_binding_pymc(lm_result, n_samples=1000)
         return lm_result
 
     def run_bayesian_perlabel(ds):
-        lm_result = fit_binding_glob(ds, robust=False)
+        lm_result = fit_binding_glob(ds)
         if lm_result.result and lm_result.result.success:
             return fit_binding_pymc2(lm_result, n_samples=1000)
         return lm_result
 
     methods = {
-        "Standard LM": lambda ds: fit_binding_glob(ds, robust=False),
-        "Robust Huber": lambda ds: fit_binding_glob(ds, robust=True),
-        "Outlier2": lambda ds: outlier2(ds, key="stress"),
+        "Standard LM": lambda ds: fit_binding_glob(ds),
+        "Robust Huber": lambda ds: fit_binding_glob(ds, method="huber"),
+        "Huber+Outlier": lambda ds: fit_binding_glob(
+            ds, method="huber", remove_outliers="zscore:2.5:5"
+        ),
         # "Bayesian-Shared": run_bayesian_shared,
         # "Bayesian-PerLabel": run_bayesian_perlabel,
     }

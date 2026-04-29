@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from clophfit.fitting.core import fit_binding_glob, outlier2
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.odr import (
@@ -117,10 +117,11 @@ def extract_metrics(fr: FitResult, ds_original: Dataset) -> FitMetrics:
 def build_fitters() -> dict[str, callable]:
     """Build dictionary of all fitting methods."""
     return {
-        "lm_standard": lambda ds: fit_binding_glob(ds, robust=False),
-        "lm_robust": lambda ds: fit_binding_glob(ds, robust=True),
-        "outlier2_uniform": lambda ds: outlier2(ds, error_model="uniform"),
-        "outlier2_shotnoise": lambda ds: outlier2(ds, error_model="shot-noise"),
+        "lm_standard": lambda ds: fit_binding_glob(ds),
+        "lm_robust": lambda ds: fit_binding_glob(ds, method="huber"),
+        "huber_outlier": lambda ds: fit_binding_glob(
+            ds, method="huber", remove_outliers="zscore:2.5:5"
+        ),
         "odr_single": lambda ds: fit_binding_odr(ds),
         "odr_recursive": lambda ds: fit_binding_odr_recursive(ds, max_iterations=10),
         "odr_recursive_outlier": lambda ds: fit_binding_odr_recursive_outlier(

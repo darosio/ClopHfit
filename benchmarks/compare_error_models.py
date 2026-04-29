@@ -41,10 +41,6 @@ from scipy import stats
 from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_recursive,
-    fit_binding_glob_recursive_outlier,
-    fit_binding_glob_reweighted,
-    outlier2,
     weight_multi_ds_titration,
 )
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
@@ -231,37 +227,45 @@ def fit_all_methods(
 
     # Method 1: Physics-informed errors (keep original y_err)
     ds_physics = copy.deepcopy(ds)
-    fr_physics = fit_binding_glob(ds_physics, robust=False)
+    fr_physics = fit_binding_glob(ds_physics)
     results["lm_physics"] = extract_K(fr_physics)
 
     # Method 2: Physics with robust fitting
     ds_robust = copy.deepcopy(ds)
-    fr_robust = fit_binding_glob(ds_robust, robust=True)
+    fr_robust = fit_binding_glob(ds_robust, method="huber")
     results["lm_robust"] = extract_K(fr_robust)
 
     # Method 3: outlier2 with uniform error model
     ds_out2_uni = copy.deepcopy(ds)
-    fr_out2_uni = outlier2(ds_out2_uni, key=key, error_model="uniform")
+    fr_out2_uni = fit_binding_glob(
+        ds_out2_uni, method="huber", remove_outliers="zscore:2.5:5"
+    )
     results["outlier2_uniform"] = extract_K(fr_out2_uni)
 
     # Method 4: outlier2 with shot-noise error model
     ds_out2_shot = copy.deepcopy(ds)
-    fr_out2_shot = outlier2(ds_out2_shot, key=key, error_model="shot-noise")
+    fr_out2_shot = fit_binding_glob(
+        ds_out2_shot, method="huber", remove_outliers="zscore:2.5:5"
+    )
     results["outlier2_shotnoise"] = extract_K(fr_out2_shot)
 
     # Method 5: Reweighted fitting
     ds_reweight = copy.deepcopy(ds)
-    fr_reweight = fit_binding_glob_reweighted(ds_reweight, key=key, threshold=2.5)
+    fr_reweight = fit_binding_glob(
+        ds_reweight, reweight="irls", remove_outliers="zscore:2.5:0"
+    )
     results["lm_reweighted"] = extract_K(fr_reweight)
 
     # Method 6: Recursive fitting
     ds_recursive = copy.deepcopy(ds)
-    fr_recursive = fit_binding_glob_recursive(ds_recursive, tol=0.01)
+    fr_recursive = fit_binding_glob(ds_recursive, reweight="iterative", tol=0.01)
     results["lm_recursive"] = extract_K(fr_recursive)
 
     # Method 7: Recursive with outlier detection
     ds_rec_out = copy.deepcopy(ds)
-    fr_rec_out = fit_binding_glob_recursive_outlier(ds_rec_out, tol=0.01, threshold=3.0)
+    fr_rec_out = fit_binding_glob(
+        ds_rec_out, reweight="irls", remove_outliers="zscore:3.0:0", tol=0.01
+    )
     results["lm_recursive_outlier"] = extract_K(fr_rec_out)
 
     # Method 8: weight_da (SEM-based)
@@ -269,7 +273,7 @@ def fit_all_methods(
     for da in ds_weight.values():
         da.y_errc = np.ones_like(da.xc)
     weight_multi_ds_titration(ds_weight)
-    fr_weight = fit_binding_glob(ds_weight, robust=False)
+    fr_weight = fit_binding_glob(ds_weight)
     results["lm_weight_da"] = extract_K(fr_weight)
 
     # === ODR-based methods ===
@@ -371,8 +375,12 @@ def analyze_residuals(
     """Analyze residual distributions for heteroscedasticity testing."""
     methods = {
         "lm_physics": fit_binding_glob(copy.deepcopy(ds)),
-        "outlier2_uniform": outlier2(copy.deepcopy(ds), key, error_model="uniform"),
-        "outlier2_shotnoise": outlier2(copy.deepcopy(ds), key, error_model="shot-noise"),
+        "outlier2_uniform": fit_binding_glob(
+            copy.deepcopy(ds), method="huber", remove_outliers="zscore:2.5:5"
+        ),
+        "outlier2_shotnoise": fit_binding_glob(
+            copy.deepcopy(ds), method="huber", remove_outliers="zscore:2.5:5"
+        ),
     }
 
     results = {}

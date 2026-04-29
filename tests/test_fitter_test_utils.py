@@ -270,7 +270,6 @@ class TestFitterBuilding:
             "glob_irls",
             "glob_iterative",
             "glob_iterative_outlier",
-            "outlier2",
         }
         assert set(fitters.keys()) == expected_keys
 
@@ -289,7 +288,6 @@ class TestFitterBuilding:
             "glob_irls",
             "glob_iterative",
             "glob_iterative_outlier",
-            "outlier2",
             "odr_recursive_outlier",
         }
         assert set(fitters.keys()) == expected_keys

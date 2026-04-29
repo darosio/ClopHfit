@@ -18,10 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    outlier2,
-)
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.odr import (
     fit_binding_odr_recursive,
     fit_binding_odr_recursive_outlier,
@@ -140,16 +137,23 @@ def test_all_methods(tit: Titration, well_key: str) -> dict[str, dict]:
         (
             "Standard LM",
             fit_binding_glob,
-            lambda d: fit_binding_glob(d, robust=False),
+            lambda d: fit_binding_glob(d),
             False,
         ),
         (
             "Robust Huber",
             fit_binding_glob,
-            lambda d: fit_binding_glob(d, robust=True),
+            lambda d: fit_binding_glob(d, method="huber"),
             False,
         ),
-        ("Outlier2", outlier2, outlier2, True),
+        (
+            "Huber+Outlier",
+            fit_binding_glob,
+            lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
+            False,
+        ),
         ("ODR-Recursive", fit_binding_odr_recursive, fit_binding_odr_recursive, False),
         (
             "ODR-Recursive+Outlier",

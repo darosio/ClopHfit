@@ -25,10 +25,6 @@ from scipy import stats
 
 from clophfit.fitting.core import (
     fit_binding_glob,
-    fit_binding_glob_recursive,
-    fit_binding_glob_recursive_outlier,
-    fit_binding_glob_reweighted,
-    outlier2,
 )
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.models import binding_1site
@@ -424,17 +420,23 @@ def run_synthetic_comparison(
         )
 
         methods = {
-            "lm_standard": lambda d: fit_binding_glob(d, robust=False),
-            "lm_robust": lambda d: fit_binding_glob(d, robust=True),
-            "lm_reweighted": lambda d: fit_binding_glob_reweighted(
-                d, key=f"trial_{trial}", threshold=2.5
+            "lm_standard": lambda d: fit_binding_glob(d),
+            "lm_robust": lambda d: fit_binding_glob(d, method="huber"),
+            "lm_reweighted": lambda d: fit_binding_glob(
+                d, reweight="irls", remove_outliers="zscore:2.5:0"
             ),
-            "lm_recursive": lambda d: fit_binding_glob_recursive(d, tol=0.01),
-            "lm_recursive_outlier": lambda d: fit_binding_glob_recursive_outlier(
-                d, tol=0.01, threshold=3.0
+            "lm_recursive": lambda d: fit_binding_glob(
+                d, reweight="iterative", tol=0.01
             ),
-            "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
-            "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
+            "lm_recursive_outlier": lambda d: fit_binding_glob(
+                d, reweight="irls", remove_outliers="zscore:3.0:0", tol=0.01
+            ),
+            "outlier2_uniform": lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
+            "outlier2_shotnoise": lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
         }
 
         for method_name, method_func in methods.items():
@@ -576,17 +578,23 @@ def run_real_data_comparison(data_dir: Path) -> pd.DataFrame:
                 continue
 
             methods = {
-                "lm_standard": lambda d: fit_binding_glob(d, robust=False),
-                "lm_robust": lambda d: fit_binding_glob(d, robust=True),
-                "lm_reweighted": lambda d: fit_binding_glob_reweighted(
-                    d, key=well_key, threshold=2.5
+                "lm_standard": lambda d: fit_binding_glob(d),
+                "lm_robust": lambda d: fit_binding_glob(d, method="huber"),
+                "lm_reweighted": lambda d: fit_binding_glob(
+                    d, reweight="irls", remove_outliers="zscore:2.5:0"
                 ),
-                "lm_recursive": lambda d: fit_binding_glob_recursive(d, tol=0.01),
-                "lm_recursive_outlier": lambda d: fit_binding_glob_recursive_outlier(
-                    d, tol=0.01, threshold=3.0
+                "lm_recursive": lambda d: fit_binding_glob(
+                    d, reweight="iterative", tol=0.01
                 ),
-                "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
-                "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
+                "lm_recursive_outlier": lambda d: fit_binding_glob(
+                    d, reweight="irls", remove_outliers="zscore:3.0:0", tol=0.01
+                ),
+                "outlier2_uniform": lambda d: fit_binding_glob(
+                    d, method="huber", remove_outliers="zscore:2.5:5"
+                ),
+                "outlier2_shotnoise": lambda d: fit_binding_glob(
+                    d, method="huber", remove_outliers="zscore:2.5:5"
+                ),
             }
 
             for method_name, method_func in methods.items():
@@ -763,17 +771,23 @@ def run_synthetic_with_outliers(
         ds = generate_synthetic_data(pKa=pKa_true, add_outliers=True, rng=rng)
 
         methods = {
-            "lm_standard": lambda d: fit_binding_glob(d, robust=False),
-            "lm_robust": lambda d: fit_binding_glob(d, robust=True),
-            "lm_reweighted": lambda d: fit_binding_glob_reweighted(
-                d, key=f"trial_{trial}", threshold=2.5
+            "lm_standard": lambda d: fit_binding_glob(d),
+            "lm_robust": lambda d: fit_binding_glob(d, method="huber"),
+            "lm_reweighted": lambda d: fit_binding_glob(
+                d, reweight="irls", remove_outliers="zscore:2.5:0"
             ),
-            "lm_recursive": lambda d: fit_binding_glob_recursive(d, tol=0.01),
-            "lm_recursive_outlier": lambda d: fit_binding_glob_recursive_outlier(
-                d, tol=0.01, threshold=3.0
+            "lm_recursive": lambda d: fit_binding_glob(
+                d, reweight="iterative", tol=0.01
             ),
-            "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
-            "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
+            "lm_recursive_outlier": lambda d: fit_binding_glob(
+                d, reweight="irls", remove_outliers="zscore:3.0:0", tol=0.01
+            ),
+            "outlier2_uniform": lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
+            "outlier2_shotnoise": lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
         }
 
         for method_name, method_func in methods.items():

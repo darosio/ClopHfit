@@ -19,10 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    outlier2,
-)
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.models import binding_1site
 
@@ -99,10 +96,11 @@ def run_comparison(n_trials: int = 100, add_outliers: bool = False, seed: int = 
         ds = generate_synthetic_data(pKa=TRUE_K, add_outliers=add_outliers, rng=rng)
 
         methods = {
-            "lm_standard": lambda d: fit_binding_glob(d, robust=False),
-            "lm_robust": lambda d: fit_binding_glob(d, robust=True),
-            "outlier2_uniform": lambda d: outlier2(d, error_model="uniform"),
-            "outlier2_shotnoise": lambda d: outlier2(d, error_model="shot-noise"),
+            "lm_standard": lambda d: fit_binding_glob(d),
+            "lm_robust": lambda d: fit_binding_glob(d, method="huber"),
+            "huber_outlier": lambda d: fit_binding_glob(
+                d, method="huber", remove_outliers="zscore:2.5:5"
+            ),
         }
 
         for method_name, method_func in methods.items():

@@ -6,10 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    outlier2,
-)
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.odr import fit_binding_odr_recursive_outlier
 from clophfit.testing.synthetic import TruthParams, make_simple_dataset
 
@@ -89,8 +86,6 @@ def build_fitters(
         "glob_iterative_outlier": lambda ds: fit_binding_glob(
             ds, reweight="iterative", remove_outliers="zscore:3.0:5"
         ),
-        # --- Legacy outlier2 (for backward comparison) ---
-        "outlier2": lambda ds: outlier2(ds, key="bench"),
     }
 
     if include_odr:
