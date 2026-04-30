@@ -342,7 +342,7 @@ class TestValidateResiduals:
         x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
         y_true = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
         # Add systematic bias
-        y = y_true + 50.0  # Constant offset
+        y = y_true + 50.0 + np.array([0.5, -0.25, 0.0, 0.25, -0.5])
         y_err = np.ones_like(y) * 10.0
         da = DataArray(xc=x, yc=y, y_errc=y_err)
         dataset = Dataset({"y1": da}, is_ph=True)
