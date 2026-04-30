@@ -637,5 +637,135 @@ step) is small relative to the K precision limit (~0.07 pH).
 Before rerunning: exclude anomalous buffer wells (L2 D01/E01 at pH=6.56;
 L4 D01 y2 protein contamination) from background estimation.
 
-1. 1 label s0 s1 fissi no drop
-2. 1 lab
+
+* DONE Calibrated Tecan noise model for synthetic benchmarks (2026-05-04)
+** Motivation
+MCMC multi_noise_xrw posteriors on L2 data revealed the true Tecan noise
+structure: y1 is dominated by shot noise and proportional noise (~62 counts
+at signal 600), while y2 is read-noise-dominated (~10 counts, nearly uniform).
+The old "physics" model (buffer_sd=50) overestimated y2 noise by 5×.
+
+** Calibrated constants (from L2 MCMC posterior, committed to synthetic.py)
+| Label | σ_read | gain   | α      | typical err at signal=600 |
+|-------|--------|--------|--------|--------------------------|
+| y1    |  8.6   |  1.78  |  0.059 | ~62 counts               |
+| y2    |  9.78  |  0.006 |  0.002 | ~10 counts (uniform)     |
+
+Constants: TECAN_Y{1,2}_{SIGMA_READ,GAIN,ALPHA} exported from
+clophfit.testing.synthetic.  Error model "tecan" added to make_dataset().
+
+** Synthetic benchmark results (n=200 reps, 2-label, TRUE_K=7.0)
+Signals: y1 S0=200→600, y2 S0=1100→2100 (realistic L2 values).
+
+*** Clean tecan noise (no outliers)
+| method                | bias    | RMSE   | coverage | sK/RMSE |
+|-----------------------|---------|--------|----------|---------|
+| glob_ls               | +0.0013 | 0.0218 |    90.5% |   0.944 |
+| glob_huber            | +0.0017 | 0.0222 |    93.0% |   1.071 |
+| glob_huber†           | +0.0017 | 0.0222 |    93.0% |   1.071 |
+| glob_irls             | +0.0039 | 0.0387 |    95.5% |   1.113 |
+| glob_iterative        | +0.0039 | 0.0387 |    95.5% |   1.113 |
+| glob_iterative†       | +0.0039 | 0.0387 |    95.5% |   1.113 |
+| odr_recursive†        | +0.0027 | 0.0261 |    70.5% |   0.607 |
+† = with outlier removal
+
+*** y1 outliers (low-pH drops, magnitude 0.4 × Δy)
+| method                | bias    | RMSE   | coverage | sK/RMSE |
+|-----------------------|---------|--------|----------|---------|
+| glob_ls               | +0.0072 | 0.0236 |    99.5% |   1.466 |
+| glob_huber            | +0.0047 | 0.0229 |    99.5% |   1.800 |
+| glob_huber†           | +0.0047 | 0.0229 |    99.5% |   1.800 |
+| glob_irls             | +0.0165 | 0.0286 |    99.5% |   2.108 |
+| glob_iterative        | +0.0165 | 0.0286 |    99.5% |   2.108 |
+| glob_iterative†       | +0.0165 | 0.0286 |    99.5% |   2.108 |
+| odr_recursive†        | +0.0051 | 0.0262 |    70.5% |   0.649 |
+
+** Key findings
+1. *glob_huber is the optimal deterministic method*: best-calibrated
+   uncertainty (sK/RMSE~1.07), good coverage (93%), lowest RMSE in
+   outlier scenario (0.023). Confirmed as correct pipeline default.
+2. *irls/iterative are harmful with calibrated heteroscedastic y_err*:
+   RMSE nearly doubles (0.039 vs 0.022) because reweighting from residuals
+   fights the correct y_err-derived weights. Coverage appears good (95.5%)
+   only due to inflated uncertainty (sK/RMSE=1.11). Do not use when y_err
+   is properly specified from noise model.
+3. *ODR stderr is broken*: 70% coverage across both scenarios despite
+   competitive point-estimate accuracy. Excluded from pipeline correctly.
+4. *With y1 outliers, all lmfit methods over-cover* (≥99.5%): the robust
+   loss inflates sK. Acceptable for conservative inference; point estimates
+   remain accurate (RMSE only 5% worse than clean case).
+5. *No benefit from explicit outlier-removal on top of Huber*: huber and
+   huber† give identical results in both scenarios.
+
+* DONE Constrained vs free-CTR comparison on L2 real data (2026-05-04)
+** Setup
+Two completed MCMC multi_noise_xrw runs on L2 plate:
+- mcmc_multi_noise_xrw: CTR wells share one K per protein name (constrained)
+- mcmc_multi_noise_xrw_free_ctr: each CTR well has independent K (free_ctr)
+
+** CTR well K posteriors (ffit4 = final MCMC)
+| well | group  | constrained K ± sK    | free_ctr K ± sK       | ΔK     |
+|------|--------|-----------------------|-----------------------|--------|
+| A12  | V224L  | 5.916 ± 0.052         | 5.871 ± 0.090         | −0.045 |
+| B01  | V224Q  | 8.104 ± 0.054         | 8.173 ± 0.066         | +0.069 |
+| C01  | E2GFP  | 6.830 ± 0.044         | 6.725 ± 0.071         | −0.105 |
+| G12  | V224Q  | 8.104 ± 0.054         | 8.009 ± 0.062         | −0.095 |
+| H01  | V224L  | 5.916 ± 0.052         | 5.771 ± 0.084         | −0.145 |
+
+** Sample well impact (n=83 non-CTR wells)
+- mean|ΔK| = 0.011, median|ΔK| = 0.004  → sample K essentially unaffected
+- mean sK: constrained 0.072, free_ctr 0.069 (negligible difference)
+
+** Noise parameter comparison
+Noise parameters are nearly identical between the two modes:
+| param        | constrained | free_ctr |
+|--------------|-------------|----------|
+| sigma_pip    | 0.045±0.004 | 0.039±0.005 |
+| sigma_read_y1| 8.6±6.0     | 9.8±6.5  |
+| sigma_read_y2| 9.8±0.75    | 10.3±0.84 |
+| gain_y1      | 1.78±0.77   | 1.85±0.82 |
+| alpha_y1     | 0.059±0.006 | 0.058±0.006 |
+| alpha_y2     | 0.002±0.001 | 0.002±0.001 |
+
+** Key findings
+1. *Sample well K is robust to CTR mode*: median|ΔK|=0.004 pH units,
+   well within posterior uncertainty (~0.07 pH). CTR constraint does not
+   bias sample estimates.
+2. *free_ctr reveals within-group CTR heterogeneity*: H01 and A12 (both
+   V224L) differ by 0.10 pH units in free_ctr but are forced identical in
+   constrained mode. This spread is a quality indicator for the plate.
+3. *constrained gives tighter CTR K* (sK 0.051 vs 0.075): pooling
+   replicates reduces uncertainty, appropriate when plate quality is good.
+4. *free_ctr is better for QC*: spread of same-name CTR wells diagnoses
+   plate-level issues (dilution errors, pipetting, well-to-well variation).
+5. *Noise parameters unaffected*: the global noise model is insensitive
+   to CTR K parameterization choice.
+
+** Recommendation
+Use constrained mode (default) for production analysis.
+Use free_ctr mode for quality control and diagnosing problematic plates.
+
+* TODO CTR K initialization fix for MCMC (new_kinit, pending validation)
+** Background
+Old implementation: all CTR wells used group-weighted mean K with σ=0.20
+(narrow, biased toward lmfit group estimate rather than true pKa).
+
+** Fix implemented (committed to main)
+Per-well K priors for MCMC CTR wells:
+- Good wells (K not at bounds, sK≤1.0): Normal(per_well_K, min(max(sK×n_sd, 0.2), 0.6))
+- Bound/noisy wells: pH@mid-fluorescence from largest-Δy label → Normal(pH_mid, 0.6)
+  New functions: _ph_at_mid_fluorescence(), _well_k_init_from_results()
+
+Old prior for L2 V224L CTR (mean=5.54, σ=0.20) was 3.8σ from MCMC posterior
+(K_V224L=5.916). New prior (pH@mid from y2) centers at 5.87 for A12, 6.00 for H01.
+
+** Validation status
+Constrained new_kinit MCMC run (PID 2509334) stuck after 90+ hours due to
+pytensor "kernel argument limit" error on C05 well overflow. Killed 2026-05-04.
+The lmfit prelim stages (ffit0–ffit3) completed identically to reference — only
+the MCMC stage (ffit4) would differ, but it was never reached.
+
+** Next steps
+- Re-run with C05 excluded or investigate C05 data quality (potential overflow)
+- Consider switching sampler (blackjax/numpyro) to avoid pytensor graph limit
+- Validate that wider σ (0.3–0.6 vs 0.20) allows posterior to dominate prior

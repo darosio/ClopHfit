@@ -788,12 +788,14 @@ def weighted_stats(
     return results
 
 
-def _build_ctr_k_params(
+def _build_ctr_k_params(  # noqa: PLR0913
     scheme: PlateScheme,
     ctr_ks: dict[str, tuple[float, float]],
     active_wells: set[str],
     *,
     ctr_free_k: bool,
+    well_k_init: dict[str, tuple[float, float]] | None = None,
+    fallback_sigma: float = 0.6,
 ) -> tuple[dict[str, typing.Any], dict[str, typing.Any]]:
     """Build K parameters for control groups.
 
@@ -806,10 +808,18 @@ def _build_ctr_k_params(
     active_wells : set[str]
         Well keys that have valid results and datasets.
     ctr_free_k : bool
-        If True, each CTR replicate gets its own independent flat K prior
-        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
-        hierarchical shrinkage.  If False (default),
-        all replicates of the same CTR share a single K.
+        If True, each CTR replicate gets its own independent K prior
+        initialized from its own preliminary fit result (same as unknown
+        wells).  If False (default), all replicates of the same CTR share
+        a single K.
+    well_k_init : dict[str, tuple[float, float]] | None
+        Maps well key → ``(K_value, K_sigma)`` from the individual
+        preliminary fit or pH@mid-fluorescence.  Used only when
+        ``ctr_free_k=True``; wells absent from this dict fall back to the
+        group weighted mean with *fallback_sigma*.
+    fallback_sigma : float
+        Prior sigma used for wells absent from *well_k_init* (free CTR
+        mode) or as a floor for the constrained group sigma.  Default 0.6.
 
     Returns
     -------
@@ -823,17 +833,25 @@ def _build_ctr_k_params(
     k_params: dict[str, typing.Any] = {}
     k_replicate: dict[str, typing.Any] = {}
     if ctr_free_k:
-        # Flat per-well K: each CTR replicate gets its own independent Normal prior
-        # with the same sigma=0.2 as UNK wells — no hierarchical shrinkage.
+        # Per-well K: initialized from each well's own preliminary fit result
+        # (same as unknown wells), falling back to group weighted mean if unavailable.
         for name, scheme_wells in scheme.names.items():
             for well in scheme_wells:
                 if well in active_wells:
+                    if well_k_init and well in well_k_init:
+                        mu, sigma = well_k_init[well]
+                    else:
+                        mu, sigma = ctr_ks[name][0], fallback_sigma
                     k_replicate[well] = pm.Normal(
-                        f"K_{name}_{well}", mu=ctr_ks[name][0], sigma=0.2
+                        f"K_{name}_{well}", mu=mu, sigma=sigma
                     )
     else:
         k_params = {
-            name: pm.Normal(f"K_{name}", mu=ctr_ks[name][0], sigma=0.2)
+            name: pm.Normal(
+                f"K_{name}",
+                mu=ctr_ks[name][0],
+                sigma=max(ctr_ks[name][1], fallback_sigma / 2),
+            )
             for name in scheme.names
         }
     return k_params, k_replicate
@@ -853,6 +871,104 @@ def _resolve_well_k(  # noqa: PLR0913
         k_rep = k_replicate.get(key)
         return k_rep if k_rep is not None else pars[f"K_{key}"]
     return k_params[ctr_name] if ctr_name else pars[f"K_{key}"]
+
+
+def _ph_at_mid_fluorescence(da: DataArray) -> float | None:
+    """Estimate pH at 50 % of fluorescence range by linear interpolation.
+
+    Parameters
+    ----------
+    da : DataArray
+        Titration data (x = pH, y = fluorescence).
+
+    Returns
+    -------
+    float | None
+        Interpolated pH at ``(y_max + y_min) / 2``, or ``None`` if the
+        midpoint crossing cannot be found.
+    """
+    x, y = da.x, da.y
+    if len(x) < 2:  # noqa: PLR2004
+        return None
+    y_mid = (float(y.max()) + float(y.min())) / 2
+    order = np.argsort(x)
+    xs, ys = x[order], y[order]
+    for i in range(len(ys) - 1):
+        if (ys[i] - y_mid) * (ys[i + 1] - y_mid) <= 0:
+            denom = ys[i + 1] - ys[i]
+            if denom == 0:
+                return float(xs[i])
+            t = (y_mid - ys[i]) / denom
+            return float(xs[i] + t * (xs[i + 1] - xs[i]))
+    return None
+
+
+def _well_k_init_from_results(
+    results: dict[str, FitResult[MiniT]],
+    scheme: PlateScheme,
+    n_sd: float,
+    fallback_sigma: float = 0.6,
+) -> dict[str, tuple[float, float]]:
+    """Extract per-well K initialization from preliminary fit results.
+
+    Returns a dict mapping each CTR well key to ``(K_value, K_sigma)``.
+    Wells whose K is at the optimizer bound or whose ``stderr`` exceeds 1.0
+    fall back to a pH-at-mid-fluorescence estimate with *fallback_sigma*.
+    For wells with a reliable preliminary fit the sigma is
+    ``min(max(sK * n_sd, 0.2), fallback_sigma)``.
+
+    Parameters
+    ----------
+    results : dict[str, FitResult[MiniT]]
+        Preliminary fit results keyed by well name.
+    scheme : PlateScheme
+        Plate scheme; only wells listed in ``scheme.names`` are processed.
+    n_sd : float
+        Number of standard deviations used to widen the sigma for reliable
+        wells (same as for unknown wells in
+        :func:`create_parameter_priors`).
+    fallback_sigma : float
+        Prior sigma used when the preliminary fit is unreliable (K at
+        bound or large stderr).  Also acts as an upper cap for good fits.
+        Default 0.6 (covers roughly ±1 pH unit, as suggested by user).
+
+    Returns
+    -------
+    dict[str, tuple[float, float]]
+        Mapping each CTR well key to ``(K_value, K_sigma)``.
+    """
+    ctr_wells = {well for wells in scheme.names.values() for well in wells}
+    well_k: dict[str, tuple[float, float]] = {}
+    for well in ctr_wells:
+        r = results.get(well)
+        if not (r and r.result and "K" in r.result.params):
+            continue
+        p = r.result.params["K"]
+        at_bound = (p.min is not None and abs(p.value - p.min) < 0.01) or (  # noqa: PLR2004
+            p.max is not None and abs(p.value - p.max) < 0.01  # noqa: PLR2004
+        )
+        large_stderr = p.stderr is None or p.stderr > 1.0
+        if at_bound or large_stderr:
+            # Pick pH@mid from the label with the largest signal range (Δy),
+            # as that label has the clearest sigmoid and most reliable midpoint.
+            ph_mid: float | None = None
+            if r.dataset:
+                best_delta, best_ph = -1.0, None
+                for da in r.dataset.values():
+                    if len(da.y) < 2:  # noqa: PLR2004
+                        continue
+                    delta = float(da.y.max() - da.y.min())
+                    ph = _ph_at_mid_fluorescence(da)
+                    if ph is not None and delta > best_delta:
+                        best_delta, best_ph = delta, ph
+                ph_mid = best_ph
+            if ph_mid is not None:
+                well_k[well] = (ph_mid, fallback_sigma)
+            # else: leave absent → _build_ctr_k_params uses group mean fallback
+        else:
+            sigma = min(max(p.stderr * n_sd, 0.2), fallback_sigma)
+            well_k[well] = (p.value, sigma)
+    return well_k
 
 
 def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
@@ -934,7 +1050,11 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
         }
         x_true = create_x_true(xc, x_errc, n_xerr)
         k_params, k_replicate = _build_ctr_k_params(
-            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+            scheme,
+            ctr_ks,
+            active_wells,
+            ctr_free_k=ctr_free_k,
+            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
         for key, r in results.items():
@@ -1322,7 +1442,11 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
         }
 
         k_params, k_replicate = _build_ctr_k_params(
-            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+            scheme,
+            ctr_ks,
+            active_wells,
+            ctr_free_k=ctr_free_k,
+            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
         for key, r in results.items():
@@ -1502,7 +1626,11 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
         }
 
         k_params, k_replicate = _build_ctr_k_params(
-            scheme, ctr_ks, active_wells, ctr_free_k=ctr_free_k
+            scheme,
+            ctr_ks,
+            active_wells,
+            ctr_free_k=ctr_free_k,
+            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
         for key, r in results.items():

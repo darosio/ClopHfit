@@ -185,6 +185,48 @@ class TestSyntheticDataGeneration:
         assert res_high >= res_low
 
 
+class TestTecanErrorModel:
+    """Test calibrated Tecan error model from MCMC posteriors."""
+
+    def test_y2_nearly_uniform(self) -> None:
+        """y2 errors are dominated by read noise — nearly constant ~10 counts."""
+        ds, _ = make_dataset(
+            k=7.0,
+            s0={"y1": 634, "y2": 903},
+            s1={"y1": 1024, "y2": 177},
+            error_model="tecan",
+            seed=0,
+        )
+        y2_err = ds["y2"].y_err
+        assert y2_err is not None
+        assert y2_err.mean() == pytest.approx(10.0, abs=1.0)
+        assert y2_err.std() < 1.0  # nearly uniform
+
+    def test_y1_noisier_than_y2(self) -> None:
+        """y1 errors are substantially larger than y2 at typical signals."""
+        ds, _ = make_dataset(
+            k=7.0,
+            s0={"y1": 634, "y2": 903},
+            s1={"y1": 1024, "y2": 177},
+            error_model="tecan",
+            seed=0,
+        )
+        y1_err = ds["y1"].y_err
+        y2_err = ds["y2"].y_err
+        assert y1_err is not None
+        assert y2_err is not None
+        assert y1_err.mean() > 4 * y2_err.mean()
+
+    def test_tecan_with_randomized_signals(self) -> None:
+        """Tecan model works with randomize_signals=True."""
+        ds, truth = make_dataset(randomize_signals=True, error_model="tecan", seed=42)
+        assert "y1" in ds
+        assert "y2" in ds
+        assert ds["y1"].y_err is not None
+        assert ds["y2"].y_err is not None
+        assert truth.K > 0
+
+
 class TestResultExtraction:
     """Test parameter extraction from fit results."""
 

@@ -44,6 +44,17 @@ REAL_DATA_LOG_COV = np.array([
     [0.256, 0.305, 0.192, 0.372],  # log_S1_y2
 ])
 
+# Calibrated Tecan plate-reader noise parameters from MCMC posterior on L2 data.
+# Noise formula: quadrature sum of shot noise, read noise, and proportional noise.
+# y1 (FRET acceptor): shot-noise + read-noise + proportional noise
+TECAN_Y1_SIGMA_READ: float = 8.6  # read noise (counts)
+TECAN_Y1_GAIN: float = 1.78  # shot noise gain (counts^-1)
+TECAN_Y1_ALPHA: float = 0.059  # relative (proportional) noise fraction
+# y2 (FRET donor): dominated by read noise — nearly uniform ~10 counts
+TECAN_Y2_SIGMA_READ: float = 9.78  # read noise (counts)
+TECAN_Y2_GAIN: float = 0.006  # negligible shot noise
+TECAN_Y2_ALPHA: float = 0.002  # negligible relative noise
+
 
 @dataclass
 class TruthParams:
@@ -160,7 +171,11 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         - "simple": Constant noise as fraction of dynamic range (uses `noise`).
         - "uniform": Constant absolute error per label (uses `y_err`).
         - "realistic": Relative error with floor (uses `rel_error`, `min_error`).
-        - "physics": Shot noise + buffer noise (uses `buffer_sd`).
+        - "physics": Shot noise + buffer noise (uses `buffer_sd`, `error_ratio`).
+        - "tecan": Calibrated model from MCMC posterior on real L2 data.
+          err = sqrt(gain * signal + sigma_read^2 + (alpha * signal)^2).
+          y1: gain=1.78, sigma_read=8.6, alpha=5.9%  → ~49 counts at signal=600.
+          y2: gain≈0, sigma_read=9.78, alpha≈0.2%  → ~10 counts (uniform).
     noise : float | dict[str, float]
         For "simple" model: relative noise as fraction of dynamic range.
         Use dict for per-label: {"y1": 0.05, "y2": 0.02}.
@@ -229,6 +244,14 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
     ...     error_model="physics",
     ...     buffer_sd=50.0,
     ...     error_ratio=0.2,
+    ... )
+
+    Calibrated Tecan noise model from real L2 MCMC posteriors:
+
+    >>> ds, truth = make_dataset(
+    ...     randomize_signals=True,
+    ...     error_model="tecan",
+    ...     seed=42,
     ... )
 
     Simulate low-pH drop artifact:
@@ -345,6 +368,22 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
             y_err_arr = np.full_like(clean, y_err_d[label]) if y_err_d else None
         elif error_model == "physics":
             y_err_arr = np.sqrt(np.maximum(clean, 1.0) + buffer_sd_d[label] ** 2)
+        elif error_model == "tecan":
+            # Calibrated model from MCMC posterior on real L2 Tecan data.
+            # Quadrature sum of gain*signal, read noise squared, and (alpha*signal) squared.
+            s = np.maximum(clean, 0.0)
+            if label in {"y1", "y0"}:
+                y_err_arr = np.sqrt(
+                    TECAN_Y1_GAIN * s
+                    + TECAN_Y1_SIGMA_READ**2
+                    + (TECAN_Y1_ALPHA * s) ** 2
+                )
+            else:  # y2: read-noise dominated (~uniform 10 counts)
+                y_err_arr = np.sqrt(
+                    TECAN_Y2_GAIN * s
+                    + TECAN_Y2_SIGMA_READ**2
+                    + (TECAN_Y2_ALPHA * s) ** 2
+                )
         else:  # realistic (default)
             y_err_arr = np.maximum(
                 rel_error_d[label] * np.abs(clean), min_error_d[label]
@@ -521,6 +560,12 @@ __all__ = [
     "REAL_DATA_LOG_COV",
     "REAL_DATA_LOG_MEAN",
     "REAL_DATA_STATS",
+    "TECAN_Y1_ALPHA",
+    "TECAN_Y1_GAIN",
+    "TECAN_Y1_SIGMA_READ",
+    "TECAN_Y2_ALPHA",
+    "TECAN_Y2_GAIN",
+    "TECAN_Y2_SIGMA_READ",
     "TruthParams",
     "make_benchmark_dataset",
     "make_dataset",
