@@ -90,17 +90,20 @@ def detect_bad_wells_from_dat(
 
     Examples
     --------
-    >>> import tempfile, os, textwrap, pandas as pd
+    >>> import tempfile
+    >>> from pathlib import Path
+    >>> nl = chr(10)
     >>> with tempfile.TemporaryDirectory() as d:
-    ...     for well, vals in [
-    ...         ("A01", "8,100,200\\n7,90,190\\n6,80,180"),
-    ...         ("A02", "8,1,2\\n7,0.9,1.9\\n6,0.8,1.8"),
-    ...     ]:
-    ...         open(os.path.join(d, well + ".dat"), "w").write(f"x,y1,y2\\n{vals}\\n")
+    ...     rows_by_well = {
+    ...         "A01": ["8,100,200", "7,90,190", "6,80,180"],
+    ...         "A02": ["8,1,2", "7,0.9,1.9", "6,0.8,1.8"],
+    ...     }
+    ...     for well, rows in rows_by_well.items():
+    ...         _ = (Path(d) / f"{well}.dat").write_text(
+    ...             nl.join(["x,y1,y2", *rows, ""])
+    ...         )
     ...     flags = detect_bad_wells_from_dat(d)
     ...     flags[["well", "flag_any"]].values.tolist()
-    24
-    24
     [['A02', True], ['A01', False]]
     """
     data_dir = Path(data_dir)
@@ -124,7 +127,16 @@ def detect_bad_wells_from_dat(
     for well in wells:
         df = well_data[well]
         for col in sig_cols:
-            y = df[col].astype(float).to_numpy()
+            y = df[col].astype(float).dropna().to_numpy()
+            if y.size == 0:
+                logger.warning(
+                    "detect_bad_wells_from_dat: %s has no valid %s values; flagging as low-signal/flat",
+                    well,
+                    col,
+                )
+                max_sig[col].append(0.0)
+                dyn_range[col].append(0.0)
+                continue
             abs_max = float(np.max(np.abs(y)))
             span = float(y.max() - y.min())
             max_sig[col].append(abs_max)

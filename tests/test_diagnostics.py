@@ -1,5 +1,7 @@
 """Tests for clophfit.fitting.diagnostics."""
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -263,7 +265,7 @@ def test_ctr_cols_k_stats_use_samples_only() -> None:
 
 
 @pytest.fixture
-def dat_dir(tmp_path: pytest.TempPathFactory) -> str:
+def dat_dir(tmp_path: Path) -> str:
     """Create a minimal plate with 4 wells: 2 good, 1 low-signal, 1 flat."""
     wells = {
         # Good wells: strong signal, clear dynamic range
@@ -303,7 +305,7 @@ def test_from_dat_good_wells_not_flagged(dat_dir: str) -> None:
         assert not row["flag_any"], f"{well} is a good well and must not be flagged"
 
 
-def test_from_dat_no_dat_files(tmp_path: pytest.TempPathFactory) -> None:
+def test_from_dat_no_dat_files(tmp_path: Path) -> None:
     """Empty directory must raise FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
         detect_bad_wells_from_dat(str(tmp_path))
@@ -320,3 +322,16 @@ def test_from_dat_ctr_cols_logged(dat_dir: str) -> None:
     # A02 is col 2 → is_ctr=False
     row = flags[flags["well"] == "A02"].iloc[0]
     assert not row["is_ctr"]
+
+
+def test_from_dat_empty_series_flagged(tmp_path: Path) -> None:
+    """Header-only .dat files must be treated as bad wells instead of crashing."""
+    (tmp_path / "A01.dat").write_text("x,y1,y2\n8,100,200\n7,90,190\n")
+    (tmp_path / "A02.dat").write_text("x,y1,y2\n")
+
+    flags = detect_bad_wells_from_dat(tmp_path)
+
+    row = flags[flags["well"] == "A02"].iloc[0]
+    assert row["flag_low_signal"]
+    assert row["flag_flat_curve"]
+    assert row["flag_any"]
