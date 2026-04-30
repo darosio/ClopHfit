@@ -92,7 +92,8 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/GPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
-@click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label (y1, y2, ...). Adds α²·signal² to y_err². Obtain from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).")  # fmt: skip
+@click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label (y1, y2, ...). Adds alpha^2*signal^2 to y_err^2. Obtain from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).")  # fmt: skip
+@click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label (y1, y2, ...). Replaces hardcoded gain=1 in shot-noise term: y_err^2=gain*signal+bg_err^2+(alpha*signal)^2. Obtain from MCMC multi-noise shared_noise_params.csv (gain_y1, gain_y2).")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,  # Click context object.
@@ -116,6 +117,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     mcmc_samples: int,
     ctr_free_k: bool,
     noise_alpha: tuple[float, ...],
+    noise_gain: tuple[float, ...],
     dry_run: bool,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
@@ -198,6 +200,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.n_mcmc_samples = mcmc_samples
     tit.params.ctr_free_k = ctr_free_k
     tit.params.noise_alpha = noise_alpha
+    tit.params.noise_gain = noise_gain
     logger.info("%s", tit.params)
 
     # Load additions file with error handling

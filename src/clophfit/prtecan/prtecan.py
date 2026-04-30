@@ -789,9 +789,17 @@ class TitrationConfig:
 
     When provided, adds an alpha^2*signal^2 term to the y_err^2 estimate so that
     high-signal wells are appropriately down-weighted:
-        y_err^2 = signal + bg_err^2 + (alpha*signal)^2
+        y_err^2 = gain*signal + bg_err^2 + (alpha*signal)^2
     Values from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).
     Empty tuple disables the correction (legacy behaviour).
+    """
+    noise_gain: tuple[float, ...] = ()
+    """Poisson gain coefficients per label (y1, y2, ...).
+
+    Replaces the hardcoded gain=1 in the shot-noise Poisson term:
+        y_err^2 = gain*signal + bg_err^2 + (alpha*signal)^2
+    Values from MCMC multi-noise shared_noise_params.csv (gain_y1, gain_y2).
+    Empty tuple keeps gain=1 (legacy behaviour).
     """
 
     _callback: Callable[[], None] | None = field(
@@ -1782,16 +1790,20 @@ class Titration(TecanfilesGroup):
     def _create_data_array(self, key: str, label: int) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
-        signal = np.maximum(1.0, y)  # Poisson term (gain ≈ 1)
+        label_idx = sorted(self.data.keys()).index(label)
+        gain = (
+            self.params.noise_gain[label_idx]
+            if self.params.noise_gain and label_idx < len(self.params.noise_gain)
+            else 1.0
+        )
+        signal = gain * np.maximum(1.0, y)
         if self.bg_err:
             y_errc = np.sqrt(signal + self.bg_err[label] ** 2)
         else:
             y_errc = np.sqrt(signal)
-        if self.params.noise_alpha:
-            label_idx = sorted(self.data.keys()).index(label)
-            if label_idx < len(self.params.noise_alpha):
-                alpha = self.params.noise_alpha[label_idx]
-                y_errc = np.sqrt(y_errc**2 + (alpha * np.abs(y)) ** 2)
+        if self.params.noise_alpha and label_idx < len(self.params.noise_alpha):
+            alpha = self.params.noise_alpha[label_idx]
+            y_errc = np.sqrt(y_errc**2 + (alpha * np.abs(y)) ** 2)
         return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def _create_ds(self, key: str, label: int) -> Dataset:
@@ -2105,6 +2117,11 @@ class Titration(TecanfilesGroup):
             "x_start",
         )
         group_k_names = {f"K_{name}" for name in self.scheme.names}
+        if self.params.ctr_free_k:
+            # Free-CTR mode: shared K hyperparams are K_mu_{name} and K_tau_{name}
+            group_k_names = {f"K_mu_{name}" for name in self.scheme.names} | {
+                f"K_tau_{name}" for name in self.scheme.names
+            }
         mask = trace_df.index.map(
             lambda n: n.startswith(shared_prefixes) or n in group_k_names
         )

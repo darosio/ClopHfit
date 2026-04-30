@@ -28,8 +28,9 @@ BASE_DIRS = {
     "L4": Path("/home/dati/arslanbaeva/data/raw/L4"),
 }
 
-FIT_METHODS = ["lm", "huber", "irls", "outlier_3.0", "outlier_2.5", "outlier_2.0"]
-MCMC_MODES = ["single", "multi", "multi_noise", "multi_noise_xrw"]
+FIT_METHODS = ["lm", "huber", "irls", "outlier_3.0", "outlier_2.5", "outlier_2.0",
+               "huber_alpha", "huber_noise"]
+MCMC_MODES = ["single", "multi", "multi_noise", "multi_noise_xrw", "multi_noise_xrw_free_ctr"]
 
 LB_LABELS = {
     0: "lb0 (y1 only)",

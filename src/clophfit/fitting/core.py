@@ -207,7 +207,155 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
             ds[lbl].y_err = np.full_like(ds[lbl].xc, fallback_error)
 
 
-# --- Spectral Data Processing ---
+def calibrate_noise_from_residuals(
+    residuals_signals: dict[str, list[tuple[np.ndarray, np.ndarray]]],
+) -> dict[str, tuple[float, float, float]]:
+    """Estimate (sigma_read, gain, alpha) per label from pooled first-pass residuals.
+
+    Fits the noise model ``sigma^2 = sigma_read^2 + gain*signal + (alpha*signal)^2``
+    by minimising
+    the squared difference between empirical residual^2 and the model prediction,
+    pooling all wells and pH-steps for each label.
+
+    This is a two-pass calibration intended to replace the heuristic
+    gain=1/alpha=0 defaults: run a first-pass fit (e.g. huber), collect all
+    (residuals, signal) pairs per label, then call this function.  The returned
+    parameters can be fed into ``_create_data_array`` via ``noise_gain`` /
+    ``noise_alpha`` so that subsequent fits use physically motivated weights.
+
+    Parameters
+    ----------
+    residuals_signals : dict[str, list[tuple[np.ndarray, np.ndarray]]]
+        Keyed by label name.  Each entry is a list of ``(residuals, signal)``
+        arrays — one pair per well — where both arrays have the same length
+        (one element per pH step that was not masked).
+
+    Returns
+    -------
+    dict[str, tuple[float, float, float]]
+        Per label: ``(sigma_read, gain, alpha)`` — all non-negative.
+
+    Notes
+    -----
+    When there are too few data points or the optimisation fails, returns
+    ``(1.0, 0.0, 0.0)`` as a safe fallback (unweighted).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> residuals_signals = {
+    ...     "y1": [(np.array([3.0, 4.0, 5.0]), np.array([100.0, 200.0, 300.0]))]
+    ... }
+    >>> params = calibrate_noise_from_residuals(residuals_signals)
+    >>> "y1" in params
+    True
+    """
+    result: dict[str, tuple[float, float, float]] = {}
+
+    for lbl, pairs in residuals_signals.items():
+        if not pairs:
+            result[lbl] = (1.0, 0.0, 0.0)
+            continue
+
+        res_all = np.concatenate([r for r, _ in pairs])
+        sig_all = np.concatenate([s for _, s in pairs])
+
+        if len(res_all) < 4:  # noqa: PLR2004
+            result[lbl] = (1.0, 0.0, 0.0)
+            continue
+
+        sq_res = res_all**2
+        sig_all**2
+
+        # Noise model: var = a + b*signal + c*signal^2
+        # a = sigma_read^2, b = gain, c = alpha^2
+        def noise_model(signal: np.ndarray, a: float, b: float, c: float) -> np.ndarray:
+            return a + b * signal + c * signal**2
+
+        p0 = [np.median(sq_res), 0.0, 0.0]
+        try:
+            import scipy.optimize as sco  # noqa: PLC0415
+
+            popt, _ = sco.curve_fit(
+                noise_model,
+                sig_all,
+                sq_res,
+                p0=p0,
+                bounds=([0.0, 0.0, 0.0], [np.inf, np.inf, np.inf]),
+                maxfev=10000,
+            )
+            a_opt, b_opt, c_opt = popt
+            result[lbl] = (float(np.sqrt(a_opt)), float(b_opt), float(np.sqrt(c_opt)))
+        except Exception:  # noqa: BLE001
+            # fallback: use residual RMS as flat sigma_read
+            result[lbl] = (float(np.sqrt(np.mean(sq_res))), 0.0, 0.0)
+
+    return result
+
+
+def weight_multi_ds_calibrated(
+    datasets: dict[str, Dataset],
+    *,
+    is_ph: bool,
+) -> dict[str, tuple[float, float, float]]:
+    """Two-pass noise calibration: fit all wells, then assign signal-dependent weights.
+
+    Runs a first-pass least-squares fit on every well, pools (residual, signal)
+    pairs across all wells for each label, calibrates the noise model
+    ``sigma^2 = sigma_read^2 + gain*signal + (alpha*signal)^2`` via
+    :func:`calibrate_noise_from_residuals`, and then re-assigns
+    ``DataArray.y_err`` using the calibrated, signal-dependent formula.
+
+    Parameters
+    ----------
+    datasets : dict[str, Dataset]
+        Keyed by well identifier; each Dataset contains one or more labels.
+        *Modified in-place*: ``da.y_err`` is overwritten for every DataArray.
+    is_ph : bool
+        Passed to the first-pass fit.
+
+    Returns
+    -------
+    dict[str, tuple[float, float, float]]
+        Per label: ``(sigma_read, gain, alpha)`` as estimated from the pooled
+        residuals.  Useful for inspecting / logging the calibrated parameters.
+
+    Notes
+    -----
+    Wells that fail the first-pass fit are excluded from calibration but still
+    get weights via fallback (10x the maximum calibrated ``sigma_read``).
+    """
+    # Step 1: first-pass fits — collect (residuals, signal) per label
+    residuals_signals: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
+
+    for well, ds in datasets.items():
+        for lbl, da in ds.items():
+            well_ds = Dataset.from_da(da, is_ph=is_ph)
+            params = _build_params_1site(well_ds)
+            if len(params) >= len(da.y):
+                continue
+            try:
+                mr = lmfit.minimize(_binding_1site_residuals, params, args=(well_ds,))
+                resid = np.asarray(mr.residual, dtype=float)
+                sig = np.asarray(da.y, dtype=float)
+                residuals_signals.setdefault(lbl, []).append((resid, sig))
+            except Exception:  # noqa: BLE001
+                logger.debug("First-pass fit failed for well %s label %s", well, lbl)
+
+    # Step 2: calibrate noise model across all wells
+    noise_params = calibrate_noise_from_residuals(residuals_signals)
+
+    # Step 3: assign signal-dependent y_err to each DataArray
+    for ds in datasets.values():
+        for lbl, da in ds.items():
+            sr, gain, alpha = noise_params.get(lbl, (1.0, 0.0, 0.0))
+            signal = np.asarray(da.y, dtype=float)
+            sigma = np.sqrt(sr**2 + gain * np.abs(signal) + (alpha * signal) ** 2)
+            da.y_err = np.where(sigma > 0, sigma, 1.0)
+
+    return noise_params
+
+
 def analyze_spectra(
     spectra: pd.DataFrame, *, is_ph: bool, band: tuple[int, int] | None = None
 ) -> FitResult[Minimizer]:

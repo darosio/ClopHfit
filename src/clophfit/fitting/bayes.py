@@ -306,8 +306,13 @@ def extract_fit(
     rdf = trace_df[trace_df.index.str.endswith(key)]
     for name, row in rdf.iterrows():
         extracted_name = str(name).replace(f"_{key}", "")
+        # ctr_free_k=True: K for CTR wells is named K_{ctr}_{well}.
+        # After stripping _{well}, we get K_{ctr} — normalize to "K".
+        if extracted_name.startswith("K_"):
+            extracted_name = "K"
         _add_param_from_summary(rpars, extracted_name, row)
-    if ctr:
+    if ctr and "K" not in rpars:
+        # Shared-K mode (ctr_free_k=False): CTR K is named K_{ctr}.
         rdf = trace_df[trace_df.index.str.endswith(ctr)]
         for name, row in rdf.iterrows():
             extracted_name = str(name).replace(f"_{ctr}", "")

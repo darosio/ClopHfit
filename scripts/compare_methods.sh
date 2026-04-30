@@ -2,7 +2,7 @@
 # Compare fit methods and MCMC modes on L1–L4 real plate data.
 #
 # Usage:
-#   ./scripts/compare_methods.sh [L1|L2|L3|L4|all]  [fit|mcmc|all]
+#   ./scripts/compare_methods.sh [L1|L2|L3|L4|all]  [fit|mcmc|noise|all]
 #
 # Results land in:
 #   /home/dati/arslanbaeva/data/raw/{L1,L2,L3,L4}/compare/{method}/
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 PLATE="${1:-all}" # L1 | L2 | L3 | L4 | all
-MODE="${2:-all}"  # fit | mcmc | all
+MODE="${2:-all}"  # fit | mcmc | noise | all
 
 L1_DIR="/home/dati/arslanbaeva/data/raw/L1"
 L2_DIR="/home/dati/arslanbaeva/data/raw/L2"
@@ -22,7 +22,14 @@ PPR="${PPR_CMD:-ppr}"
 NUTS_SAMPLER="${NUTS_SAMPLER:-default}"
 MCMC_SAMPLES="${MCMC_SAMPLES:-2000}"
 
-# Per-plate scheme filename (L2/L4 use scheme.0.txt; L1/L3 use scheme.txt).
+# Per-plate MCMC multi-noise parameters (from shared_noise_params.csv, scheme.0.txt runs).
+# L1: MCMC unreliable (4433 divergences) → fall back to L3 values as proxy.
+declare -A ALPHA_Y1=([L1]="0.042" [L2]="0.057" [L3]="0.042" [L4]="0.101")
+declare -A ALPHA_Y2=([L1]="0.019" [L2]="0.006" [L3]="0.019" [L4]="0.050")
+declare -A GAIN_Y1=([L1]="0.064" [L2]="1.528" [L3]="0.064" [L4]="0.306")
+declare -A GAIN_Y2=([L1]="0.138" [L2]="0.028" [L3]="0.138" [L4]="0.056")
+
+# Per-plate scheme filename.
 scheme_for() {
   local dir="$1"
   if [[ -f "${dir}/scheme.0.txt" ]]; then
@@ -56,6 +63,38 @@ run_fit_methods() {
   done
 }
 
+run_noise_fit() {
+  local dir="$1"
+  local plate
+  plate=$(basename "$dir")
+  local sch
+  sch=$(scheme_for "$dir")
+  local ay1="${ALPHA_Y1[$plate]}" ay2="${ALPHA_Y2[$plate]}"
+  local gy1="${GAIN_Y1[$plate]}" gy2="${GAIN_Y2[$plate]}"
+  echo "=== Noise-corrected fit: $plate  α=($ay1,$ay2)  gain=($gy1,$gy2) ==="
+
+  # Alpha-only correction (gain still 1)
+  outdir="compare/huber_alpha"
+  echo "  → huber + --noise-alpha  out=${outdir}"
+  "$PPR" -o "${outdir}" tecan list.pH.csv \
+    --bg-adj --nrm --sch "${sch}" --add additions.pH \
+    --fit-method huber \
+    --noise-alpha "${ay1}" --noise-alpha "${ay2}" \
+    --no-png 2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
+  echo "    done"
+
+  # Full correction: alpha + gain
+  outdir="compare/huber_noise"
+  echo "  → huber + --noise-alpha + --noise-gain  out=${outdir}"
+  "$PPR" -o "${outdir}" tecan list.pH.csv \
+    --bg-adj --nrm --sch "${sch}" --add additions.pH \
+    --fit-method huber \
+    --noise-alpha "${ay1}" --noise-alpha "${ay2}" \
+    --noise-gain "${gy1}" --noise-gain "${gy2}" \
+    --no-png 2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
+  echo "    done"
+}
+
 run_mcmc_modes() {
   local dir="$1"
   local sch
@@ -72,6 +111,16 @@ run_mcmc_modes() {
       2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
     echo "    done"
   done
+  # multi-noise-xrw with per-well independent K (hierarchical partial pooling per CTR)
+  outdir="compare/mcmc_multi_noise_xrw_free_ctr"
+  echo "  → mcmc=multi-noise-xrw --ctr-free-k  sampler=${NUTS_SAMPLER}  samples=${MCMC_SAMPLES}  out=${outdir}"
+  "$PPR" -o "${outdir}" tecan list.pH.csv \
+    --bg-adj --nrm --sch "${sch}" --add additions.pH \
+    --fit-method huber --mcmc multi-noise-xrw --ctr-free-k \
+    --nuts-sampler "${NUTS_SAMPLER}" \
+    --mcmc-samples "${MCMC_SAMPLES}" \
+    2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
+  echo "    done"
 }
 
 PLATES=("$L1_DIR" "$L2_DIR" "$L3_DIR" "$L4_DIR")
@@ -85,6 +134,9 @@ for dir in "${PLATES[@]}"; do
   mkdir -p compare
   if [[ "$MODE" == "fit" || "$MODE" == "all" ]]; then
     run_fit_methods "$dir"
+  fi
+  if [[ "$MODE" == "noise" || "$MODE" == "all" ]]; then
+    run_noise_fit "$dir"
   fi
   if [[ "$MODE" == "mcmc" || "$MODE" == "all" ]]; then
     run_mcmc_modes "$dir"
