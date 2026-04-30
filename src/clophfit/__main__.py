@@ -69,6 +69,46 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 
 
 ######################################
+# ppr.detect-bad-wells               #
+######################################
+@ppr.command("detect-bad-wells")
+@click.argument("data_dir", type=cPath(exists=True, file_okay=False))
+@click.option("--min-signal", default=0.05, show_default=True, type=float, help="Flag wells with max signal below this fraction of the plate median (per label).")  # fmt: skip
+@click.option("--min-dynamic", default=0.05, show_default=True, type=float, help="Flag wells with dynamic range (max-min)/max below this fraction.")  # fmt: skip
+@click.option("--ctr-cols", default="1,12", show_default=True, type=str, help="Comma-separated 1-based column numbers for CTR wells (used for logging only).")  # fmt: skip
+def detect_bad_wells_cmd(
+    data_dir: str,
+    min_signal: float,
+    min_dynamic: float,
+    ctr_cols: str,
+) -> None:
+    """Flag unreliable wells from raw .dat files in DATA_DIR.
+
+    Reads every *.dat file (one per well, columns: x, y1[, y2, ...]) and
+    reports wells with very low signal or flat curves across all labels.
+    No fitting is required.
+
+    Example::
+
+        ppr detect-bad-wells path/to/pH/dat_bg_adj_dil_nrm_1sd/
+    """
+    ctr_list = [int(c.strip()) for c in ctr_cols.split(",") if c.strip()]
+    flags = fitting.diagnostics.detect_bad_wells_from_dat(
+        data_dir,
+        min_signal_fraction=min_signal,
+        min_dynamic_range=min_dynamic,
+        ctr_cols=ctr_list or None,
+    )
+    bad = flags[flags["flag_any"]]
+    if bad.empty:
+        click.echo("No problematic wells detected.")
+        return
+    flag_cols = [c for c in bad.columns if c.startswith("flag_") and c not in {"flag_any", "flag_count"}]  # fmt: skip
+    extra = ["is_ctr"] if "is_ctr" in bad.columns else []
+    click.echo(bad[["well", *extra, "flag_count", *flag_cols]].to_string(index=False))
+
+
+######################################
 # pr.tecan                           #
 ######################################
 @ppr.command()
