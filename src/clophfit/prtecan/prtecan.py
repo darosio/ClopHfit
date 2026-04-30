@@ -2118,10 +2118,9 @@ class Titration(TecanfilesGroup):
         )
         group_k_names = {f"K_{name}" for name in self.scheme.names}
         if self.params.ctr_free_k:
-            # Free-CTR mode: shared K hyperparams are K_mu_{name} and K_tau_{name}
-            group_k_names = {f"K_mu_{name}" for name in self.scheme.names} | {
-                f"K_tau_{name}" for name in self.scheme.names
-            }
+            # Flat free-CTR mode: no shared K hyperparams — per-well K values
+            # are already in ffit*.csv via extract_fit; nothing extra to export.
+            group_k_names = set()
         mask = trace_df.index.map(
             lambda n: n.startswith(shared_prefixes) or n in group_k_names
         )

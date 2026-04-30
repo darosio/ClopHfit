@@ -806,8 +806,9 @@ def _build_ctr_k_params(
     active_wells : set[str]
         Well keys that have valid results and datasets.
     ctr_free_k : bool
-        If True, each CTR replicate gets its own K drawn from a hierarchical
-        prior ``Normal(K_mu_{name}, K_tau_{name})``.  If False (default),
+        If True, each CTR replicate gets its own independent flat K prior
+        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
+        hierarchical shrinkage.  If False (default),
         all replicates of the same CTR share a single K.
 
     Returns
@@ -822,13 +823,13 @@ def _build_ctr_k_params(
     k_params: dict[str, typing.Any] = {}
     k_replicate: dict[str, typing.Any] = {}
     if ctr_free_k:
+        # Flat per-well K: each CTR replicate gets its own independent Normal prior
+        # with the same sigma=0.2 as UNK wells — no hierarchical shrinkage.
         for name, scheme_wells in scheme.names.items():
-            k_mu = pm.Normal(f"K_mu_{name}", mu=ctr_ks[name][0], sigma=0.2)
-            k_tau = pm.HalfNormal(f"K_tau_{name}", sigma=0.1)
             for well in scheme_wells:
                 if well in active_wells:
                     k_replicate[well] = pm.Normal(
-                        f"K_{name}_{well}", mu=k_mu, sigma=k_tau
+                        f"K_{name}_{well}", mu=ctr_ks[name][0], sigma=0.2
                     )
     else:
         k_params = {
@@ -885,11 +886,11 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
         NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
         ``"nutpie"``).
     ctr_free_k : bool
-        If True, each CTR replicate well gets its own K drawn from a
-        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
-        spread of K posteriors across replicates then quantifies
-        between-replicate accuracy.  If False (default), all replicates of
-        the same CTR share a single K.
+        If True, each CTR replicate well gets its own independent flat K prior
+        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
+        hierarchical shrinkage.  The spread of K posteriors across replicates
+        then quantifies between-replicate accuracy.  If False (default), all
+        replicates of the same CTR share a single K.
 
     Returns
     -------
@@ -1258,10 +1259,11 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
         NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
         (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
     ctr_free_k : bool
-        If True, each CTR replicate well gets its own K drawn from a
-        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
-        spread of K posteriors across replicates quantifies between-replicate
-        accuracy.  If False (default), all replicates share a single K.
+        If True, each CTR replicate well gets its own independent flat K prior
+        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
+        hierarchical shrinkage.  The spread of K posteriors across replicates
+        quantifies between-replicate accuracy.  If False (default), all
+        replicates share a single K.
 
     Returns
     -------
@@ -1414,10 +1416,11 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
         NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
         (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
     ctr_free_k : bool
-        If True, each CTR replicate well gets its own K drawn from a
-        hierarchical prior ``Normal(K_mu_{name}, K_tau_{name})``.  The
-        spread of K posteriors across replicates quantifies between-replicate
-        accuracy.  If False (default), all replicates share a single K.
+        If True, each CTR replicate well gets its own independent flat K prior
+        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
+        hierarchical shrinkage.  The spread of K posteriors across replicates
+        quantifies between-replicate accuracy.  If False (default), all
+        replicates share a single K.
 
     Returns
     -------
