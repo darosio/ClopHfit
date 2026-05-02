@@ -47,7 +47,7 @@ version = "0.12.0"
 gpu = [
   "blackjax>=1.5",
   "jax[cuda12]>=0.10.0",
-  "numpyro>=0.20.1",
+  "numpyro>=0.21.0",
   "nutpie>=0.16.8",
 ]
 docs = [
