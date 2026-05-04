@@ -51,6 +51,21 @@ if TYPE_CHECKING:
     from clophfit.fitting.data_structures import FitResult, MiniT
 
 
+class _FlexChoice(click.Choice):
+    """click.Choice that also accepts underscores in place of hyphens."""
+
+    def convert(
+        self,
+        value: str | float,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> str | int | float:
+        """Normalize underscores to hyphens before validation."""
+        if isinstance(value, str):
+            value = value.replace("_", "-")
+        return super().convert(value, param, ctx)
+
+
 @click.group()
 @click.version_option(message="%(version)s")
 def clop() -> None:  # pragma: no cover
@@ -141,7 +156,7 @@ def detect_bad_wells_cmd(
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'zscore:3.0:4' (method:threshold:min_keep).")  # fmt: skip
-@click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single.")  # fmt: skip
+@click.option("--mcmc", type=_FlexChoice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single.")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
