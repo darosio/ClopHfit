@@ -28,6 +28,10 @@ if "optimizer" not in _pt_flags:
     _pt_additions.append("optimizer=fast_compile")
 if _pt_additions:
     os.environ["PYTENSOR_FLAGS"] = ",".join(filter(None, [_pt_flags, *_pt_additions]))
+# Force JAX (blackjax/numpyro) onto CPU to avoid GPU OOM with vectorised chains
+# on large plate models (~88 wells).  Users can override by setting
+# JAX_PLATFORM_NAME before invoking ppr.
+os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
 
 from clophfit import (
     __enspire_out_dir__,
@@ -138,7 +142,7 @@ def detect_bad_wells_cmd(
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'zscore:3.0:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=click.Choice(["None", "multi", "multi-noise", "multi-noise-xrw", "single"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single.")  # fmt: skip
-@click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/GPU), nutpie (Rust/CPU).")  # fmt: skip
+@click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label (y1, y2, ...). Adds alpha^2*signal^2 to y_err^2. Obtain from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).")  # fmt: skip
