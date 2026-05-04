@@ -17,8 +17,17 @@ import pandas as pd
 from click import Context, Path as cPath
 
 # Set unique pytensor compile dir per process to avoid atexit filelock race
-# when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock
-os.environ.setdefault("PYTENSOR_FLAGS", f"base_compiledir=/tmp/pytensor_{os.getpid()}")
+# when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock.
+# Also apply optimizer=fast_compile so nutpie does not hit the loop-fusion
+# kernel argument limit on large plate models (e.g. 88 wells x 6 pH steps).
+_pt_flags = os.environ.get("PYTENSOR_FLAGS", "")
+_pt_additions = []
+if "base_compiledir" not in _pt_flags:
+    _pt_additions.append(f"base_compiledir=/tmp/pytensor_{os.getpid()}")
+if "optimizer" not in _pt_flags:
+    _pt_additions.append("optimizer=fast_compile")
+if _pt_additions:
+    os.environ["PYTENSOR_FLAGS"] = ",".join(filter(None, [_pt_flags, *_pt_additions]))
 
 from clophfit import (
     __enspire_out_dir__,

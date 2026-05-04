@@ -253,6 +253,7 @@ max-complexity = 12
   "FBT002", # configure_logging has boolean default for CLI compatibility
 ]
 "src/clophfit/__main__.py" = [
+  "E402", # Imports after PYTENSOR_FLAGS env-var setup (must precede pytensor init)
   "FBT001", # Boolean args acceptable in CLI with Click
   "FBT002", # Boolean defaults acceptable in CLI with Click
   "PLR0917", # Many args acceptable in CLI commands
