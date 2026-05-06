@@ -12,7 +12,10 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.testing.fitter_test_utils import (
+    TecanFitCombination,
+    apply_tecan_combination,
     build_fitters,
+    build_tecan_fit_combinations,
     k_from_result,
     make_synthetic_ds,
     s_from_result,
@@ -349,6 +352,108 @@ class TestFitterBuilding:
                 assert isinstance(result, FitResult)
             except (ValueError, TypeError, RuntimeError) as e:
                 pytest.fail(f"Fitter {name} failed with error: {e}")
+
+
+class TestTecanFitCombinations:
+    """Test registry utilities for modular Tecan fit combinations."""
+
+    def test_build_tecan_fit_combinations_default_names(self) -> None:
+        """Default registry should enumerate the baseline Tecan pipelines."""
+        combinations = build_tecan_fit_combinations()
+
+        expected_names = {
+            "y1_huber",
+            "y2_huber",
+            "y1y2_huber",
+            "y1y2_odr_from_huber",
+        }
+        assert set(combinations) == expected_names
+        assert all(
+            isinstance(combo, TecanFitCombination) for combo in combinations.values()
+        )
+        assert combinations["y1_huber"].channels == ("y1",)
+        assert combinations["y2_huber"].channels == ("y2",)
+        assert combinations["y1y2_huber"].channels == ("y1", "y2")
+        assert combinations["y1y2_odr_from_huber"].final_stage == "odr"
+        assert combinations["y1y2_odr_from_huber"].prefit == "huber"
+
+    def test_build_tecan_fit_combinations_with_mcmc(self) -> None:
+        """Optional MCMC stages should be appended as named combinations."""
+        combinations = build_tecan_fit_combinations(
+            include_mcmc=True,
+            mcmc_modes=("single", "multi-noise"),
+        )
+
+        assert "y1y2_mcmc_single_from_huber" in combinations
+        assert "y1y2_mcmc_multi-noise_from_huber" in combinations
+        assert combinations["y1y2_mcmc_single_from_huber"].final_stage == "mcmc_single"
+        assert (
+            combinations["y1y2_mcmc_multi-noise_from_huber"].final_stage
+            == "mcmc_multi-noise"
+        )
+
+    def test_apply_tecan_combination_uses_fresh_dataset_copy(self) -> None:
+        """Combination execution must not mutate the caller's dataset."""
+        ds, _ = make_dataset(
+            randomize_signals=True,
+            error_model="tecan",
+            seed=42,
+        )
+        combo = TecanFitCombination(
+            name="y1_huber",
+            channels=("y1",),
+            prefit="huber",
+            final_stage="huber",
+        )
+
+        y_before = ds["y1"].y.copy()
+        mask_before = ds["y1"].mask.copy()
+
+        result = apply_tecan_combination(ds, combo)
+
+        assert isinstance(result, FitResult)
+        np.testing.assert_array_equal(ds["y1"].y, y_before)
+        np.testing.assert_array_equal(ds["y1"].mask, mask_before)
+
+    def test_apply_tecan_combination_restricts_channels(self) -> None:
+        """Single-channel combinations should fit only the requested channel."""
+        ds, _ = make_dataset(
+            randomize_signals=True,
+            error_model="tecan",
+            seed=42,
+        )
+        combo = TecanFitCombination(
+            name="y2_huber",
+            channels=("y2",),
+            prefit="huber",
+            final_stage="huber",
+        )
+
+        result = apply_tecan_combination(ds, combo)
+
+        assert result.dataset is not None
+        assert set(result.dataset.keys()) == {"y2"}
+
+    def test_apply_tecan_combination_odr_uses_global_prefit(self) -> None:
+        """ODR combinations should run on top of a preceding global fit result."""
+        ds, _ = make_dataset(
+            randomize_signals=True,
+            error_model="tecan",
+            seed=42,
+        )
+        combo = TecanFitCombination(
+            name="y1y2_odr_from_huber",
+            channels=("y1", "y2"),
+            prefit="huber",
+            final_stage="odr",
+        )
+
+        result = apply_tecan_combination(ds, combo)
+
+        assert isinstance(result, FitResult)
+        assert result.result is not None
+        assert result.dataset is not None
+        assert set(result.dataset.keys()) == {"y1", "y2"}
 
 
 class TestEdgeCases:

@@ -1153,6 +1153,33 @@ class TestTitrationAnalysis:
         titan.load_scheme(data_tests / "140220/scheme.txt")
         return titan
 
+    def test_fit_pipeline_order_default(self, titan: Titration) -> None:
+        """It builds the default sequential Tecan fitting pipeline."""
+        assert tuple(titan.fit_pipeline) == ("label_1", "label_2", "global", "odr")
+        assert titan.result_global is titan.fit_pipeline["global"]
+        assert titan.result_odr is titan.fit_pipeline["odr"]
+
+    def test_fit_pipeline_order_with_mcmc(self, titan: Titration) -> None:
+        """It appends the configured MCMC stage at the end of the pipeline."""
+        titan.params.mcmc = "multi-noise"
+        assert tuple(titan.fit_pipeline) == (
+            "label_1",
+            "label_2",
+            "global",
+            "odr",
+            "mcmc_multi_noise",
+        )
+        assert titan.result_multi_noise_mcmc is titan.fit_pipeline["mcmc_multi_noise"]
+        titan.params.mcmc = "None"
+
+    def test_fit_pipeline_cache_resets_on_param_change(self, titan: Titration) -> None:
+        """It clears the cached fit pipeline when analysis parameters change."""
+        _ = titan.fit_pipeline
+        assert "fit_pipeline" in titan.__dict__
+        titan.params.bg = not titan.params.bg
+        assert "fit_pipeline" not in titan.__dict__
+        titan.params.bg = not titan.params.bg
+
     def test_scheme(self, titan: Titration) -> None:
         """It finds well position for buffer samples."""
         assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]

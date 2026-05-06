@@ -1325,14 +1325,23 @@ class Titration(TecanfilesGroup):
 
     def _reset_data_and_results(self) -> None:
         self._data = {}
-        if "results" in self.__dict__:
-            del self.results
-        if "result_global" in self.__dict__:
-            del self.result_global
-        if "result_odr" in self.__dict__:
-            del self.result_odr
-        if "result_mcmc" in self.__dict__:
-            del self.result_mcmc
+        cached_results = (
+            "results",
+            "result_global",
+            "result_odr",
+            "result_mcmc",
+            "result_multi_trace",
+            "result_multi_trace2",
+            "result_multi_noise",
+            "result_multi_noise_xrw",
+            "result_multi_mcmc",
+            "result_multi_noise_mcmc",
+            "result_multi_noise_xrw_mcmc",
+            "fit_pipeline",
+        )
+        for attr in cached_results:
+            if attr in self.__dict__:
+                delattr(self, attr)
 
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()
@@ -1592,19 +1601,7 @@ class Titration(TecanfilesGroup):
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "fit"
         outfit.mkdir(parents=True, exist_ok=True)
-        export_list = [
-            *list(self.results.values()),
-            self.result_global,
-            self.result_odr,
-        ]
-        if self.params.mcmc == "single":
-            export_list.append(self.result_mcmc)
-        elif self.params.mcmc == "multi":
-            export_list.append(self.result_multi_mcmc)
-        elif self.params.mcmc == "multi-noise":
-            export_list.append(self.result_multi_noise_mcmc)
-        elif self.params.mcmc == "multi-noise-xrw":
-            export_list.append(self.result_multi_noise_xrw_mcmc)
+        export_list = self._ordered_result_sets()
         for i, results in enumerate(export_list):
             png_dir = outfit / f"lb{i}"
             data_dir = png_dir / "ds"
@@ -1748,6 +1745,37 @@ class Titration(TecanfilesGroup):
     def result_odr(self) -> TitrationResults:
         """Perform global ODR fitting."""
         return TitrationResults(self.scheme, self.fit_keys, self._compute_odr_fit)
+
+    @cached_property
+    def fit_pipeline(self) -> dict[str, TitrationResults]:
+        """Ordered registry of fitting stages for the current titration analysis."""
+        pipeline = {
+            f"label_{label}": results for label, results in sorted(self.results.items())
+        }
+        pipeline["global"] = self.result_global
+        pipeline["odr"] = self.result_odr
+        mcmc_stage = self._mcmc_stage_result()
+        if mcmc_stage is not None:
+            stage_name, stage_results = mcmc_stage
+            pipeline[stage_name] = stage_results
+        return pipeline
+
+    def _mcmc_stage_result(self) -> tuple[str, TitrationResults] | None:
+        """Return the configured MCMC stage, if any."""
+        stage_map = {
+            "single": ("mcmc_single", self.result_mcmc),
+            "multi": ("mcmc_multi", self.result_multi_mcmc),
+            "multi-noise": ("mcmc_multi_noise", self.result_multi_noise_mcmc),
+            "multi-noise-xrw": (
+                "mcmc_multi_noise_xrw",
+                self.result_multi_noise_xrw_mcmc,
+            ),
+        }
+        return stage_map.get(self.params.mcmc)
+
+    def _ordered_result_sets(self) -> list[TitrationResults]:
+        """Return fit result collections in execution/export order."""
+        return list(self.fit_pipeline.values())
 
     def _fit(self, ds: Dataset) -> FitResult[Minimizer]:
         """Call fit_binding_glob with parameters from current config."""
