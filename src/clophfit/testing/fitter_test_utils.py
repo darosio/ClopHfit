@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
@@ -13,7 +14,7 @@ from clophfit.fitting.odr import fit_binding_odr, fit_binding_odr_recursive_outl
 from clophfit.testing.synthetic import TruthParams, make_simple_dataset
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from clophfit.fitting.data_structures import Dataset, FitResult, MiniT
 
@@ -33,6 +34,8 @@ TecanFinalStage = Literal[
     "mcmc_multi-noise",
     "mcmc_multi-noise-xrw",
 ]
+TecanWeighting = Literal["auto", "none"]
+GLOBAL_FINAL_STAGES: tuple[TecanFitMethod, ...] = ("lm", "huber", "irls")
 
 
 @dataclass(frozen=True)
@@ -44,11 +47,14 @@ class TecanFitCombination:
     prefit: TecanFitMethod
     final_stage: TecanFinalStage
     outlier_handling: str | None = None
-    weighting: Literal["auto", "none"] = "auto"
+    weighting: TecanWeighting = "auto"
 
 
 def _fit_binding_glob_for_method(
-    ds: Dataset, method: TecanFitMethod
+    ds: Dataset,
+    method: TecanFitMethod,
+    *,
+    remove_outliers: str | None = None,
 ) -> FitResult[MiniT]:
     """Run the global fitter with the configured robustification mode."""
     method_map: dict[TecanFitMethod, tuple[str, str | None]] = {
@@ -57,7 +63,76 @@ def _fit_binding_glob_for_method(
         "irls": ("lm", "irls"),
     }
     fit_method, reweight = method_map[method]
-    return fit_binding_glob(ds, method=fit_method, reweight=reweight)
+    return fit_binding_glob(
+        ds,
+        method=fit_method,
+        reweight=reweight,
+        remove_outliers=remove_outliers,
+    )
+
+
+def _channel_tag(channels: Sequence[str]) -> str:
+    """Return the compact channel tag used in combination names."""
+    return "".join(channels)
+
+
+def _sanitize_name_fragment(value: str) -> str:
+    """Convert factor values into safe, readable name fragments."""
+    return value.replace(":", "-").replace("_", "-")
+
+
+def _combination_name(
+    *,
+    channels: tuple[str, ...],
+    prefit: TecanFitMethod,
+    final_stage: TecanFinalStage,
+    weighting: TecanWeighting,
+    outlier_handling: str | None,
+) -> str:
+    """Build a stable method name from the factor settings."""
+    channel_tag = _channel_tag(channels)
+    if final_stage in GLOBAL_FINAL_STAGES and final_stage == prefit:
+        name = f"{channel_tag}_{final_stage}_{weighting}"
+    else:
+        name = f"{channel_tag}_{final_stage}_from_{prefit}_{weighting}"
+    if outlier_handling is not None:
+        name = f"{name}_outlier_{_sanitize_name_fragment(outlier_handling)}"
+    return name
+
+
+def build_factorized_tecan_fit_combinations(
+    *,
+    channels: tuple[tuple[str, ...], ...] = (("y1",), ("y2",), ("y1", "y2")),
+    prefits: tuple[TecanFitMethod, ...] = ("huber",),
+    final_stages: tuple[TecanFinalStage, ...] = ("huber", "odr"),
+    weightings: tuple[TecanWeighting, ...] = ("auto",),
+    outlier_handlings: tuple[str | None, ...] = (None,),
+) -> dict[str, TecanFitCombination]:
+    """Build a systematic registry across explicit Tecan benchmark factors."""
+    combinations: dict[str, TecanFitCombination] = {}
+    for channel_set, prefit, final_stage, weighting, outlier_handling in product(
+        channels,
+        prefits,
+        final_stages,
+        weightings,
+        outlier_handlings,
+    ):
+        name = _combination_name(
+            channels=channel_set,
+            prefit=prefit,
+            final_stage=final_stage,
+            weighting=weighting,
+            outlier_handling=outlier_handling,
+        )
+        combinations[name] = TecanFitCombination(
+            name=name,
+            channels=channel_set,
+            prefit=prefit,
+            final_stage=final_stage,
+            weighting=weighting,
+            outlier_handling=outlier_handling,
+        )
+    return combinations
 
 
 def build_tecan_fit_combinations(
@@ -125,16 +200,28 @@ def apply_tecan_combination(
         elif len(work_ds) > 1:
             weight_multi_ds_titration(work_ds)
 
-    prefit_result = _fit_binding_glob_for_method(work_ds, combination.prefit)
     final_stage = combination.final_stage
-    if final_stage in {"lm", "huber", "irls"}:
+    prefit_outliers = (
+        combination.outlier_handling if final_stage not in GLOBAL_FINAL_STAGES else None
+    )
+    prefit_result = _fit_binding_glob_for_method(
+        work_ds,
+        combination.prefit,
+        remove_outliers=prefit_outliers,
+    )
+    if final_stage in GLOBAL_FINAL_STAGES:
         return _fit_binding_glob_for_method(
-            work_ds, cast("TecanFitMethod", final_stage)
+            work_ds,
+            final_stage,
+            remove_outliers=combination.outlier_handling,
         )
     if final_stage == "odr":
-        return fit_binding_odr(prefit_result)
+        return cast("FitResult[MiniT]", fit_binding_odr(prefit_result))
     if final_stage == "mcmc_single":
-        return fit_binding_pymc(prefit_result, n_sd=5.0, n_xerr=1.0, n_samples=200)
+        return cast(
+            "FitResult[MiniT]",
+            fit_binding_pymc(prefit_result, n_sd=5.0, n_xerr=1.0, n_samples=200),
+        )
     msg = (
         f"Final stage '{final_stage}' requires full TitrationAnalysis context and "
         "is not supported by dataset-only benchmark utilities."
@@ -213,7 +300,7 @@ def build_fitters(
 
         def _odr(ds: Dataset) -> FitResult[MiniT]:
             base = fit_binding_glob(ds)
-            return fit_binding_odr_recursive_outlier(base)
+            return cast("FitResult[MiniT]", fit_binding_odr_recursive_outlier(base))
 
         fitters["odr_recursive_outlier"] = _odr
 

@@ -7,7 +7,7 @@ import logging
 import os
 import pprint
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import click
 import lmfit  # type: ignore[import-untyped]
@@ -56,14 +56,13 @@ class _FlexChoice(click.Choice):
 
     def convert(
         self,
-        value: str | float,
+        value: str,
         param: click.Parameter | None,
         ctx: click.Context | None,
-    ) -> str | int | float:
+    ) -> str:
         """Normalize underscores to hyphens before validation."""
-        if isinstance(value, str):
-            value = value.replace("_", "-")
-        return super().convert(value, param, ctx)
+        normalized = value.replace("_", "-")
+        return cast("str", super().convert(normalized, param, ctx))
 
 
 @click.group()

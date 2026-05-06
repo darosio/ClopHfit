@@ -14,6 +14,7 @@ from clophfit.fitting.models import binding_1site
 from clophfit.testing.fitter_test_utils import (
     TecanFitCombination,
     apply_tecan_combination,
+    build_factorized_tecan_fit_combinations,
     build_fitters,
     build_tecan_fit_combinations,
     k_from_result,
@@ -391,6 +392,76 @@ class TestTecanFitCombinations:
             combinations["y1y2_mcmc_multi-noise_from_huber"].final_stage
             == "mcmc_multi-noise"
         )
+
+    def test_build_factorized_tecan_fit_combinations_crosses_factors(self) -> None:
+        """Factorized registry should generate the requested cross-product."""
+        combinations = build_factorized_tecan_fit_combinations(
+            channels=(("y1",), ("y1", "y2")),
+            prefits=("huber",),
+            final_stages=("huber", "odr", "mcmc_single"),
+            weightings=("auto", "none"),
+            outlier_handlings=(None, "zscore:2.5:5"),
+        )
+
+        assert set(combinations) == {
+            "y1_huber_auto",
+            "y1_huber_auto_outlier_zscore-2.5-5",
+            "y1_huber_none",
+            "y1_huber_none_outlier_zscore-2.5-5",
+            "y1_odr_from_huber_auto",
+            "y1_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "y1_odr_from_huber_none",
+            "y1_odr_from_huber_none_outlier_zscore-2.5-5",
+            "y1_mcmc_single_from_huber_auto",
+            "y1_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "y1_mcmc_single_from_huber_none",
+            "y1_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+            "y1y2_huber_auto",
+            "y1y2_huber_auto_outlier_zscore-2.5-5",
+            "y1y2_huber_none",
+            "y1y2_huber_none_outlier_zscore-2.5-5",
+            "y1y2_odr_from_huber_auto",
+            "y1y2_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "y1y2_odr_from_huber_none",
+            "y1y2_odr_from_huber_none_outlier_zscore-2.5-5",
+            "y1y2_mcmc_single_from_huber_auto",
+            "y1y2_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "y1y2_mcmc_single_from_huber_none",
+            "y1y2_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+        }
+        assert combinations["y1_huber_none"].weighting == "none"
+        assert combinations["y1_odr_from_huber_auto"].final_stage == "odr"
+        assert (
+            combinations["y1_mcmc_single_from_huber_auto"].final_stage == "mcmc_single"
+        )
+        assert combinations["y1y2_odr_from_huber_auto"].prefit == "huber"
+        assert (
+            combinations[
+                "y1y2_odr_from_huber_auto_outlier_zscore-2.5-5"
+            ].outlier_handling
+            == "zscore:2.5:5"
+        )
+
+    def test_build_factorized_tecan_fit_combinations_keeps_single_channel_odr_and_mcmc(
+        self,
+    ) -> None:
+        """Single-channel ODR and MCMC workflows should remain benchmarkable."""
+        combinations = build_factorized_tecan_fit_combinations(
+            channels=(("y1",), ("y2",), ("y1", "y2")),
+            prefits=("huber",),
+            final_stages=("odr", "mcmc_single"),
+            weightings=("auto",),
+            outlier_handlings=(None,),
+        )
+
+        assert {
+            "y1_odr_from_huber_auto",
+            "y2_odr_from_huber_auto",
+            "y1y2_odr_from_huber_auto",
+            "y1_mcmc_single_from_huber_auto",
+            "y2_mcmc_single_from_huber_auto",
+            "y1y2_mcmc_single_from_huber_auto",
+        } <= set(combinations)
 
     def test_apply_tecan_combination_uses_fresh_dataset_copy(self) -> None:
         """Combination execution must not mutate the caller's dataset."""
