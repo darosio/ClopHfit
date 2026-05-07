@@ -1965,7 +1965,7 @@ class Titration(TecanfilesGroup):
         """Perform global MCMC fitting with learned per-label noise model."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
-        results = self.result_global.results
+        results = dict(self.result_global.results)
         trace = fit_binding_pymc_multi_noise(
             results,
             self.scheme,
@@ -1990,7 +1990,7 @@ class Titration(TecanfilesGroup):
         """Perform global MCMC with noise model and per-well pH random walk."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC XRW fitting: %.3f", n_sd)
-        results = self.result_global.results
+        results = dict(self.result_global.results)
         trace = fit_binding_pymc_multi_noise_xrw(
             results,
             self.scheme,

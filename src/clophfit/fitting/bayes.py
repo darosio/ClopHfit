@@ -139,7 +139,10 @@ def create_parameter_priors(
         # Skip creating a separate K prior if it belongs to a control group
         if ctr_name and name == "K":
             continue
-        priors[param_name(name)] = pm.Normal(param_name(name), mu=p.value, sigma=sigma)
+        prior_name = param_name(name)
+        if prior_name in priors:
+            continue
+        priors[prior_name] = pm.Normal(prior_name, mu=p.value, sigma=sigma)
     return priors
 
 
@@ -312,10 +315,10 @@ def extract_fit(
             extracted_name = "K"
         _add_param_from_summary(rpars, extracted_name, row)
     if ctr and "K" not in rpars:
-        # Shared-K mode (ctr_free_k=False): CTR K is named K_{ctr}.
-        rdf = trace_df[trace_df.index.str.endswith(ctr)]
+        # Shared-K mode (ctr_free_k=False): CTR K is named with _ctr_ prefix.
+        rdf = trace_df[trace_df.index == _ctr_param_name(ctr)]
         for name, row in rdf.iterrows():
-            extracted_name = str(name).replace(f"_{ctr}", "")
+            extracted_name = str(name).replace(_ctr_param_name(ctr), "K")
             _add_param_from_summary(rpars, extracted_name, row)
     # Use per-well x (xrw model) when available; fall back to global x_true.
     nxc, nx_errc = (
@@ -788,6 +791,11 @@ def weighted_stats(
     return results
 
 
+def _ctr_param_name(group_name: str) -> str:
+    """Return a control-group K variable name that cannot collide with well names."""
+    return f"K_ctr_{group_name}"
+
+
 def _build_ctr_k_params(  # noqa: PLR0913
     scheme: PlateScheme,
     ctr_ks: dict[str, tuple[float, float]],
@@ -848,7 +856,7 @@ def _build_ctr_k_params(  # noqa: PLR0913
     else:
         k_params = {
             name: pm.Normal(
-                f"K_{name}",
+                _ctr_param_name(name),
                 mu=ctr_ks[name][0],
                 sigma=max(ctr_ks[name][1], fallback_sigma / 2),
             )
@@ -1154,7 +1162,7 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
         # Create shared K parameters for each control group
         k_params = {
             control_name: pm.Normal(
-                f"K_{control_name}",
+                _ctr_param_name(control_name),
                 mu=ctr_ks[control_name][0],
                 # if ctr_ks[control_name][0] is not np.nan
                 # else 7.0,  # Handle case where no K values found
@@ -1456,7 +1464,7 @@ def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
             ctr_name = next(
                 (name for name, wells in scheme.names.items() if key in wells), ""
             )
-            pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+            pars = create_parameter_priors(r.result.params, n_sd, key, "")
             K = _resolve_well_k(  # noqa: N806
                 key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
             )
@@ -1640,7 +1648,7 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
             ctr_name = next(
                 (name for name, sw in scheme.names.items() if key in sw), ""
             )
-            pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
+            pars = create_parameter_priors(r.result.params, n_sd, key, "")
             K = _resolve_well_k(  # noqa: N806
                 key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
             )
@@ -1867,7 +1875,7 @@ def fit_pymc_hierarchical(  # noqa: PLR0913,PLR0917
         k_params = {}
         for name in scheme.names:
             mean_k = np.mean(k_values[name]) if k_values[name] else 7.0
-            k_params[name] = pm.Normal(f"K_{name}", mu=mean_k, sigma=0.5)
+            k_params[name] = pm.Normal(_ctr_param_name(name), mu=mean_k, sigma=0.5)
 
         # --- Loop through each well to define its model ---
         for key, r in results.items():

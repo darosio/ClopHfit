@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from clophfit.fitting.bayes import fit_binding_pymc
-from clophfit.fitting.core import fit_binding_glob, weight_da, weight_multi_ds_titration
+from clophfit.fitting.core import (
+    fit_binding_glob,
+    weight_da,
+    weight_multi_ds_titration,
+)
 from clophfit.fitting.odr import fit_binding_odr, fit_binding_odr_recursive_outlier
 from clophfit.testing.synthetic import TruthParams, make_simple_dataset
 
@@ -34,7 +38,7 @@ TecanFinalStage = Literal[
     "mcmc_multi-noise",
     "mcmc_multi-noise-xrw",
 ]
-TecanWeighting = Literal["auto", "none"]
+TecanWeighting = Literal["auto", "none", "calibrated"]
 GLOBAL_FINAL_STAGES: tuple[TecanFitMethod, ...] = ("lm", "huber", "irls")
 
 
@@ -199,6 +203,12 @@ def apply_tecan_combination(
             weight_da(da, is_ph=work_ds.is_ph)
         elif len(work_ds) > 1:
             weight_multi_ds_titration(work_ds)
+    elif combination.weighting == "calibrated":
+        msg = (
+            "Calibrated weighting requires pooled multi-well context and is not supported "
+            "by dataset-only benchmark utilities."
+        )
+        raise NotImplementedError(msg)
 
     final_stage = combination.final_stage
     prefit_outliers = (
