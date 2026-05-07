@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import os
 import typing
+import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import arviz as az
@@ -442,6 +444,8 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     ye_scaling: float = 1.0,
     n_samples: int = 2000,
     nuts_sampler: str = "default",
+    *,
+    error_model: str = "shared",
 ) -> FitResult[az.InferenceData]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -460,6 +464,8 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     nuts_sampler : str
         NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
         ``"numpyro"``, or ``"nutpie"``.
+    error_model : str
+        Error model to use: ``"shared"`` (single ye_mag) or ``"separate"`` (per-label ye_mag).
 
     Returns
     -------
@@ -479,15 +485,27 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
         pars = create_parameter_priors(params, n_sd)
         x_true = create_x_true(xc, x_errc, n_xerr)
         # Add likelihoods for each dataset
-        ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
+        if error_model == "separate":
+            ye_mag_dict: dict[str, pm.Distribution] = {
+                lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=ye_scaling * 10.0)
+                for lbl in ds
+            }
+        else:
+            ye_mag_shared = pm.HalfNormal("ye_mag", sigma=ye_scaling)
+
         for lbl, da in ds.items():
             y_model = binding_1site(
                 x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
             )
+            sigma = (
+                ye_mag_dict[lbl] * np.ones_like(da.y_err)
+                if error_model == "separate"
+                else ye_mag_shared * da.y_err
+            )
             pm.Normal(
                 f"y_likelihood_{lbl}",
                 mu=y_model[da.mask],
-                sigma=ye_mag * da.y_err,
+                sigma=sigma,
                 observed=da.y,
             )
         # Inference
@@ -509,61 +527,20 @@ def fit_binding_pymc2(
     n_xerr: float = 1.0,
     n_samples: int = 2000,
 ) -> FitResult[az.InferenceData]:
-    """Analyze multi-label titration datasets using PyMC with separate ye_mag per label.
-
-    Parameters
-    ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
-        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
-    n_sd : float
-        Number of standard deviations for parameter priors.
-    n_xerr : float
-        Scaling factor for x-error.
-    n_samples : int
-        Number of MCMC samples.
-
-    Returns
-    -------
-    FitResult[az.InferenceData]
-        Bayesian fitting results with per-label error scaling.
-    """
-    # Handle both Dataset and FitResult inputs
-    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
-
-    if fr.result is None or fr.dataset is None:
-        return FitResult()
-    params = fr.result.params
-    ds = copy.deepcopy(fr.dataset)
-    xc = next(iter(ds.values())).xc  # # TODO: move up out
-    x_errc = next(iter(ds.values())).x_errc
-    with pm.Model():
-        pars = create_parameter_priors(params, n_sd)
-        x_true = create_x_true(xc, x_errc, n_xerr)
-        # Add likelihoods for each dataset
-        ye_mag: dict[str, pm.Distribution] = {}
-        for lbl in ds:
-            ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=10.0)  # TODO: 100
-        for lbl, da in ds.items():
-            y_model = binding_1site(
-                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
-            )
-            pm.Normal(
-                f"y_likelihood_{lbl}",
-                mu=y_model[da.mask],
-                sigma=ye_mag[lbl] * np.ones_like(da.y_err),
-                observed=da.y,
-            )
-        # Inference
-        tune = n_samples // 2
-        trace = pm.sample(
-            n_samples,
-            tune=tune,
-            target_accept=0.9,
-            return_inferencedata=True,
-            idata_kwargs={"log_likelihood": True},
-            **_pymc_sample_parallel_args(),
-        )
-    return process_trace(trace, params.keys(), ds, n_xerr)
+    """Analyze multi-label titration datasets using deprecated PyMC with separate ye_mag per label."""
+    warnings.warn(
+        "fit_binding_pymc2 is deprecated. Use fit_binding_pymc(..., error_model='separate') instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return fit_binding_pymc(
+        ds_or_fr,
+        n_sd=n_sd,
+        n_xerr=n_xerr,
+        ye_scaling=1.0,
+        n_samples=n_samples,
+        error_model="separate",
+    )
 
 
 def fit_binding_pymc_compare(  # noqa: PLR0913
@@ -699,7 +676,12 @@ def fit_binding_pymc_odr(
     ye_scaling: float = 10.0,
     n_samples: int = 2000,
 ) -> az.InferenceData | pm.backends.base.MultiTrace:
-    """Bayesian ODR-like modeling of x and y errors."""
+    """Analyze using deprecated Bayesian ODR-like modeling of x and y errors."""
+    warnings.warn(
+        "fit_binding_pymc_odr is deprecated and may not work with recent PyMC versions.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if fr.result is None or fr.dataset is None:
         return az.InferenceData()  # FitResult()
     params = fr.result.params

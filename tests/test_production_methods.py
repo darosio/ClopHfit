@@ -4,10 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import Dataset, FitResult
-from clophfit.fitting.odr import (
-    fit_binding_odr_recursive,
-    fit_binding_odr_recursive_outlier,
-)
+from clophfit.fitting.odr import fit_binding_odr
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -24,7 +21,7 @@ def test_odr_recursive_basic_convergence(ph_dataset: Dataset) -> None:
     assert lm_result.result is not None
     assert lm_result.result.success, "LM fit failed"
 
-    odr_result = fit_binding_odr_recursive(lm_result)
+    odr_result = fit_binding_odr(lm_result, reweight=True)
     assert odr_result.result is not None
     assert odr_result.result.success, "ODR recursive fit failed"
     assert "K" in odr_result.result.params, "Missing K parameter"
@@ -38,7 +35,7 @@ def test_odr_recursive_outlier_basic_convergence(ph_dataset: Dataset) -> None:
     assert lm_result.result is not None
     assert lm_result.result.success, "LM fit failed"
 
-    odr_result = fit_binding_odr_recursive_outlier(lm_result)
+    odr_result = fit_binding_odr(lm_result, remove_outliers="zscore:2.0")
     assert odr_result.result is not None
     assert odr_result.result.success, "ODR recursive+outlier fit failed"
     assert "K" in odr_result.result.params, "Missing K parameter"
@@ -68,8 +65,11 @@ def test_all_production_methods_converge(ph_dataset: Dataset) -> None:
     assert lm_result.result.success, "LM failed"
 
     odr_methods: list[tuple[str, Callable[[FitResult[Any]], FitResult[Any]]]] = [
-        ("ODR-Recursive", fit_binding_odr_recursive),
-        ("ODR-Recursive+Outlier", fit_binding_odr_recursive_outlier),
+        ("ODR-Recursive", lambda fr: fit_binding_odr(fr, reweight=True)),
+        (
+            "ODR-Recursive+Outlier",
+            lambda fr: fit_binding_odr(fr, remove_outliers="zscore:2.0"),
+        ),
     ]
 
     for name, odr_method in odr_methods:
@@ -85,7 +85,7 @@ def test_odr_vs_lm_both_succeed(ph_dataset: Dataset) -> None:
     assert lm_result.result is not None
     assert lm_result.result.success
 
-    odr_result = fit_binding_odr_recursive(lm_result)
+    odr_result = fit_binding_odr(lm_result, reweight=True)
     assert odr_result.result is not None
     assert odr_result.result.success
 
@@ -108,7 +108,7 @@ def test_odr_preserves_lm_structure(ph_dataset: Dataset) -> None:
     """Verify ODR output maintains FitResult structure."""
     lm_result = fit_binding_glob(ph_dataset)
     assert lm_result.result is not None
-    odr_result = fit_binding_odr_recursive(lm_result)
+    odr_result = fit_binding_odr(lm_result, reweight=True)
     assert odr_result.result is not None
 
     for param_name in lm_result.result.params:

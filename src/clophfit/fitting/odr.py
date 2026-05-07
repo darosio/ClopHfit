@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import typing
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -113,8 +114,13 @@ def generalized_combined_model(
     return np.concatenate(results)
 
 
-def fit_binding_odr(
+def fit_binding_odr(  # noqa: C901, PLR0915
     ds_or_fr: Dataset | FitResult[MiniT],
+    *,
+    reweight: bool = False,
+    remove_outliers: str | None = None,
+    max_iter: int = 15,
+    tol: float = 0.1,
 ) -> FitResult[odrpack.OdrResult]:
     """Analyze multi-label titration datasets using ODR.
 
@@ -122,6 +128,15 @@ def fit_binding_odr(
     ----------
     ds_or_fr : Dataset | FitResult[MiniT]
         Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+    reweight : bool
+        Whether to perform iterative reweighting (recursive ODR).
+    remove_outliers : str | None
+        Outlier removal configuration, e.g., "zscore:2.5" or "zscore:2.5:5".
+        If set, performs recursive ODR and masks outliers iteratively.
+    max_iter : int
+        Maximum number of iterations for recursive ODR.
+    tol : float
+        Convergence tolerance for residual variance.
 
     Returns
     -------
@@ -130,72 +145,122 @@ def fit_binding_odr(
         (before ODR modified it), making them comparable to LM residuals.
     """
     # Handle both Dataset and FitResult inputs
-    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
+    fr = (
+        fit_binding_glob(ds_or_fr)
+        if isinstance(ds_or_fr, Dataset)
+        else copy.deepcopy(ds_or_fr)
+    )
 
     if fr.result is None or fr.dataset is None:
         return FitResult()
 
-    params = fr.result.params
-    ds = copy.deepcopy(fr.dataset)
+    def _single_odr_fit(current_fr: FitResult[MiniT]) -> FitResult[odrpack.OdrResult]:
+        if current_fr.result is None or current_fr.dataset is None:
+            return FitResult()
+        params = current_fr.result.params
+        ds = copy.deepcopy(current_fr.dataset)
 
-    # Store ORIGINAL y_err from LM fit (for residual weighting)
-    # These are physics-based errors, not inflated by shot_factor
-    original_y_err = np.concatenate([da.y_err for da in ds.values()])
+        original_y_err = np.concatenate([da.y_err for da in ds.values()])
 
-    # Apply shot_factor for ODR fitting (not for residual weighting)
-    for da in ds.values():
-        # even if da.y_err is set to [1,1,..] array y_errc remains []
-        shot_factor = 1 + np.sqrt(np.abs(da.yc))
-        da.y_err = da.y_errc * shot_factor if da.y_errc.size > 0 else 1.0 * shot_factor
+        for da in ds.values():
+            shot_factor = 1 + np.sqrt(np.abs(da.yc))
+            da.y_err = (
+                da.y_errc * shot_factor if da.y_errc.size > 0 else 1.0 * shot_factor
+            )
 
-    # Collect dataset lengths
-    dataset_lengths = [len(da.y) for da in ds.values()]
-    x_data, y_data, x_err, y_err = ds.concatenate_data()
-    weight_x = weights_from_sigma(x_err)
-    weight_y = weights_from_sigma(y_err)
-    # Initial parameters setup
-    initial_params = [params["K"].value]
-    for lbl in ds:
-        initial_params.extend([params[f"S0_{lbl}"].value, params[f"S1_{lbl}"].value])
+        dataset_lengths = [len(da.y) for da in ds.values()]
+        x_data, y_data, x_err, y_err = ds.concatenate_data()
+        weight_x = weights_from_sigma(x_err)
+        weight_y = weights_from_sigma(y_err)
 
-    # Define the combined model
-    def combined_model_odr(x: ArrayF, p: ArrayF) -> ArrayF:
-        return generalized_combined_model(p, x, dataset_lengths, is_ph=ds.is_ph)
+        initial_params = [params["K"].value]
+        for lbl in ds:
+            initial_params.extend([
+                params[f"S0_{lbl}"].value,
+                params[f"S1_{lbl}"].value,
+            ])
 
-    output = odrpack.odr_fit(
-        combined_model_odr,
-        x_data,
-        y_data,
-        initial_params,
-        weight_x=weight_x,
-        weight_y=weight_y,
-    )
-    # reassign x_err and y_err to ds (ODR-estimated values)
-    start_idx = 0
-    for da in ds.values():
-        end_idx = start_idx + len(da.y)
-        da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])
-        da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
-        start_idx = end_idx
-    # Update the parameters with results from ODR
-    p_names = ["K"]
-    for lbl in ds:
-        p_names.extend((f"S0_{lbl}", f"S1_{lbl}"))
-    params = Parameters()
-    for name, value, error in zip(p_names, output.beta, output.sd_beta, strict=True):
-        params.add(name, value=value)
-        params[name].stderr = error
+        def combined_model_odr(x: ArrayF, p: ArrayF) -> ArrayF:
+            return generalized_combined_model(p, x, dataset_lengths, is_ph=ds.is_ph)
 
-    # Compute weighted residuals using ORIGINAL y_err (not ODR-modified)
-    residuals = _compute_odr_residuals(ds, params, original_y_err)
+        output = odrpack.odr_fit(
+            combined_model_odr,
+            x_data,
+            y_data,
+            initial_params,
+            weight_x=weight_x,
+            weight_y=weight_y,
+        )
 
-    # Create figure and result
-    fig = figure.Figure()
-    ax = fig.add_subplot(111)
-    plot_fit(ax, ds, params, nboot=20, pp=PlotParameters(ds.is_ph))
-    return FitResult(
-        fig, _Result(params, residual=residuals, redchi=output.res_var), output, ds
-    )
+        start_idx = 0
+        for da in ds.values():
+            end_idx = start_idx + len(da.y)
+            da.x_errc[da.mask] = 2 * np.abs(output.delta[start_idx:end_idx])
+            da.y_errc[da.mask] = 2 * np.abs(output.eps[start_idx:end_idx])
+            start_idx = end_idx
+
+        p_names = ["K"]
+        for lbl in ds:
+            p_names.extend((f"S0_{lbl}", f"S1_{lbl}"))
+        params = Parameters()
+        for name, value, error in zip(
+            p_names, output.beta, output.sd_beta, strict=True
+        ):
+            params.add(name, value=value)
+            params[name].stderr = error
+
+        residuals = _compute_odr_residuals(ds, params, original_y_err)
+
+        fig = figure.Figure()
+        ax = fig.add_subplot(111)
+        plot_fit(ax, ds, params, nboot=20, pp=PlotParameters(ds.is_ph))
+        return FitResult(
+            fig, _Result(params, residual=residuals, redchi=output.res_var), output, ds
+        )
+
+    # Initial fit
+    ro = _single_odr_fit(fr)
+
+    # If neither reweighting nor outlier removal is requested, return early
+    if not reweight and not remove_outliers:
+        return ro
+
+    # Parse outlier config if present
+    threshold = 2.0
+    if remove_outliers:
+        parts = remove_outliers.split(":")
+        if len(parts) > 1:
+            threshold = float(parts[1])
+
+    residual_variance = ro.mini.res_var if ro.mini else 0.0
+
+    for _ in range(max_iter):
+        if remove_outliers and ro.mini:
+            omask = outlier(ro.mini, threshold=threshold)
+            if omask.any() and ro.dataset:
+                # Apply mask to the starting FitResult's dataset to exclude points
+                fr.dataset.apply_mask(~omask)
+
+        rn = _single_odr_fit(fr)
+        if rn.mini and rn.mini.res_var == 0:
+            rn = ro
+            break
+
+        if rn.mini and residual_variance - rn.mini.res_var < tol:
+            if not remove_outliers:
+                break
+            # If removing outliers, also require no new outliers to converge
+            if remove_outliers:
+                omask_new = outlier(rn.mini, threshold=threshold)
+                if not omask_new.any():
+                    ro = rn
+                    break
+
+        residual_variance = rn.mini.res_var if rn.mini else 0.0
+        ro = rn
+        fr = copy.deepcopy(ro)  # update starting point for next iteration
+
+    return ro
 
 
 def fit_binding_odr_recursive(
@@ -203,45 +268,27 @@ def fit_binding_odr_recursive(
     max_iterations: int = 15,
     tol: float = 0.1,
 ) -> FitResult[odrpack.OdrResult]:
-    """Analyze multi-label titration datasets using iterative ODR.
+    """Analyze multi-label titration datasets using iterative ODR (deprecated)."""
+    warnings.warn(
+        "fit_binding_odr_recursive is deprecated. Use fit_binding_odr(..., reweight=True) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return fit_binding_odr(ds_or_fr, reweight=True, max_iter=max_iterations, tol=tol)
 
-    Parameters
-    ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
-        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
-    max_iterations : int
-        Maximum number of iterations.
-    tol : float
-        Convergence tolerance for residual variance.
 
-    Returns
-    -------
-    FitResult[odrpack.OdrResult]
-        ODR fitting results.
-    """
-    # Handle both Dataset and FitResult inputs
-    if isinstance(ds_or_fr, Dataset):
-        fr = fit_binding_glob(ds_or_fr)
-    else:
-        fr = copy.deepcopy(ds_or_fr)
-
-    if fr.result is None or fr.dataset is None:
-        return FitResult()
-
-    # Initial fit
-    ro = fit_binding_odr(fr)
-    residual_variance = ro.mini.res_var if ro.mini else 0.0
-    for _ in range(max_iterations):
-        rn = fit_binding_odr(ro)
-        if rn.mini and rn.mini.res_var == 0:
-            rn = ro
-            break
-        # Check convergence
-        if rn.mini and residual_variance - rn.mini.res_var < tol:
-            break
-        residual_variance = rn.mini.res_var if rn.mini else 0.0
-        ro = rn
-    return rn
+def fit_binding_odr_recursive_outlier(
+    ds_or_fr: Dataset | FitResult[MiniT],
+    tol: float = 0.5,
+    threshold: float = 2.0,
+) -> FitResult[odrpack.OdrResult]:
+    """Analyze multi-label titration datasets using iterative ODR (deprecated)."""
+    warnings.warn(
+        f"fit_binding_odr_recursive_outlier is deprecated. Use fit_binding_odr(..., remove_outliers=f'zscore:{threshold}') instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return fit_binding_odr(ds_or_fr, remove_outliers=f"zscore:{threshold}", tol=tol)
 
 
 def outlier(
@@ -258,45 +305,3 @@ def outlier(
         plt.title("Z-scores")
     outliers: ArrayMask = z_scores > threshold
     return outliers
-
-
-def fit_binding_odr_recursive_outlier(
-    ds_or_fr: Dataset | FitResult[MiniT],
-    tol: float = 0.5,
-    threshold: float = 2.0,
-) -> FitResult[odrpack.OdrResult]:
-    """Analyze multi-label titration datasets using ODR with outlier removal.
-
-    Parameters
-    ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
-        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
-    tol : float
-        Convergence tolerance for residual variance.
-    threshold : float
-        Z-score threshold for outlier detection.
-
-    Returns
-    -------
-    FitResult[odrpack.OdrResult]
-        ODR fitting results.
-    """
-    # Handle both Dataset and FitResult inputs
-    if isinstance(ds_or_fr, Dataset):
-        fr = fit_binding_glob(ds_or_fr)
-    else:
-        fr = copy.deepcopy(ds_or_fr)
-
-    if fr.result is None or fr.dataset is None:
-        return FitResult()
-
-    # Initial fit
-    ro = fit_binding_odr_recursive(fr, tol=tol)
-    if ro.mini:
-        omask = outlier(ro.mini, threshold=threshold)
-    while omask.any() and ro.dataset:
-        fr.dataset.apply_mask(~omask)
-        ro = fit_binding_odr_recursive(fr, tol=tol)
-        if ro.mini:
-            omask = outlier(ro.mini, threshold=3.0)
-    return ro

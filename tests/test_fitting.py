@@ -30,8 +30,6 @@ from clophfit.fitting.errors import InsufficientDataError, InvalidDataError
 from clophfit.fitting.models import binding_1site, kd
 from clophfit.fitting.odr import (
     fit_binding_odr,
-    fit_binding_odr_recursive,
-    fit_binding_odr_recursive_outlier,
 )
 from clophfit.fitting.plotting import plot_fit
 from clophfit.prtecan import PlateScheme
@@ -820,7 +818,7 @@ def test_fit_binding_odr_from_fitresult(ph_dataset: Dataset) -> None:
 
 def test_fit_binding_odr_recursive_ph(ph_dataset: Dataset) -> None:
     """Test iterative ODR fitting."""
-    fr = fit_binding_odr_recursive(ph_dataset, max_iterations=3)
+    fr = fit_binding_odr(ph_dataset, reweight=True, max_iter=3)
     assert fr.result is not None
     assert "K" in fr.result.params
     assert np.isclose(fr.result.params["K"].value, 7.0, atol=0.5)
@@ -829,7 +827,7 @@ def test_fit_binding_odr_recursive_ph(ph_dataset: Dataset) -> None:
 
 def test_fit_binding_odr_recursive_outlier_ph(ph_dataset: Dataset) -> None:
     """Test ODR fitting with outlier removal."""
-    fr = fit_binding_odr_recursive_outlier(ph_dataset, threshold=3.0)
+    fr = fit_binding_odr(ph_dataset, remove_outliers="zscore:3.0")
     assert fr.result is not None
     assert "K" in fr.result.params
 
