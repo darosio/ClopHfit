@@ -971,6 +971,8 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     nuts_sampler: str = "default",
     *,
     ctr_free_k: bool = False,
+    bg_err: dict[int, ArrayF] | None = None,
+    sample_ppc: bool = False,
 ) -> az.InferenceData:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -997,6 +999,12 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
         hierarchical shrinkage.  The spread of K posteriors across replicates
         then quantifies between-replicate accuracy.  If False (default), all
         replicates of the same CTR share a single K.
+    bg_err : dict[int, ArrayF] | None
+        Background error for each signal band. If provided, uses heteroscedastic
+        noise model combining buffer and signal, ignoring `ye_scaling`.
+    sample_ppc : bool
+        If True, generates posterior predictive samples and adds them to the
+        returned InferenceData object. Needed for `plot_ppc_well`.
 
     Returns
     -------
@@ -1034,10 +1042,6 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     active_wells = {key for key, r in results.items() if r.result and r.dataset}
 
     with pm.Model():
-        ye_mag: dict[str, pm.Distribution] = {
-            label: pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
-            for label in labels
-        }
         x_true = create_x_true(xc, x_errc, n_xerr)
         k_params, k_replicate = _build_ctr_k_params(
             scheme,
@@ -1047,9 +1051,23 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
+        if bg_err is None:
+            ye_mag: dict[str, pm.Distribution] = {
+                label: pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
+                for label in labels
+            }
+        else:
+            gain: dict[str, pm.Distribution] = {
+                lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
+            }
+            floor_sq = {
+                lbl: float(np.mean(bg_err[i])) ** 2
+                for i, lbl in enumerate(labels, start=1)
+            }
+
         for key, r in results.items():
             if r.result and r.dataset:
-                ds = r.dataset
+                ds_well = r.dataset
                 ctr_name = next(
                     (name for name, wells in scheme.names.items() if key in wells), ""
                 )
@@ -1058,20 +1076,36 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                     key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
                 )
 
-                for lbl, da in ds.items():
+                for _i, (lbl, da) in enumerate(ds_well.items(), start=1):
                     y_model = binding_1site(
                         x_true,
                         K,
                         pars[f"S0_{lbl}_{key}"],
                         pars[f"S1_{lbl}_{key}"],
-                        is_ph=ds.is_ph,
+                        is_ph=ds_well.is_ph,
                     )
-                    pm.Normal(
-                        f"y_likelihood_{lbl}_{key}",
-                        mu=y_model[da.mask],
-                        sigma=ye_mag[lbl] * da.y_err,
-                        observed=da.y,
-                    )
+
+                    if bg_err is None:
+                        pm.Normal(
+                            f"y_likelihood_{lbl}_{key}",
+                            mu=y_model[da.mask],
+                            sigma=ye_mag[lbl] * da.y_err,
+                            observed=da.y,
+                        )
+                    else:
+                        sigma_obs = pm.Deterministic(
+                            f"sigma_obs_{lbl}_{key}",
+                            pm_math.sqrt(
+                                floor_sq[lbl]
+                                + gain[lbl] * pm_math.maximum(1e-6, y_model)
+                            ),
+                        )
+                        pm.Normal(
+                            f"y_likelihood_{lbl}_{key}",
+                            mu=y_model[da.mask],
+                            sigma=sigma_obs[da.mask],
+                            observed=da.y,
+                        )
 
         trace: az.InferenceData = pm.sample(
             n_samples,
@@ -1079,6 +1113,9 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             return_inferencedata=True,
             **_pymc_sample_parallel_args(nuts_sampler),
         )
+
+        if sample_ppc:
+            pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
     return trace
 
@@ -1092,138 +1129,20 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
     # Ponder this: ye_scaling: float = 1.0, # This parameter is no longer needed in the same way
     n_samples: int = 2000,
 ) -> az.InferenceData:
-    """Multi-well PyMC with heteroscedastic noise combining buffer and signal."""
-    ds_example = next((r.dataset for r in results.values() if r.dataset), None)
-    ds = next((result.dataset for result in results.values() if result.dataset), None)
-
-    if ds_example is None:
-        msg = "No valid dataset found in results."
-        raise ValueError(msg)
-    # Extract common data once
-    xc = next(iter(ds_example.values())).xc
-    x_errc = next(iter(ds_example.values())).x_errc * n_xerr
-    labels = list(ds_example.keys())  # e.g., ['y1', 'y2']
-    # --- Pre-calculate weighted stats for K priors (remains the same) ---
-    values: dict[str, list[float | None]] = {}
-    stderr: dict[str, list[float | None]] = {}
-    for name, wells in scheme.names.items():
-        values[name] = [
-            v.result.params["K"].value
-            for well, v in results.items()
-            if v.result
-            and well in wells  # and "K" in v.result.params._params # Check if K exists
-        ]
-        stderr[name] = [
-            v.result.params["K"].stderr
-            for well, v in results.items()
-            if v.result and well in wells  # and "K" in v.result.params._params
-        ]
-    ctr_ks = weighted_stats(values, stderr)
-    # MAYBE: Restore logger.info(f"Weighted K stats for control groups: {ctr_ks}")
-
-    with pm.Model():
-        # --- Common Priors / Variables for the entire model ---
-        x_true = create_x_true(xc, x_errc, n_xerr)
-        # Global scaling factors for the signal-dependent noise for each label (band)
-        # `sigma` prior for HalfNormal should be set considering the expected scale of your signal values.
-        # If your fluorescence values are thousands, a sigma of 10-100 might be reasonable for the scaling factor.
-        sigma_signal_scale: dict[str, pm.Distribution] = {
-            lbl: pm.HalfNormal(f"sigma_signal_scale_{lbl}", sigma=10.0)
-            for lbl in labels
-        }
-        true_buffer = {
-            lbl: pm.Normal(f"true_buffer_{lbl}", mu=0, sigma=bg_err[i])
-            for i, lbl in enumerate(labels, start=1)
-        }
-        variance_buffer_contrib = {i: bg_err[i] ** 2 for i in range(1, len(labels) + 1)}
-
-        # Degrees of freedom for Student's T distribution (for robustness)
-        # Can be shared or per-label. Shared is often fine for similar data types.
-        # this was for student: nu_common = pm.Gamma("nu_common", alpha=2, beta=0.1)
-
-        # Create shared K parameters for each control group
-        k_params = {
-            control_name: pm.Normal(
-                _ctr_param_name(control_name),
-                mu=ctr_ks[control_name][0],
-                # if ctr_ks[control_name][0] is not np.nan
-                # else 7.0,  # Handle case where no K values found
-                sigma=0.2,  # FIXME: consider using ctr_ks[control_name][1] for sigma
-                # TODO: sigma=ctr_ks[control_name][1] if ctr_ks[control_name][1] is not np.nan else 0.5, # Default sigma for K if no stderr
-            )
-            for control_name in scheme.names
-        }
-        print(k_params)
-        # --- Loop through each well (key) and its data ---
-        for key, r in results.items():
-            if r.result and r.dataset:
-                ds = r.dataset
-                # Determine if the well is associated with a control group
-                ctr_name = next(
-                    (name for name, wells in scheme.names.items() if key in wells), ""
-                )
-                # Parameters for S0, S1 (unique to each well and label)
-                # `create_parameter_priors` should return a dict of PyMC distributions for S0, S1 for this key/well
-                pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
-                # Use shared K for control group wells or create a unique K otherwise
-                k_param_for_well = k_params[ctr_name] if ctr_name else pars[f"K_{key}"]
-                # --- Loop through each fluorescence label (e.g., 'y1', 'y2') within the current well ---
-                for i, (lbl, da) in enumerate(ds.items(), start=1):
-                    # for lbl, da in ds.items():
-                    # --- Predicted signal from the binding model ---
-                    y_model_signal = binding_1site(
-                        x_true,
-                        k_param_for_well,
-                        pars[f"S0_{lbl}_{key}"],
-                        pars[f"S1_{lbl}_{key}"],
-                        is_ph=ds.is_ph,
-                    )
-                    # Predicted Total Fluorescence (Signal + Buffer) for the likelihood mu
-                    mu_total_pred = pm.Deterministic(
-                        f"mu_total_pred_{lbl}_{key}", y_model_signal + true_buffer[lbl]
-                    )
-                    # --- Model the Noise ---
-                    # A common model for fluorescence noise is that standard deviation scales with sqrt(mean)
-                    # or that variance scales linearly with mean (similar to Poisson, but continuous/scaled).
-                    # Let's use a simpler and common power-law for noise (SD = a * mu^b)
-                    # Here, we'll assume `b=0.5` (sqrt) and `a` is our `sigma_signal_scale`.
-                    # Calculate the variance for the signal component (excluding buffer noise)
-                    # Ensuring non-negativity for sqrt
-                    # Variance from signal itself (heteroscedastic: proportional to predicted signal mean)
-                    # Use pm_math.maximum to avoid issues with negative predicted signals for variance
-                    variance_signal_contrib = sigma_signal_scale[lbl] * pm_math.maximum(
-                        1e-6, y_model_signal
-                    )
-                    # Total variance is the sum of independent variances
-                    total_variance_obs = pm.Deterministic(
-                        f"total_variance_obs_{lbl}_{key}",
-                        # variance_buffer_contrib + variance_signal_contrib,
-                        variance_buffer_contrib[i] + variance_signal_contrib,
-                    )
-                    # Total standard deviation for the likelihood
-                    sigma_obs = pm.Deterministic(
-                        f"sigma_obs_{lbl}_{key}", pm_math.sqrt(total_variance_obs)
-                    )
-                    # --- Likelihood ---
-                    # Use Student's T distribution for robustness against outliers
-                    # Apply mask to observed data and corresponding mu/sigma
-                    # This is the learned, heteroscedastic SD
-                    pm.Normal(
-                        f"y_likelihood_{lbl}_{key}",
-                        # this was for student: nu=nu_common,  # Use the shared nu_common
-                        mu=mu_total_pred[da.mask],
-                        sigma=sigma_obs[da.mask],
-                        observed=da.y,
-                    )
-
-        trace: az.InferenceData = pm.sample(
-            n_samples,
-            target_accept=0.9,
-            return_inferencedata=True,
-            **_pymc_sample_parallel_args(),
-        )
-
-    return trace
+    """Analyze multi-well PyMC with heteroscedastic noise (deprecated)."""
+    warnings.warn(
+        "fit_binding_pymc_multi2 is deprecated. Use fit_binding_pymc_multi(..., bg_err=bg_err) instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return fit_binding_pymc_multi(
+        results,
+        scheme,
+        n_sd=n_sd,
+        n_xerr=n_xerr,
+        n_samples=n_samples,
+        bg_err=bg_err,
+    )
 
 
 # ------------------------------------------------------------------
@@ -1684,13 +1603,13 @@ def plot_ppc_well(
     Parameters
     ----------
     trace   : az.InferenceData
-        Trace produced by ``fit_binding_pymc_advanced``.
+        Trace produced by PyMC fitting with posterior predictive data included.
     key     : str
         Well identifier (e.g. 'A01').
     labels  : list[str] | None
         Names of the bands to show.  If *None* the function will
         automatically look for all variables starting with
-        ``'y_'`` that contain this key.
+        ``'y_likelihood'`` that contain this key.
     figsize: tuple[float, float]
         size?
 
@@ -1698,12 +1617,25 @@ def plot_ppc_well(
     -------
     figure.Figure
         Plot
+
+    Raises
+    ------
+    AttributeError
+        If the trace does not contain `posterior_predictive` data.
     """
+    if not hasattr(trace, "posterior_predictive"):
+        msg = (
+            "The InferenceData object does not contain 'posterior_predictive'. "
+            "You must run pm.sample_posterior_predictive() inside the pm.Model "
+            "context after sampling to generate this data."
+        )
+        raise AttributeError(msg)
+
     if labels is None:
         labels = [
-            var.split("_")[1]
-            for var in trace.posterior.data_vars  # type: ignore[attr-defined]
-            if f"{key}" in var and var.startswith("y_")
+            str(var).split("_")[2]
+            for var in trace.posterior_predictive.data_vars
+            if f"_{key}" in str(var) and str(var).startswith("y_likelihood")
         ]
 
     fig, axes = plt.subplots(
@@ -1713,10 +1645,18 @@ def plot_ppc_well(
         axes = [axes]
 
     for ax, lbl in zip(axes, labels, strict=True):
-        var_name = f"y_{lbl}_{key}"
+        var_name = f"y_likelihood_{lbl}_{key}"
+
+        # Prepare dictionary for az.from_dict
+        trace_dict = {
+            "posterior_predictive": {var_name: trace.posterior_predictive[var_name]}
+        }
+        if hasattr(trace, "observed_data") and var_name in trace.observed_data:
+            trace_dict["observed_data"] = {var_name: trace.observed_data[var_name]}
+
         az.plot_ppc(  # type: ignore[no-untyped-call]
             az.from_dict(
-                {"posterior_predictive": trace.posterior_predictive[var_name]},  # type: ignore[attr-defined]
+                **trace_dict,  # type: ignore[arg-type]
                 coords={"y": [lbl]},
                 dims={"y": 0},
             ),
