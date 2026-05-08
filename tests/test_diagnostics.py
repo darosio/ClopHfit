@@ -94,11 +94,11 @@ def test_sorted_by_flag_count(simple_ffit: pd.DataFrame) -> None:
 def test_flat_curve() -> None:
     """Well with |S1-S0|/max(|S0|,|S1|) < 0.05 must be flagged as flat."""
     df = pd.DataFrame({
-        "well": ["A01", "A02"],
-        "K": [7.0, 7.0],
-        "sK": [0.05, 0.05],
-        "S0_1": [1000.0, 1000.0],
-        "S1_1": [1001.0, 1500.0],  # A01: barely changes, A02: normal
+        "well": ["A01", "A02", "A03", "A04"],
+        "K": [7.0, 7.0, 7.0, 7.0],
+        "sK": [0.05, 0.05, 0.05, 0.05],
+        "S0_1": [1000.0, 1000.0, 1000.0, 1000.0],
+        "S1_1": [1001.0, 1500.0, 1510.0, 1490.0],  # A01: barely changes, others normal
     })
     flags = detect_bad_wells(df, k_min=3.0, k_max=11.0)
     assert flags.loc[flags["well"] == "A01", "flag_flat_curve"].to_numpy()[0]
@@ -248,8 +248,8 @@ def test_ctr_cols_k_stats_use_samples_only() -> None:
         #         CTR    sample sample sample sample
         "K": [5.0, 7.1, 7.15, 7.2, 14.0],  # E02 is an outlier sample
         "sK": [0.1, 0.06, 0.05, 0.07, 0.5],
-        "S0_1": [500.0, 600.0, 610.0, 605.0, 590.0],
-        "S1_1": [900.0, 1100.0, 1120.0, 1115.0, 950.0],
+        "S0_1": [580.0, 600.0, 610.0, 605.0, 590.0],
+        "S1_1": [1080.0, 1100.0, 1120.0, 1115.0, 1090.0],
     })
     flags = detect_bad_wells(df, k_min=3.0, k_max=14.0, ctr_cols=[1])
 
@@ -328,6 +328,8 @@ def test_from_dat_empty_series_flagged(tmp_path: Path) -> None:
     """Header-only .dat files must be treated as bad wells instead of crashing."""
     (tmp_path / "A01.dat").write_text("x,y1,y2\n8,100,200\n7,90,190\n")
     (tmp_path / "A02.dat").write_text("x,y1,y2\n")
+    (tmp_path / "A03.dat").write_text("x,y1,y2\n8,101,199\n7,91,191\n")
+    (tmp_path / "A04.dat").write_text("x,y1,y2\n8,102,202\n7,89,188\n")
 
     flags = detect_bad_wells_from_dat(tmp_path)
 

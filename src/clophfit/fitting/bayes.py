@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 import pytensor.tensor as pt
+import seaborn as sns  # type: ignore[import-untyped]
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
@@ -32,6 +33,20 @@ if typing.TYPE_CHECKING:
 
     from clophfit.clophfit_types import ArrayF, FloatFunc
     from clophfit.prtecan import PlateScheme
+
+
+__all__ = [
+    "fit_binding_pymc",
+    "fit_binding_pymc_compare",
+    "fit_binding_pymc_multi",
+    "fit_binding_pymc_multi_noise",
+    "fit_binding_pymc_odr",
+    "fit_pymc_hierarchical",
+    "plot_noise_vs_index",
+    "plot_noise_vs_signal",
+    "plot_ppc_well",
+    "process_trace",
+]
 
 
 def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, object]:
@@ -1590,6 +1605,206 @@ def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
 # ------------------------------------------------------------------
 # 2.3  Posterior-predictive helper - visualise one well at a time
 # ------------------------------------------------------------------
+def _extract_sigma_df(trace: az.InferenceData) -> pd.DataFrame:
+    """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
+    trace_df = az.summary(trace)
+    sigma_df = trace_df[trace_df.index.str.startswith("sigma_obs_")].copy()
+    if len(sigma_df) == 0:
+        return pd.DataFrame()
+
+    pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>[^\[]+)\[(?P<idx>\d+)\]"
+    extracted = sigma_df.index.to_series().str.extract(pattern)
+    sigma_df = pd.concat([sigma_df, extracted], axis=1)  # type: ignore[call-overload]
+    sigma_df["idx"] = sigma_df["idx"].astype(int)
+    return sigma_df  # type: ignore[no-any-return]
+
+
+def plot_noise_vs_index(
+    trace: az.InferenceData,
+    wells: Sequence[str] | str | None = None,
+    figsize_per_well: tuple[float, float] = (5, 4),
+    max_cols: int = 4,
+) -> figure.Figure:
+    """Plot inferred noise (sigma) across titration steps for specified wells.
+
+    Parameters
+    ----------
+    trace : az.InferenceData
+        The PyMC inference trace containing `sigma_obs` deterministic nodes.
+    wells : Sequence[str] | str | None, optional
+        A specific well ID (e.g., 'A01'), a list of well IDs, or None to plot all
+        wells found in the trace. Default is None.
+    figsize_per_well : tuple[float, float], optional
+        The width and height allocated per well subplot.
+    max_cols : int, optional
+        Maximum number of columns in the subplot grid.
+
+    Returns
+    -------
+    figure.Figure
+        The constructed matplotlib figure.
+    """
+    sigma_df = _extract_sigma_df(trace)
+    if len(sigma_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    if wells is None:
+        wells_to_plot = list(sigma_df["well"].unique())
+    elif isinstance(wells, str):
+        wells_to_plot = [wells]
+    else:
+        wells_to_plot = list(wells)
+
+    n_wells = len(wells_to_plot)
+    n_cols = min(n_wells, max_cols)
+    n_rows = max(1, (n_wells - 1) // n_cols + 1)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(n_cols * figsize_per_well[0], n_rows * figsize_per_well[1]),
+        squeeze=False,
+    )
+
+    for i, well in enumerate(wells_to_plot):
+        ax = axes.flat[i]
+        well_data = sigma_df[sigma_df["well"] == well]
+        if len(well_data) == 0:
+            ax.set_title(f"Well {well} (No Data)")
+            continue
+
+        sns.lineplot(data=well_data, x="idx", y="mean", hue="label", marker="o", ax=ax)
+
+        # Add error bands (94% HDI) for the noise estimate
+        for lbl in well_data["label"].unique():
+            lbl_data = well_data[well_data["label"] == lbl]
+            ax.fill_between(
+                lbl_data["idx"],
+                lbl_data["hdi_3%"],
+                lbl_data["hdi_97%"],
+                alpha=0.2,
+            )
+
+        ax.set_title(rf"Inferred Noise ($\sigma_{{obs}}$) - Well {well}")
+        ax.set_xlabel("Titration Step (Index)")
+        ax.set_ylabel(r"Inferred $\sigma$ (RFU)")
+
+    # Hide unused axes
+    for j in range(len(wells_to_plot), len(axes.flat)):
+        axes.flat[j].set_visible(False)
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_noise_vs_signal(
+    trace: az.InferenceData,
+    results: Mapping[str, FitResult[MiniT]],
+    figsize_per_label: tuple[float, float] = (6, 5),
+) -> figure.Figure:
+    """Plot inferred noise (sigma) versus observed signal across all wells.
+
+    This function extracts the `sigma_obs_...` parameters from a heteroscedastic
+    PyMC trace (like `fit_binding_pymc_multi`) and plots them against the observed
+    fluorescence values `da.y` to visualize the noise-to-signal relationship.
+
+    Parameters
+    ----------
+    trace : az.InferenceData
+        The PyMC inference trace containing the `sigma_obs` deterministic nodes.
+    results : Mapping[str, FitResult[MiniT]]
+        The dictionary of well results containing datasets with `.y` arrays.
+        Normally this is `tit.result_global.results`.
+    figsize_per_label : tuple[float, float], optional
+        The width and height to allocate per band/label in the final figure.
+
+    Returns
+    -------
+    figure.Figure
+        The constructed matplotlib figure.
+    """
+    sigma_df = _extract_sigma_df(trace)
+    if len(sigma_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    # Build a combined DataFrame of (Observed Y, Inferred Sigma) for all wells
+    records = []
+    for well, fr in results.items():
+        if fr.dataset is not None:
+            for lbl, da in fr.dataset.items():
+                # Get the sigma_obs rows for this well and label, sorted by index
+                mask_well_lbl = (sigma_df["well"] == well) & (sigma_df["label"] == lbl)
+                well_lbl_sigmas = sigma_df[mask_well_lbl].sort_values("idx")
+
+                # Ensure we have PyMC results for this well
+                if len(well_lbl_sigmas) > 0 and hasattr(da, "mask"):
+                    # Apply the dataset mask to the full sigma array to match valid da.y points
+                    valid_sigmas = well_lbl_sigmas[da.mask]["mean"].to_numpy()
+                    valid_y = da.y
+
+                    for sig, y_val in zip(valid_sigmas, valid_y, strict=False):
+                        records.append({
+                            "well": well,
+                            "label": lbl,
+                            "sigma_mean": sig,
+                            "y_obs": y_val,
+                        })
+    all_wells_df = pd.DataFrame(records)
+    if len(all_wells_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    # Plotting
+    labels_found = all_wells_df["label"].unique()
+    fig, axes = plt.subplots(
+        1,
+        len(labels_found),
+        figsize=(figsize_per_label[0] * len(labels_found), figsize_per_label[1]),
+    )
+    if len(labels_found) == 1:
+        axes = [axes]
+
+    for ax, lbl in zip(axes, labels_found, strict=False):
+        data = all_wells_df[all_wells_df["label"] == lbl]
+
+        # Plot all points as a semi-transparent scatter
+        sns.scatterplot(
+            data=data,
+            x="y_obs",
+            y="sigma_mean",
+            alpha=0.3,
+            edgecolor=None,
+            color="indigo",
+            s=20,
+            ax=ax,
+        )
+
+        # Add a trendline to highlight the heteroscedastic curve shape
+        sns.regplot(
+            data=data,
+            x="y_obs",
+            y="sigma_mean",
+            scatter=False,
+            order=2,
+            color="orange",
+            line_kws={"linestyle": "--", "linewidth": 2},
+            ax=ax,
+        )
+
+        ax.set_title(f"Band {lbl} (All Wells)")
+        ax.set_xlabel("Observed Fluorescence ($y$)")
+        ax.set_ylabel(r"Inferred $\sigma_{obs}$ (mean)")
+
+    plt.suptitle("Noise vs Signal Intensity (All Wells)", y=1.05, fontsize=14)
+    plt.tight_layout()
+    return fig
+
+
 def plot_ppc_well(
     trace: az.InferenceData,
     key: str,

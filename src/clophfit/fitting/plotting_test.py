@@ -42,6 +42,7 @@ from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
+from clophfit.fitting.bayes import _extract_sigma_df
 from clophfit.fitting.data_structures import Dataset
 from clophfit.fitting.models import binding_1site
 
@@ -311,7 +312,6 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913
     Figure
         The generated QC matplotlib figure.
     """
-    from clophfit.fitting.bayes import _extract_sigma_df  # noqa: PLC0415
     from clophfit.fitting.utils import (  # noqa: PLC0415
         fit_trendline,
         flag_trend_outliers,

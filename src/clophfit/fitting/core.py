@@ -75,6 +75,11 @@ from clophfit.fitting.plotting import (
     plot_spectra,
     plot_spectra_distributed,
 )
+from clophfit.fitting.utils import (
+    identify_outliers_zscore,
+    parse_remove_outliers,
+    reweight_from_residuals,
+)
 
 from .data_structures import FitResult, SpectraGlobResults
 
@@ -500,18 +505,7 @@ def _plot_spectra_glob_emcee(
 # ---- Unified LM fitting function ----
 
 
-def _parse_remove_outliers(spec: str) -> tuple[str, float, int]:
-    """Parse ``"zscore:2.5:5"`` -> (method, threshold, min_keep)."""
-    n_threshold_parts = 1
-    n_min_keep_parts = 2
-    parts = spec.split(":")
-    method = parts[0]
-    threshold = float(parts[1]) if len(parts) > n_threshold_parts else 2.0
-    min_keep = int(parts[2]) if len(parts) > n_min_keep_parts else 1
-    return method, threshold, min_keep
-
-
-def fit_binding_glob(  # noqa: PLR0913, PLR0915
+def fit_binding_glob(  # noqa: PLR0913
     ds: Dataset,
     *,
     method: str = "lm",
@@ -595,15 +589,8 @@ def fit_binding_glob(  # noqa: PLR0913, PLR0915
     result = mini.minimize(**minimize_kwargs)
     if reweight is not None and result is not None:
         resid_var = result.redchi
-        ds_working = copy.deepcopy(ds)
         for _i in range(max_iter):
-            start_idx = 0
-            for da in ds_working.values():
-                end_idx = start_idx + len(da.y)
-                label_res = result.residual[start_idx:end_idx]
-                sigma = max(float(np.mean(np.abs(label_res))), 1e-3)
-                da.y_errc[:] = sigma
-                start_idx = end_idx
+            ds_working = reweight_from_residuals(ds_working, result.residual)
 
             mini = Minimizer(
                 _binding_1site_residuals,
@@ -623,7 +610,7 @@ def fit_binding_glob(  # noqa: PLR0913, PLR0915
 
     # Outlier masking
     if remove_outliers is not None and result is not None:
-        method_name, z_threshold, _min_keep = _parse_remove_outliers(remove_outliers)
+        method_name, z_threshold, _min_keep = parse_remove_outliers(remove_outliers)
         current_len = sum(len(da.y) for da in ds_working.values())
         combined_mask = np.ones(current_len, dtype=bool)
         start_idx = 0
@@ -631,12 +618,8 @@ def fit_binding_glob(  # noqa: PLR0913, PLR0915
             end_idx = start_idx + len(da.y)
             dr = result.residual[start_idx:end_idx]
             if method_name == "zscore":
-                mean_r = float(np.mean(dr))
-                std_r = float(np.std(dr))
-                if std_r > 0:
-                    z = np.abs((dr - mean_r) / std_r)
-                    block_mask = z <= z_threshold
-                    combined_mask[start_idx:end_idx] &= block_mask
+                outliers = identify_outliers_zscore(dr, threshold=z_threshold)
+                combined_mask[start_idx:end_idx] &= ~outliers
             start_idx = end_idx
         ds_filtered = copy.deepcopy(ds_working)
         ds_filtered.apply_mask(combined_mask)
@@ -662,24 +645,12 @@ def fit_binding_glob(  # noqa: PLR0913, PLR0915
 # ---- Legacy helper ----
 
 
-def _reweight_from_residuals(ds: Dataset, residuals: ArrayF) -> Dataset:
-    """Update y_err from residuals mean."""
-    updated_ds = copy.deepcopy(ds)
-    for i, da in enumerate(updated_ds.values()):
-        len_x = len(da.y)
-        label_residuals = residuals[i * len_x : (i + 1) * len_x]
-        sigma_val: float = max(float(np.mean(np.abs(label_residuals))), 1e-3)
-        da.y_err = np.full(da.y.shape, sigma_val)
-    return updated_ds
-
-
 # ---- Public API ----
 
 __all__ = [
     # Helpers
     "_binding_1site_residuals",
     "_build_params_1site",
-    "_reweight_from_residuals",
     # Spectral analysis
     "analyze_spectra",
     "analyze_spectra_glob",

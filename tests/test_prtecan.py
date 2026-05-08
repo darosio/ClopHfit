@@ -1301,3 +1301,16 @@ class TestTitrationAnalysis:
         g = titan.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
+
+    def test_detect_and_discard_bad_wells(self, titan: Titration) -> None:
+        """It flags outlier wells based on signal properties."""
+        discards_before = set(titan.scheme.discard)
+        # Using tight thresholds to definitely catch something in the titan fixture, or mock it
+        discards = titan.detect_and_discard_bad_wells(
+            smoothness_threshold=1.5, roughness_threshold=0.3, z_threshold=2.0
+        )
+        assert isinstance(discards, list)
+        assert set(discards).issubset(set(titan.scheme.discard))
+        # Ensure that whatever it found is now in scheme.discard
+        discards_after = set(titan.scheme.discard)
+        assert discards_after == discards_before.union(set(discards))

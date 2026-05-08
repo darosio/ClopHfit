@@ -1323,6 +1323,82 @@ class Titration(TecanfilesGroup):
             self.labelblocksgroups[first_label].data_nrm.keys() - self.scheme.nofit_keys
         )
 
+    def detect_and_discard_bad_wells(
+        self,
+        smoothness_threshold: float | None = 2.5,
+        roughness_threshold: float | None = 0.5,
+        z_threshold: float | None = 3.0,
+    ) -> list[str]:
+        """Detect and discard bad wells based on signal properties.
+
+        Evaluates all non-discarded wells. Wells exceeding the specified thresholds
+        are added to the `scheme.discard` list, and internal caches are cleared.
+
+        Parameters
+        ----------
+        smoothness_threshold : float | None
+            Maximum allowed smoothness value (sum(|diff|) / span).
+        roughness_threshold : float | None
+            Maximum allowed roughness value ((sum(|diff|) - span) / sum(|diff|)).
+        z_threshold : float | None
+            Z-score threshold for trendline outlier detection (max signal vs span).
+
+        Returns
+        -------
+        list[str]
+            A list of the newly discarded well keys.
+        """
+        from clophfit.fitting.utils import (  # noqa: PLC0415
+            flag_trend_outliers,
+            roughness,
+            smoothness,
+        )
+
+        new_discards = set()
+
+        data_to_analyze = self._get_normalized_or_raw_data()
+        if not data_to_analyze:
+            return []
+
+        for da_dict in data_to_analyze.values():
+            max_sig = {}
+            span_val = {}
+            for well, y in da_dict.items():
+                if well in self.scheme.discard:
+                    continue
+
+                valid_y = y[~np.isnan(y)]
+                if len(valid_y) < 2:  # noqa: PLR2004
+                    new_discards.add(well)
+                    continue
+
+                if smoothness_threshold is not None:
+                    sm = smoothness(valid_y)
+                    if sm > smoothness_threshold:
+                        new_discards.add(well)
+
+                if roughness_threshold is not None:
+                    rg = roughness(valid_y)
+                    if rg > roughness_threshold:
+                        new_discards.add(well)
+
+                max_sig[well] = float(np.max(np.abs(valid_y)))
+                span_val[well] = float(np.max(valid_y) - np.min(valid_y))
+
+            if z_threshold is not None and max_sig:
+                x_series = pd.Series(max_sig)
+                y_series = pd.Series(span_val)
+                outliers = flag_trend_outliers(
+                    x_series, y_series, threshold=z_threshold
+                )
+                new_discards.update(outliers[outliers].index)
+
+        if new_discards:
+            self.scheme.discard = list(set(self.scheme.discard) | new_discards)
+            self.clear_all_data_results()
+
+        return sorted(new_discards)
+
     def _reset_data_and_results(self) -> None:
         self._data = {}
         cached_results = (

@@ -14,6 +14,7 @@ from matplotlib import figure
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
+from clophfit.fitting.utils import identify_outliers_zscore, parse_remove_outliers
 from clophfit.utils import weights_from_sigma
 
 from .core import fit_binding_glob
@@ -228,9 +229,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     # Parse outlier config if present
     threshold = 2.0
     if remove_outliers:
-        parts = remove_outliers.split(":")
-        if len(parts) > 1:
-            threshold = float(parts[1])
+        _method, threshold, _min_keep = parse_remove_outliers(remove_outliers)
 
     residual_variance = ro.mini.res_var if ro.mini else 0.0
 
@@ -298,10 +297,11 @@ def outlier(
     residuals_x = output.delta
     residuals_y = output.eps
     residuals = np.sqrt(residuals_x**2 + residuals_y**2)
-    z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
+
     if plot_z_scores:
+        z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
         plt.scatter(range(len(z_scores)), z_scores)
         plt.axhline(y=threshold, color="r", linestyle="-")
         plt.title("Z-scores")
-    outliers: ArrayMask = z_scores > threshold
-    return outliers
+
+    return identify_outliers_zscore(residuals, threshold=threshold)
