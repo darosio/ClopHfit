@@ -25,8 +25,6 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc,
     fit_binding_pymc_multi,
     fit_binding_pymc_multi2,
-    fit_binding_pymc_multi_noise,
-    fit_binding_pymc_multi_noise_xrw,
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import (
@@ -2042,12 +2040,12 @@ class Titration(TecanfilesGroup):
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = dict(self.result_global.results)
-        trace = fit_binding_pymc_multi_noise(
+        trace = fit_binding_pymc_multi(
             results,
             self.scheme,
-            self.buffer.dataframes,
             n_sd=n_sd,
             n_samples=self.params.n_mcmc_samples,
+            bg_err=self.bg_err,
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,
         )
@@ -2067,12 +2065,13 @@ class Titration(TecanfilesGroup):
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC XRW fitting: %.3f", n_sd)
         results = dict(self.result_global.results)
-        trace = fit_binding_pymc_multi_noise_xrw(
+        trace = fit_binding_pymc_multi(
             results,
             self.scheme,
-            self.buffer.dataframes,
             n_sd=n_sd,
             n_samples=self.params.n_mcmc_samples,
+            bg_err=self.bg_err,
+            x_error_model="random_walk",
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,
         )
@@ -2083,7 +2082,7 @@ class Titration(TecanfilesGroup):
             "filenames": filenames,
             "x": da_true.x,
             "x_err": da_true.x_err,
-        }).to_csv("list_x_true_xrw.csv", index=False, header=False)
+        }).to_csv("list_x_true.csv", index=False, header=False)
         return trace, trace_df
 
     @cached_property

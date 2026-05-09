@@ -7,7 +7,7 @@ import os
 import typing
 import warnings
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from typing import Literal
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -39,7 +39,6 @@ __all__ = [
     "fit_binding_pymc",
     "fit_binding_pymc_compare",
     "fit_binding_pymc_multi",
-    "fit_binding_pymc_multi_noise",
     "fit_binding_pymc_odr",
     "fit_pymc_hierarchical",
     "plot_noise_vs_index",
@@ -415,7 +414,7 @@ def _extract_x_per_well_from_trace_df(
     Parameters
     ----------
     trace_df : pd.DataFrame
-        ArviZ summary DataFrame from ``fit_binding_pymc_multi_noise_xrw``.
+        ArviZ summary DataFrame from ``fit_binding_pymc_multi`` (with xrw).
     well_key : str
         Well identifier used as the ``well`` coord (e.g. ``"A01"``).
 
@@ -976,7 +975,7 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
+def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
@@ -985,9 +984,12 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     n_samples: int = 2000,
     nuts_sampler: str = "default",
     *,
+    x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
+    sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
     bg_err: dict[int, ArrayF] | None = None,
     sample_ppc: bool = False,
+    robust: bool = False,
 ) -> az.InferenceData:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -1008,6 +1010,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     nuts_sampler : str
         NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
         ``"nutpie"``).
+    x_error_model : Literal["deterministic", "random_walk"]
+        Model for x-error propagation (default: "deterministic").
+    sigma_pip_prior : float
+        Prior for random_walk sigma pipette error parameter.
     ctr_free_k : bool
         If True, each CTR replicate well gets its own independent flat K prior
         ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
@@ -1020,6 +1026,8 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
     sample_ppc : bool
         If True, generates posterior predictive samples and adds them to the
         returned InferenceData object. Needed for `plot_ppc_well`.
+    robust : bool
+        If True, use StudentT likelihood (nu=3) for robust regression instead of Normal.
 
     Returns
     -------
@@ -1055,9 +1063,34 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
         ]
     ctr_ks = weighted_stats(values, stderr)
     active_wells = {key for key, r in results.items() if r.result and r.dataset}
+    wells_list = [
+        key for key in results if results[key].result and results[key].dataset
+    ]
+    well_idx = {key: i for i, key in enumerate(wells_list)}
+    n_wells = len(wells_list)
+    n_steps = len(xc)
 
-    with pm.Model():
+    coords: dict[str, list[int] | list[str]] = {
+        "well": wells_list,
+        "step": list(range(n_steps)),
+        "step_diff": list(range(n_steps - 1)),
+    }
+
+    with pm.Model(coords=coords):
         x_true = create_x_true(xc, x_errc, n_xerr)
+        if x_error_model == "random_walk":
+            sigma_pip = pm.HalfNormal("sigma_pip", sigma=sigma_pip_prior)
+            z_pip = pm.Normal(
+                "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
+            )
+            cum_dev = pm.math.cumsum(sigma_pip * z_pip, axis=0)
+            x_dev = pm.math.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
+            x_per_well = pm.Deterministic(
+                "x_per_well",
+                x_true[:, None] + x_dev,
+                dims=("step", "well"),
+            )
+
         k_params, k_replicate = _build_ctr_k_params(
             scheme,
             ctr_ks,
@@ -1076,8 +1109,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                 lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
             }
             alpha_sq: dict[str, pm.Distribution] = {
-                lbl: pm.LogNormal(f"S_{lbl}", mu=np.log(1e-5), sigma=2.0)
-                for lbl in labels
+                lbl: pm.HalfNormal(f"S_{lbl}", sigma=1e-3) for lbl in labels
             }
             floor_sq = {
                 lbl: float(np.mean(bg_err[i])) ** 2
@@ -1095,9 +1127,15 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                     key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
                 )
 
+                if x_error_model == "random_walk":
+                    w_idx = well_idx[key]
+                    x_w = x_per_well[:, w_idx]
+                else:
+                    x_w = x_true
+
                 for _i, (lbl, da) in enumerate(ds_well.items(), start=1):
                     y_model = binding_1site(
-                        x_true,
+                        x_w,
                         K,
                         pars[f"S0_{lbl}_{key}"],
                         pars[f"S1_{lbl}_{key}"],
@@ -1105,12 +1143,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                     )
 
                     if bg_err is None:
-                        pm.Normal(
-                            f"y_likelihood_{lbl}_{key}",
-                            mu=y_model[da.mask],
-                            sigma=ye_mag[lbl] * da.y_err,
-                            observed=da.y,
-                        )
+                        sigma_val = ye_mag[lbl] * da.y_err
                     else:
                         sigma_obs = pm.Deterministic(
                             f"sigma_obs_{lbl}_{key}",
@@ -1120,10 +1153,21 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                                 + alpha_sq[lbl] * y_model**2
                             ),
                         )
+                        sigma_val = sigma_obs[da.mask]
+
+                    if robust:
+                        pm.StudentT(
+                            f"y_likelihood_{lbl}_{key}",
+                            nu=3.0,
+                            mu=y_model[da.mask],
+                            sigma=sigma_val,
+                            observed=da.y,
+                        )
+                    else:
                         pm.Normal(
                             f"y_likelihood_{lbl}_{key}",
                             mu=y_model[da.mask],
-                            sigma=sigma_obs[da.mask],
+                            sigma=sigma_val,
                             observed=da.y,
                         )
 
@@ -1167,448 +1211,6 @@ def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
 
 # ------------------------------------------------------------------
 # 2.2b  Noise-model helpers and multi-well fit with learned noise
-# ------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class NoisePriors:
-    """Prior scale parameters for the 3-component heteroscedastic noise model.
-
-    All values are HalfNormal sigma parameters.  The variance model is::
-
-        Var(y | mu) = sigma_read**2 + gain * max(0, mu) + alpha**2 * mu**2
-
-    Parameters
-    ----------
-    sigma_read : float
-        HalfNormal sigma for the readout-floor noise (RFU).
-    gain : float
-        HalfNormal sigma for the Poisson-like gain term (RFU/RFU).
-    alpha : float
-        HalfNormal sigma for the multiplicative CV term (dimensionless).
-    """
-
-    sigma_read: float
-    gain: float
-    alpha: float
-
-
-def _noise_priors_from_buffer(
-    buffer_df: dict[int, pd.DataFrame],
-    labels: list[str],
-) -> dict[str, NoisePriors]:
-    """Derive noise-model prior scales from buffer replicate variance.
-
-    For each label, performs a simple Var-Mean decomposition on the buffer
-    well replicates (rows = pH points, columns = wells) to estimate::
-
-        Var(y) approx sigma_read**2 + gain * mu + alpha**2 * mu**2
-
-    The HalfNormal sigma for each parameter is set to 2x the empirical
-    estimate to give a moderately informative but permissive prior.  If
-    buffer data are absent or insufficient (< 2 replicate wells), a
-    weakly-informative fallback is used.
-
-    Parameters
-    ----------
-    buffer_df : dict[int, pd.DataFrame]
-        Buffer DataFrames keyed by integer label index (1-based).  Each
-        DataFrame has well IDs as columns and pH points as rows; the columns
-        ``Label``, ``fit``, ``fit_err``, ``mean``, and ``sem`` are ignored.
-    labels : list[str]
-        String label names in order (e.g. ``['y1', 'y2']``).  Label ``labels[i]``
-        corresponds to ``buffer_df[i+1]``.
-
-    Returns
-    -------
-    dict[str, NoisePriors]
-        Prior parameters keyed by string label.
-    """
-    meta_cols = {"Label", "fit", "fit_err", "mean", "sem"}
-    min_replicates = 2
-    default = NoisePriors(sigma_read=50.0, gain=10.0, alpha=0.05)
-    priors: dict[str, NoisePriors] = {}
-
-    for idx, lbl in enumerate(labels, start=1):
-        df = buffer_df.get(idx)
-        if df is None or df.empty:
-            priors[lbl] = default
-            continue
-
-        well_cols = [c for c in df.columns if c not in meta_cols]
-        if len(well_cols) < min_replicates:
-            priors[lbl] = default
-            continue
-
-        data = df[well_cols].to_numpy(dtype=float)
-        row_means = data.mean(axis=1)
-        row_vars = data.var(axis=1, ddof=1)
-
-        valid = (row_means > 0) & np.isfinite(row_vars) & np.isfinite(row_means)
-        if not valid.any():
-            priors[lbl] = default
-            continue
-
-        m, v = row_means[valid], row_vars[valid]
-        cv = float(np.sqrt(v.mean()) / m.mean())
-        gain_est = float((v / m).mean())
-        sigma_read_est = float(np.sqrt(np.maximum(0.0, v - gain_est * m).mean()))
-
-        priors[lbl] = NoisePriors(
-            sigma_read=max(sigma_read_est * 2.0, 1.0),
-            gain=max(gain_est * 2.0, 0.1),
-            alpha=min(cv * 2.0, 0.5),
-        )
-
-    return priors
-
-
-def fit_binding_pymc_multi_noise(  # noqa: PLR0913,PLR0917
-    results: dict[str, FitResult[MiniT]],
-    scheme: PlateScheme,
-    buffer_df: dict[int, pd.DataFrame],
-    n_sd: float = 5.0,
-    n_xerr: float = 1.0,
-    n_samples: int = 2000,
-    nuts_sampler: str = "default",
-    *,
-    ctr_free_k: bool = False,
-) -> az.InferenceData:
-    """Multi-well PyMC fit with shared learnable heteroscedastic noise model.
-
-    Fits all wells simultaneously.  Per-label noise parameters
-    (``sigma_read``, ``gain``, ``alpha``) are shared across all wells and
-    inferred from the data.  The variance model is::
-
-        Var(y | mu) = sigma_read**2 + gain * max(0, mu) + alpha**2 * mu**2
-
-    where *mu* is the model-predicted (background-subtracted) signal.
-    Priors for the noise parameters are derived empirically from the buffer
-    replicate variance via :func:`_noise_priors_from_buffer`.
-
-    Input data must be background-subtracted (i.e. the standard Tecan
-    pipeline output where buffer mean has already been removed).
-
-    Parameters
-    ----------
-    results : dict[str, FitResult[MiniT]]
-        Per-well initial fit results, typically from ``fit_binding_glob``.
-    scheme : PlateScheme
-        Plate scheme defining control groups for shared-K priors.
-    buffer_df : dict[int, pd.DataFrame]
-        Buffer DataFrames (integer label index -> DataFrame with well
-        columns), used to derive noise priors from replicate variance.
-    n_sd : float
-        Prior width multiplier for per-well S0/S1 parameters.
-    n_xerr : float
-        Scaling factor applied to x-value uncertainties.
-    n_samples : int
-        Number of MCMC posterior samples per chain.
-    nuts_sampler : str
-        NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
-        (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
-    ctr_free_k : bool
-        If True, each CTR replicate well gets its own independent flat K prior
-        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
-        hierarchical shrinkage.  The spread of K posteriors across replicates
-        quantifies between-replicate accuracy.  If False (default), all
-        replicates share a single K.
-
-    Returns
-    -------
-    az.InferenceData
-        Posterior trace.  Noise parameters are accessible as
-        ``trace.posterior["sigma_read_<lbl>"]``,
-        ``trace.posterior["gain_<lbl>"]``, and
-        ``trace.posterior["alpha_<lbl>"]``.
-
-    Raises
-    ------
-    ValueError
-        If no valid dataset is found in *results*.
-    """
-    ds_template = next((r.dataset for r in results.values() if r.dataset), None)
-    if ds_template is None:
-        msg = "No valid dataset found in results."
-        raise ValueError(msg)
-
-    xc = next(iter(ds_template.values())).xc
-    x_errc = next(iter(ds_template.values())).x_errc * n_xerr
-    labels = list(ds_template.keys())
-
-    noise_priors = _noise_priors_from_buffer(buffer_df, labels)
-
-    values: dict[str, list[float | None]] = {}
-    stderr_: dict[str, list[float | None]] = {}
-    for name, wells in scheme.names.items():
-        values[name] = [
-            r.result.params["K"].value
-            for well, r in results.items()
-            if r.result and well in wells
-        ]
-        stderr_[name] = [
-            r.result.params["K"].stderr
-            for well, r in results.items()
-            if r.result and well in wells
-        ]
-    ctr_ks = weighted_stats(values, stderr_)
-    active_wells = {key for key, r in results.items() if r.result and r.dataset}
-
-    with pm.Model():
-        x_true = create_x_true(xc, x_errc, n_xerr)
-
-        sigma_read = {
-            lbl: pm.HalfNormal(f"sigma_read_{lbl}", sigma=noise_priors[lbl].sigma_read)
-            for lbl in labels
-        }
-        gain = {
-            lbl: pm.HalfNormal(f"gain_{lbl}", sigma=noise_priors[lbl].gain)
-            for lbl in labels
-        }
-        alpha = {
-            lbl: pm.HalfNormal(f"alpha_{lbl}", sigma=noise_priors[lbl].alpha)
-            for lbl in labels
-        }
-
-        k_params, k_replicate = _build_ctr_k_params(
-            scheme,
-            ctr_ks,
-            active_wells,
-            ctr_free_k=ctr_free_k,
-            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
-        )
-
-        for key, r in results.items():
-            if not (r.result and r.dataset):
-                continue
-            ds = r.dataset
-            ctr_name = next(
-                (name for name, wells in scheme.names.items() if key in wells), ""
-            )
-            pars = create_parameter_priors(r.result.params, n_sd, key, "")
-            K = _resolve_well_k(  # noqa: N806
-                key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
-            )
-
-            for lbl, da in ds.items():
-                mu_pred = binding_1site(
-                    x_true,
-                    K,
-                    pars[f"S0_{lbl}_{key}"],
-                    pars[f"S1_{lbl}_{key}"],
-                    is_ph=ds.is_ph,
-                )
-                mu_nn = pm_math.maximum(0.0, mu_pred)
-                sigma_obs = pm_math.sqrt(
-                    sigma_read[lbl] ** 2
-                    + gain[lbl] * mu_nn
-                    + alpha[lbl] ** 2 * mu_pred**2
-                )
-                pm.Normal(
-                    f"y_likelihood_{lbl}_{key}",
-                    mu=mu_pred[da.mask],
-                    sigma=sigma_obs[da.mask],
-                    observed=da.y,
-                )
-
-        trace: az.InferenceData = pm.sample(
-            n_samples,
-            tune=n_samples // 2,
-            target_accept=0.9,
-            return_inferencedata=True,
-            **_pymc_sample_parallel_args(nuts_sampler),
-        )
-    return trace
-
-
-def fit_binding_pymc_multi_noise_xrw(  # noqa: PLR0913,PLR0917
-    results: dict[str, FitResult[MiniT]],
-    scheme: PlateScheme,
-    buffer_df: dict[int, pd.DataFrame],
-    n_sd: float = 5.0,
-    n_xerr: float = 1.0,
-    n_samples: int = 2000,
-    sigma_pip_prior: float = 0.02,
-    nuts_sampler: str = "default",
-    *,
-    ctr_free_k: bool = False,
-) -> az.InferenceData:
-    """Multi-well PyMC fit with shared noise model and per-well pH random walk.
-
-    Extends :func:`fit_binding_pymc_multi_noise` with a hierarchical
-    random-walk model for per-well pH deviations.  The first titration step
-    is common to all wells (same buffer).  Each subsequent acid addition
-    introduces independent Normal(0, sigma_pip²) deviations that accumulate,
-    so the variance of the pH deviation at step *t* is *t · sigma_pip²*.
-
-    Non-centred parameterisation is used for numerical efficiency::
-
-        z_pip[t, w] ~ Normal(0, 1)  (shape: n_steps-1 x n_wells)
-        x_dev[:, w] = concat([0, cumsum(sigma_pip * z_pip[:, w])])
-        x_per_well  = x_nominal[:, None] + x_dev   (shape: n_steps x n_wells)
-
-    Parameters
-    ----------
-    results : dict[str, FitResult[MiniT]]
-        Per-well initial fit results, typically from ``fit_binding_glob``.
-    scheme : PlateScheme
-        Plate scheme defining control groups for shared-K priors.
-    buffer_df : dict[int, pd.DataFrame]
-        Buffer DataFrames (integer label index -> DataFrame with well
-        columns), used to derive noise priors from replicate variance.
-    n_sd : float
-        Prior width multiplier for per-well S0/S1 parameters.
-    n_xerr : float
-        Scaling factor applied to x-value uncertainties.
-    n_samples : int
-        Number of MCMC posterior samples per chain.
-    sigma_pip_prior : float
-        Prior scale (HalfNormal sigma) for the per-step pipetting SD,
-        in the same units as the x-axis (pH units by default).
-    nuts_sampler : str
-        NUTS sampler backend: ``"default"`` (pytensor/CPU), ``"blackjax"``
-        (JAX/GPU), ``"numpyro"`` (JAX/GPU), or ``"nutpie"`` (Rust/CPU).
-    ctr_free_k : bool
-        If True, each CTR replicate well gets its own independent flat K prior
-        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
-        hierarchical shrinkage.  The spread of K posteriors across replicates
-        quantifies between-replicate accuracy.  If False (default), all
-        replicates share a single K.
-
-    Returns
-    -------
-    az.InferenceData
-        Posterior trace.  Per-well x is accessible as
-        ``trace.posterior["x_per_well"]`` with dims ``("chain", "draw",
-        "step", "well")``.  Noise parameters are accessible as
-        ``trace.posterior["sigma_read_<lbl>"]`` etc.
-
-    Raises
-    ------
-    ValueError
-        If no valid dataset is found in *results*.
-    """
-    ds_template = next((r.dataset for r in results.values() if r.dataset), None)
-    if ds_template is None:
-        msg = "No valid dataset found in results."
-        raise ValueError(msg)
-
-    xc = next(iter(ds_template.values())).xc
-    x_errc = next(iter(ds_template.values())).x_errc * n_xerr
-    labels = list(ds_template.keys())
-    n_steps = len(xc)
-
-    wells = [key for key, r in results.items() if r.result and r.dataset]
-    n_wells = len(wells)
-    well_idx = {key: i for i, key in enumerate(wells)}
-    active_wells = set(wells)
-
-    noise_priors = _noise_priors_from_buffer(buffer_df, labels)
-
-    values: dict[str, list[float | None]] = {}
-    stderr_: dict[str, list[float | None]] = {}
-    for name, scheme_wells in scheme.names.items():
-        values[name] = [
-            r.result.params["K"].value
-            for well, r in results.items()
-            if r.result and well in scheme_wells
-        ]
-        stderr_[name] = [
-            r.result.params["K"].stderr
-            for well, r in results.items()
-            if r.result and well in scheme_wells
-        ]
-    ctr_ks = weighted_stats(values, stderr_)
-
-    coords: dict[str, list[int] | list[str]] = {
-        "well": wells,
-        "step": list(range(n_steps)),
-        "step_diff": list(range(n_steps - 1)),
-    }
-
-    with pm.Model(coords=coords):
-        x_true = create_x_true(xc, x_errc, n_xerr)
-
-        sigma_pip = pm.HalfNormal("sigma_pip", sigma=sigma_pip_prior)
-        z_pip = pm.Normal(
-            "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
-        )
-        cum_dev = pm.math.cumsum(sigma_pip * z_pip, axis=0)
-        x_dev = pm.math.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
-        x_per_well = pm.Deterministic(
-            "x_per_well",
-            x_true[:, None] + x_dev,
-            dims=("step", "well"),
-        )
-
-        sigma_read = {
-            lbl: pm.HalfNormal(f"sigma_read_{lbl}", sigma=noise_priors[lbl].sigma_read)
-            for lbl in labels
-        }
-        gain = {
-            lbl: pm.HalfNormal(f"gain_{lbl}", sigma=noise_priors[lbl].gain)
-            for lbl in labels
-        }
-        alpha = {
-            lbl: pm.HalfNormal(f"alpha_{lbl}", sigma=noise_priors[lbl].alpha)
-            for lbl in labels
-        }
-
-        k_params, k_replicate = _build_ctr_k_params(
-            scheme,
-            ctr_ks,
-            active_wells,
-            ctr_free_k=ctr_free_k,
-            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
-        )
-
-        for key, r in results.items():
-            if not (r.result and r.dataset):
-                continue
-            ds = r.dataset
-            ctr_name = next(
-                (name for name, sw in scheme.names.items() if key in sw), ""
-            )
-            pars = create_parameter_priors(r.result.params, n_sd, key, "")
-            K = _resolve_well_k(  # noqa: N806
-                key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
-            )
-            w_idx = well_idx[key]
-            x_w = x_per_well[:, w_idx]
-
-            for lbl, da in ds.items():
-                mu_pred = binding_1site(
-                    x_w,
-                    K,
-                    pars[f"S0_{lbl}_{key}"],
-                    pars[f"S1_{lbl}_{key}"],
-                    is_ph=ds.is_ph,
-                )
-                mu_nn = pm_math.maximum(0.0, mu_pred)
-                sigma_obs = pm_math.sqrt(
-                    sigma_read[lbl] ** 2
-                    + gain[lbl] * mu_nn
-                    + alpha[lbl] ** 2 * mu_pred**2
-                )
-                pm.Normal(
-                    f"y_likelihood_{lbl}_{key}",
-                    mu=mu_pred[da.mask],
-                    sigma=sigma_obs[da.mask],
-                    observed=da.y,
-                )
-
-        trace: az.InferenceData = pm.sample(
-            n_samples,
-            tune=n_samples // 2,
-            target_accept=0.9,
-            return_inferencedata=True,
-            **_pymc_sample_parallel_args(nuts_sampler),
-        )
-    return trace
-
-
-# ------------------------------------------------------------------
-# 2.3  Posterior-predictive helper - visualise one well at a time
 # ------------------------------------------------------------------
 def _extract_sigma_df(trace: az.InferenceData) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""

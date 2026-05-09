@@ -12,12 +12,9 @@ from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-un
 from matplotlib.figure import Figure
 
 from clophfit.fitting.bayes import (
-    NoisePriors,
-    _noise_priors_from_buffer,  # noqa: PLC2701
     fit_binding_pymc,
     fit_binding_pymc2,
-    fit_binding_pymc_multi_noise,
-    fit_binding_pymc_multi_noise_xrw,
+    fit_binding_pymc_multi,
 )
 from clophfit.fitting.core import (
     analyze_spectra,
@@ -893,32 +890,6 @@ def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
     assert fr.result.residual is not None
 
 
-def test_noise_priors_from_buffer() -> None:
-    """NoisePriors are derived from buffer replicates."""
-    rng = np.random.default_rng(0)
-    n_ph = 7
-    # Simulate 4 buffer wells with ~5% CV for y1 and ~10% CV for y2
-    y1_mean = 10000.0
-    y2_mean = 60.0
-    buf1 = pd.DataFrame(
-        rng.normal(y1_mean, y1_mean * 0.05, (n_ph, 4)),
-        columns=["A01", "A02", "A03", "A04"],
-    )
-    buf2 = pd.DataFrame(
-        rng.normal(y2_mean, y2_mean * 0.10, (n_ph, 4)),
-        columns=["A01", "A02", "A03", "A04"],
-    )
-    buffer_df = {1: buf1, 2: buf2}
-    priors = _noise_priors_from_buffer(buffer_df, ["y1", "y2"])
-
-    assert isinstance(priors["y1"], NoisePriors)
-    assert isinstance(priors["y2"], NoisePriors)
-    assert priors["y1"].alpha > 0
-    assert priors["y2"].alpha > 0
-    # y2 has higher CV so alpha prior should be larger for y2
-    assert priors["y2"].alpha > priors["y1"].alpha
-
-
 @pytest.mark.slow
 def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     """Smoke test for multi-well noise-learning PyMC fit."""
@@ -930,23 +901,20 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     scheme = PlateScheme()
     scheme.names = {"ctrl": {"A01", "A02"}}
 
-    # Minimal buffer DataFrames (2 pH points, 3 replicate wells)
     rng = np.random.default_rng(42)
-    buf1 = pd.DataFrame(
-        rng.normal(5000.0, 250.0, (5, 3)), columns=["B01", "B02", "B03"]
-    )
-    buf2 = pd.DataFrame(rng.normal(50.0, 5.0, (5, 3)), columns=["B01", "B02", "B03"])
-    buffer_df = {1: buf1, 2: buf2}
+    bg_err = {
+        1: rng.normal(5000.0, 250.0, 5),
+        2: rng.normal(50.0, 5.0, 5),
+    }
 
-    trace = fit_binding_pymc_multi_noise(
-        results, scheme, buffer_df, n_sd=3.0, n_xerr=0.0, n_samples=50
+    trace = fit_binding_pymc_multi(
+        results, scheme, bg_err=bg_err, n_sd=3.0, n_xerr=0.0, n_samples=50
     )
 
     assert hasattr(trace, "posterior")
-    assert "alpha_y1" in trace.posterior
-    assert "alpha_y2" in trace.posterior
+    assert "S_y1" in trace.posterior
+    assert "S_y2" in trace.posterior
     assert "gain_y1" in trace.posterior
-    assert "sigma_read_y1" in trace.posterior
 
 
 @pytest.mark.slow
@@ -960,21 +928,26 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     rng = np.random.default_rng(42)
-    buf1 = pd.DataFrame(
-        rng.normal(5000.0, 250.0, (5, 3)), columns=["B01", "B02", "B03"]
-    )
-    buf2 = pd.DataFrame(rng.normal(50.0, 5.0, (5, 3)), columns=["B01", "B02", "B03"])
-    buffer_df = {1: buf1, 2: buf2}
+    bg_err = {
+        1: rng.normal(5000.0, 250.0, 5),
+        2: rng.normal(50.0, 5.0, 5),
+    }
 
-    trace = fit_binding_pymc_multi_noise_xrw(
-        results, scheme, buffer_df, n_sd=3.0, n_xerr=0.0, n_samples=50
+    trace = fit_binding_pymc_multi(
+        results,
+        scheme,
+        bg_err=bg_err,
+        x_error_model="random_walk",
+        n_sd=3.0,
+        n_xerr=0.0,
+        n_samples=50,
     )
 
     assert hasattr(trace, "posterior")
     assert "sigma_pip" in trace.posterior
     assert "x_per_well" in trace.posterior
-    assert "alpha_y1" in trace.posterior
-    assert "alpha_y2" in trace.posterior
+    assert "S_y1" in trace.posterior
+    assert "S_y2" in trace.posterior
     # x_per_well has dims (step, well)
     assert "step" in trace.posterior["x_per_well"].dims
     assert "well" in trace.posterior["x_per_well"].dims
