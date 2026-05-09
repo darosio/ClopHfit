@@ -1075,6 +1075,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
             gain: dict[str, pm.Distribution] = {
                 lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
             }
+            alpha_sq: dict[str, pm.Distribution] = {
+                lbl: pm.LogNormal(f"S_{lbl}", mu=np.log(1e-5), sigma=2.0)
+                for lbl in labels
+            }
             floor_sq = {
                 lbl: float(np.mean(bg_err[i])) ** 2
                 for i, lbl in enumerate(labels, start=1)
@@ -1113,6 +1117,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0913,PLR0917
                             pm_math.sqrt(
                                 floor_sq[lbl]
                                 + gain[lbl] * pm_math.maximum(1e-6, y_model)
+                                + alpha_sq[lbl] * y_model**2
                             ),
                         )
                         pm.Normal(
