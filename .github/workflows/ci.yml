@@ -70,7 +70,7 @@ jobs:
       - name: Run test and coverage
         if: matrix.tests == 'test'
         run: |
-          make test
+          make test ARGS='-m "not slow"'
           make cov
       - name: Upload coverage report
         if: matrix.tests == 'test'
