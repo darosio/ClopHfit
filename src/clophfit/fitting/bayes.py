@@ -987,7 +987,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
     sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
-    bg_err: dict[int, ArrayF] | None = None,
+    bg_noise: dict[int, ArrayF] | None = None,
     sample_ppc: bool = False,
     robust: bool = False,
 ) -> az.InferenceData:
@@ -1020,8 +1020,8 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
         hierarchical shrinkage.  The spread of K posteriors across replicates
         then quantifies between-replicate accuracy.  If False (default), all
         replicates of the same CTR share a single K.
-    bg_err : dict[int, ArrayF] | None
-        Background error for each signal band. If provided, uses heteroscedastic
+    bg_noise : dict[int, ArrayF] | None
+        Background noise for each signal band. If provided, uses heteroscedastic
         noise model combining buffer and signal, ignoring `ye_scaling`.
     sample_ppc : bool
         If True, generates posterior predictive samples and adds them to the
@@ -1099,7 +1099,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
             well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
-        if bg_err is None:
+        if bg_noise is None:
             ye_mag: dict[str, pm.Distribution] = {
                 label: pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
                 for label in labels
@@ -1109,10 +1109,24 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
                 lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
             }
             rel_error = pm.HalfNormal("rel_error", sigma=0.04)
-            floor_sq = {
-                lbl: float(np.mean(bg_err[i])) ** 2
+            est_sigma = {
+                lbl: float(np.sqrt(np.mean(np.array(bg_noise[i]) ** 2)))
                 for i, lbl in enumerate(labels, start=1)
             }
+
+            # Prior width matched to degrees of freedom of the empirical noise estimate
+            n_pts = len(bg_noise[1]) if bg_noise else 1
+            n_buf = len(scheme.buffer) if scheme.buffer else 1
+            dof = max(1, n_pts * n_buf - 2)
+            rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+
+            floor = {
+                lbl: pm.Normal(
+                    f"floor_{lbl}", mu=est_sigma[lbl], sigma=rel_sigma * est_sigma[lbl]
+                )
+                for lbl in labels
+            }
+            floor_sq = {lbl: floor[lbl] ** 2 for lbl in labels}
 
         for key, r in results.items():
             if r.result and r.dataset:
@@ -1140,7 +1154,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
                         is_ph=ds_well.is_ph,
                     )
 
-                    if bg_err is None:
+                    if bg_noise is None:
                         sigma_val = ye_mag[lbl] * da.y_err
                     else:
                         sigma_obs = pm.Deterministic(
@@ -1180,31 +1194,6 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
             pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
     return trace
-
-
-def fit_binding_pymc_multi2(  # noqa: PLR0913,PLR0917
-    results: dict[str, FitResult[MiniT]],
-    scheme: PlateScheme,
-    bg_err: dict[int, ArrayF],
-    n_sd: float = 5.0,
-    n_xerr: float = 1.0,
-    # Ponder this: ye_scaling: float = 1.0, # This parameter is no longer needed in the same way
-    n_samples: int = 2000,
-) -> az.InferenceData:
-    """Analyze multi-well PyMC with heteroscedastic noise (deprecated)."""
-    warnings.warn(
-        "fit_binding_pymc_multi2 is deprecated. Use fit_binding_pymc_multi(..., bg_err=bg_err) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return fit_binding_pymc_multi(
-        results,
-        scheme,
-        n_sd=n_sd,
-        n_xerr=n_xerr,
-        n_samples=n_samples,
-        bg_err=bg_err,
-    )
 
 
 # ------------------------------------------------------------------

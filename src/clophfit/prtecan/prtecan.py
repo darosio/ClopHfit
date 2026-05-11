@@ -24,7 +24,6 @@ from clophfit.fitting.bayes import (
     extract_fit,
     fit_binding_pymc,
     fit_binding_pymc_multi,
-    fit_binding_pymc_multi2,
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import (
@@ -929,6 +928,20 @@ class Buffer:
         """Set the buffer SEM values manually."""
         self._bg_err = value
 
+    @property
+    def bg_noise(self) -> dict[int, ArrayF]:
+        """List of intrinsic well noise (RMSE/pooled SD) values."""
+        buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
+        noise = {}
+        noise_col = "fit_noise" if self.tit.params.bg_mth == "fit" else "mean_noise"
+        for label, bdf in buffers.items():
+            if bdf.empty:
+                noise[label] = np.array([])
+            else:
+                # noise is a scalar per label for the whole dataset
+                noise[label] = np.repeat(bdf[noise_col].iloc[0], len(bdf))
+        return noise
+
     def _compute_bg_and_sd(self) -> tuple[dict[int, ArrayF], dict[int, ArrayF]]:
         """Compute and return buffer values and their SEM."""
         buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
@@ -978,6 +991,7 @@ class Buffer:
             if buf_df.empty:
                 fit_resultd[label] = BufferFit()
             else:
+                y_obs = buf_df.to_numpy().astype(float)
                 mean = buf_df.mean(axis=1).to_numpy().astype(float)
                 sem = buf_df.sem(axis=1).to_numpy().astype(float)
                 # y_err estimate is important when using 2 ds and x_err for ODR
@@ -999,11 +1013,23 @@ class Buffer:
                 fit_resultd[label] = BufferFit(
                     float(m_best), float(q_best), float(m_err), float(q_err)
                 )
+
+                # intrinsic well noise (RMSE of fit, or pooled SD of mean)
+                y_fit = m_best * self.tit.x + q_best
+                diffs = y_obs - y_fit[:, np.newaxis]
+                n_obs = diffs.size
+                sigma_res = (
+                    np.sqrt(np.sum(diffs**2) / (n_obs - 2)) if n_obs > 2 else 0.0  # noqa: PLR2004
+                )
+                pooled_std = np.sqrt(buf_df.var(axis=1, ddof=1).mean())
+
                 buf_df["Label"] = label
-                buf_df["fit"] = m_best * self.tit.x + q_best
+                buf_df["fit"] = y_fit
                 buf_df["fit_err"] = fit_error(self.tit.x, cov_matrix)
+                buf_df["fit_noise"] = sigma_res
                 buf_df["mean"] = mean
                 buf_df["sem"] = sem
+                buf_df["mean_noise"] = pooled_std
         return fit_resultd
 
     def plot(self, *, nrm: bool = False, title: str | None = None) -> sns.FacetGrid:
@@ -1461,6 +1487,11 @@ class Titration(TecanfilesGroup):
         # def bg_err(self, value: list[ArrayF]) -> None:
         self.buffer.bg_err = value
         self._reset_data_and_results()
+
+    @property
+    def bg_noise(self) -> dict[int, ArrayF]:
+        """List of intrinsic well noise (RMSE/pooled SD) values."""
+        return self.buffer.bg_noise
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
@@ -2021,8 +2052,8 @@ class Titration(TecanfilesGroup):
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
         results = self.result_global.results
-        trace = fit_binding_pymc_multi2(
-            results, self.scheme, self.buffer.bg_err, n_sd=n_sd
+        trace = fit_binding_pymc_multi(
+            results, self.scheme, bg_noise=self.bg_noise, n_sd=n_sd
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
@@ -2045,9 +2076,7 @@ class Titration(TecanfilesGroup):
             self.scheme,
             n_sd=n_sd,
             n_samples=self.params.n_mcmc_samples,
-            bg_err=self.bg_err,
-            nuts_sampler=self.params.nuts_sampler,
-            ctr_free_k=self.params.ctr_free_k,
+            bg_noise=self.bg_noise,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
         da_true = x_true_from_trace_df(trace_df)
@@ -2070,7 +2099,7 @@ class Titration(TecanfilesGroup):
             self.scheme,
             n_sd=n_sd,
             n_samples=self.params.n_mcmc_samples,
-            bg_err=self.bg_err,
+            bg_noise=self.bg_noise,
             x_error_model="random_walk",
             nuts_sampler=self.params.nuts_sampler,
             ctr_free_k=self.params.ctr_free_k,

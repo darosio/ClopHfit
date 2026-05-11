@@ -902,18 +902,17 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     rng = np.random.default_rng(42)
-    bg_err = {
+    bg_noise = {
         1: rng.normal(5000.0, 250.0, 5),
         2: rng.normal(50.0, 5.0, 5),
     }
 
     trace = fit_binding_pymc_multi(
-        results, scheme, bg_err=bg_err, n_sd=3.0, n_xerr=0.0, n_samples=50
+        results, scheme, bg_noise=bg_noise, n_sd=3.0, n_xerr=0.0, n_samples=50
     )
 
     assert hasattr(trace, "posterior")
-    assert "S_y1" in trace.posterior
-    assert "S_y2" in trace.posterior
+    assert "rel_error" in trace.posterior
     assert "gain_y1" in trace.posterior
 
 
@@ -928,7 +927,7 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     rng = np.random.default_rng(42)
-    bg_err = {
+    bg_noise = {
         1: rng.normal(5000.0, 250.0, 5),
         2: rng.normal(50.0, 5.0, 5),
     }
@@ -936,7 +935,7 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     trace = fit_binding_pymc_multi(
         results,
         scheme,
-        bg_err=bg_err,
+        bg_noise=bg_noise,
         x_error_model="random_walk",
         n_sd=3.0,
         n_xerr=0.0,
@@ -946,8 +945,7 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     assert hasattr(trace, "posterior")
     assert "sigma_pip" in trace.posterior
     assert "x_per_well" in trace.posterior
-    assert "S_y1" in trace.posterior
-    assert "S_y2" in trace.posterior
+    assert "rel_error" in trace.posterior
     # x_per_well has dims (step, well)
     assert "step" in trace.posterior["x_per_well"].dims
     assert "well" in trace.posterior["x_per_well"].dims
