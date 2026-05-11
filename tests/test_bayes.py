@@ -12,7 +12,6 @@ from clophfit.fitting.bayes import (
     create_x_true,
     extract_fit,
     fit_binding_pymc,
-    fit_binding_pymc2,
     process_trace,
     rename_keys,
     weighted_stats,
@@ -348,7 +347,6 @@ def test_bayes_module_imports() -> None:
     assert callable(rename_keys)
     assert callable(weighted_stats)
     assert callable(fit_binding_pymc)
-    assert callable(fit_binding_pymc2)
     assert callable(process_trace)
     assert callable(extract_fit)
     assert callable(x_true_from_trace_df)
@@ -404,15 +402,16 @@ def test_fit_binding_pymc_with_xerr(ph_dataset: Dataset) -> None:
 @pytest.mark.filterwarnings(
     "ignore:invalid value encountered in scalar divide"
 )  # smoke tests use very short MCMC chains (50 samples), which causes arviz to encounter numerical issues when calculating convergence diagnostics.
-def test_fit_binding_pymc2_smoke_test(multi_dataset: Dataset) -> None:
+def test_fit_binding_pymc_separate_smoke_test(multi_dataset: Dataset) -> None:
     """Smoke test for PyMC fitter with separate ye_mag per label."""
     pytest.importorskip("pymc")
-    # Get initial fit
     initial_fit = fit_binding_glob(multi_dataset)
     assert initial_fit.result is not None
     assert initial_fit.dataset is not None
-    # Run PyMC2 with separate noise scaling (reduced samples for speed)
-    fit_result = fit_binding_pymc2(initial_fit, n_samples=50, n_xerr=0, n_sd=10.0)
+    # Run PyMC with separate noise scaling (reduced samples for speed)
+    fit_result = fit_binding_pymc(
+        initial_fit, n_samples=50, n_xerr=0, n_sd=10.0, error_model="separate"
+    )
     assert fit_result.result is not None
     assert "K" in fit_result.result.params
     # Check that K is reasonably close to expected value

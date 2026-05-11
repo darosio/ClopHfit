@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
+from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.testing.synthetic import make_dataset
 
@@ -124,7 +124,7 @@ def run_all_methods_on_scenario(
     def run_bayesian_perlabel(ds):
         lm_result = fit_binding_glob(ds)
         if lm_result.result and lm_result.result.success:
-            return fit_binding_pymc2(lm_result, n_samples=1000)
+            return fit_binding_pymc(lm_result, n_samples=1000, error_model="separate")
         return lm_result
 
     methods = {

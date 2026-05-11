@@ -13,7 +13,6 @@ from matplotlib.figure import Figure
 
 from clophfit.fitting.bayes import (
     fit_binding_pymc,
-    fit_binding_pymc2,
     fit_binding_pymc_multi,
 )
 from clophfit.fitting.core import (
@@ -813,7 +812,7 @@ def test_fit_binding_odr_from_fitresult(ph_dataset: Dataset) -> None:
     assert fr_odr.result.residual is not None
 
 
-def test_fit_binding_odr_recursive_ph(ph_dataset: Dataset) -> None:
+def test_fit_binding_odr_reweight_ph(ph_dataset: Dataset) -> None:
     """Test iterative ODR fitting."""
     fr = fit_binding_odr(ph_dataset, reweight=True, max_iter=3)
     assert fr.result is not None
@@ -822,7 +821,7 @@ def test_fit_binding_odr_recursive_ph(ph_dataset: Dataset) -> None:
     assert fr.result.residual is not None
 
 
-def test_fit_binding_odr_recursive_outlier_ph(ph_dataset: Dataset) -> None:
+def test_fit_binding_odr_outlier_ph(ph_dataset: Dataset) -> None:
     """Test ODR fitting with outlier removal."""
     fr = fit_binding_odr(ph_dataset, remove_outliers="zscore:3.0")
     assert fr.result is not None
@@ -872,9 +871,9 @@ def test_fit_binding_pymc_from_fitresult(ph_dataset: Dataset) -> None:
     assert "K" in fr_pymc.result.params
 
 
-def test_fit_binding_pymc2_ph(ph_dataset: Dataset) -> None:
+def test_fit_binding_pymc_separate_ph(ph_dataset: Dataset) -> None:
     """Test PyMC with per-label noise scaling."""
-    fr = fit_binding_pymc2(ph_dataset, n_samples=100, n_sd=1.0)
+    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0, error_model="separate")
     assert fr.result is not None
     assert "K" in fr.result.params
     assert fr.result.residual is not None

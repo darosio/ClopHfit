@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import typing
-import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -260,34 +259,6 @@ def fit_binding_odr(  # noqa: C901, PLR0915
         fr = copy.deepcopy(ro)  # update starting point for next iteration
 
     return ro
-
-
-def fit_binding_odr_recursive(
-    ds_or_fr: Dataset | FitResult[MiniT],
-    max_iterations: int = 15,
-    tol: float = 0.1,
-) -> FitResult[odrpack.OdrResult]:
-    """Analyze multi-label titration datasets using iterative ODR (deprecated)."""
-    warnings.warn(
-        "fit_binding_odr_recursive is deprecated. Use fit_binding_odr(..., reweight=True) instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return fit_binding_odr(ds_or_fr, reweight=True, max_iter=max_iterations, tol=tol)
-
-
-def fit_binding_odr_recursive_outlier(
-    ds_or_fr: Dataset | FitResult[MiniT],
-    tol: float = 0.5,
-    threshold: float = 2.0,
-) -> FitResult[odrpack.OdrResult]:
-    """Analyze multi-label titration datasets using iterative ODR (deprecated)."""
-    warnings.warn(
-        f"fit_binding_odr_recursive_outlier is deprecated. Use fit_binding_odr(..., remove_outliers=f'zscore:{threshold}') instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return fit_binding_odr(ds_or_fr, remove_outliers=f"zscore:{threshold}", tol=tol)
 
 
 def outlier(

@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc2
+from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import (
     fit_binding_glob,
     weight_multi_ds_titration,
@@ -47,8 +47,6 @@ from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.odr import (
     fit_binding_odr,
-    fit_binding_odr_recursive,
-    fit_binding_odr_recursive_outlier,
 )
 from clophfit.prtecan import Titration
 
@@ -297,7 +295,7 @@ def fit_all_methods(
     # Method 11: ODR recursive
     if fr_physics.result is not None:
         try:
-            fr_odr_rec = fit_binding_odr_recursive(fr_physics, tol=0.01)
+            fr_odr_rec = fit_binding_odr(fr_physics, tol=0.01, reweight=True)
             results["odr_recursive"] = extract_K(fr_odr_rec)
         except Exception:
             results["odr_recursive"] = (np.nan, np.nan)
@@ -305,8 +303,8 @@ def fit_all_methods(
     # Method 12: ODR recursive with outlier
     if fr_physics.result is not None:
         try:
-            fr_odr_rec_out = fit_binding_odr_recursive_outlier(
-                fr_physics, tol=0.01, threshold=3.0
+            fr_odr_rec_out = fit_binding_odr(
+                fr_physics, tol=0.01, remove_outliers="zscore:3.0"
             )
             results["odr_recursive_outlier"] = extract_K(fr_odr_rec_out)
         except Exception:
@@ -345,8 +343,8 @@ def fit_all_methods(
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    fr_pymc2_phys = fit_binding_pymc2(
-                        fr_physics, n_sd=n_sd, n_xerr=0, n_samples=1000
+                    fr_pymc2_phys = fit_binding_pymc(
+                        fr_physics, n_sd=n_sd, n_xerr=0, n_samples=1000, error_model="separate"
                     )
                 results["pymc2_physics"] = extract_K_from_trace(fr_pymc2_phys)
             except Exception as e:
@@ -358,8 +356,8 @@ def fit_all_methods(
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    fr_pymc2_uni = fit_binding_pymc2(
-                        fr_out2_uni, n_sd=n_sd, n_xerr=0, n_samples=1000
+                    fr_pymc2_uni = fit_binding_pymc(
+                        fr_out2_uni, n_sd=n_sd, n_xerr=0, n_samples=1000, error_model="separate"
                     )
                 results["pymc2_uniform"] = extract_K_from_trace(fr_pymc2_uni)
             except Exception as e:

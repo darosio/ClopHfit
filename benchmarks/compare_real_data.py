@@ -20,8 +20,7 @@ import pandas as pd
 
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.odr import (
-    fit_binding_odr_recursive,
-    fit_binding_odr_recursive_outlier,
+    fit_binding_odr,
 )
 from clophfit.prtecan import Titration
 
@@ -154,11 +153,16 @@ def test_all_methods(tit: Titration, well_key: str) -> dict[str, dict]:
             ),
             False,
         ),
-        ("ODR-Recursive", fit_binding_odr_recursive, fit_binding_odr_recursive, False),
+        (
+            "ODR-Recursive",
+            lambda ds: fit_binding_odr(ds, reweight=True),
+            lambda fr: fit_binding_odr(fr, reweight=True),
+            False
+        ),
         (
             "ODR-Recursive+Outlier",
-            fit_binding_odr_recursive_outlier,
-            fit_binding_odr_recursive_outlier,
+            lambda ds: fit_binding_odr(ds, remove_outliers="zscore:3.0"),
+            lambda fr: fit_binding_odr(fr, remove_outliers="zscore:3.0"),
             False,
         ),
     ]

@@ -14,7 +14,7 @@ from clophfit.fitting.core import (
     weight_da,
     weight_multi_ds_titration,
 )
-from clophfit.fitting.odr import fit_binding_odr, fit_binding_odr_recursive_outlier
+from clophfit.fitting.odr import fit_binding_odr
 from clophfit.testing.synthetic import TruthParams, make_simple_dataset
 
 if TYPE_CHECKING:
@@ -310,7 +310,9 @@ def build_fitters(
 
         def _odr(ds: Dataset) -> FitResult[MiniT]:
             base = fit_binding_glob(ds)
-            return cast("FitResult[MiniT]", fit_binding_odr_recursive_outlier(base))
+            return cast(
+                "FitResult[MiniT]", fit_binding_odr(base, remove_outliers="zscore:3.0")
+            )
 
         fitters["odr_recursive_outlier"] = _odr
 

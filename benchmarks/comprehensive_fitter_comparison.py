@@ -31,8 +31,6 @@ from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.odr import (
     fit_binding_odr,
-    fit_binding_odr_recursive,
-    fit_binding_odr_recursive_outlier,
 )
 
 # Ground truth parameters (calibrated to match real data characteristics)
@@ -123,9 +121,9 @@ def build_fitters() -> dict[str, callable]:
             ds, method="huber", remove_outliers="zscore:2.5:5"
         ),
         "odr_single": lambda ds: fit_binding_odr(ds),
-        "odr_recursive": lambda ds: fit_binding_odr_recursive(ds, max_iterations=10),
-        "odr_recursive_outlier": lambda ds: fit_binding_odr_recursive_outlier(
-            ds, threshold=3.0
+        "odr_recursive": lambda ds: fit_binding_odr(ds, reweight=True, max_iter=10),
+        "odr_recursive_outlier": lambda ds: fit_binding_odr(
+            ds, remove_outliers="zscore:3.0"
         ),
     }
 

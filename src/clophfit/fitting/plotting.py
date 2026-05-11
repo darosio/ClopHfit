@@ -38,6 +38,7 @@ import corner  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 from uncertainties import ufloat  # type: ignore[import-untyped]
@@ -46,7 +47,7 @@ from clophfit.fitting.data_structures import Dataset
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
     from clophfit.clophfit_types import ArrayF
+    from clophfit.fitting.data_structures import FitResult, MiniT
 
     from .data_structures import Dataset
 
@@ -275,9 +277,9 @@ def plot_spectra_distributed(
     fig.colorbar(sm, ax=axl, label=pp.kind)
 
 
-def plot_qc_mean_vs_std(  # noqa: PLR0913
+def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
     trace: az.InferenceData,
-    *,
+    results: Mapping[str, FitResult[MiniT]] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
     annotate_wells: list[str] | None = None,
     z_threshold: float = 3.0,
@@ -294,6 +296,8 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913
     ----------
     trace : az.InferenceData
         The PyMC inference trace containing `sigma_obs` deterministic nodes.
+    results : Mapping[str, FitResult[MiniT]] | None, optional
+        The dictionary of well results to derive fallback sigma values.
     figsize_per_label : tuple[float, float], optional
         Figure size allocated for each spectral band (label). Default is (5, 4).
     annotate_wells : list[str] | None, optional
@@ -311,13 +315,16 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913
     Figure
         The generated QC matplotlib figure.
     """
-    from clophfit.fitting.bayes import _extract_sigma_df  # noqa: PLC0415
     from clophfit.fitting.utils import (  # noqa: PLC0415
         fit_trendline,
         flag_trend_outliers,
     )
 
-    sigma_df = _extract_sigma_df(trace)
+    sigma_df = _extract_sigma_df(trace, results)
+    if len(sigma_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' or fallback data found.", ha="center")
+        return fig
     if len(sigma_df) == 0:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No 'sigma_obs' data found in trace.", ha="center")
@@ -351,7 +358,9 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913
         bg_outliers = pd.Series(data=False, index=d.index)
         if bg_noise is not None and lbl in bg_noise:
             threshold_bg = bg_multiplier * bg_noise[lbl]
-            bg_outliers = (x_val < threshold_bg) | (y_val < threshold_bg)
+            bg_outliers = (x_val < threshold_bg) | (
+                (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
+            )
 
         # Fit line for plotting
         m, c = fit_trendline(x_val, y_val)
@@ -716,3 +725,315 @@ def print_emcee(result_emcee: MinimizerResult) -> None:
     quantiles = np.percentile(result_emcee.flatchain["K"], [2.28, 15.9, 50, 84.2, 97.7])
     print(f"\n\n1 sigma spread = {0.5 * (quantiles[3] - quantiles[1]):.3f}")
     print(f"2 sigma spread = {0.5 * (quantiles[4] - quantiles[0]):.3f}")
+
+
+def _extract_sigma_df(
+    trace: az.InferenceData, results: Mapping[str, FitResult[MiniT]] | None = None
+) -> pd.DataFrame:
+    """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
+    trace_df = az.summary(trace)
+    sigma_df = trace_df[trace_df.index.str.startswith("sigma_obs_")].copy()
+    if len(sigma_df) > 0:
+        pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>[^\[]+)\[(?P<idx>\d+)\]"
+        extracted = sigma_df.index.to_series().str.extract(pattern)
+        sigma_df = pd.concat([sigma_df, extracted], axis=1)  # type: ignore[call-overload]
+        sigma_df["idx"] = sigma_df["idx"].astype(int)
+        return sigma_df  # type: ignore[no-any-return]
+
+    # Fallback: if sigma_obs_ isn't in trace, reconstruct from ye_mag * y_err
+    if results is None:
+        return pd.DataFrame()
+
+    records = []
+    for well, fr in results.items():
+        if fr.dataset is None:
+            continue
+        for lbl, da in fr.dataset.items():
+            if f"ye_mag_{lbl}" in trace_df.index:
+                ye = trace_df.loc[f"ye_mag_{lbl}"]  # type: ignore[index]
+            elif "ye_mag" in trace_df.index:
+                ye = trace_df.loc["ye_mag"]  # type: ignore[index]
+            else:
+                continue
+
+            for idx, y_err_val in enumerate(da.y_errc):
+                records.append({
+                    "mean": float(ye["mean"] * y_err_val),
+                    "sd": float(ye["sd"] * y_err_val),
+                    "hdi_3%": float(ye["hdi_3%"] * y_err_val),
+                    "hdi_97%": float(ye["hdi_97%"] * y_err_val),
+                    "label": lbl,
+                    "well": well,
+                    "idx": int(idx),
+                })
+
+    return pd.DataFrame(records)
+
+
+def plot_noise_vs_index(
+    trace: az.InferenceData,
+    results: Mapping[str, FitResult[MiniT]] | None = None,
+    wells: Sequence[str] | str | None = None,
+    figsize_per_well: tuple[float, float] = (5, 4),
+    max_cols: int = 4,
+) -> Figure:
+    """Plot inferred noise (sigma) across titration steps for specified wells.
+
+    Parameters
+    ----------
+    trace : az.InferenceData
+        The PyMC inference trace containing `sigma_obs` deterministic nodes.
+    results : Mapping[str, FitResult[MiniT]] | None, optional
+        The dictionary of well results to derive fallback sigma values.
+    wells : Sequence[str] | str | None, optional
+        A specific well ID (e.g., 'A01'), a list of well IDs, or None to plot all
+        wells found in the trace. Default is None.
+    figsize_per_well : tuple[float, float], optional
+        The width and height allocated per well subplot.
+    max_cols : int, optional
+        Maximum number of columns in the subplot grid.
+
+    Returns
+    -------
+    Figure
+        The constructed matplotlib figure.
+    """
+    sigma_df = _extract_sigma_df(trace, results)
+    if len(sigma_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    if wells is None:
+        wells_to_plot = list(sigma_df["well"].unique())
+    elif isinstance(wells, str):
+        wells_to_plot = [wells]
+    else:
+        wells_to_plot = list(wells)
+
+    n_wells = len(wells_to_plot)
+    n_cols = min(n_wells, max_cols)
+    n_rows = max(1, (n_wells - 1) // n_cols + 1)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(n_cols * figsize_per_well[0], n_rows * figsize_per_well[1]),
+        squeeze=False,
+    )
+
+    for i, well in enumerate(wells_to_plot):
+        ax = axes.flat[i]
+        well_data = sigma_df[sigma_df["well"] == well]
+        if len(well_data) == 0:
+            ax.set_title(f"Well {well} (No Data)")
+            continue
+
+        sns.lineplot(data=well_data, x="idx", y="mean", hue="label", marker="o", ax=ax)
+
+        # Add error bands (94% HDI) for the noise estimate
+        for lbl in well_data["label"].unique():
+            lbl_data = well_data[well_data["label"] == lbl]
+            ax.fill_between(
+                lbl_data["idx"],
+                lbl_data["hdi_3%"],
+                lbl_data["hdi_97%"],
+                alpha=0.2,
+            )
+
+        ax.set_title(rf"Inferred Noise ($\sigma_{{obs}}$) - Well {well}")
+        ax.set_xlabel("Titration Step (Index)")
+        ax.set_ylabel(r"Inferred $\sigma$ (RFU)")
+
+    # Hide unused axes
+    for j in range(len(wells_to_plot), len(axes.flat)):
+        axes.flat[j].set_visible(False)
+
+    plt.tight_layout()
+    return fig
+
+
+def plot_noise_vs_signal(
+    trace: az.InferenceData,
+    results: Mapping[str, FitResult[MiniT]],
+    figsize_per_label: tuple[float, float] = (6, 5),
+) -> Figure:
+    """Plot inferred noise (sigma) versus observed signal across all wells.
+
+    This function extracts the `sigma_obs_...` parameters from a heteroscedastic
+    PyMC trace (like `fit_binding_pymc_multi`) and plots them against the observed
+    fluorescence values `da.y` to visualize the noise-to-signal relationship.
+
+    Parameters
+    ----------
+    trace : az.InferenceData
+        The PyMC inference trace containing the `sigma_obs` deterministic nodes.
+    results : Mapping[str, FitResult[MiniT]]
+        The dictionary of well results containing datasets with `.y` arrays.
+        Normally this is `tit.result_global.results`.
+    figsize_per_label : tuple[float, float], optional
+        The width and height to allocate per band/label in the final figure.
+
+    Returns
+    -------
+    Figure
+        The constructed matplotlib figure.
+    """
+    sigma_df = _extract_sigma_df(trace, results)
+    if len(sigma_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    # Build a combined DataFrame of (Observed Y, Inferred Sigma) for all wells
+    records = []
+    for well, fr in results.items():
+        if fr.dataset is not None:
+            for lbl, da in fr.dataset.items():
+                # Get the sigma_obs rows for this well and label, sorted by index
+                mask_well_lbl = (sigma_df["well"] == well) & (sigma_df["label"] == lbl)
+                well_lbl_sigmas = sigma_df[mask_well_lbl].sort_values("idx")
+
+                # Ensure we have PyMC results for this well
+                if len(well_lbl_sigmas) > 0 and hasattr(da, "mask"):
+                    # Apply the dataset mask to the full sigma array to match valid da.y points
+                    valid_sigmas = well_lbl_sigmas[da.mask]["mean"].to_numpy()
+                    valid_y = da.y
+
+                    for sig, y_val in zip(valid_sigmas, valid_y, strict=False):
+                        records.append({
+                            "well": well,
+                            "label": lbl,
+                            "sigma_mean": sig,
+                            "y_obs": y_val,
+                        })
+    all_wells_df = pd.DataFrame(records)
+    if len(all_wells_df) == 0:
+        fig, ax = plt.subplots()
+        ax.text(0.5, 0.5, "No 'sigma_obs' data found.", ha="center")
+        return fig
+
+    # Plotting
+    labels_found = all_wells_df["label"].unique()
+    fig, axes = plt.subplots(
+        1,
+        len(labels_found),
+        figsize=(figsize_per_label[0] * len(labels_found), figsize_per_label[1]),
+    )
+    if len(labels_found) == 1:
+        axes = [axes]
+
+    for ax, lbl in zip(axes, labels_found, strict=False):
+        data = all_wells_df[all_wells_df["label"] == lbl]
+
+        # Plot all points as a semi-transparent scatter
+        sns.scatterplot(
+            data=data,
+            x="y_obs",
+            y="sigma_mean",
+            alpha=0.3,
+            edgecolor=None,
+            color="indigo",
+            s=20,
+            ax=ax,
+        )
+
+        # Add a trendline to highlight the heteroscedastic curve shape
+        sns.regplot(
+            data=data,
+            x="y_obs",
+            y="sigma_mean",
+            scatter=False,
+            order=2,
+            color="orange",
+            line_kws={"linestyle": "--", "linewidth": 2},
+            ax=ax,
+        )
+
+        ax.set_title(f"Band {lbl} (All Wells)")
+        ax.set_xlabel("Observed Fluorescence ($y$)")
+        ax.set_ylabel(r"Inferred $\sigma_{obs}$ (mean)")
+
+    plt.suptitle("Noise vs Signal Intensity (All Wells)", y=1.05, fontsize=14)
+    plt.tight_layout()
+    return fig
+
+
+def plot_ppc_well(
+    trace: az.InferenceData,
+    key: str,
+    labels: list[str] | None = None,
+    figsize: tuple[float, float] = (8, 4),
+) -> Figure:
+    """Draw posterior predictive samples for a particular well (and all its labels).
+
+    The returned figure can be displayed with matplotlib.
+
+    Parameters
+    ----------
+    trace   : az.InferenceData
+        Trace produced by PyMC fitting with posterior predictive data included.
+    key     : str
+        Well identifier (e.g. 'A01').
+    labels  : list[str] | None
+        Names of the bands to show.  If *None* the function will
+        automatically look for all variables starting with
+        ``'y_likelihood'`` that contain this key.
+    figsize: tuple[float, float]
+        size?
+
+    Returns
+    -------
+    Figure
+        Plot
+
+    Raises
+    ------
+    AttributeError
+        If the trace does not contain `posterior_predictive` data.
+    """
+    if not hasattr(trace, "posterior_predictive"):
+        msg = (
+            "The InferenceData object does not contain 'posterior_predictive'. "
+            "You must run pm.sample_posterior_predictive() inside the pm.Model "
+            "context after sampling to generate this data."
+        )
+        raise AttributeError(msg)
+
+    if labels is None:
+        labels = [
+            str(var).split("_")[2]
+            for var in trace.posterior_predictive.data_vars
+            if f"_{key}" in str(var) and str(var).startswith("y_likelihood")
+        ]
+
+    fig, axes = plt.subplots(
+        len(labels), 1, figsize=(figsize[0], figsize[1] * len(labels)), sharex=True
+    )
+    if len(labels) == 1:
+        axes = [axes]
+
+    for ax, lbl in zip(axes, labels, strict=True):
+        var_name = f"y_likelihood_{lbl}_{key}"
+
+        # Prepare dictionary for az.from_dict
+        trace_dict = {
+            "posterior_predictive": {var_name: trace.posterior_predictive[var_name]}
+        }
+        if hasattr(trace, "observed_data") and var_name in trace.observed_data:
+            trace_dict["observed_data"] = {var_name: trace.observed_data[var_name]}
+
+        az.plot_ppc(  # type: ignore[no-untyped-call]
+            az.from_dict(
+                **trace_dict,  # type: ignore[arg-type]
+                coords={"y": [lbl]},
+                dims={"y": 0},
+            ),
+            ax=ax,
+        )
+        ax.set_title(f"Well {key} - band {lbl}")
+        ax.set_xlabel("Observed y")
+        ax.set_ylabel("Posterior predictive")
+
+    plt.tight_layout()
+    return fig
