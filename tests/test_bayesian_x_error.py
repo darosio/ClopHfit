@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 from lmfit import Parameters  # type: ignore[import-untyped]
 

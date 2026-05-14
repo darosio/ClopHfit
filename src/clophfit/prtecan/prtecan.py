@@ -12,7 +12,7 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import odrpack
@@ -2037,6 +2037,7 @@ class Titration(TecanfilesGroup):
             ctr_free_k=self.params.ctr_free_k,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame({
@@ -2056,6 +2057,7 @@ class Titration(TecanfilesGroup):
             results, self.scheme, bg_noise=self.bg_noise, n_sd=n_sd
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame({
@@ -2079,6 +2081,7 @@ class Titration(TecanfilesGroup):
             bg_noise=self.bg_noise,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame({
@@ -2105,6 +2108,7 @@ class Titration(TecanfilesGroup):
             ctr_free_k=self.params.ctr_free_k,
         )
         trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
+        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
         da_true = x_true_from_trace_df(trace_df)
         filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
         pd.DataFrame({

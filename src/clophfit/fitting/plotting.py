@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import corner  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
@@ -458,10 +458,9 @@ def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
 
 def plot_emcee(flatchain: pd.DataFrame) -> Figure:
     """Plot emcee result."""
-    # Convert the dictionary of flatchains to an ArviZ InferenceData object
-    samples_dict = {key: np.array(val) for key, val in flatchain.items()}
-    idata = az.from_dict(posterior=samples_dict)
-    corner_fig: Figure = corner.corner(idata, divergences=False)
+    # Pass DataFrame directly to corner.corner.
+    # ArviZ 1.x DataTree is not yet supported by corner 2.2.3.
+    corner_fig: Figure = corner.corner(flatchain, divergences=False)
     return corner_fig
 
 
@@ -469,10 +468,11 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     """Plot emcee result."""
     samples = res_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
-    samples_dict = {key: np.array(val) for key, val in samples.items()}
-    idata = az.from_dict(posterior=samples_dict)
+    # Reshape to (1, -1) to satisfy ArviZ 1.x requirement for 2 sample dims (chain, draw)
+    samples_dict = {key: np.array(val).reshape(1, -1) for key, val in samples.items()}
+    idata = az.from_dict({"posterior": samples_dict})
     parameter_posterior = idata.posterior[p_name]
-    az.plot_posterior(parameter_posterior, ax=ax)  # type: ignore[no-untyped-call]
+    az.plot_posterior(parameter_posterior, ax=ax)
 
 
 def plot_fit(
@@ -732,11 +732,13 @@ def _extract_sigma_df(
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
     trace_df = az.summary(trace)
+    # Ensure numeric types (ArviZ 1.x might return strings)
+    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     sigma_df = trace_df[trace_df.index.str.startswith("sigma_obs_")].copy()
     if len(sigma_df) > 0:
         pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>[^\[]+)\[(?P<idx>\d+)\]"
         extracted = sigma_df.index.to_series().str.extract(pattern)
-        sigma_df = pd.concat([sigma_df, extracted], axis=1)  # type: ignore[call-overload]
+        sigma_df = pd.concat([sigma_df, extracted], axis=1)
         sigma_df["idx"] = sigma_df["idx"].astype(int)
         return sigma_df  # type: ignore[no-any-return]
 
@@ -750,9 +752,9 @@ def _extract_sigma_df(
             continue
         for lbl, da in fr.dataset.items():
             if f"ye_mag_{lbl}" in trace_df.index:
-                ye = trace_df.loc[f"ye_mag_{lbl}"]  # type: ignore[index]
+                ye = trace_df.loc[f"ye_mag_{lbl}"]
             elif "ye_mag" in trace_df.index:
-                ye = trace_df.loc["ye_mag"]  # type: ignore[index]
+                ye = trace_df.loc["ye_mag"]
             else:
                 continue
 
@@ -1023,9 +1025,9 @@ def plot_ppc_well(
         if hasattr(trace, "observed_data") and var_name in trace.observed_data:
             trace_dict["observed_data"] = {var_name: trace.observed_data[var_name]}
 
-        az.plot_ppc(  # type: ignore[no-untyped-call]
+        az.plot_ppc(
             az.from_dict(
-                **trace_dict,  # type: ignore[arg-type]
+                trace_dict,
                 coords={"y": [lbl]},
                 dims={"y": 0},
             ),
