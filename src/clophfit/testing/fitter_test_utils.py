@@ -228,10 +228,7 @@ def apply_tecan_combination(
     if final_stage == "odr":
         return cast("FitResult[MiniT]", fit_binding_odr(prefit_result))
     if final_stage == "mcmc_single":
-        return cast(
-            "FitResult[MiniT]",
-            fit_binding_pymc(prefit_result, n_sd=5.0, n_xerr=1.0, n_samples=200),
-        )
+        return fit_binding_pymc(prefit_result, n_sd=5.0, n_xerr=1.0, n_samples=200)
     msg = (
         f"Final stage '{final_stage}' requires full TitrationAnalysis context and "
         "is not supported by dataset-only benchmark utilities."

@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
@@ -236,6 +236,8 @@ def process_trace(
     if not isinstance(rdf, pd.DataFrame):
         msg = "az.summary did not return a DataFrame"
         raise TypeError(msg)
+    # Ensure numeric types (ArviZ 1.x might return strings)
+    rdf = rdf.apply(pd.to_numeric, errors="coerce")
     rpars = Parameters()
     for name, row in rdf.iterrows():
         if name in p_names:
@@ -248,7 +250,7 @@ def process_trace(
             da.x_errc = nx_errc * n_xerr  # Scale the errors FIXME: n_xerr not needed
     # Scale y_errc if present
     try:
-        mag = float(rdf.loc["ye_mag", "mean"])  # type: ignore[arg-type]
+        mag = float(rdf.loc["ye_mag", "mean"])
     except Exception:  # noqa: BLE001
         mag = 1.0
     for da in ds.values():
@@ -386,6 +388,8 @@ def _extract_x_true_from_trace_df(
     tuple[np.ndarray, np.ndarray]
         Arrays of x_true means and standard deviations.
     """
+    # Ensure numeric types (ArviZ 1.x might return strings)
+    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     nxc: list[float] = []
     nx_errc: list[float] = []
     for name, row in trace_df.iterrows():
@@ -418,6 +422,8 @@ def _extract_x_per_well_from_trace_df(
         Arrays of per-well x posterior means and standard deviations ordered
         by step.  Both arrays are empty if ``x_per_well`` rows are absent.
     """
+    # Ensure numeric types (ArviZ 1.x might return strings)
+    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     suffix = f", {well_key}]"
     rows: dict[int, tuple[float, float]] = {}
     for name, row in trace_df.iterrows():

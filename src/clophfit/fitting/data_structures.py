@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import odrpack

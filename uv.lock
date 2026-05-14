@@ -634,7 +634,7 @@ tests = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arviz", specifier = ">=0.23.4" },
+    { name = "arviz", specifier = ">=1.1.0" },
     { name = "blackjax", marker = "extra == 'gpu'", specifier = ">=1.5" },
     { name = "click", specifier = ">=8.3.1" },
     { name = "corner", specifier = ">=2.2.3" },
