@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import itertools
 import logging
+import re
 import typing
 import warnings
 from dataclasses import InitVar, dataclass, field
@@ -32,6 +33,7 @@ from clophfit.fitting.core import (
     weight_multi_ds_titration,
 )
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
+from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
@@ -41,6 +43,7 @@ from clophfit.fitting.residuals import (
     plot_residual_vs_yerr,
     residual_statistics,
 )
+from clophfit.fitting.utils import apply_outlier_mask
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -63,6 +66,33 @@ NUM_COLS_96WELL = 12
 ROW_NAMES = tuple("ABCDEFGH")
 
 logger = logging.getLogger(__name__)
+
+# pH K bounds as used by _build_params_1site in fitting/core.py
+_PH_K_MIN: float = 3.0
+_PH_K_MAX: float = 11.0
+
+
+def _extract_ctrl_cols(scheme: PlateScheme) -> list[int] | None:
+    """Extract unique 1-based column numbers from ctrl well IDs.
+
+    Parameters
+    ----------
+    scheme : PlateScheme
+        Plate scheme containing ctrl well identifiers (e.g. ``["A01", "H12"]``).
+
+    Returns
+    -------
+    list[int] | None
+        Sorted column numbers, or ``None`` if no ctrl wells are defined.
+    """
+    if not scheme.ctrl:
+        return None
+    cols: set[int] = set()
+    for well in scheme.ctrl:
+        m = re.search(r"(\d+)$", well)
+        if m:
+            cols.add(int(m.group(1)))
+    return sorted(cols) or None
 
 
 def read_xls(path: Path) -> list[list[str | int | float]]:
@@ -799,6 +829,13 @@ class TitrationConfig:
     Empty tuple keeps gain=1 (legacy behaviour).
     """
 
+    mask_outliers: bool = field(default=False)
+    """Mask geometric outliers in each well's curve before fitting. Default is False."""
+    outlier_threshold: float = field(default=0.2)
+    """Threshold for geometric outlier scoring (0-1). Default is 0.2."""
+    discard_bad_wells: bool = field(default=False)
+    """Automatically detect and discard bad wells before fitting. Default is False."""
+
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
     )
@@ -814,7 +851,7 @@ class TitrationConfig:
     def __setattr__(
         self,
         name: str,
-        value: bool | str | int | tuple[float, ...] | None,  # noqa: FBT001
+        value: bool | str | float | tuple[float, ...] | None,  # noqa: FBT001
     ) -> None:
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
@@ -1332,6 +1369,7 @@ class Titration(TecanfilesGroup):
     _data: dict[int, dict[str, ArrayF]] = field(init=False, default_factory=dict)
 
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
+    _bad_wells_detected: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         """Create metadata and data."""
@@ -1347,30 +1385,46 @@ class Titration(TecanfilesGroup):
             self.labelblocksgroups[first_label].data_nrm.keys() - self.scheme.nofit_keys
         )
 
-    def detect_and_discard_bad_wells(
+    def detect_and_discard_bad_wells(  # noqa: C901, PLR0912
         self,
-        smoothness_threshold: float | None = 2.5,
-        roughness_threshold: float | None = 0.5,
-        z_threshold: float | None = 3.0,
+        smoothness_threshold: float | None = None,
+        roughness_threshold: float | None = None,
+        z_threshold: float | None = None,
+        *,
+        outlier_threshold: float | None = 0.2,
+        bg_multiplier: float | None = 3.0,
     ) -> list[str]:
-        """Detect and discard bad wells based on signal properties.
+        """Detect and discard bad wells from masked per-label signal quality.
 
-        Evaluates all non-discarded wells. Wells exceeding the specified thresholds
-        are added to the `scheme.discard` list, and internal caches are cleared.
+        By default, each well is converted to a per-label dataset with
+        :meth:`_create_ds`, masked with :func:`apply_outlier_mask`, and then
+        discarded when the mean masked signal of any label falls below a
+        background-derived floor. The floor uses ``bg_err`` when available and
+        falls back to ``bg_noise``.
+
+        Legacy smoothness, roughness, and trendline criteria are still available
+        as optional extra filters when their thresholds are provided explicitly.
 
         Parameters
         ----------
         smoothness_threshold : float | None
-            Maximum allowed smoothness value (sum(|diff|) / span).
+            Optional maximum allowed smoothness value.
         roughness_threshold : float | None
-            Maximum allowed roughness value ((sum(|diff|) - span) / sum(|diff|)).
+            Optional maximum allowed roughness value.
         z_threshold : float | None
-            Z-score threshold for trendline outlier detection (max signal vs span).
+            Optional trendline outlier threshold on max signal vs span.
+        outlier_threshold : float | None
+            Threshold passed to :func:`apply_outlier_mask` before computing
+            per-label summary statistics. If ``None``, no masking is applied.
+        bg_multiplier : float | None
+            Discard a well when any masked per-label mean signal is below
+            ``bg_multiplier * mean(background_floor)``. If ``None``, this check
+            is disabled.
 
         Returns
         -------
         list[str]
-            A list of the newly discarded well keys.
+            Newly discarded well keys.
         """
         from clophfit.fitting.utils import (  # noqa: PLC0415
             flag_trend_outliers,
@@ -1378,40 +1432,77 @@ class Titration(TecanfilesGroup):
             smoothness,
         )
 
-        new_discards = set()
-
-        data_to_analyze = self._get_normalized_or_raw_data()
-        if not data_to_analyze:
+        first_label = next(iter(self.labelblocksgroups.keys()), None)
+        if first_label is None:
             return []
 
-        for da_dict in data_to_analyze.values():
-            max_sig = {}
-            span_val = {}
-            for well, y in da_dict.items():
-                if well in self.scheme.discard:
-                    continue
+        candidate_wells = sorted(
+            self.labelblocksgroups[first_label].data_nrm.keys() - self.scheme.nofit_keys
+        )
+        if not candidate_wells:
+            return []
 
+        label_ids = sorted(self.labelblocksgroups)
+        new_discards: set[str] = set()
+        trend_inputs: dict[int, dict[str, dict[str, float]]] = {
+            label: {} for label in label_ids
+        }
+
+        for well in candidate_wells:
+            discard_well = False
+            for label in label_ids:
+                ds = self._create_ds(well, label)
+                if outlier_threshold is not None:
+                    ds = apply_outlier_mask(ds, threshold=outlier_threshold)
+                y = np.asarray(ds[str(label)].y, dtype=float)
                 valid_y = y[~np.isnan(y)]
                 if len(valid_y) < 2:  # noqa: PLR2004
-                    new_discards.add(well)
+                    discard_well = True
+                    break
+
+                if bg_multiplier is not None:
+                    floor_values = self.bg_err.get(label)
+                    if floor_values is None or np.asarray(floor_values).size == 0:
+                        floor_values = self.bg_noise.get(label)
+                    if floor_values is not None:
+                        floor = float(np.nanmean(np.asarray(floor_values, dtype=float)))
+                        if (
+                            np.isfinite(floor)
+                            and float(np.nanmean(valid_y)) < bg_multiplier * floor
+                        ):
+                            discard_well = True
+
+                if (
+                    smoothness_threshold is not None
+                    and smoothness(valid_y) > smoothness_threshold
+                ):
+                    discard_well = True
+
+                if (
+                    roughness_threshold is not None
+                    and roughness(valid_y) > roughness_threshold
+                ):
+                    discard_well = True
+
+                trend_inputs[label][well] = {
+                    "max_sig": float(np.max(np.abs(valid_y))),
+                    "span": float(np.max(valid_y) - np.min(valid_y)),
+                }
+
+            if discard_well:
+                new_discards.add(well)
+
+        if z_threshold is not None:
+            for label in label_ids:
+                label_metrics = trend_inputs[label]
+                if not label_metrics:
                     continue
-
-                if smoothness_threshold is not None:
-                    sm = smoothness(valid_y)
-                    if sm > smoothness_threshold:
-                        new_discards.add(well)
-
-                if roughness_threshold is not None:
-                    rg = roughness(valid_y)
-                    if rg > roughness_threshold:
-                        new_discards.add(well)
-
-                max_sig[well] = float(np.max(np.abs(valid_y)))
-                span_val[well] = float(np.max(valid_y) - np.min(valid_y))
-
-            if z_threshold is not None and max_sig:
-                x_series = pd.Series(max_sig)
-                y_series = pd.Series(span_val)
+                x_series = pd.Series({
+                    well: metrics["max_sig"] for well, metrics in label_metrics.items()
+                })
+                y_series = pd.Series({
+                    well: metrics["span"] for well, metrics in label_metrics.items()
+                })
                 outliers = flag_trend_outliers(
                     x_series, y_series, threshold=z_threshold
                 )
@@ -1422,6 +1513,14 @@ class Titration(TecanfilesGroup):
             self.clear_all_data_results()
 
         return sorted(new_discards)
+
+    def _ensure_bad_wells_detected(self) -> None:
+        if not self.params.discard_bad_wells:
+            return
+        if self._bad_wells_detected:
+            return
+        self._bad_wells_detected = True
+        self.detect_and_discard_bad_wells()
 
     def _reset_data_and_results(self) -> None:
         self._data = {}
@@ -1440,8 +1539,7 @@ class Titration(TecanfilesGroup):
             "fit_pipeline",
         )
         for attr in cached_results:
-            if attr in self.__dict__:
-                delattr(self, attr)
+            self.__dict__.pop(attr, None)
 
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()
@@ -1703,6 +1801,15 @@ class Titration(TecanfilesGroup):
         subfolder.mkdir(parents=True, exist_ok=True)
         return subfolder
 
+    def _run_pre_fit_detection(self, subfolder: Path) -> None:
+        """Detect and discard bad wells before fitting; write discarded_wells.txt."""
+        discards = self.detect_and_discard_bad_wells()
+        if discards:
+            logger.info("Pre-fit bad-well detection: discarding %s", discards)
+            (subfolder / "discarded_wells.txt").write_text(
+                "\n".join(sorted(discards)) + "\n", encoding="utf-8"
+            )
+
     def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
         outfit = subfolder / "fit"
         outfit.mkdir(parents=True, exist_ok=True)
@@ -1734,6 +1841,9 @@ class Titration(TecanfilesGroup):
             self._export_noise_extras(outfit)
         elif self.params.mcmc == "multi-noise-xrw":
             self._export_noise_xrw_extras(outfit)
+        # Post-fit bad-well summary from global fit results
+        if config.detect_bad:
+            self._export_bad_wells(outfit)
 
     def export_data_fit(self, tecan_config: TecanConfig) -> None:
         """Export dat files [x,y1,..,yN] from copy of self.data.
@@ -1779,12 +1889,16 @@ class Titration(TecanfilesGroup):
                 subfolder = self._prepare_output_folder(tecan_config.out_fp)
                 write(self.x, self.data, subfolder)
                 if tecan_config.fit:
+                    if tecan_config.detect_bad:
+                        self._run_pre_fit_detection(subfolder)
                     self._export_fit(subfolder, tecan_config)
             self.params = saved_p
         else:
             subfolder = self._prepare_output_folder(tecan_config.out_fp)
             write(self.x, self.data, subfolder)
             if tecan_config.fit:
+                if tecan_config.detect_bad:
+                    self._run_pre_fit_detection(subfolder)
                 self._export_fit(subfolder, tecan_config)
 
     # TODO: test cases are:
@@ -1827,24 +1941,32 @@ class Titration(TecanfilesGroup):
                 self._export_fit(output_folder, tecan_config)
     """
 
-    @cached_property
+    @property
     def results(self) -> dict[int, TitrationResults]:
         """Fit results for all single titration dataset."""
-        fittings = {}
-        for label, dat in enumerate(self.data, start=1):
-            if dat:
-                fit = TitrationResults(
-                    self.scheme,
-                    self.fit_keys,
-                    partial(self._compute_fit, label=label),
-                )
-                fittings[label] = fit
-        return fittings
+        if "results" not in self.__dict__:
+            self._ensure_bad_wells_detected()
+            fittings = {}
+            for label, dat in enumerate(self.data, start=1):
+                if dat:
+                    fit = TitrationResults(
+                        self.scheme,
+                        self.fit_keys,
+                        partial(self._compute_fit, label=label),
+                    )
+                    fittings[label] = fit
+            self.__dict__["results"] = fittings
+        return typing.cast("dict[int, TitrationResults]", self.__dict__["results"])
 
-    @cached_property
+    @property
     def result_global(self) -> TitrationResults:
         """Perform global fitting lazily."""
-        return TitrationResults(self.scheme, self.fit_keys, self._compute_global_fit)
+        if "result_global" not in self.__dict__:
+            self._ensure_bad_wells_detected()
+            self.__dict__["result_global"] = TitrationResults(
+                self.scheme, self.fit_keys, self._compute_global_fit
+            )
+        return typing.cast("TitrationResults", self.__dict__["result_global"])
 
     @cached_property
     def result_odr(self) -> TitrationResults:
@@ -1901,6 +2023,8 @@ class Titration(TecanfilesGroup):
         """Compute individual dataset fit for a single key."""
         try:
             ds = self._create_ds(key, label)
+            if self.params.mask_outliers:
+                ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
             return self._fit(ds)
         except InsufficientDataError:
             logger.warning("Skip fit for well %s for Label:%s.", key, label)
@@ -1915,6 +2039,8 @@ class Titration(TecanfilesGroup):
         """
         try:
             ds = self._create_global_ds(key)
+            if self.params.mask_outliers:
+                ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
             return self._fit(ds)
         except InsufficientDataError:
             logger.warning("Skipping global fit for well %s.", key)
@@ -2182,6 +2308,41 @@ class Titration(TecanfilesGroup):
         fig_yerr = plot_residual_vs_yerr(all_res, title=label)
         fig_yerr.savefig(outfit / f"residual_vs_yerr_{index}.png", dpi=150)
 
+    def _export_bad_wells(self, outfit: Path) -> None:
+        """Write bad_wells.csv from post-fit quality checks on the global fit.
+
+        Reads ``result_global.dataframe``, runs :func:`detect_bad_wells`, and
+        writes ``bad_wells.csv`` into *outfit*.  Wells flagged by any criterion
+        are listed first (sorted by ``flag_count`` descending).
+
+        Parameters
+        ----------
+        outfit : Path
+            Output directory (the ``fit/`` subfolder).
+        """
+        ffit = self.result_global.dataframe.reset_index()
+        if ffit.empty or "K" not in ffit.columns:
+            logger.debug("_export_bad_wells: global ffit has no K column — skipping")
+            return
+        k_min = _PH_K_MIN if self.is_ph else 0.0
+        k_max = _PH_K_MAX if self.is_ph else float("inf")
+        ctr_cols = _extract_ctrl_cols(self.scheme)
+        flags = detect_bad_wells(
+            ffit,
+            k_min=k_min,
+            k_max=k_max,
+            is_ph=self.is_ph,
+            ctr_cols=ctr_cols,
+        )
+        flags.to_csv(outfit / "bad_wells.csv", index=False)
+        n_flagged = int(flags["flag_any"].sum())
+        logger.info(
+            "_export_bad_wells: %d/%d wells flagged → %s",
+            n_flagged,
+            len(flags),
+            outfit / "bad_wells.csv",
+        )
+
     def _export_noise_extras(self, outfit: Path) -> None:
         """Save the noise-model trace and shared parameters for multi-noise MCMC.
 
@@ -2373,3 +2534,5 @@ class TecanConfig:
     title: str
     fit: bool
     png: bool
+    detect_bad: bool = True
+    """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""

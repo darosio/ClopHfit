@@ -75,6 +75,8 @@ __all__ = [
     "plot_fit_gemini",
     "plot_pca",
     "plot_qc_mean_vs_std",
+    "plot_qc_span_vs_center",
+    "plot_qc_span_vs_center_titration",
     "plot_spectra",
     "plot_spectra_distributed",
     "print_emcee",
@@ -1039,3 +1041,243 @@ def plot_ppc_well(
 
     plt.tight_layout()
     return fig
+
+
+def plot_qc_span_vs_center(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
+    data: Mapping[int, Mapping[str, ArrayF]],
+    center: str = "mean",
+    figsize_per_label: tuple[float, float] = (5, 4),
+    z_threshold: float = 3.0,
+    bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = None,
+    bg_multiplier: float = 4.0,
+    loglog: bool = False,  # noqa: FBT001, FBT002
+    annotate_wells: list[str] | None = None,
+) -> Figure:
+    """Plot signal span versus center for quality control of titration wells.
+
+    Identifies dead or flat wells (e.g. caused by pipetting errors or missing
+    fluorophore) which show low dynamic range relative to their signal center.
+
+    Parameters
+    ----------
+    data : Mapping[int, Mapping[str, ArrayF]]
+        Raw or normalised data keyed by label index, then by well name.
+    center : str
+        How to compute the x-axis value per well: ``"mean"`` (default) or
+        ``"max"`` (maximum absolute signal).
+    figsize_per_label : tuple[float, float]
+        Figure size allocated per spectral label.
+    z_threshold : float
+        Z-score threshold for trendline-based outlier detection.
+    bg_noise : Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None
+        Background noise reference per label (string or integer keys).  Used
+        to draw a ``bg_multiplier * bg_noise`` reference line.
+    bg_multiplier : float
+        Multiplier applied to ``bg_noise`` for the low-signal reference.
+    loglog : bool
+        If True, use log-log axes.
+    annotate_wells : list[str] | None
+        Well IDs to annotate even if not flagged as outliers.
+
+    Returns
+    -------
+    Figure
+        The generated QC matplotlib figure.
+    """
+    from clophfit.fitting.utils import (  # noqa: PLC0415
+        fit_trendline,
+        flag_trend_outliers,
+    )
+
+    labels = list(data.keys())
+    fig, axes = plt.subplots(
+        1,
+        len(labels),
+        figsize=(figsize_per_label[0] * len(labels), figsize_per_label[1]),
+        squeeze=False,
+    )
+
+    for ax, lbl in zip(axes[0], labels, strict=False):
+        da_dict = data[lbl]
+        wells_list: list[str] = []
+        center_vals: list[float] = []
+        span_vals: list[float] = []
+        for well, y_arr in da_dict.items():
+            y = np.asarray(y_arr)
+            valid = y[~np.isnan(y)]
+            if len(valid) < 2:  # noqa: PLR2004
+                continue
+            cv = (
+                float(np.mean(np.abs(valid)))
+                if center == "mean"
+                else float(np.max(np.abs(valid)))
+            )
+            sv = float(np.max(valid) - np.min(valid))
+            wells_list.append(well)
+            center_vals.append(cv)
+            span_vals.append(sv)
+
+        if not wells_list:
+            ax.set_title(f"QC: Span vs Center ({lbl}) — no data")
+            continue
+
+        x_s = pd.Series(center_vals, index=wells_list)
+        y_s = pd.Series(span_vals, index=wells_list)
+        outliers = flag_trend_outliers(x_s, y_s, threshold=z_threshold)
+
+        bg_out = pd.Series(data=False, index=x_s.index)
+        bg_val: float | None = None
+        if bg_noise is not None:
+            raw = bg_noise.get(lbl) or bg_noise.get(str(lbl))  # type: ignore[call-overload]
+            if raw is not None:
+                bg_val = float(np.mean(raw)) if hasattr(raw, "__len__") else float(raw)
+                thr = bg_multiplier * bg_val
+                bg_out = (x_s < thr) | ((y_s < thr) & (y_s.max() > 1e-6))  # noqa: PLR2004
+
+        m, c = fit_trendline(x_s, y_s)
+        x_line = np.linspace(x_s.min(), x_s.max(), 100)
+        ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
+
+        if bg_val is not None:
+            ax.axvline(
+                bg_multiplier * bg_val,
+                color="cyan",
+                linestyle=":",
+                alpha=0.7,
+                label=f"{bg_multiplier}x bg",
+            )
+
+        good_mask = ~(outliers | bg_out)
+        ax.scatter(
+            x_s[good_mask],
+            y_s[good_mask],
+            alpha=0.7,
+            color="indigo",
+            edgecolors="none",
+            label="Wells",
+        )
+
+        if bg_out.any():
+            ax.scatter(
+                x_s[bg_out],
+                y_s[bg_out],
+                alpha=1.0,
+                color="cyan",
+                s=60,
+                marker="s",
+                label=f"BG < {bg_multiplier}x",
+            )
+            for w in x_s[bg_out].index:
+                ax.annotate(
+                    w,
+                    (x_s[w], y_s[w]),
+                    color="c",
+                    fontweight="bold",
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                )
+
+        trend_only = outliers & ~bg_out
+        if trend_only.any():
+            ax.scatter(
+                x_s[trend_only],
+                y_s[trend_only],
+                alpha=1.0,
+                color="orange",
+                s=50,
+                marker="X",
+                label="Outliers",
+            )
+            for w in x_s[trend_only].index:
+                ax.annotate(
+                    w,
+                    (x_s[w], y_s[w]),
+                    color="orange",
+                    fontweight="bold",
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                )
+
+        if annotate_wells:
+            flagged_idx = set(x_s[outliers | bg_out].index)
+            for w in annotate_wells:
+                if w in x_s.index and w not in flagged_idx:
+                    ax.scatter(x_s[w], y_s[w], alpha=1.0, color="red", s=50, marker="*")
+                    ax.annotate(
+                        w,
+                        (x_s[w], y_s[w]),
+                        color="red",
+                        fontweight="bold",
+                        xytext=(4, 4),
+                        textcoords="offset points",
+                    )
+
+        if loglog:
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+
+        xlabel = f"{'Mean' if center == 'mean' else 'Max'} signal (label {lbl})"
+        ax.set_title(f"QC: Span vs {center.capitalize()} ({lbl})")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Span (max - min)")
+        ax.legend()
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
+    tit: object,
+    center: str = "mean",
+    figsize_per_label: tuple[float, float] = (5, 4),
+    z_threshold: float = 3.0,
+    bg_multiplier: float = 4.0,
+    loglog: bool = False,  # noqa: FBT001, FBT002
+    annotate_wells: list[str] | None = None,
+) -> Figure:
+    """Plot signal span versus center for quality control using a Titration object.
+
+    Convenience wrapper around :func:`plot_qc_span_vs_center` that extracts
+    data and background noise directly from a :class:`~clophfit.prtecan.Titration`.
+
+    Parameters
+    ----------
+    tit : object
+        The titration object.
+    center : str
+        How to compute the x-axis value per well: ``"mean"`` or ``"max"``.
+    figsize_per_label : tuple[float, float]
+        Figure size per spectral label.
+    z_threshold : float
+        Z-score threshold for trendline outlier detection.
+    bg_multiplier : float
+        Multiplier applied to the background noise reference.
+    loglog : bool
+        If True, use log-log axes.
+    annotate_wells : list[str] | None
+        Well IDs to annotate even if not flagged.
+
+    Returns
+    -------
+    Figure
+        The generated QC matplotlib figure.
+    """
+    if hasattr(tit, "_get_normalized_or_raw_data"):
+        data = tit._get_normalized_or_raw_data()  # noqa: SLF001
+    else:
+        # Fallback if method is missing or not a prtecan Titration
+        data = getattr(tit, "data", {})
+
+    bg_noise: dict[int, float] | None = None
+    if hasattr(tit, "bg_noise") and tit.bg_noise:
+        bg_noise = {lbl: float(np.mean(v)) for lbl, v in tit.bg_noise.items()}
+    return plot_qc_span_vs_center(
+        data,
+        center=center,
+        figsize_per_label=figsize_per_label,
+        z_threshold=z_threshold,
+        bg_noise=bg_noise,
+        bg_multiplier=bg_multiplier,
+        loglog=loglog,
+        annotate_wells=annotate_wells,
+    )

@@ -907,7 +907,13 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     }
 
     trace = fit_binding_pymc_multi(
-        results, scheme, bg_noise=bg_noise, n_sd=3.0, n_xerr=0.0, n_samples=50
+        results,
+        scheme,
+        bg_noise=bg_noise,
+        n_sd=3.0,
+        n_xerr=0.0,
+        n_samples=50,
+        infer_gain=True,
     )
 
     assert hasattr(trace, "posterior")
@@ -939,6 +945,7 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
         n_sd=3.0,
         n_xerr=0.0,
         n_samples=50,
+        infer_gain=True,
     )
 
     assert hasattr(trace, "posterior")

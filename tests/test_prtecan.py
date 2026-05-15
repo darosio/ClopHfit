@@ -689,6 +689,20 @@ class TestTecanConfig:
         )
         assert config.out_fp == tmp_path
         assert config.comb is True
+        assert config.detect_bad is True  # default
+
+    def test_config_detect_bad_false(self, tmp_path: Path) -> None:
+        """detect_bad=False disables bad-well detection."""
+        config = TecanConfig(
+            out_fp=tmp_path,
+            comb=False,
+            lim=None,
+            title="",
+            fit=True,
+            png=False,
+            detect_bad=False,
+        )
+        assert config.detect_bad is False
 
 
 # =============================================================================
@@ -723,6 +737,38 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
     fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
     assert any(fit_dir.glob("residuals_*.csv")), "residuals CSV missing"
     assert any(fit_dir.glob("residual_stats_*.csv")), "residual_stats CSV missing"
+    # Bad-well CSV written by default
+    assert (fit_dir / "bad_wells.csv").exists(), "bad_wells.csv missing"
+
+
+def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
+    """When detect_bad=False, bad_wells.csv and discarded_wells.txt must not be written."""
+    tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    tit.load_additions(data_tests / "140220/additions.pH")
+    tit.load_scheme(data_tests / "140220/scheme.txt")
+    tit.params.bg = True
+    tit.params.dil = True
+    tit.params.nrm = True
+
+    config = TecanConfig(
+        out_fp=tmp_path,
+        comb=False,
+        lim=None,
+        title="",
+        fit=True,
+        png=False,
+        detect_bad=False,
+    )
+    tit.export_data_fit(config)
+
+    fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
+    assert not (fit_dir / "bad_wells.csv").exists(), (
+        "bad_wells.csv must not be written when detect_bad=False"
+    )
+    subfolder = tmp_path / "dat_bg_dil_nrm"
+    assert not (subfolder / "discarded_wells.txt").exists(), (
+        "discarded_wells.txt must not be written when detect_bad=False"
+    )
 
 
 # =============================================================================
@@ -1302,15 +1348,27 @@ class TestTitrationAnalysis:
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
 
-    def test_detect_and_discard_bad_wells(self, titan: Titration) -> None:
-        """It flags outlier wells based on signal properties."""
-        discards_before = set(titan.scheme.discard)
-        # Using tight thresholds to definitely catch something in the titan fixture, or mock it
+    @pytest.mark.parametrize(
+        ("folder", "expected"),
+        [
+            ("140220", []),
+            ("L2", ["B03", "C05"]),
+            ("L4", ["G12"]),
+        ],
+    )
+    def test_detect_and_discard_bad_wells(
+        self, folder: str, expected: list[str]
+    ) -> None:
+        """It discards only the low-signal wells seen in the reference plates."""
+        titan = Titration.fromlistfile(data_tests / f"{folder}/list.pH.csv", is_ph=True)
+        titan.load_additions(data_tests / f"{folder}/additions.pH")
+        titan.load_scheme(data_tests / f"{folder}/scheme.txt")
+        titan.scheme.discard = []
+
         discards = titan.detect_and_discard_bad_wells(
-            smoothness_threshold=1.5, roughness_threshold=0.3, z_threshold=2.0
+            outlier_threshold=0.2,
+            bg_multiplier=3.0,
         )
-        assert isinstance(discards, list)
-        assert set(discards).issubset(set(titan.scheme.discard))
-        # Ensure that whatever it found is now in scheme.discard
-        discards_after = set(titan.scheme.discard)
-        assert discards_after == discards_before.union(set(discards))
+
+        assert discards == expected
+        assert set(expected).issubset(set(titan.scheme.discard))

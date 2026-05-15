@@ -953,7 +953,7 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
+def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
@@ -967,6 +967,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
     ctr_free_k: bool = False,
     bg_noise: dict[int, ArrayF] | None = None,
     sample_ppc: bool = False,
+    infer_gain: bool = False,
     robust: bool = False,
 ) -> az.InferenceData:
     """Multi-well PyMC with shared K per control group and per-label noise.
@@ -1004,6 +1005,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
     sample_ppc : bool
         If True, generates posterior predictive samples and adds them to the
         returned InferenceData object. Needed for `plot_ppc_well`.
+    infer_gain : bool
+        If True (and ``bg_noise`` is provided), jointly infer per-label Poisson
+        gain and a single shared relative error. If False (default), infer
+        per-label relative error with no gain term.
     robust : bool
         If True, use StudentT likelihood (nu=3) for robust regression instead of Normal.
 
@@ -1083,10 +1088,6 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
                 for label in labels
             }
         else:
-            gain: dict[str, pm.Distribution] = {
-                lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
-            }
-            rel_error = pm.HalfNormal("rel_error", sigma=0.04)
             est_sigma = {
                 lbl: float(np.sqrt(np.mean(np.array(bg_noise[i]) ** 2)))
                 for i, lbl in enumerate(labels, start=1)
@@ -1105,6 +1106,18 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
                 for lbl in labels
             }
             floor_sq = {lbl: floor[lbl] ** 2 for lbl in labels}
+
+            if infer_gain:
+                gain_rv: dict[str, pm.Distribution] = {
+                    lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
+                }
+                rel_error_common: pm.Distribution = pm.HalfNormal(
+                    "rel_error", sigma=0.04
+                )
+            else:
+                rel_error: dict[str, pm.Distribution] = {
+                    lbl: pm.HalfNormal(f"rel_error{lbl}", sigma=0.2) for lbl in labels
+                }
 
         for key, r in results.items():
             if r.result and r.dataset:
@@ -1135,13 +1148,18 @@ def fit_binding_pymc_multi(  # noqa: PLR0912,PLR0913,PLR0915,PLR0917
                     if bg_noise is None:
                         sigma_val = ye_mag[lbl] * da.y_err
                     else:
+                        y_pos = pm_math.maximum(1e-6, y_model)
+                        if infer_gain:
+                            noise_var = (
+                                floor_sq[lbl]
+                                + gain_rv[lbl] * y_pos
+                                + (rel_error_common * y_pos) ** 2
+                            )
+                        else:
+                            noise_var = floor_sq[lbl] + (rel_error[lbl] * y_pos) ** 2
                         sigma_obs = pm.Deterministic(
                             f"sigma_obs_{lbl}_{key}",
-                            pm_math.sqrt(
-                                floor_sq[lbl]
-                                + gain[lbl] * pm_math.maximum(1e-6, y_model)
-                                + (rel_error * pm_math.maximum(1e-6, y_model)) ** 2
-                            ),
+                            pm_math.sqrt(noise_var),
                         )
                         sigma_val = sigma_obs[da.mask]
 

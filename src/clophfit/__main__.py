@@ -159,6 +159,10 @@ def detect_bad_wells_cmd(
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label (y1, y2, ...). Adds alpha^2*signal^2 to y_err^2. Obtain from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).")  # fmt: skip
 @click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label (y1, y2, ...). Replaces hardcoded gain=1 in shot-noise term: y_err^2=gain*signal+bg_err^2+(alpha*signal)^2. Obtain from MCMC multi-noise shared_noise_params.csv (gain_y1, gain_y2).")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
+@click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
+@click.option("--discard-bad-wells/--no-discard-bad-wells", default=True, show_default=True, help="Automatically detect and discard bad wells before fitting.")  # fmt: skip
+@click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
+@click.option("--outlier-threshold", default=0.2, type=float, show_default=True, help="Threshold for geometric point outlier scoring (0-1).")  # fmt: skip
 def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctx: Context,  # Click context object.
     list_file: str,
@@ -183,6 +187,10 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     noise_alpha: tuple[float, ...],
     noise_gain: tuple[float, ...],
     dry_run: bool,
+    detect_bad: bool,
+    discard_bad_wells: bool,
+    mask_outliers: bool,
+    outlier_threshold: float,
 ) -> None:
     """Convert a list of Tecan-exported excel files into titrations.
 
@@ -223,7 +231,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
         return
 
     # Config
-    tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png)
+    tecan_config = TecanConfig(out_fp, comb, lim, title, fit, png, detect_bad)
 
     # Load titration with error handling
     list_fp = Path(list_file)
@@ -265,6 +273,9 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.ctr_free_k = ctr_free_k
     tit.params.noise_alpha = noise_alpha
     tit.params.noise_gain = noise_gain
+    tit.params.discard_bad_wells = discard_bad_wells
+    tit.params.mask_outliers = mask_outliers
+    tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
 
     # Load additions file with error handling
