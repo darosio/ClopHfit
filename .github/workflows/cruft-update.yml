@@ -45,6 +45,12 @@ jobs:
             fi
           fi
 
+      - name: Debug token presence
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "TOKEN IS EMPTY"; else echo "token present (${#GH_TOKEN} chars)"; fi
+        env:
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS }}
+
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         env:
