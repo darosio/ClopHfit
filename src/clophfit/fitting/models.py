@@ -102,32 +102,10 @@ def binding_1site(
         Predicted signal value(s) at the given x value(s).
         Returns same type as input x (scalar if x is scalar, array if x is array).
 
-    Examples
+    See Also
     --------
-    Standard chloride binding at half-saturation:
-
-    >>> binding_1site(x=10.0, K=10.0, S0=100, S1=200)
-    150.0
-
-    pH titration at the pKa:
-
-    >>> binding_1site(x=7.0, K=7.0, S0=100, S1=200, is_ph=True)
-    150.0
-
-    Array input for generating a titration curve:
-
-    >>> import numpy as np
-    >>> x_vals = np.array([0.5, 1.0, 2.0])
-    >>> binding_1site(x_vals, K=1.0, S0=0, S1=1)
-    array([0.33333333, 0.5       , 0.66666667])
-
-    Typical fluorescence titration:
-
-    >>> # GFP with pKa=7.0, fluorescence ratio changes from 0.1 to 2.5
-    >>> ph_range = np.array([5.0, 6.0, 7.0, 8.0, 9.0])
-    >>> signals = binding_1site(ph_range, K=7.0, S0=0.1, S1=2.5, is_ph=True)
-    >>> np.round(signals, 2)
-    array([2.48, 2.28, 1.3 , 0.32, 0.12])
+    kd : pH-dependent dissociation constant model
+    clophfit.fitting.core.fit_binding_glob : Global fitting across multiple datasets
 
     Notes
     -----
@@ -168,10 +146,32 @@ def binding_1site(
     - General 1:1 protein-ligand binding studies
     - Spectroscopic signal changes during titration
 
-    See Also
+    Examples
     --------
-    kd : pH-dependent dissociation constant model
-    clophfit.fitting.core.fit_binding_glob : Global fitting across multiple datasets
+    Standard chloride binding at half-saturation:
+
+    >>> binding_1site(x=10.0, K=10.0, S0=100, S1=200)
+    150.0
+
+    pH titration at the pKa:
+
+    >>> binding_1site(x=7.0, K=7.0, S0=100, S1=200, is_ph=True)
+    150.0
+
+    Array input for generating a titration curve:
+
+    >>> import numpy as np
+    >>> x_vals = np.array([0.5, 1.0, 2.0])
+    >>> binding_1site(x_vals, K=1.0, S0=0, S1=1)
+    array([0.33333333, 0.5       , 0.66666667])
+
+    Typical fluorescence titration:
+
+    >>> # GFP with pKa=7.0, fluorescence ratio changes from 0.1 to 2.5
+    >>> ph_range = np.array([5.0, 6.0, 7.0, 8.0, 9.0])
+    >>> signals = binding_1site(ph_range, K=7.0, S0=0.1, S1=2.5, is_ph=True)
+    >>> np.round(signals, 2)
+    array([2.48, 2.28, 1.3 , 0.32, 0.12])
     """
     if is_ph:
         return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
@@ -209,33 +209,10 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
         Returns same type as input ph (scalar if ph is scalar, array if ph is array).
         Kd increases with pH, meaning weaker binding at higher pH.
 
-    Examples
+    See Also
     --------
-    Calculate Kd at a single pH:
-
-    >>> kd(kd1=10.0, pka=8.4, ph=7.4)
-    11.0
-
-    The Kd at the pKa is exactly 2*kd1:
-
-    >>> kd(kd1=10.0, pka=8.4, ph=8.4)
-    20.0
-
-    Generate a pH-dependent Kd curve:
-
-    >>> import numpy as np
-    >>> ph_values = np.array([6.4, 7.4, 8.4, 9.4])
-    >>> kd_values = kd(kd1=10.0, pka=8.4, ph=ph_values)
-    >>> np.round(kd_values, 1)
-    array([ 10.1,  11. ,  20. , 110. ])
-
-    Typical ClopHensor parameters:
-
-    >>> # E2 variant: kd1=9mM, pKa=7.4
-    >>> ph_range = np.linspace(6, 9, 7)
-    >>> kds = kd(kd1=9.0, pka=7.4, ph=ph_range)
-    >>> np.round(kds, 1)
-    array([  9.4,  10.1,  12.6,  20.3,  44.8, 122.3, 367.3])
+    binding_1site : The binding model that uses Kd as a parameter
+    clophfit.prtecan.calculate_conc : Calculate chloride concentrations for experiments
 
     Notes
     -----
@@ -278,15 +255,38 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     - Does not account for multiple ionizable groups with different pKa values
     - Simplified model may not capture all aspects of real protein behavior
 
-    See Also
-    --------
-    binding_1site : The binding model that uses Kd as a parameter
-    clophfit.prtecan.calculate_conc : Calculate chloride concentrations for experiments
-
     References
     ----------
     .. [1] Arosio et al. (2010) "Simultaneous intracellular chloride and pH
            measurements using a GFP-based sensor" Nature Methods 7, 516-518.
+
+    Examples
+    --------
+    Calculate Kd at a single pH:
+
+    >>> kd(kd1=10.0, pka=8.4, ph=7.4)
+    11.0
+
+    The Kd at the pKa is exactly 2*kd1:
+
+    >>> kd(kd1=10.0, pka=8.4, ph=8.4)
+    20.0
+
+    Generate a pH-dependent Kd curve:
+
+    >>> import numpy as np
+    >>> ph_values = np.array([6.4, 7.4, 8.4, 9.4])
+    >>> kd_values = kd(kd1=10.0, pka=8.4, ph=ph_values)
+    >>> np.round(kd_values, 1)
+    array([ 10.1,  11. ,  20. , 110. ])
+
+    Typical ClopHensor parameters:
+
+    >>> # E2 variant: kd1=9mM, pKa=7.4
+    >>> ph_range = np.linspace(6, 9, 7)
+    >>> kds = kd(kd1=9.0, pka=7.4, ph=ph_range)
+    >>> np.round(kds, 1)
+    array([  9.4,  10.1,  12.6,  20.3,  44.8, 122.3, 367.3])
     """
     # Support Python scalars and NumPy scalars
     if np.isscalar(ph):
