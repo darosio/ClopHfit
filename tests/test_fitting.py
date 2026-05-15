@@ -861,6 +861,24 @@ def test_fit_binding_pymc_ph(ph_dataset: Dataset) -> None:
     assert len(fr.result.residual) > 0
 
 
+def test_fit_binding_pymc_avoids_log_likelihood_deprecation(
+    ph_dataset: Dataset,
+) -> None:
+    """PyMC fitting should not emit the log_likelihood idata_kwargs deprecation."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fr = fit_binding_pymc(ph_dataset, n_samples=20, n_sd=1.0)
+
+    assert fr.result is not None
+    loglike_future_warnings = [
+        warning
+        for warning in caught
+        if issubclass(warning.category, FutureWarning)
+        and "log_likelihood" in str(warning.message)
+    ]
+    assert loglike_future_warnings == []
+
+
 def test_fit_binding_pymc_from_fitresult(ph_dataset: Dataset) -> None:
     """Test PyMC starting from a FitResult."""
     fr_init = fit_binding_glob(ph_dataset)

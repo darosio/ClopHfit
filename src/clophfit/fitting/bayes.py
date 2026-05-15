@@ -78,6 +78,13 @@ def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, objec
     return kwargs
 
 
+def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
+    """Populate the log_likelihood group on sampled PyMC inference data."""
+    return pm.compute_log_likelihood(
+        trace, extend_inferencedata=True, progressbar=False
+    )
+
+
 def create_x_true(
     xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
 ) -> ArrayF | pm.Deterministic:
@@ -530,9 +537,9 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
             tune=tune,
             target_accept=0.9,
             return_inferencedata=True,
-            idata_kwargs={"log_likelihood": True},
             **_pymc_sample_parallel_args(nuts_sampler),
         )
+        trace = _compute_sample_log_likelihood(trace)
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
@@ -646,10 +653,9 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
             n_samples,
             return_inferencedata=True,
             target_accept=0.9,
-            idata_kwargs={"log_likelihood": True},
             **_pymc_sample_parallel_args(),
         )
-    return trace
+        return _compute_sample_log_likelihood(trace)
 
 
 def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
