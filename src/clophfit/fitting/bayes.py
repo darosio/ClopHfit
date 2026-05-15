@@ -80,8 +80,9 @@ def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, objec
 
 def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
     """Populate the log_likelihood group on sampled PyMC inference data."""
-    return pm.compute_log_likelihood(
-        trace, extend_inferencedata=True, progressbar=False
+    return typing.cast(
+        "xr.DataTree",
+        pm.compute_log_likelihood(trace, extend_inferencedata=True, progressbar=False),
     )
 
 
