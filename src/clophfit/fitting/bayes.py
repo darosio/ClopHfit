@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 import pytensor.tensor as pt
+import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
@@ -204,13 +205,13 @@ def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> Non
 
 
 def process_trace(
-    trace: az.InferenceData, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
-) -> FitResult[az.InferenceData]:
+    trace: xr.DataTree, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
+) -> FitResult[xr.DataTree]:
     """Process the trace to extract parameter estimates and update datasets.
 
     Parameters
     ----------
-    trace : az.InferenceData
+    trace : xr.DataTree
         The posterior samples from PyMC sampling.
     p_names: typing.KeysView[str]
         Parameter names.
@@ -221,7 +222,7 @@ def process_trace(
 
     Returns
     -------
-    FitResult[az.InferenceData]
+    FitResult[xr.DataTree]
         The updated fit result with extracted parameter values and datasets.
         Residuals are WEIGHTED (weight * (obs - pred)) where weight = 1/y_err,
         computed using posterior mean parameter estimates.
@@ -294,7 +295,7 @@ def extract_fit(
     trace_df: pd.DataFrame,
     ds: Dataset,
     well_key: str = "",
-) -> FitResult[az.InferenceData]:
+) -> FitResult[xr.DataTree]:
     """Compute individual dataset fit from a multi-well trace summary.
 
     Parameters
@@ -314,7 +315,7 @@ def extract_fit(
 
     Returns
     -------
-    FitResult[az.InferenceData]
+    FitResult[xr.DataTree]
         Fit result with figure, parameters, and dataset using posterior x.
     """
     rpars = Parameters()
@@ -370,7 +371,7 @@ def extract_fit(
         residuals_list.append(weighted)
     residuals = np.concatenate(residuals_list)
 
-    return FitResult(fig, _Result(rpars, residual=residuals), az.InferenceData(), ds)
+    return FitResult(fig, _Result(rpars, residual=residuals), xr.DataTree(), ds)
 
 
 def _extract_x_true_from_trace_df(
@@ -460,7 +461,7 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     nuts_sampler: str = "default",
     *,
     error_model: str = "shared",
-) -> FitResult[az.InferenceData]:
+) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
     Parameters
@@ -483,7 +484,7 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
 
     Returns
     -------
-    FitResult[az.InferenceData]
+    FitResult[xr.DataTree]
         Bayesian fitting results.
     """
     # Handle both Dataset and FitResult inputs
@@ -543,7 +544,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
-) -> az.InferenceData:
+) -> xr.DataTree:
     """
     Fits a Bayesian binding model with two different noise models for comparison.
 
@@ -565,7 +566,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
 
     Returns
     -------
-    az.InferenceData
+    xr.DataTree
         The posterior samples from PyMC for the specified noise model.
     """
     """
@@ -641,7 +642,7 @@ def fit_binding_pymc_compare(  # noqa: PLR0913
                 )
         # ---------------------------------------------------------------------
         # Run MCMC sampling
-        trace: az.InferenceData = pm.sample(
+        trace: xr.DataTree = pm.sample(
             n_samples,
             return_inferencedata=True,
             target_accept=0.9,
@@ -667,7 +668,7 @@ def fit_binding_pymc_odr(
     xe_scaling: float = 1.0,
     ye_scaling: float = 10.0,
     n_samples: int = 2000,
-) -> az.InferenceData | pm.backends.base.MultiTrace:
+) -> xr.DataTree | pm.backends.base.MultiTrace:
     """Analyze using deprecated Bayesian ODR-like modeling of x and y errors."""
     warnings.warn(
         "fit_binding_pymc_odr is deprecated and may not work with recent PyMC versions.",
@@ -675,7 +676,7 @@ def fit_binding_pymc_odr(
         stacklevel=2,
     )
     if fr.result is None or fr.dataset is None:
-        return az.InferenceData()  # FitResult()
+        return xr.DataTree()  # FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
     xc = next(iter(ds.values())).xc
@@ -969,7 +970,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     sample_ppc: bool = False,
     infer_gain: bool = False,
     robust: bool = False,
-) -> az.InferenceData:
+) -> xr.DataTree:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
     Parameters
@@ -1014,7 +1015,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
 
     Returns
     -------
-    az.InferenceData
+    xr.DataTree
         The PyMC posterior trace.
 
     Raises
@@ -1179,7 +1180,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
                             observed=da.y,
                         )
 
-        trace: az.InferenceData = pm.sample(
+        trace: xr.DataTree = pm.sample(
             n_samples,
             target_accept=0.9,
             return_inferencedata=True,

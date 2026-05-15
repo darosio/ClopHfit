@@ -49,6 +49,7 @@ from clophfit.fitting.models import binding_1site
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    import xarray as xr
     from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
     from matplotlib import axes
@@ -280,7 +281,7 @@ def plot_spectra_distributed(
 
 
 def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
-    trace: az.InferenceData,
+    trace: xr.DataTree,
     results: Mapping[str, FitResult[MiniT]] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
     annotate_wells: list[str] | None = None,
@@ -296,7 +297,7 @@ def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
 
     Parameters
     ----------
-    trace : az.InferenceData
+    trace : xr.DataTree
         The PyMC inference trace containing `sigma_obs` deterministic nodes.
     results : Mapping[str, FitResult[MiniT]] | None, optional
         The dictionary of well results to derive fallback sigma values.
@@ -471,10 +472,14 @@ def plot_emcee_k_on_ax(ax: Axes, res_emcee: MinimizerResult, p_name: str = "K") 
     samples = res_emcee.flatchain
     # Convert the dictionary of flatchains to an ArviZ InferenceData object
     # Reshape to (1, -1) to satisfy ArviZ 1.x requirement for 2 sample dims (chain, draw)
-    samples_dict = {key: np.array(val).reshape(1, -1) for key, val in samples.items()}
-    idata = az.from_dict({"posterior": samples_dict})
-    parameter_posterior = idata.posterior[p_name]
-    az.plot_posterior(parameter_posterior, ax=ax)
+    param_samples = np.array(samples[p_name]).flatten()
+    hdi_lo, hdi_hi = az.hdi(param_samples, prob=0.94)
+    median = float(np.median(param_samples))
+    ax.hist(param_samples, bins=30, density=True, color="steelblue", alpha=0.7)
+    ax.axvline(median, color="black", linestyle="--", label=f"median={median:.3g}")
+    ax.axvspan(hdi_lo, hdi_hi, alpha=0.2, color="orange", label="94% HDI")
+    ax.set_xlabel(p_name)
+    ax.legend(fontsize=8)
 
 
 def plot_fit(
@@ -730,7 +735,7 @@ def print_emcee(result_emcee: MinimizerResult) -> None:
 
 
 def _extract_sigma_df(
-    trace: az.InferenceData, results: Mapping[str, FitResult[MiniT]] | None = None
+    trace: xr.DataTree, results: Mapping[str, FitResult[MiniT]] | None = None
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
     trace_df = az.summary(trace)
@@ -775,7 +780,7 @@ def _extract_sigma_df(
 
 
 def plot_noise_vs_index(
-    trace: az.InferenceData,
+    trace: xr.DataTree,
     results: Mapping[str, FitResult[MiniT]] | None = None,
     wells: Sequence[str] | str | None = None,
     figsize_per_well: tuple[float, float] = (5, 4),
@@ -785,7 +790,7 @@ def plot_noise_vs_index(
 
     Parameters
     ----------
-    trace : az.InferenceData
+    trace : xr.DataTree
         The PyMC inference trace containing `sigma_obs` deterministic nodes.
     results : Mapping[str, FitResult[MiniT]] | None, optional
         The dictionary of well results to derive fallback sigma values.
@@ -858,7 +863,7 @@ def plot_noise_vs_index(
 
 
 def plot_noise_vs_signal(
-    trace: az.InferenceData,
+    trace: xr.DataTree,
     results: Mapping[str, FitResult[MiniT]],
     figsize_per_label: tuple[float, float] = (6, 5),
 ) -> Figure:
@@ -870,7 +875,7 @@ def plot_noise_vs_signal(
 
     Parameters
     ----------
-    trace : az.InferenceData
+    trace : xr.DataTree
         The PyMC inference trace containing the `sigma_obs` deterministic nodes.
     results : Mapping[str, FitResult[MiniT]]
         The dictionary of well results containing datasets with `.y` arrays.
@@ -964,7 +969,7 @@ def plot_noise_vs_signal(
 
 
 def plot_ppc_well(
-    trace: az.InferenceData,
+    trace: xr.DataTree,
     key: str,
     labels: list[str] | None = None,
     figsize: tuple[float, float] = (8, 4),
@@ -975,7 +980,7 @@ def plot_ppc_well(
 
     Parameters
     ----------
-    trace   : az.InferenceData
+    trace   : xr.DataTree
         Trace produced by PyMC fitting with posterior predictive data included.
     key     : str
         Well identifier (e.g. 'A01').

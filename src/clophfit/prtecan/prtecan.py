@@ -49,6 +49,7 @@ from clophfit.utils import weights_from_sigma
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    import xarray as xr
     from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
     from odrpack import OdrResult
 
@@ -2128,7 +2129,7 @@ class Titration(TecanfilesGroup):
         n_sd: float,
         n_samples: int = 2000,
         nuts_sampler: str = "default",
-    ) -> FitResult[az.InferenceData]:
+    ) -> FitResult[xr.DataTree]:
         """Compute global MCMC fit for a single key."""
         logger.info("Starting PyMC sampling for key: %s", key)
         try:  # FIXME: Global vs. ODR
@@ -2149,7 +2150,7 @@ class Titration(TecanfilesGroup):
         return result_pymc
 
     @cached_property
-    def result_multi_trace(self) -> tuple[az.InferenceData, pd.DataFrame]:
+    def result_multi_trace(self) -> tuple[xr.DataTree, pd.DataFrame]:
         """Perform global MCMC fitting and x_true."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
@@ -2174,7 +2175,7 @@ class Titration(TecanfilesGroup):
         return trace, trace_df
 
     @cached_property
-    def result_multi_trace2(self) -> tuple[az.InferenceData, pd.DataFrame]:
+    def result_multi_trace2(self) -> tuple[xr.DataTree, pd.DataFrame]:
         """Perform global MCMC fitting and x_true."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
@@ -2194,7 +2195,7 @@ class Titration(TecanfilesGroup):
         return trace, trace_df
 
     @cached_property
-    def result_multi_noise(self) -> tuple[az.InferenceData, pd.DataFrame]:
+    def result_multi_noise(self) -> tuple[xr.DataTree, pd.DataFrame]:
         """Perform global MCMC fitting with learned per-label noise model."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
@@ -2218,7 +2219,7 @@ class Titration(TecanfilesGroup):
         return trace, trace_df
 
     @cached_property
-    def result_multi_noise_xrw(self) -> tuple[az.InferenceData, pd.DataFrame]:
+    def result_multi_noise_xrw(self) -> tuple[xr.DataTree, pd.DataFrame]:
         """Perform global MCMC with noise model and per-well pH random walk."""
         n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
         logger.info("n_sd[Global] estimated for MCMC XRW fitting: %.3f", n_sd)
@@ -2348,7 +2349,7 @@ class Titration(TecanfilesGroup):
 
         Writes two files into *outfit*:
 
-        - ``trace_multi_noise.nc``: full ``az.InferenceData`` in NetCDF format
+        - ``trace_multi_noise.nc``: full ``xr.DataTree`` in NetCDF format
           (can be reloaded with ``az.from_netcdf``).
         - ``shared_noise_params.csv``: arviz summary (mean, sd, HDI 94%) for
           the per-label noise parameters (``alpha_*``, ``gain_*``,
@@ -2387,7 +2388,7 @@ class Titration(TecanfilesGroup):
 
         Writes into *outfit*:
 
-        - ``trace_multi_noise_xrw.nc``: full ``az.InferenceData`` in NetCDF.
+        - ``trace_multi_noise_xrw.nc``: full ``xr.DataTree`` in NetCDF.
         - ``shared_noise_xrw_params.csv``: arviz summary for noise/gain/alpha
           parameters, group-level K values, ``sigma_pip``, and the global
           ``x_true`` / ``x_diff`` / ``x_start`` pH steps.  Per-well
@@ -2428,7 +2429,7 @@ class Titration(TecanfilesGroup):
             outfit / "shared_noise_xrw_params.csv",
         )
 
-    def _compute_multi_mcmc_fit(self, key: str) -> FitResult[az.InferenceData]:
+    def _compute_multi_mcmc_fit(self, key: str) -> FitResult[xr.DataTree]:
         """Compute individual dataset fit for a single key."""
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset
@@ -2436,7 +2437,7 @@ class Titration(TecanfilesGroup):
             return extract_fit(key, ctr, self.result_multi_trace[1], ds)
         return FitResult()
 
-    def _compute_multi_noise_fit(self, key: str) -> FitResult[az.InferenceData]:
+    def _compute_multi_noise_fit(self, key: str) -> FitResult[xr.DataTree]:
         """Compute per-well fit from the noise-model MCMC trace."""
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset
@@ -2444,7 +2445,7 @@ class Titration(TecanfilesGroup):
             return extract_fit(key, ctr, self.result_multi_noise[1], ds)
         return FitResult()
 
-    def _compute_multi_noise_xrw_fit(self, key: str) -> FitResult[az.InferenceData]:
+    def _compute_multi_noise_xrw_fit(self, key: str) -> FitResult[xr.DataTree]:
         """Compute per-well fit from the noise+random-walk MCMC trace."""
         ctr = self.get_scheme_name(key, self.scheme.names)
         ds = self.result_global[key].dataset

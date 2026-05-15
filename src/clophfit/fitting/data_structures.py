@@ -16,11 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 
-import arviz as az  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import odrpack
 import pandas as pd
+import xarray as xr
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
@@ -426,7 +426,7 @@ class MiniProtocol(Protocol):
 
 
 MiniType = TypeVar("MiniType", bound=MiniProtocol)
-MiniT = Minimizer | odrpack.OdrResult | az.InferenceData
+MiniT = Minimizer | odrpack.OdrResult | xr.DataTree
 
 
 @dataclass
@@ -441,7 +441,7 @@ class FitResult[MiniType: MiniProtocol]:
     MinimizerResult."""
     mini: MiniType | None = None
     """The primary backend object (e.g., lmfit.Minimizer, odrpack.Output, or
-    az.InferenceData for PyMC)."""
+    xr.DataTree for PyMC)."""
     dataset: Dataset | None = None
     """Dataset used for the fit (typically a deep copy of the input dataset)."""
 

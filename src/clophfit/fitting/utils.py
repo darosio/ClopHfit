@@ -171,9 +171,9 @@ def fit_trendline(x: pd.Series, y: pd.Series) -> tuple[float, float]:
 
 
 def smoothness(y: np.ndarray) -> float:
-    """Calculate the smoothness of a curve.
+    r"""Calculate the smoothness of a curve.
 
-    Sum of |consecutive diffs| / total span.
+    Sum of \|consecutive diffs\| / total span.
     = 1 for perfectly monotone, > 1 for noisy/non-monotone.
 
     Parameters

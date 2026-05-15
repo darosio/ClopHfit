@@ -475,9 +475,9 @@ def estimate_x_shift_statistics(
 
 
 def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure:
-    """Plot |standardized residual| vs predicted signal per label.
+    r"""Plot \|standardized residual\| vs predicted signal per label.
 
-    A flat trend at ~0.80 (expected |N(0,1)|) confirms the error model is
+    A flat trend at ~0.80 (expected \|N(0,1)\|) confirms the error model is
     correctly calibrated.  A rising trend indicates under-estimated errors
     at high signals (multiplicative noise).
 
@@ -520,10 +520,10 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
             if bin_centers:
                 ax.plot(bin_centers, bin_means, "r-o", lw=2, ms=5, label="Binned mean")
         ax.axhline(
-            0.798, color="green", ls="--", lw=1.5, label="Expected |N(0,1)| = 0.80"
+            0.798, color="green", ls="--", lw=1.5, label=r"Expected \|N(0,1)\| = 0.80"
         )
         ax.set_xlabel("Predicted signal")
-        ax.set_ylabel("|Standardized residual|")
+        ax.set_ylabel(r"\|Standardized residual\|")
         ax.set_title(f"Label {label}")
         ax.legend(fontsize=8)
         ax.grid(alpha=0.3)

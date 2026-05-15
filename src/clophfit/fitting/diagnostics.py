@@ -1,4 +1,4 @@
-"""Well-quality diagnostics for plate-reader titration data.
+r"""Well-quality diagnostics for plate-reader titration data.
 
 Two complementary entry points:
 
@@ -14,7 +14,8 @@ Detection criteria
 ------------------
 - **K at bound** : K equals the optimizer bound (default 3 or 11 for pH).
   Fit converged to a limit, not a true optimum.
-- **K outlier** : |K - median_K| > ``k_mad_factor * MAD(K)`` across all
+- **K outlier** : \|K - median_K\| > ``k_mad_factor * MAD(K)`` across all
+
   wells on the plate.  Identifies wells with biologically implausible K.
 - **Poor fit** : sK / K > ``max_sk_ratio``.  Relative uncertainty so large
   that K is undetermined.
