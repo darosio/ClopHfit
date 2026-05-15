@@ -16,7 +16,7 @@ jobs:
   update-template:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -48,7 +48,8 @@ jobs:
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
+          # GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS }} # remove the || fallback
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
