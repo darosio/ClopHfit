@@ -124,6 +124,195 @@ def _create_spectra_canvas() -> tuple[Figure, tuple[Axes, Axes, Axes, Axes, Axes
     return fig, (ax1, ax2, ax3, ax4, ax5)
 
 
+def _make_empty_qc_figure(message: str) -> Figure:
+    """Create a one-axis QC figure containing a centered message."""
+    fig, ax = plt.subplots()
+    ax.text(0.5, 0.5, message, ha="center")
+    return fig
+
+
+def _create_qc_subplots(
+    labels: Sequence[str | int], figsize_per_label: tuple[float, float]
+) -> tuple[Figure, np.ndarray]:
+    """Create one-row QC subplots with one panel per label."""
+    fig, axes = plt.subplots(
+        1,
+        len(labels),
+        figsize=(figsize_per_label[0] * len(labels), figsize_per_label[1]),
+        squeeze=False,
+    )
+    return fig, np.asarray(axes[0])
+
+
+def _resolve_qc_bg_value(
+    bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None,
+    label: str | int,
+) -> float | None:
+    """Resolve a scalar background-noise reference for a QC label."""
+    if bg_noise is None:
+        return None
+
+    raw: float | ArrayF | None = None
+    for key in (label, str(label)):
+        if key in bg_noise:
+            raw = bg_noise[key]  # type: ignore[index]
+            break
+
+    if raw is None and isinstance(label, str):
+        try:
+            numeric_label = int(label)
+        except ValueError:
+            numeric_label = None
+        if numeric_label is not None and numeric_label in bg_noise:
+            raw = bg_noise[numeric_label]  # type: ignore[index]
+
+    if raw is None:
+        return None
+
+    raw_array = np.asarray(raw)
+    if raw_array.ndim == 0:
+        return float(raw_array)
+    return float(np.mean(raw_array))
+
+
+def _annotate_qc_point(ax: Axes, x: float, y: float, well: str, color: str) -> None:
+    """Annotate a QC point with consistent styling."""
+    ax.annotate(
+        well,
+        (x, y),
+        color=color,
+        fontweight="bold",
+        xytext=(4, 4),
+        textcoords="offset points",
+    )
+
+
+def _render_qc_panel(  # noqa: PLR0913
+    ax: Axes,
+    panel_df: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+    z_threshold: float,
+    bg_value: float | None = None,
+    bg_multiplier: float = 4.0,
+    annotate_wells: list[str] | None = None,
+    loglog: bool = False,
+) -> None:
+    """Render one QC scatter panel with shared highlighting logic."""
+    from clophfit.fitting.utils import (  # noqa: PLC0415
+        fit_trendline,
+        flag_trend_outliers,
+    )
+
+    x_val = panel_df[x_col]
+    y_val = panel_df[y_col]
+    outliers = flag_trend_outliers(x_val, y_val, threshold=z_threshold)
+
+    bg_outliers = pd.Series(data=False, index=panel_df.index)
+    if bg_value is not None:
+        threshold_bg = bg_multiplier * bg_value
+        bg_outliers = (x_val < threshold_bg) | (
+            (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
+        )
+
+    m, c = fit_trendline(x_val, y_val)
+    x_line = np.linspace(float(x_val.min()), float(x_val.max()), 100)
+    ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
+
+    if bg_value is not None:
+        ax.axvline(
+            bg_multiplier * bg_value,
+            color="cyan",
+            linestyle=":",
+            alpha=0.7,
+        )
+
+    good = panel_df[~(outliers | bg_outliers)]
+    ax.scatter(
+        good[x_col],
+        good[y_col],
+        alpha=0.7,
+        color="indigo",
+        edgecolors="none",
+        label="Wells",
+    )
+
+    bad_bg = panel_df[bg_outliers]
+    if not bad_bg.empty:
+        ax.scatter(
+            bad_bg[x_col],
+            bad_bg[y_col],
+            alpha=1.0,
+            color="cyan",
+            s=60,
+            marker="s",
+            label=f"BG < {bg_multiplier}x",
+        )
+        for _, row in bad_bg.iterrows():
+            _annotate_qc_point(
+                ax,
+                float(row[x_col]),
+                float(row[y_col]),
+                str(row["well"]),
+                "c",
+            )
+
+    bad = panel_df[outliers & ~bg_outliers]
+    if not bad.empty:
+        ax.scatter(
+            bad[x_col],
+            bad[y_col],
+            alpha=1.0,
+            color="orange",
+            s=50,
+            marker="X",
+            label="Outliers",
+        )
+        for _, row in bad.iterrows():
+            _annotate_qc_point(
+                ax,
+                float(row[x_col]),
+                float(row[y_col]),
+                str(row["well"]),
+                "orange",
+            )
+
+    if annotate_wells:
+        flagged_wells = set(panel_df.loc[outliers | bg_outliers, "well"])
+        requested_wells = set(annotate_wells)
+        for _, row in panel_df.iterrows():
+            well = str(row["well"])
+            if well in requested_wells and well not in flagged_wells:
+                ax.scatter(
+                    float(row[x_col]),
+                    float(row[y_col]),
+                    alpha=1.0,
+                    color="red",
+                    s=50,
+                    marker="*",
+                )
+                _annotate_qc_point(
+                    ax,
+                    float(row[x_col]),
+                    float(row[y_col]),
+                    well,
+                    "red",
+                )
+
+    if loglog:
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
+
+
 def distribute_axes(fig: Figure, num_axes: int) -> list[Axes]:
     """Position axes evenly along the horizontal axis of the figure.
 
@@ -281,7 +470,7 @@ def plot_spectra_distributed(
     fig.colorbar(sm, ax=axl, label=pp.kind)
 
 
-def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
+def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
     trace: xr.DataTree,
     results: Mapping[str, FitResult[MiniT]] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
@@ -319,22 +508,10 @@ def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
     Figure
         The generated QC matplotlib figure.
     """
-    from clophfit.fitting.utils import (  # noqa: PLC0415
-        fit_trendline,
-        flag_trend_outliers,
-    )
-
     sigma_df = _extract_sigma_df(trace, results)
     if len(sigma_df) == 0:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No 'sigma_obs' or fallback data found.", ha="center")
-        return fig
-    if len(sigma_df) == 0:
-        fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No 'sigma_obs' data found in trace.", ha="center")
-        return fig
+        return _make_empty_qc_figure("No 'sigma_obs' or fallback data found.")
 
-    # Calculate mean and span (max - min) of the inferred sigma means across indices for each well/label
     agg_df = (
         sigma_df
         .groupby(["well", "label"])["mean"]
@@ -342,119 +519,24 @@ def plot_qc_mean_vs_std(  # noqa: C901, PLR0913, PLR0917
         .reset_index()
     )
 
-    labels = agg_df["label"].unique()
-    fig, axes = plt.subplots(
-        1,
-        len(labels),
-        figsize=(figsize_per_label[0] * len(labels), figsize_per_label[1]),
-    )
-    if len(labels) == 1:
-        axes = np.array([axes])
+    labels = list(agg_df["label"].unique())
+    fig, axes = _create_qc_subplots(labels, figsize_per_label)
 
     for ax, lbl in zip(axes, labels, strict=False):
         d = agg_df[agg_df["label"] == lbl].copy()
-
-        # Detect outliers using trendline
-        x_val = d["mean"]
-        y_val = d["span"]
-        outliers = flag_trend_outliers(x_val, y_val, threshold=z_threshold)
-
-        bg_outliers = pd.Series(data=False, index=d.index)
-        if bg_noise is not None and lbl in bg_noise:
-            threshold_bg = bg_multiplier * bg_noise[lbl]
-            bg_outliers = (x_val < threshold_bg) | (
-                (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
-            )
-
-        # Fit line for plotting
-        m, c = fit_trendline(x_val, y_val)
-        x_line = np.linspace(x_val.min(), x_val.max(), 100)
-        ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
-
-        # Plot good wells
-        good = d[~(outliers | bg_outliers)]
-        ax.scatter(
-            good["mean"],
-            good["span"],
-            alpha=0.7,
-            color="indigo",
-            edgecolors="none",
-            label="Wells",
+        _render_qc_panel(
+            ax,
+            d,
+            x_col="mean",
+            y_col="span",
+            title=f"QC: Span vs Mean of inferred $\\sigma$ ({lbl})",
+            xlabel=r"Mean($\sigma_{obs}$)",
+            ylabel=r"Span($\sigma_{obs}$) [max - min]",
+            z_threshold=z_threshold,
+            bg_value=_resolve_qc_bg_value(bg_noise, lbl),
+            bg_multiplier=bg_multiplier,
+            annotate_wells=annotate_wells,
         )
-
-        # Plot background noise outliers
-        bad_bg = d[bg_outliers]
-        if not bad_bg.empty:
-            ax.scatter(
-                bad_bg["mean"],
-                bad_bg["span"],
-                alpha=1.0,
-                color="cyan",
-                s=60,
-                marker="s",
-                label=f"BG < {bg_multiplier}x",
-            )
-            for _, row in bad_bg.iterrows():
-                ax.annotate(
-                    row["well"],
-                    (row["mean"], row["span"]),
-                    color="c",
-                    fontweight="bold",
-                    xytext=(4, 4),
-                    textcoords="offset points",
-                )
-
-        # Plot trend outliers
-        bad = d[outliers & ~bg_outliers]
-        if not bad.empty:
-            ax.scatter(
-                bad["mean"],
-                bad["span"],
-                alpha=1.0,
-                color="orange",
-                s=50,
-                marker="X",
-                label="Outliers",
-            )
-            for _, row in bad.iterrows():
-                ax.annotate(
-                    row["well"],
-                    (row["mean"], row["span"]),
-                    color="orange",
-                    fontweight="bold",
-                    xytext=(4, 4),
-                    textcoords="offset points",
-                )
-
-        # Annotate specific requested wells if not already highlighted
-        if annotate_wells:
-            for _, row in d.iterrows():
-                if (
-                    row["well"] in annotate_wells
-                    and row["well"] not in bad["well"].to_numpy()
-                    and row["well"] not in bad_bg["well"].to_numpy()
-                ):
-                    ax.scatter(
-                        row["mean"],
-                        row["span"],
-                        alpha=1.0,
-                        color="red",
-                        s=50,
-                        marker="*",
-                    )
-                    ax.annotate(
-                        row["well"],
-                        (row["mean"], row["span"]),
-                        color="red",
-                        fontweight="bold",
-                        xytext=(4, 4),
-                        textcoords="offset points",
-                    )
-
-        ax.set_title(f"QC: Span vs Mean of inferred $\\sigma$ ({lbl})")
-        ax.set_xlabel(r"Mean($\sigma_{obs}$)")
-        ax.set_ylabel(r"Span($\sigma_{obs}$) [max - min]")
-        ax.legend()
 
     fig.tight_layout()
     return fig
@@ -740,7 +822,7 @@ def _sample_dims_from_posterior_var(da: xr.DataArray) -> list[str]:
     sample_dims = [d for d in ("chain", "draw") if d in da.dims]
     if sample_dims:
         return sample_dims
-    return list(da.dims[: min(2, da.ndim)])
+    return [str(d) for d in da.dims[: min(2, da.ndim)]]
 
 
 def _interval_bounds_from_var(
@@ -1139,7 +1221,7 @@ def plot_ppc_well(
     return fig
 
 
-def plot_qc_span_vs_center(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
+def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
     data: Mapping[int, Mapping[str, ArrayF]],
     center: str = "mean",
     figsize_per_label: tuple[float, float] = (5, 4),
@@ -1180,143 +1262,48 @@ def plot_qc_span_vs_center(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     Figure
         The generated QC matplotlib figure.
     """
-    from clophfit.fitting.utils import (  # noqa: PLC0415
-        fit_trendline,
-        flag_trend_outliers,
-    )
-
     labels = list(data.keys())
-    fig, axes = plt.subplots(
-        1,
-        len(labels),
-        figsize=(figsize_per_label[0] * len(labels), figsize_per_label[1]),
-        squeeze=False,
-    )
+    fig, axes = _create_qc_subplots(labels, figsize_per_label)
 
-    for ax, lbl in zip(axes[0], labels, strict=False):
+    for ax, lbl in zip(axes, labels, strict=False):
         da_dict = data[lbl]
-        wells_list: list[str] = []
-        center_vals: list[float] = []
-        span_vals: list[float] = []
+        panel_rows: list[dict[str, str | float]] = []
         for well, y_arr in da_dict.items():
             y = np.asarray(y_arr)
             valid = y[~np.isnan(y)]
             if len(valid) < 2:  # noqa: PLR2004
                 continue
-            cv = (
+            center_value = (
                 float(np.mean(np.abs(valid)))
                 if center == "mean"
                 else float(np.max(np.abs(valid)))
             )
-            sv = float(np.max(valid) - np.min(valid))
-            wells_list.append(well)
-            center_vals.append(cv)
-            span_vals.append(sv)
+            panel_rows.append({
+                "well": well,
+                "center": center_value,
+                "span": float(np.max(valid) - np.min(valid)),
+            })
 
-        if not wells_list:
+        if not panel_rows:
             ax.set_title(f"QC: Span vs Center ({lbl}) — no data")
             continue
 
-        x_s = pd.Series(center_vals, index=wells_list)
-        y_s = pd.Series(span_vals, index=wells_list)
-        outliers = flag_trend_outliers(x_s, y_s, threshold=z_threshold)
-
-        bg_out = pd.Series(data=False, index=x_s.index)
-        bg_val: float | None = None
-        if bg_noise is not None:
-            raw = bg_noise.get(lbl) or bg_noise.get(str(lbl))  # type: ignore[call-overload]
-            if raw is not None:
-                bg_val = float(np.mean(raw)) if hasattr(raw, "__len__") else float(raw)
-                thr = bg_multiplier * bg_val
-                bg_out = (x_s < thr) | ((y_s < thr) & (y_s.max() > 1e-6))  # noqa: PLR2004
-
-        m, c = fit_trendline(x_s, y_s)
-        x_line = np.linspace(x_s.min(), x_s.max(), 100)
-        ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
-
-        if bg_val is not None:
-            ax.axvline(
-                bg_multiplier * bg_val,
-                color="cyan",
-                linestyle=":",
-                alpha=0.7,
-                label=f"{bg_multiplier}x bg",
-            )
-
-        good_mask = ~(outliers | bg_out)
-        ax.scatter(
-            x_s[good_mask],
-            y_s[good_mask],
-            alpha=0.7,
-            color="indigo",
-            edgecolors="none",
-            label="Wells",
-        )
-
-        if bg_out.any():
-            ax.scatter(
-                x_s[bg_out],
-                y_s[bg_out],
-                alpha=1.0,
-                color="cyan",
-                s=60,
-                marker="s",
-                label=f"BG < {bg_multiplier}x",
-            )
-            for w in x_s[bg_out].index:
-                ax.annotate(
-                    w,
-                    (x_s[w], y_s[w]),
-                    color="c",
-                    fontweight="bold",
-                    xytext=(4, 4),
-                    textcoords="offset points",
-                )
-
-        trend_only = outliers & ~bg_out
-        if trend_only.any():
-            ax.scatter(
-                x_s[trend_only],
-                y_s[trend_only],
-                alpha=1.0,
-                color="orange",
-                s=50,
-                marker="X",
-                label="Outliers",
-            )
-            for w in x_s[trend_only].index:
-                ax.annotate(
-                    w,
-                    (x_s[w], y_s[w]),
-                    color="orange",
-                    fontweight="bold",
-                    xytext=(4, 4),
-                    textcoords="offset points",
-                )
-
-        if annotate_wells:
-            flagged_idx = set(x_s[outliers | bg_out].index)
-            for w in annotate_wells:
-                if w in x_s.index and w not in flagged_idx:
-                    ax.scatter(x_s[w], y_s[w], alpha=1.0, color="red", s=50, marker="*")
-                    ax.annotate(
-                        w,
-                        (x_s[w], y_s[w]),
-                        color="red",
-                        fontweight="bold",
-                        xytext=(4, 4),
-                        textcoords="offset points",
-                    )
-
-        if loglog:
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-
+        panel_df = pd.DataFrame(panel_rows)
         xlabel = f"{'Mean' if center == 'mean' else 'Max'} signal (label {lbl})"
-        ax.set_title(f"QC: Span vs {center.capitalize()} ({lbl})")
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Span (max - min)")
-        ax.legend()
+        _render_qc_panel(
+            ax,
+            panel_df,
+            x_col="center",
+            y_col="span",
+            title=f"QC: Span vs {center.capitalize()} ({lbl})",
+            xlabel=xlabel,
+            ylabel="Span (max - min)",
+            z_threshold=z_threshold,
+            bg_value=_resolve_qc_bg_value(bg_noise, lbl),
+            bg_multiplier=bg_multiplier,
+            annotate_wells=annotate_wells,
+            loglog=loglog,
+        )
 
     fig.tight_layout()
     return fig

@@ -33,6 +33,7 @@ from clophfit.fitting.plotting import (
     plot_fit,
     plot_noise_vs_signal,
     plot_qc_mean_vs_std,
+    plot_qc_span_vs_center_titration,
 )
 from clophfit.prtecan import PlateScheme
 
@@ -1051,7 +1052,7 @@ def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
         },
         is_ph=True,
     )
-    fr = FitResult(dataset=ds)
+    fr: FitResult[xr.DataTree] = FitResult(dataset=ds)
 
     sigma_df = extract_sigma_df(trace, {"A01": fr})
 
@@ -1061,8 +1062,9 @@ def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
     np.testing.assert_allclose(sigma_df["hdi_97%"].to_numpy(), np.array([39.4, 78.8]))
 
 
-def test_noise_and_qc_plots_accept_direct_posterior_sigma() -> None:
-    """QC/noise plots should accept sigma extracted directly from posterior vars."""
+def _make_direct_sigma_trace_and_results() -> tuple[
+    xr.DataTree, dict[str, FitResult[xr.DataTree]]
+]:
     posterior = xr.Dataset(
         data_vars={
             "sigma_obs_y1_A01": (
@@ -1090,13 +1092,86 @@ def test_noise_and_qc_plots_accept_direct_posterior_sigma() -> None:
         {"y1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([9.0, 10.0, 11.0]))},
         is_ph=True,
     )
-    results = {"A01": FitResult(dataset=ds_a01), "A02": FitResult(dataset=ds_a02)}
+    results: dict[str, FitResult[xr.DataTree]] = {
+        "A01": FitResult(dataset=ds_a01),
+        "A02": FitResult(dataset=ds_a02),
+    }
+    return trace, results
+
+
+def test_noise_and_qc_plots_accept_direct_posterior_sigma() -> None:
+    """QC/noise plots should accept sigma extracted directly from posterior vars."""
+    trace, results = _make_direct_sigma_trace_and_results()
 
     fig_noise = plot_noise_vs_signal(trace, results)
     fig_qc = plot_qc_mean_vs_std(trace, results)
 
     assert isinstance(fig_noise, Figure)
     assert isinstance(fig_qc, Figure)
+
+
+def test_plot_qc_mean_vs_std_preserves_annotations_and_legend_semantics() -> None:
+    """Mean-vs-std QC plot should keep legend and annotation behavior stable."""
+    trace, results = _make_direct_sigma_trace_and_results()
+
+    fig = plot_qc_mean_vs_std(
+        trace,
+        results,
+        bg_noise={"y1": 0.29},
+        annotate_wells=["A01"],
+    )
+
+    assert isinstance(fig, Figure)
+    ax = fig.axes[0]
+    assert ax.get_title() == r"QC: Span vs Mean of inferred $\sigma$ (y1)"
+    assert ax.get_xlabel() == r"Mean($\sigma_{obs}$)"
+    assert ax.get_ylabel() == r"Span($\sigma_{obs}$) [max - min]"
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    assert "Trendline" in legend_labels
+    assert "Wells" in legend_labels
+    assert "BG < 4.0x" in legend_labels
+    annotations = {text.get_text() for text in ax.texts}
+    assert {"A01", "A02"}.issubset(annotations)
+
+
+class _FakeTitration:
+    def __init__(self) -> None:
+        self.bg_noise = {1: np.array([0.2, 0.25, 0.3])}
+
+    def _get_normalized_or_raw_data(self) -> dict[int, dict[str, np.ndarray]]:
+        return {
+            1: {
+                "A01": np.array([0.05, 0.05, 0.06]),
+                "A02": np.array([1.0, 1.4, 1.8]),
+                "A03": np.array([1.1, 1.2, 1.25]),
+            }
+        }
+
+
+def test_plot_qc_span_vs_center_titration_matches_mean_vs_std_style() -> None:
+    """Titration QC wrapper should mirror mean-vs-std highlight/legend behavior."""
+    fig = plot_qc_span_vs_center_titration(
+        _FakeTitration(),
+        annotate_wells=["A02"],
+        loglog=True,
+    )
+
+    assert isinstance(fig, Figure)
+    ax = fig.axes[0]
+    assert ax.get_xscale() == "log"
+    assert ax.get_yscale() == "log"
+    assert ax.get_title() == "QC: Span vs Mean (1)"
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+    assert "Trendline" in legend_labels
+    assert "Wells" in legend_labels
+    assert "BG < 4.0x" in legend_labels
+    assert "4.0x bg" not in legend_labels
+    annotations = {text.get_text() for text in ax.texts}
+    assert {"A01", "A02"}.issubset(annotations)
 
 
 ###############################################################################
