@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import os
 import typing
-import warnings
 from collections.abc import Mapping, Sequence
 from typing import Literal
 
@@ -20,7 +19,6 @@ from matplotlib import figure
 from pymc import math as pm_math
 from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
-from scipy import optimize
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
@@ -31,15 +29,13 @@ from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from clophfit.clophfit_types import ArrayF, FloatFunc
+    from clophfit.clophfit_types import ArrayF
     from clophfit.prtecan import PlateScheme
 
 
 __all__ = [
     "fit_binding_pymc",
-    "fit_binding_pymc_compare",
     "fit_binding_pymc_multi",
-    "fit_binding_pymc_odr",
     "process_trace",
 ]
 
@@ -548,206 +544,6 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     return process_trace(trace, params.keys(), ds, n_xerr)
 
 
-def fit_binding_pymc_compare(  # noqa: PLR0913
-    fr: FitResult[MiniT],
-    buffer_sd: dict[str, float],
-    *,
-    learn_separate_y_mag: bool = False,
-    n_sd: float = 10.0,
-    n_xerr: float = 1.0,
-    n_samples: int = 2000,
-) -> xr.DataTree:
-    """
-    Fits a Bayesian binding model with two different noise models for comparison.
-
-    Parameters
-    ----------
-    fr : FitResult[MiniT]
-        The fit result from a previous run, providing initial parameters and dataset.
-    buffer_sd : dict[str, float]
-        bg_err
-    learn_separate_y_mag : bool
-        If True, learns a unique noise scaling factor for each dataset label.
-        If False, learns a single scaling factor for all pre-weighted data.
-    n_sd : float
-        Prior width for parameters in create_parameter_priors.
-    n_xerr : float
-        Scaling factor for x_errc in create_x_true.
-    n_samples : int
-        Number of MCMC samples to draw.
-
-    Returns
-    -------
-    xr.DataTree
-        The posterior samples from PyMC for the specified noise model.
-    """
-    """
-    if fr.result is None or fr.dataset is None:
-        msg = "Input FitResult object must contain a result and a dataset."
-        raise ValueError(msg)
-    """
-    if fr.result:
-        params = fr.result.params
-    if fr.dataset:
-        ds = copy.deepcopy(fr.dataset)
-
-    # Use the first dataset's x values. Assumes all datasets have same x points.
-    xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc
-
-    with pm.Model():
-        # Create priors for all parameters (K, S0_y1, S1_y1, etc.)
-        pars = create_parameter_priors(params, n_sd)
-        # Model the x-values with their uncertainties
-        x_true = create_x_true(xc, x_errc, n_xerr)
-        # ---------------------------------------------------------------------
-        # Core conditional logic for the noise model
-
-        if learn_separate_y_mag:
-            # Model 1: Learn a unique noise scaling factor for each label
-            # This is robust when you don't trust the initial y_err values
-            ye_mag: dict[str | int, float] = {}
-            true_buffer = {}
-            for lbl, da in ds.items():
-                ye_mag[lbl] = pm.HalfNormal(f"ye_mag_{lbl}", sigma=da.y_err.mean())
-                y_model = binding_1site(
-                    x_true,
-                    pars["K"],
-                    pars[f"S0_{lbl}"],
-                    pars[f"S1_{lbl}"],
-                    is_ph=ds.is_ph,
-                )
-                true_buffer[lbl] = pm.Normal(
-                    f"true_buffer_{lbl}", mu=0, sigma=da.y_err.mean()
-                )
-                sigma = 10 * pm.math.sqrt(
-                    (ye_mag[lbl] * np.ones_like(da.y_err)) ** 2 + buffer_sd[lbl] ** 2
-                    # Alternatively use: ye_mag[lbl] ** 2 * da.y + buffer_sd[lbl] ** 2
-                )
-
-                pm.Normal(
-                    f"y_likelihood_{lbl}",
-                    mu=y_model[da.mask] + true_buffer[lbl],
-                    sigma=sigma,
-                    # Noise is learned from scratch and shot noise model
-                    # Alternatively use: * np.ones_like(da.y_err),# Noise is learned from scratch
-                    observed=da.y,
-                )
-        else:
-            # Model 2: Learn a single noise scaling factor for all data
-            # This is appropriate when you trust the relative y_err values
-            ye_mag0 = pm.HalfNormal("ye_mag", sigma=10.0)
-            for lbl, da in ds.items():
-                y_model = binding_1site(
-                    x_true,
-                    pars["K"],
-                    pars[f"S0_{lbl}"],
-                    pars[f"S1_{lbl}"],
-                    is_ph=ds.is_ph,
-                )
-                pm.Normal(
-                    f"y_likelihood_{lbl}",
-                    mu=y_model[da.mask],
-                    sigma=ye_mag0 * da.y_err,  # Apply a single scaling factor
-                    # Alternatively use:  sigma=da.y_err,  # Apply a single scaling factor
-                    observed=da.y,
-                )
-        # ---------------------------------------------------------------------
-        # Run MCMC sampling
-        trace: xr.DataTree = pm.sample(
-            n_samples,
-            return_inferencedata=True,
-            target_accept=0.9,
-            **_pymc_sample_parallel_args(),
-        )
-        return _compute_sample_log_likelihood(trace)
-
-
-def closest_point_on_curve(f: FloatFunc, x_obs: float, y_obs: float) -> float:
-    """Find the closest point on the model curve."""
-
-    def objective(x_prime: float) -> float:
-        return (x_obs - x_prime) ** 2 + (y_obs - f(x_prime)) ** 2
-
-    result = optimize.minimize_scalar(objective)
-    return float(result.x)
-
-
-def fit_binding_pymc_odr(
-    fr: FitResult[MiniT],
-    n_sd: float = 10.0,
-    xe_scaling: float = 1.0,
-    ye_scaling: float = 10.0,
-    n_samples: int = 2000,
-) -> xr.DataTree | pm.backends.base.MultiTrace:
-    """Analyze using deprecated Bayesian ODR-like modeling of x and y errors."""
-    warnings.warn(
-        "fit_binding_pymc_odr is deprecated and may not work with recent PyMC versions.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if fr.result is None or fr.dataset is None:
-        return xr.DataTree()  # FitResult()
-    params = fr.result.params
-    ds = copy.deepcopy(fr.dataset)
-    xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc
-    with pm.Model() as _:
-        pars = create_parameter_priors(params, n_sd)
-        # Add likelihoods for each dataset
-        ye_mag = pm.HalfNormal("ye_mag", sigma=ye_scaling)
-        xe_mag = pm.HalfNormal("xe_mag", sigma=xe_scaling)
-
-        for lbl, da in ds.items():
-
-            def _y_model(x: float, lbl: str = lbl) -> float:
-                return binding_1site(
-                    x, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
-                )
-
-            # Define symbolic closest points using PyMC-compatible operations
-            x_prime = pm.Deterministic(
-                f"x_prime_{lbl}",
-                pm.math.stack(  # noqa: PD013
-                    [
-                        closest_point_on_curve(
-                            lambda x_val: _y_model(x_val).eval(),  # type: ignore[attr-defined]
-                            x_obs,
-                            y_obs,
-                        )
-                        for x_obs, y_obs in zip(xc, da.y, strict=True)
-                    ]
-                ),
-            )
-
-            y_prime = pm.Deterministic(
-                f"y_prime_{lbl}",
-                pm.math.stack([_y_model(x) for x in x_prime.eval()]),  # noqa: PD013
-            )
-            y_model = pm.Deterministic(
-                f"y_model_{lbl}",
-                pm.math.stack([_y_model(x) for x in xc]),  # noqa: PD013
-            )
-            # TODO:  y_model = as_tensor_variable([_y_model(x) for x in xc])
-
-            mask = as_tensor_variable(da.mask)
-            # Orthogonal distance likelihood
-            distances = ((x_prime - xc) / (xe_mag * x_errc)) ** 2 + (
-                (y_prime - y_model) / (ye_mag * da.y_err)
-            ) ** 2
-            pm.Normal(
-                f"orthogonal_likelihood_{lbl}",
-                mu=distances[mask],
-                sigma=1,
-                observed=np.zeros(len(distances[mask].eval())),
-            )
-        # Inference
-        return pm.sample(
-            n_samples, return_inferencedata=True, **_pymc_sample_parallel_args()
-        )
-    # TODO:  return process_trace(trace, params.keys(), ds, 0)
-
-
 # ------------------------------------------------------------------
 # Helper: weighted statistics
 # ------------------------------------------------------------------
@@ -1202,8 +998,3 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
             pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
     return trace
-
-
-# ------------------------------------------------------------------
-# 2.2b  Noise-model helpers and multi-well fit with learned noise
-# ------------------------------------------------------------------
