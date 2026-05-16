@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
@@ -27,7 +28,12 @@ from clophfit.fitting.models import binding_1site, kd
 from clophfit.fitting.odr import (
     fit_binding_odr,
 )
-from clophfit.fitting.plotting import plot_fit
+from clophfit.fitting.plotting import (
+    extract_sigma_df,
+    plot_fit,
+    plot_noise_vs_signal,
+    plot_qc_mean_vs_std,
+)
 from clophfit.prtecan import PlateScheme
 
 ###############################################################################
@@ -973,6 +979,124 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     # x_per_well has dims (step, well)
     assert "step" in trace.posterior["x_per_well"].dims
     assert "well" in trace.posterior["x_per_well"].dims
+
+
+def test_extract_sigma_df_from_datatree_posterior() -> None:
+    """Sigma extraction should work directly from posterior variables."""
+    posterior = xr.Dataset(
+        data_vars={
+            "sigma_obs_y1_A01": (
+                ("chain", "draw", "sigma_obs_y1_A01_dim_0"),
+                np.array([
+                    [
+                        [1.0, 2.0, 3.0],
+                        [2.0, 3.0, 4.0],
+                    ]
+                ]),
+            ),
+            "sigma_obs_y2_A01": (
+                ("chain", "draw", "sigma_obs_y2_A01_dim_0"),
+                np.array([
+                    [
+                        [4.0, 5.0, 6.0],
+                        [6.0, 7.0, 8.0],
+                    ]
+                ]),
+            ),
+        },
+        coords={
+            "chain": [0],
+            "draw": [0, 1],
+            "sigma_obs_y1_A01_dim_0": [0, 1, 2],
+            "sigma_obs_y2_A01_dim_0": [0, 1, 2],
+        },
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+
+    sigma_df = extract_sigma_df(trace)
+
+    assert len(sigma_df) == 6
+    assert set(sigma_df["label"]) == {"y1", "y2"}
+    assert set(sigma_df["well"]) == {"A01"}
+    np.testing.assert_array_equal(
+        sigma_df[sigma_df["label"] == "y1"].sort_values("idx")["idx"].to_numpy(),
+        np.array([0, 1, 2]),
+    )
+    np.testing.assert_allclose(
+        sigma_df[sigma_df["label"] == "y1"].sort_values("idx")["mean"].to_numpy(),
+        np.array([1.5, 2.5, 3.5]),
+    )
+    np.testing.assert_allclose(
+        sigma_df[sigma_df["label"] == "y2"].sort_values("idx")["mean"].to_numpy(),
+        np.array([5.0, 6.0, 7.0]),
+    )
+
+
+def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
+    """Fallback sigma extraction should use posterior ye_mag directly."""
+    posterior = xr.Dataset(
+        data_vars={
+            "ye_mag_y1": (("chain", "draw"), np.array([[2.0, 4.0]])),
+        },
+        coords={"chain": [0], "draw": [0, 1]},
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+    ds = Dataset(
+        {
+            "y1": DataArray(
+                np.array([6.0, 7.0]),
+                np.array([1.0, 2.0]),
+                y_errc=np.array([10.0, 20.0]),
+            )
+        },
+        is_ph=True,
+    )
+    fr = FitResult(dataset=ds)
+
+    sigma_df = extract_sigma_df(trace, {"A01": fr})
+
+    np.testing.assert_allclose(sigma_df["mean"].to_numpy(), np.array([30.0, 60.0]))
+    np.testing.assert_allclose(sigma_df["sd"].to_numpy(), np.array([10.0, 20.0]))
+    np.testing.assert_allclose(sigma_df["hdi_3%"].to_numpy(), np.array([20.6, 41.2]))
+    np.testing.assert_allclose(sigma_df["hdi_97%"].to_numpy(), np.array([39.4, 78.8]))
+
+
+def test_noise_and_qc_plots_accept_direct_posterior_sigma() -> None:
+    """QC/noise plots should accept sigma extracted directly from posterior vars."""
+    posterior = xr.Dataset(
+        data_vars={
+            "sigma_obs_y1_A01": (
+                ("chain", "draw", "sigma_obs_y1_A01_dim_0"),
+                np.array([[[1.0, 1.1, 1.2], [1.3, 1.4, 1.5]]]),
+            ),
+            "sigma_obs_y1_A02": (
+                ("chain", "draw", "sigma_obs_y1_A02_dim_0"),
+                np.array([[[0.9, 1.0, 1.1], [1.2, 1.3, 1.4]]]),
+            ),
+        },
+        coords={
+            "chain": [0],
+            "draw": [0, 1],
+            "sigma_obs_y1_A01_dim_0": [0, 1, 2],
+            "sigma_obs_y1_A02_dim_0": [0, 1, 2],
+        },
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+    ds_a01 = Dataset(
+        {"y1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([10.0, 11.0, 12.0]))},
+        is_ph=True,
+    )
+    ds_a02 = Dataset(
+        {"y1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([9.0, 10.0, 11.0]))},
+        is_ph=True,
+    )
+    results = {"A01": FitResult(dataset=ds_a01), "A02": FitResult(dataset=ds_a02)}
+
+    fig_noise = plot_noise_vs_signal(trace, results)
+    fig_qc = plot_qc_mean_vs_std(trace, results)
+
+    assert isinstance(fig_noise, Figure)
+    assert isinstance(fig_qc, Figure)
 
 
 ###############################################################################

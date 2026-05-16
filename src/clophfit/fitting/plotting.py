@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
+import xarray as xr
 from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 from uncertainties import ufloat  # type: ignore[import-untyped]
@@ -49,7 +50,6 @@ from clophfit.fitting.models import binding_1site
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    import xarray as xr
     from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
     from matplotlib import axes
@@ -68,6 +68,7 @@ __all__ = [
     "COLOR_MAP",
     "PlotParameters",
     "distribute_axes",
+    "extract_sigma_df",
     "plot_autovalues",
     "plot_autovectors",
     "plot_emcee",
@@ -734,20 +735,104 @@ def print_emcee(result_emcee: MinimizerResult) -> None:
     print(f"2 sigma spread = {0.5 * (quantiles[4] - quantiles[0]):.3f}")
 
 
+def _sample_dims_from_posterior_var(da: xr.DataArray) -> list[str]:
+    """Infer sample dimensions for a posterior variable."""
+    sample_dims = [d for d in ("chain", "draw") if d in da.dims]
+    if sample_dims:
+        return sample_dims
+    return list(da.dims[: min(2, da.ndim)])
+
+
+def _interval_bounds_from_var(
+    da: xr.DataArray, sample_dims: Sequence[str]
+) -> tuple[xr.DataArray, xr.DataArray]:
+    """Return lower and upper credible bounds for a posterior variable."""
+    if not sample_dims:
+        return da, da
+    quantiles = da.quantile([0.03, 0.97], dim=sample_dims)
+    return quantiles.sel(quantile=0.03), quantiles.sel(quantile=0.97)
+
+
+def _sigma_records_from_posterior(trace: xr.DataTree) -> list[dict[str, object]]:
+    """Extract sigma_obs summaries directly from posterior variables."""
+    if not hasattr(trace, "posterior"):
+        return []
+
+    records: list[dict[str, object]] = []
+    pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>.+)"
+    for name, da in trace.posterior.data_vars.items():
+        var_name = str(name)
+        match = pd.Series([var_name]).str.extract(pattern).iloc[0]
+        if match.isna().any():
+            continue
+
+        sample_dims = _sample_dims_from_posterior_var(da)
+        mean_da = da.mean(dim=sample_dims) if sample_dims else da
+        sd_da = da.std(dim=sample_dims) if sample_dims else xr.zeros_like(da)
+        lo_da, hi_da = _interval_bounds_from_var(da, sample_dims)
+
+        index_dim = next((dim for dim in mean_da.dims), None)
+        if index_dim is None:
+            records.append({
+                "mean": float(mean_da.values),
+                "sd": float(sd_da.values),
+                "hdi_3%": float(lo_da.values),
+                "hdi_97%": float(hi_da.values),
+                "label": str(match["label"]),
+                "well": str(match["well"]),
+                "idx": 0,
+            })
+            continue
+
+        coord = mean_da.coords.get(index_dim)
+        idx_values = (
+            coord.to_numpy()
+            if coord is not None
+            else np.arange(mean_da.sizes[index_dim])
+        )
+        for pos, raw_idx in enumerate(np.asarray(idx_values).tolist(), start=0):
+            try:
+                idx = int(raw_idx)
+            except (TypeError, ValueError):
+                idx = pos
+            records.append({
+                "mean": float(mean_da.isel({index_dim: pos}).values),
+                "sd": float(sd_da.isel({index_dim: pos}).values),
+                "hdi_3%": float(lo_da.isel({index_dim: pos}).values),
+                "hdi_97%": float(hi_da.isel({index_dim: pos}).values),
+                "label": str(match["label"]),
+                "well": str(match["well"]),
+                "idx": idx,
+            })
+    return records
+
+
+def _summary_stats_from_scalar_var(
+    trace: xr.DataTree, var_name: str
+) -> dict[str, float] | None:
+    """Summarize a scalar posterior variable without relying on ``az.summary``."""
+    if not hasattr(trace, "posterior") or var_name not in trace.posterior:
+        return None
+    da = trace.posterior[var_name]
+    sample_dims = _sample_dims_from_posterior_var(da)
+    mean_da = da.mean(dim=sample_dims) if sample_dims else da
+    sd_da = da.std(dim=sample_dims) if sample_dims else xr.zeros_like(da)
+    lo_da, hi_da = _interval_bounds_from_var(da, sample_dims)
+    return {
+        "mean": float(np.asarray(mean_da.values)),
+        "sd": float(np.asarray(sd_da.values)),
+        "hdi_3%": float(np.asarray(lo_da.values)),
+        "hdi_97%": float(np.asarray(hi_da.values)),
+    }
+
+
 def _extract_sigma_df(
     trace: xr.DataTree, results: Mapping[str, FitResult[MiniT]] | None = None
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
-    trace_df = az.summary(trace)
-    # Ensure numeric types (ArviZ 1.x might return strings)
-    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
-    sigma_df = trace_df[trace_df.index.str.startswith("sigma_obs_")].copy()
-    if len(sigma_df) > 0:
-        pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>[^\[]+)\[(?P<idx>\d+)\]"
-        extracted = sigma_df.index.to_series().str.extract(pattern)
-        sigma_df = pd.concat([sigma_df, extracted], axis=1)
-        sigma_df["idx"] = sigma_df["idx"].astype(int)
-        return sigma_df  # type: ignore[no-any-return]
+    sigma_records = _sigma_records_from_posterior(trace)
+    if sigma_records:
+        return pd.DataFrame(sigma_records)
 
     # Fallback: if sigma_obs_ isn't in trace, reconstruct from ye_mag * y_err
     if results is None:
@@ -758,11 +843,10 @@ def _extract_sigma_df(
         if fr.dataset is None:
             continue
         for lbl, da in fr.dataset.items():
-            if f"ye_mag_{lbl}" in trace_df.index:
-                ye = trace_df.loc[f"ye_mag_{lbl}"]
-            elif "ye_mag" in trace_df.index:
-                ye = trace_df.loc["ye_mag"]
-            else:
+            ye = _summary_stats_from_scalar_var(trace, f"ye_mag_{lbl}")
+            if ye is None:
+                ye = _summary_stats_from_scalar_var(trace, "ye_mag")
+            if ye is None:
                 continue
 
             for idx, y_err_val in enumerate(da.y_errc):
@@ -777,6 +861,13 @@ def _extract_sigma_df(
                 })
 
     return pd.DataFrame(records)
+
+
+def extract_sigma_df(
+    trace: xr.DataTree, results: Mapping[str, FitResult[MiniT]] | None = None
+) -> pd.DataFrame:
+    """Extract heteroscedastic sigma summaries from a PyMC trace."""
+    return _extract_sigma_df(trace, results)
 
 
 def plot_noise_vs_index(

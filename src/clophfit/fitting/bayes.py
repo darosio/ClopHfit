@@ -18,6 +18,7 @@ import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
+from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
 from scipy import optimize
 
@@ -41,6 +42,9 @@ __all__ = [
     "fit_binding_pymc_odr",
     "process_trace",
 ]
+
+
+pytensor_config.linker = "cvm"  # ← ripristina backend C come PyMC 5
 
 
 def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, object]:
