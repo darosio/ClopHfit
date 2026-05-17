@@ -14,7 +14,6 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc,
     process_trace,
     rename_keys,
-    weighted_stats,
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import fit_binding_glob
@@ -244,97 +243,6 @@ def test_rename_keys_preserves_values() -> None:
 
 
 ###############################################################################
-# Tests for weighted_stats
-###############################################################################
-
-
-def test_weighted_stats_basic() -> None:
-    """Test basic weighted statistics calculation."""
-    values = {
-        "sample1": [7.0, 7.2, 6.8],
-        "sample2": [8.0, 8.1],
-    }
-    stderr = {
-        "sample1": [0.1, 0.2, 0.15],
-        "sample2": [0.3, 0.25],
-    }
-    result = weighted_stats(values, stderr)
-
-    assert "sample1" in result
-    assert "sample2" in result
-    # Check that each result is a tuple of (mean, stderr)
-    assert len(result["sample1"]) == 2
-    assert len(result["sample2"]) == 2
-    # Mean should be a float
-    assert isinstance(result["sample1"][0], (float, np.floating))
-    # Stderr should be a float
-    assert isinstance(result["sample1"][1], (float, np.floating))
-
-
-def test_weighted_stats_single_value() -> None:
-    """Test weighted statistics with single value."""
-    values = {"sample": [7.0]}
-    stderr = {"sample": [0.2]}
-    result = weighted_stats(values, stderr)
-
-    assert "sample" in result
-    # With a single value, weighted mean equals the value
-    assert np.isclose(result["sample"][0], 7.0)
-
-
-def test_weighted_stats_weights() -> None:
-    """Test that weighting by inverse variance works correctly."""
-    values = {
-        "sample": [5.0, 9.0],  # Two very different values
-    }
-    stderr = {
-        "sample": [0.1, 10.0],  # First has much smaller error
-    }
-    result = weighted_stats(values, stderr)
-
-    # Weighted mean should be much closer to the first value (5.0)
-    # since it has much smaller error
-    assert result["sample"][0] < 6.0
-    assert result["sample"][0] > 4.9
-
-
-def test_weighted_stats_equal_weights() -> None:
-    """Test that equal weights give arithmetic mean."""
-    values = {"sample": [4.0, 6.0, 8.0]}
-    stderr = {"sample": [1.0, 1.0, 1.0]}  # Equal weights
-    result = weighted_stats(values, stderr)
-
-    # Should be close to arithmetic mean (4+6+8)/3 = 6.0
-    assert np.isclose(result["sample"][0], 6.0, rtol=0.01)
-
-
-def test_weighted_stats_multiple_samples() -> None:
-    """Test with multiple sample groups."""
-    values = {
-        "control": [7.0, 7.1, 6.9],
-        "treated": [8.0, 8.2],
-        "blank": [5.0],
-    }
-    stderr = {
-        "control": [0.1, 0.1, 0.1],
-        "treated": [0.2, 0.2],
-        "blank": [0.3],
-    }
-    result = weighted_stats(values, stderr)
-
-    assert len(result) == 3
-    assert all(key in result for key in ["control", "treated", "blank"])
-
-
-def test_weighted_stats_empty() -> None:
-    """Test with empty dictionaries."""
-    values: dict[str, list[float]] = {}
-    stderr: dict[str, list[float]] = {}
-    result = weighted_stats(values, stderr)
-    assert result == {}
-
-
-###############################################################################
 # Tests for integration with fitting pipeline
 ###############################################################################
 
@@ -345,7 +253,6 @@ def test_bayes_module_imports() -> None:
     assert callable(create_x_true)
     assert callable(create_parameter_priors)
     assert callable(rename_keys)
-    assert callable(weighted_stats)
     assert callable(fit_binding_pymc)
     assert callable(process_trace)
     assert callable(extract_fit)
@@ -458,17 +365,6 @@ def test_rename_keys_with_underscores() -> None:
     result = rename_keys(data)
     # Should handle these edge cases without crashing
     assert isinstance(result, dict)
-
-
-def test_weighted_stats_zero_stderr() -> None:
-    """Test weighted_stats with very small stderr (near zero)."""
-    values = {"sample": [7.0, 7.1]}
-    stderr = {"sample": [1e-10, 1e-10]}  # Very small errors
-    result = weighted_stats(values, stderr)
-    # Should still compute without division errors
-    assert "sample" in result
-    assert not np.isnan(result["sample"][0])
-    assert not np.isinf(result["sample"][0])
 
 
 def test_create_parameter_priors_minimum_sigma() -> None:
