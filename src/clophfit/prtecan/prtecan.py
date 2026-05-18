@@ -728,6 +728,7 @@ class PlateScheme:
             msg = "Buffer wells must be a list of strings"
             raise TypeError(msg)
         self._buffer = value
+        self.__dict__.pop("nofit_keys", None)
 
     @property
     def discard(self) -> list[str]:
@@ -740,6 +741,7 @@ class PlateScheme:
             msg = "Discard wells must be a list of strings"
             raise TypeError(msg)
         self._discard = value
+        self.__dict__.pop("nofit_keys", None)
 
     @property
     def ctrl(self) -> list[str]:
