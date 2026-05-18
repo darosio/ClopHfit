@@ -925,10 +925,10 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     scheme = PlateScheme()
     scheme.names = {"ctrl": {"A01", "A02"}}
 
-    rng = np.random.default_rng(42)
+    np.random.default_rng(42)
     bg_noise = {
-        1: rng.normal(5000.0, 250.0, 5),
-        2: rng.normal(50.0, 5.0, 5),
+        1: 250.0,
+        2: 5.0,
     }
 
     trace = fit_binding_pymc_multi(
@@ -956,10 +956,10 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     scheme = PlateScheme()
     scheme.names = {"ctrl": {"A01", "A02"}}
 
-    rng = np.random.default_rng(42)
+    np.random.default_rng(42)
     bg_noise = {
-        1: rng.normal(5000.0, 250.0, 5),
-        2: rng.normal(50.0, 5.0, 5),
+        1: 250.0,
+        2: 5.0,
     }
 
     trace = fit_binding_pymc_multi(

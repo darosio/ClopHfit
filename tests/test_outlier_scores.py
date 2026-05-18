@@ -128,7 +128,7 @@ def test_fit_noise_model_recovers_known_params() -> None:
     y = np.linspace(10, 1000, 300)
     sigma = np.sqrt(true_floor**2 + true_gain * y + (rel * y) ** 2)
     resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "y": y})
+    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
     floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=rel)
     assert abs(floor_d["y1"] - true_floor) <= true_floor
     assert abs(gain_d["y1"] - true_gain) < true_gain * 3
@@ -139,7 +139,7 @@ def test_fit_noise_model_fallback_on_negative_params() -> None:
     rng = np.random.default_rng(0)
     y = np.ones(50)
     resid = rng.standard_normal(50) * 0.01
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "y": y})
+    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
     floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=0.003)
     assert floor_d["y1"] >= 0.0
     assert gain_d["y1"] >= 0.0
@@ -153,7 +153,7 @@ def test_fit_noise_model_multi_label() -> None:
     for lbl, floor in [("y1", 3.0), ("y2", 10.0)]:
         sigma = np.sqrt(floor**2 + 1.0 * y + (0.003 * y) ** 2)
         resid = sigma * rng.standard_normal(100)
-        parts.append(pd.DataFrame({"label": lbl, "resid_raw": resid, "y": y}))
+        parts.append(pd.DataFrame({"label": lbl, "resid_raw": resid, "predicted": y}))
     df = pd.concat(parts, ignore_index=True)
     floor_d, _ = fit_noise_model_from_residuals(df, rel_error=0.003)
     assert "y1" in floor_d
@@ -170,7 +170,7 @@ def test_fit_gain_and_rel_error_recovers_known_params() -> None:
     y = np.linspace(50, 500, 300)
     sigma = np.sqrt(floor**2 + true_gain * y + (true_alpha * y) ** 2)
     resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "y": y})
+    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
     gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"y1": floor})
     assert gain_d["y1"] >= 0.0
     assert alpha_d["y1"] >= 0.0
@@ -184,7 +184,7 @@ def test_fit_gain_and_rel_error_non_negative() -> None:
     rng = np.random.default_rng(1)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "y": y})
+    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
     gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"y1": 10.0})
     assert gain_d["y1"] >= 0.0
     assert alpha_d["y1"] >= 0.0

@@ -477,7 +477,7 @@ def fit_noise_model_from_residuals(
     gain_d: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        y = grp["y"].to_numpy()
+        y = grp["predicted"].to_numpy()
         adjusted = grp["resid_raw"].to_numpy() ** 2 - (rel_error * y) ** 2
         # OLS: adjusted = sigma_read^2 + gain * y  →  x_mat = [1, y]
         x_mat = np.column_stack([np.ones_like(y), y])
@@ -512,7 +512,7 @@ def fit_gain_and_rel_error_from_residuals(
     rel_error_d: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        y = grp["y"].to_numpy()
+        y = grp["predicted"].to_numpy()
         floor = sigma_floor.get(lbl_str, 0.0)
         adjusted = grp["resid_raw"].to_numpy() ** 2 - floor**2
         # No-intercept OLS: adjusted = gain * y + c * y^2

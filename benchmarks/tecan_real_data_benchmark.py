@@ -48,7 +48,7 @@ import click
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting.core import weight_multi_ds_calibrated
+from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.prtecan.prtecan import Titration
@@ -300,7 +300,14 @@ def _fit_real_curve_with_titration(
 
     if combination.weighting == "calibrated":
         datasets = {fit_well: tit._create_global_ds(fit_well) for fit_well in sorted(tit.fit_keys)}  # noqa: SLF001
-        noise_params = weight_multi_ds_calibrated(datasets, is_ph=tit.is_ph)
+
+        # Determine known background floor for anchoring
+        sigma_floor = {}
+        for lbl in tit.bg_noise:
+            arr = tit.bg_noise[lbl]
+            sigma_floor[str(lbl)] = float(np.nanmean(arr)) if np.any(np.isfinite(arr)) else 0.0
+
+        _, noise_params = fgls_plate_fit(datasets, is_ph=tit.is_ph, sigma_floor=sigma_floor)
         label_names = sorted(combination.channels)
         tit.params.noise_alpha = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[2] for label in label_names)
         tit.params.noise_gain = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[1] for label in label_names)

@@ -1353,7 +1353,7 @@ def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
 
     bg_noise: dict[int, float] | None = None
     if hasattr(tit, "bg_noise") and tit.bg_noise:
-        bg_noise = {lbl: float(np.mean(v)) for lbl, v in tit.bg_noise.items()}
+        bg_noise = tit.bg_noise
     return plot_qc_span_vs_center(
         data,
         center=center,

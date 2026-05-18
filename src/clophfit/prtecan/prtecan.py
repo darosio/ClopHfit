@@ -27,13 +27,10 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc_multi,
     x_true_from_trace_df,
 )
-from clophfit.fitting.core import (
-    fit_binding_glob,
-    weight_da,
-    weight_multi_ds_titration,
-)
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
 from clophfit.fitting.diagnostics import detect_bad_wells
+from clophfit.fitting.error_models import ComprehensiveErrorModel
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
@@ -969,17 +966,17 @@ class Buffer:
         self._bg_err = value
 
     @property
-    def bg_noise(self) -> dict[int, ArrayF]:
-        """List of intrinsic well noise (RMSE/pooled SD) values."""
+    def bg_noise(self) -> dict[int, float]:
+        """Intrinsic well noise (RMSE/pooled SD) values."""
         buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
         noise = {}
         noise_col = "fit_noise" if self.tit.params.bg_mth == "fit" else "mean_noise"
         for label, bdf in buffers.items():
             if bdf.empty:
-                noise[label] = np.array([])
+                noise[label] = 0.0
             else:
                 # noise is a scalar per label for the whole dataset
-                noise[label] = np.repeat(bdf[noise_col].iloc[0], len(bdf))
+                noise[label] = float(bdf[noise_col].iloc[0])
         return noise
 
     def _compute_bg_and_sd(self) -> tuple[dict[int, ArrayF], dict[int, ArrayF]]:
@@ -1466,14 +1463,15 @@ class Titration(TecanfilesGroup):
                 if bg_multiplier is not None:
                     floor_values = self.bg_err.get(label)
                     if floor_values is None or np.asarray(floor_values).size == 0:
-                        floor_values = self.bg_noise.get(label)
-                    if floor_values is not None:
+                        floor = self.bg_noise.get(label)
+                    else:
                         floor = float(np.nanmean(np.asarray(floor_values, dtype=float)))
-                        if (
-                            np.isfinite(floor)
-                            and float(np.nanmean(valid_y)) < bg_multiplier * floor
-                        ):
-                            discard_well = True
+
+                    if floor is not None and (
+                        np.isfinite(floor)
+                        and float(np.nanmean(valid_y)) < bg_multiplier * floor
+                    ):
+                        discard_well = True
 
                 if (
                     smoothness_threshold is not None
@@ -1590,8 +1588,8 @@ class Titration(TecanfilesGroup):
         self._reset_data_and_results()
 
     @property
-    def bg_noise(self) -> dict[int, ArrayF]:
-        """List of intrinsic well noise (RMSE/pooled SD) values."""
+    def bg_noise(self) -> dict[int, float]:
+        """Intrinsic well noise (RMSE/pooled SD) values."""
         return self.buffer.bg_noise
 
     def __repr__(self) -> str:
@@ -2058,33 +2056,34 @@ class Titration(TecanfilesGroup):
             if self.params.noise_gain and label_idx < len(self.params.noise_gain)
             else 1.0
         )
-        signal = gain * np.maximum(1.0, y)
-        if self.bg_err:
-            y_errc = np.sqrt(signal + self.bg_err[label] ** 2)
-        else:
-            y_errc = np.sqrt(signal)
-        if self.params.noise_alpha and label_idx < len(self.params.noise_alpha):
-            alpha = self.params.noise_alpha[label_idx]
-            y_errc = np.sqrt(y_errc**2 + (alpha * np.abs(y)) ** 2)
+        sigma_read = self.bg_err[label] if self.bg_err else 0.0
+        alpha = (
+            self.params.noise_alpha[label_idx]
+            if self.params.noise_alpha and label_idx < len(self.params.noise_alpha)
+            else 0.0
+        )
+
+        error_model = ComprehensiveErrorModel(
+            sigma_read=sigma_read, gain=gain, rel_error=alpha
+        )
+
+        # Calculate errors using the unified ErrorModel.
+        # Ensure variance is at least 1.0 to avoid division by zero in weighting
+        var = error_model.compute_variance(y)
+        var = np.maximum(1.0, var)
+
+        y_errc = np.sqrt(var)
         return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def _create_ds(self, key: str, label: int) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
-        ds = Dataset({f"{label}": da}, is_ph=self.is_ph)
-        # Apply weighting if bg_err is not provided
-        if not self.bg_err:
-            weight_da(da, is_ph=ds.is_ph)
-        return ds
+        return Dataset({f"{label}": da}, is_ph=self.is_ph)
 
     def _create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
         data_arrays_dict = {f"y{i}": self._create_data_array(key, i) for i in self.data}
-        ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
-        # Apply multi-dataset weighting if bg_err is not provided
-        if not self.bg_err:
-            weight_multi_ds_titration(ds)
-        return ds
+        return Dataset(data_arrays_dict, is_ph=self.is_ph)
 
     def _compute_odr_fit(self, key: str) -> FitResult[OdrResult]:
         """Compute global ODR fit for a single key.

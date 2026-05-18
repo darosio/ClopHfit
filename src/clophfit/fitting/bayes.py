@@ -12,6 +12,7 @@ import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
+import pymc.math  # type: ignore[import-untyped]
 import pytensor.tensor as pt
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
@@ -31,6 +32,80 @@ if typing.TYPE_CHECKING:
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prtecan import PlateScheme
+
+
+def get_pymc_noise_priors(
+    labels: list[str],
+    model_type: Literal["constant", "proportional", "comprehensive"],
+    bg_noise: dict[int, float] | None = None,
+    ye_scaling: float = 1.0,
+    n_buf: int = 1,
+) -> dict[str, typing.Any]:
+    """Create PyMC priors for the specified error model.
+
+    Returns a dictionary of priors that can be passed to ``get_pymc_variance``.
+    """
+    priors: dict[str, typing.Any] = {}
+    if model_type == "constant":
+        priors["ye_mag"] = {
+            lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=ye_scaling) for lbl in labels
+        }
+    elif model_type in {"proportional", "comprehensive"}:
+        est_sigma = {}
+        if bg_noise:
+            for i, lbl in enumerate(labels, start=1):
+                est_sigma[lbl] = float(bg_noise[i])
+        else:
+            for lbl in labels:
+                est_sigma[lbl] = 10.0  # Fallback
+
+        # Without raw arrays, assume a reasonable number of buffer points (~4 per buffer)
+        n_pts = 4 if bg_noise else 1
+        dof = max(1, n_pts * n_buf - 2)
+        rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+
+        priors["floor"] = {
+            lbl: pm.Normal(
+                f"floor_{lbl}", mu=est_sigma[lbl], sigma=rel_sigma * est_sigma[lbl]
+            )
+            for lbl in labels
+        }
+
+        if model_type == "comprehensive":
+            priors["gain"] = {lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels}
+            priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.04)
+        else:
+            priors["rel_error"] = {
+                lbl: pm.HalfNormal(f"rel_error_{lbl}", sigma=0.2) for lbl in labels
+            }
+    return priors
+
+
+def get_pymc_variance(
+    mu: pm.math.TensorVariable,
+    label: str,
+    model_type: Literal["constant", "proportional", "comprehensive"],
+    priors: dict[str, typing.Any],
+    y_errc: np.ndarray | None = None,
+) -> pm.math.TensorVariable:
+    """Construct the PyMC symbolic variance based on the chosen error model."""
+    if model_type == "constant":
+        if y_errc is None:
+            msg = "y_errc must be provided for constant error model"
+            raise ValueError(msg)
+        return (priors["ye_mag"][label] * y_errc) ** 2
+
+    y_pos = pm_math.maximum(1e-6, mu)
+    floor_sq = priors["floor"][label] ** 2
+
+    if model_type == "comprehensive":
+        return (
+            floor_sq
+            + priors["gain"][label] * y_pos
+            + (priors["rel_error"] * y_pos) ** 2
+        )
+    # Proportional
+    return floor_sq + (priors["rel_error"][label] * y_pos) ** 2
 
 
 __all__ = [
@@ -773,7 +848,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
     sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
-    bg_noise: dict[int, ArrayF] | None = None,
+    bg_noise: dict[int, float] | None = None,
     sample_ppc: bool = False,
     infer_gain: bool = False,
     robust: bool = False,
@@ -807,7 +882,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         hierarchical shrinkage.  The spread of K posteriors across replicates
         then quantifies between-replicate accuracy.  If False (default), all
         replicates of the same CTR share a single K.
-    bg_noise : dict[int, ArrayF] | None
+    bg_noise : dict[int, float] | None
         Background noise for each signal band. If provided, uses heteroscedastic
         noise model combining buffer and signal, ignoring `ye_scaling`.
     sample_ppc : bool
@@ -890,42 +965,18 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
             well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
+        model_type: Literal["constant", "proportional", "comprehensive"]
         if bg_noise is None:
-            ye_mag: dict[str, pm.Distribution] = {
-                label: pm.HalfNormal(f"ye_mag_{label}", sigma=ye_scaling)
-                for label in labels
-            }
+            model_type = "constant"
+        elif infer_gain:
+            model_type = "comprehensive"
         else:
-            est_sigma = {
-                lbl: float(np.sqrt(np.mean(np.array(bg_noise[i]) ** 2)))
-                for i, lbl in enumerate(labels, start=1)
-            }
+            model_type = "proportional"
 
-            # Prior width matched to degrees of freedom of the empirical noise estimate
-            n_pts = len(bg_noise[1]) if bg_noise else 1
-            n_buf = len(scheme.buffer) if scheme.buffer else 1
-            dof = max(1, n_pts * n_buf - 2)
-            rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
-
-            floor = {
-                lbl: pm.Normal(
-                    f"floor_{lbl}", mu=est_sigma[lbl], sigma=rel_sigma * est_sigma[lbl]
-                )
-                for lbl in labels
-            }
-            floor_sq = {lbl: floor[lbl] ** 2 for lbl in labels}
-
-            if infer_gain:
-                gain_rv: dict[str, pm.Distribution] = {
-                    lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels
-                }
-                rel_error_common: pm.Distribution = pm.HalfNormal(
-                    "rel_error", sigma=0.04
-                )
-            else:
-                rel_error: dict[str, pm.Distribution] = {
-                    lbl: pm.HalfNormal(f"rel_error{lbl}", sigma=0.2) for lbl in labels
-                }
+        n_buf = len(scheme.buffer) if scheme.buffer else 1
+        noise_priors = get_pymc_noise_priors(
+            labels, model_type, bg_noise, ye_scaling, n_buf
+        )
 
         for key, r in results.items():
             if r.result and r.dataset:
@@ -953,18 +1004,15 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
                         is_ph=ds_well.is_ph,
                     )
 
-                    if bg_noise is None:
-                        sigma_val = ye_mag[lbl] * da.y_err
+                    noise_var = get_pymc_variance(
+                        y_model, lbl, model_type, noise_priors, da.y_err
+                    )
+
+                    if model_type == "constant":
+                        sigma_val = (
+                            noise_var**0.5
+                        )  # Since constant returns variance=sigma^2
                     else:
-                        y_pos = pm_math.maximum(1e-6, y_model)
-                        if infer_gain:
-                            noise_var = (
-                                floor_sq[lbl]
-                                + gain_rv[lbl] * y_pos
-                                + (rel_error_common * y_pos) ** 2
-                            )
-                        else:
-                            noise_var = floor_sq[lbl] + (rel_error[lbl] * y_pos) ** 2
                         sigma_obs = pm.Deterministic(
                             f"sigma_obs_{lbl}_{key}",
                             pm_math.sqrt(noise_var),
