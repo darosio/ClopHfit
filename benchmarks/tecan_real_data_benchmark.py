@@ -51,7 +51,7 @@ import pandas as pd
 from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.models import binding_1site
-from clophfit.prtecan.prtecan import Titration
+from clophfit.prtecan import Titration
 from clophfit.testing.fitter_test_utils import (
     TecanFitCombination,
     TecanWeighting,

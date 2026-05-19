@@ -16,19 +16,15 @@ Please consult the documentation for each function in this module for more
 detailed information on their operation and use.
 """
 
-from clophfit.prtecan.prtecan import (
-    Buffer,
-    BufferFit,
+from .models import (
     Labelblock,
     LabelblocksGroup,
-    Metadata,
     PlateScheme,
-    TecanConfig,
     Tecanfile,
     TecanfilesGroup,
-    Titration,
-    TitrationConfig,
-    TitrationResults,
+)
+from .parsers import (
+    Metadata,
     calculate_conc,
     dilution_correction,
     extract_metadata,
@@ -36,6 +32,14 @@ from clophfit.prtecan.prtecan import (
     merge_md,
     read_xls,
     strip_lines,
+)
+from .titration import (
+    Buffer,
+    BufferFit,
+    TecanConfig,
+    Titration,
+    TitrationConfig,
+    TitrationResults,
 )
 
 __all__ = [
