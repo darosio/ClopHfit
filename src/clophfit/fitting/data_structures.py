@@ -105,14 +105,14 @@ class DataArray:
     def y_err(self) -> ArrayF:
         """Masked y_err."""
         if self.y_errc.size == 0:
-            self.y_errc = np.ones_like(self.xc)
+            self.y_errc = np.ones_like(self.yc, dtype=np.float64)
         return self.y_errc[self.mask]
 
     @y_err.setter
     def y_err(self, y_errc: ArrayF) -> None:
         """Set y_err and validate its length."""
         if y_errc.ndim == 0:
-            y_errc = np.ones_like(self.xc) * y_errc
+            y_errc = np.ones_like(self.yc, dtype=np.float64) * float(y_errc)
         self.y_errc = y_errc
         self._validate_yerrc_lengths()
 
@@ -120,14 +120,14 @@ class DataArray:
     def x_err(self) -> ArrayF:
         """Masked x_err."""
         if self.x_errc.size == 0:
-            self.x_errc = np.ones_like(self.xc)
+            self.x_errc = np.ones_like(self.xc, dtype=np.float64)
         return self.x_errc[self.mask]
 
     @x_err.setter
     def x_err(self, x_errc: ArrayF) -> None:
         """Set x_err and validate its length."""
         if x_errc.ndim == 0:
-            x_errc = np.ones_like(self.xc) * x_errc
+            x_errc = np.ones_like(self.xc, dtype=np.float64) * float(x_errc)
         self.x_errc = x_errc
         self._validate_xerrc_lengths()
 

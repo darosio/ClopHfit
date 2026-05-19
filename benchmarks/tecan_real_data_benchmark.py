@@ -228,7 +228,7 @@ def load_real_tecan_curves(
         well: sample for sample, wells in tit.scheme.names.items() for well in wells
     }
     for well in sorted(tit.fit_keys):
-        ds = tit._create_global_ds(well)  # noqa: SLF001
+        ds = tit.create_global_ds(well)  # noqa: SLF001
         curves.append(
             RealCurve(
                 well=well,
@@ -299,7 +299,7 @@ def _fit_real_curve_with_titration(
     tit.params.mcmc = mcmc_mode
 
     if combination.weighting == "calibrated":
-        datasets = {fit_well: tit._create_global_ds(fit_well) for fit_well in sorted(tit.fit_keys)}  # noqa: SLF001
+        datasets = {fit_well: tit.create_global_ds(fit_well) for fit_well in sorted(tit.fit_keys)}  # noqa: SLF001
 
         # Determine known background floor for anchoring
         sigma_floor = {}

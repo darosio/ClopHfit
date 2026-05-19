@@ -46,6 +46,7 @@ from clophfit.fitting.errors import (
 )
 from clophfit.prenspire import EnspireFile, Note
 from clophfit.prtecan import TecanConfig, Titration, calculate_conc
+from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
     from clophfit.fitting.data_structures import FitResult, MiniT
@@ -348,7 +349,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 
     # Output and export with error handling
     try:
-        tit.export_data_fit(tecan_config)
+        export_data_fit(tit, tecan_config)
     except Exception as e:
         msg = (
             f"Error during data export and fitting: {e}\n"

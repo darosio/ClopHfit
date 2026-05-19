@@ -179,7 +179,7 @@ def weight_da(da: DataArray, *, is_ph: bool) -> bool:
     mr = lmfit.minimize(_binding_1site_residuals, params, args=(ds,))
     # Calculate residuals SEM
     sem = float(np.std(mr.residual, ddof=1) / np.sqrt(len(mr.residual)))
-    da.y_err = np.full_like(da.xc, sem if np.isfinite(sem) and sem > 0 else 1.0)
+    da.y_err = np.full_like(da.yc, sem if np.isfinite(sem) and sem > 0 else 1.0)
     return True
 
 

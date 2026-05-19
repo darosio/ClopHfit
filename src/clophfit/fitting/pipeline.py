@@ -5,9 +5,12 @@ import typing
 
 import numpy as np
 
+from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.error_models import ComprehensiveErrorModel
+from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.odr import fit_binding_odr
 from clophfit.fitting.residuals import collect_multi_residuals
 from clophfit.fitting.utils import fit_gain_and_rel_error_from_residuals
 
@@ -49,7 +52,11 @@ def fgls_plate_fit(
     logger.info("Starting FGLS Pass 1: %s fit", first_pass_method)
     first_pass_results = {}
     for well, ds in datasets.items():
-        first_pass_results[well] = fit_binding_glob(ds, method=first_pass_method)
+        try:
+            first_pass_results[well] = fit_binding_glob(ds, method=first_pass_method)
+        except InsufficientDataError:
+            logger.warning("Skip FGLS Pass 1 fit for well %s.", well)
+            first_pass_results[well] = FitResult()
 
     # 2. Collect residuals for calibration
     logger.info("Starting FGLS Noise Calibration")
@@ -93,12 +100,64 @@ def fgls_plate_fit(
     )
     final_results = {}
     for well, ds in datasets.items():
-        # Inject the new model-derived weights for the full array (yc)
+        # Update ds with new variance model
         for lbl, da in ds.items():
             var = global_error_model.compute_variance(da.yc, lbl)
             var = np.maximum(1.0, var)  # avoid division by zero
             da.y_err = np.sqrt(var)
 
-        final_results[well] = fit_binding_glob(ds, method=second_pass_method)
+        try:
+            final_results[well] = fit_binding_glob(ds, method=second_pass_method)
+        except InsufficientDataError:
+            logger.warning("Skip FGLS Pass 2 fit for well %s.", well)
+            final_results[well] = FitResult()
 
     return final_results, noise_params
+
+
+def fit_plate(
+    datasets: dict[str, Dataset],
+    method: str = "lm",
+    **kwargs: typing.Any,  # noqa: ANN401
+) -> dict[str, FitResult[typing.Any]]:
+    """Run a single-pass fit on an entire plate of datasets.
+
+    Parameters
+    ----------
+    datasets : dict[str, Dataset]
+        A mapping of well keys (e.g. 'A01') to `Dataset` objects.
+    method : str
+        The fitting method to use: 'lm' (default), 'odr', or 'mcmc'.
+    **kwargs : typing.Any
+        Additional keyword arguments passed to the specific fitting function.
+
+    Returns
+    -------
+    dict[str, FitResult[typing.Any]]
+        A dictionary mapping well keys to their corresponding `FitResult`.
+    """
+    results: dict[str, FitResult[typing.Any]] = {}
+
+    if method == "odr":
+        for well, ds in datasets.items():
+            try:
+                results[well] = fit_binding_odr(ds, **kwargs)
+            except InsufficientDataError:
+                logger.warning("Skip ODR fit for well %s.", well)
+                results[well] = FitResult()
+    elif method == "mcmc":
+        for well, ds in datasets.items():
+            try:
+                results[well] = fit_binding_pymc(ds, **kwargs)
+            except InsufficientDataError:
+                logger.warning("Skip MCMC fit for well %s.", well)
+                results[well] = FitResult()
+    else:
+        for well, ds in datasets.items():
+            try:
+                results[well] = fit_binding_glob(ds, method=method, **kwargs)
+            except InsufficientDataError:
+                logger.warning("Skip fit for well %s.", well)
+                results[well] = FitResult()
+
+    return results

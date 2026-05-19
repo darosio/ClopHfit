@@ -15,6 +15,7 @@ from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equ
 
 from clophfit import prtecan
 from clophfit.fitting.data_structures import FitResult
+from clophfit.fitting.pipeline import fit_plate
 from clophfit.prtecan import (
     Buffer,
     BufferFit,
@@ -33,6 +34,11 @@ from clophfit.prtecan import (
     extract_metadata,
     merge_md,
     strip_lines,
+)
+from clophfit.prtecan.export import (
+    export_data_fit,
+    generate_combinations,
+    prepare_output_folder,
 )
 
 # Test data paths
@@ -606,19 +612,13 @@ class TestTitrationResults:
         """Create titration results fixture."""
         scheme = PlateScheme()
         scheme.names = {"sample1": {"A01"}}
-        return TitrationResults(scheme, {"A01"}, lambda _: FitResult())
+        return TitrationResults(scheme, {"A01"}, {"A01": FitResult()})
 
     def test_dataframe_property(self, titration_results: TitrationResults) -> None:
         """It creates a DataFrame from results."""
         df = titration_results.dataframe
         assert isinstance(df, pd.DataFrame)
         assert "A01" in df.index
-
-    def test_lazy_computation(self, titration_results: TitrationResults) -> None:
-        """It computes results lazily."""
-        assert not titration_results.results  # Should be empty before access
-        _ = titration_results["A01"]  # Trigger computation
-        assert "A01" in titration_results.results
 
 
 class TestTitration:
@@ -656,7 +656,7 @@ class TestTitration:
         """Test generation of parameter combinations and output folder naming."""
         # use existing list file for minimal Titration
         tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
-        combos = tit._generate_combinations()  # noqa: SLF001
+        combos = generate_combinations()
         # 2^4 boolean flags times 3 methods
         assert len(combos) == 16 * 3
         flags, method = combos[0]
@@ -670,7 +670,7 @@ class TestTitration:
         tit.params.dil = True
         tit.params.nrm = True
         tit.params.bg_mth = "fit"
-        out = tit._prepare_output_folder(tmp_path)  # noqa: SLF001
+        out = prepare_output_folder(tit, tmp_path)
         name = out.name
         assert "_bg" in name
         assert "_adj" in name
@@ -728,7 +728,7 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
     config = TecanConfig(
         out_fp=tmp_path, comb=False, lim=None, title="Test", fit=True, png=False
     )
-    tit.export_data_fit(config)
+    export_data_fit(tit, config)
 
     # Verify output files were created
     assert (tmp_path / "dat_bg_dil_nrm").exists()
@@ -759,7 +759,7 @@ def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
         png=False,
         detect_bad=False,
     )
-    tit.export_data_fit(config)
+    export_data_fit(tit, config)
 
     fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
     assert not (fit_dir / "bad_wells.csv").exists(), (
@@ -848,10 +848,7 @@ def test_buffer_empty_wells() -> None:
 def test_titration_results_empty() -> None:
     """Test TitrationResults with empty data."""
     scheme = prtecan.PlateScheme()
-    empty_results = prtecan.TitrationResults(
-        scheme=scheme, fit_keys=set(), compute_func=lambda _: FitResult()
-    )
-
+    empty_results = prtecan.TitrationResults(scheme=scheme, fit_keys=set(), results={})
     assert len(empty_results) == 0
     assert empty_results.dataframe.empty
 
@@ -1093,7 +1090,7 @@ class TestTitrationAdvanced:
             fit=False,
             png=False,
         )
-        tit_ph.export_data_fit(tecan_config)
+        export_data_fit(tit_ph, tecan_config)
         a01 = pd.read_csv(tmp_path / "dat" / "A01.dat")
         h12 = pd.read_csv(tmp_path / "dat" / "H12.dat")
         assert a01["y1"].tolist()[0::2] == [14798.0, 20142.0, 22915.0, 22060.0]
@@ -1200,33 +1197,6 @@ class TestTitrationAnalysis:
         return titan
 
     def test_fit_pipeline_order_default(self, titan: Titration) -> None:
-        """It builds the default sequential Tecan fitting pipeline."""
-        assert tuple(titan.fit_pipeline) == ("label_1", "label_2", "global", "odr")
-        assert titan.result_global is titan.fit_pipeline["global"]
-        assert titan.result_odr is titan.fit_pipeline["odr"]
-
-    def test_fit_pipeline_order_with_mcmc(self, titan: Titration) -> None:
-        """It appends the configured MCMC stage at the end of the pipeline."""
-        titan.params.mcmc = "multi-noise"
-        assert tuple(titan.fit_pipeline) == (
-            "label_1",
-            "label_2",
-            "global",
-            "odr",
-            "mcmc_multi_noise",
-        )
-        assert titan.result_multi_noise_mcmc is titan.fit_pipeline["mcmc_multi_noise"]
-        titan.params.mcmc = "None"
-
-    def test_fit_pipeline_cache_resets_on_param_change(self, titan: Titration) -> None:
-        """It clears the cached fit pipeline when analysis parameters change."""
-        _ = titan.fit_pipeline
-        assert "fit_pipeline" in titan.__dict__
-        titan.params.bg = not titan.params.bg
-        assert "fit_pipeline" not in titan.__dict__
-        titan.params.bg = not titan.params.bg
-
-    def test_scheme(self, titan: Titration) -> None:
         """It finds well position for buffer samples."""
         assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
         assert titan.buffer.wells == ["D01", "E01", "D12", "E12"]
@@ -1300,40 +1270,41 @@ class TestTitrationAnalysis:
 
     def test_fit(self, titan: Titration) -> None:
         """It fits each label separately."""
-        fres = titan.results
-        assert len(fres[1]) == 0
-        assert len(fres[2]) == 0
-        assert not fres[1]["H02"].is_valid()
-        assert fres[2]["H02"].is_valid()
-        assert len(fres[1]) == 1
-        assert len(fres[2]) == 1
-        # Check skipping fit of well 'H02' Label:1
-        assert fres[1]["H02"] == FitResult(None, None, None)
-        # Check that the first fit result dictionary has 92 elements
-        fres[1].compute_all()
-        assert len(fres[1]) == 92
-        # Check that the second fit result for 'H02' is not None
+        # Test Label 1 for H02 (should be skipped because of OVER value or insufficient points)
+        ds1 = {k: titan.create_ds(k, label=1) for k in titan.fit_keys}
+        res1 = fit_plate(ds1, method="huber")
+        assert not res1["H02"].is_valid()
+
+        # Test Label 2 for H02
+        ds2 = {k: titan.create_ds(k, label=2) for k in titan.fit_keys}
+        res2 = fit_plate(ds2, method="huber")
+        assert res2["H02"].is_valid()
+
         # Check 'K' and std error for 'H02' in the second fit result
-        assert fres[2]["H02"].result is not None
-        k_h02 = fres[2]["H02"].result.params["K"]
+        assert res2["H02"].result is not None
+        k_h02 = res2["H02"].result.params["K"]
         assert k_h02.value == pytest.approx(7.901, abs=1e-3)
         assert k_h02.stderr == pytest.approx(0.028, abs=1e-3)
-        # Check 'K' and std error for 'H02' in the third fit result
-        assert titan.result_global["H02"].result is not None
-        k_h02 = titan.result_global["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.901, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.028, abs=1e-3)
+
+        # Check 'K' and std error for 'H02' in global fit
+        ds_global = {k: titan.create_global_ds(k) for k in titan.fit_keys}
+        res_global = fit_plate(ds_global, method="huber")
+        assert res_global["H02"].result is not None
+        k_h02_glob = res_global["H02"].result.params["K"]
+        assert k_h02_glob.value == pytest.approx(7.901, abs=1e-3)
+        assert k_h02_glob.stderr == pytest.approx(0.028, abs=1e-3)
+
         # Check 'K' and std error for 'E02' in the second fit result
-        assert fres[2]["E02"].result is not None
-        k_e02 = fres[2]["E02"].result.params["K"]
+        assert res2["E02"].result is not None
+        k_e02 = res2["E02"].result.params["K"]
         assert k_e02.value == pytest.approx(7.978, abs=1e-3)
         assert k_e02.stderr == pytest.approx(0.038, abs=1e-3)
+
         # Check 'K' and std error for 'E02' in the third fit result
-        assert titan.result_global["E02"].result is not None
-        k_e02 = titan.result_global["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.997, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.170, abs=1e-3)
-        # Fit up to the second-last data point
+        assert res_global["E02"].result is not None
+        k_e02_glob = res_global["E02"].result.params["K"]
+        assert k_e02_glob.value == pytest.approx(7.997, abs=1e-3)
+        assert k_e02_glob.stderr == pytest.approx(0.170, abs=1e-3)
 
     def test_plot_buffer_with_title(self, titan: Titration) -> None:
         """It plots buffers for 2 lbg with title."""

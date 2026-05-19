@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import copy
-import itertools
 import logging
 import typing
-import warnings
 from dataclasses import dataclass, field
-from functools import cached_property, partial
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import arviz as az  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import odrpack
@@ -20,40 +16,21 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
-from clophfit.fitting.bayes import (
-    extract_fit,
-    fit_binding_pymc,
-    fit_binding_pymc_multi,
-    x_true_from_trace_df,
-)
-from clophfit.fitting.core import fit_binding_glob
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
-from clophfit.fitting.diagnostics import detect_bad_wells
+from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.error_models import ComprehensiveErrorModel
-from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.odr import fit_binding_odr, format_estimate
+from clophfit.fitting.odr import format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.residuals import (
-    collect_multi_residuals,
-    plot_residual_vs_predicted,
-    plot_residual_vs_yerr,
-    residual_statistics,
-)
 from clophfit.fitting.utils import apply_outlier_mask
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import xarray as xr
-    from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
-    from odrpack import OdrResult
-
     from clophfit.clophfit_types import ArrayF
 
 # TODO: Add tqdm progress bar
 # TODO: sort before computing to have outlier output sorted
-from .models import PlateScheme, Tecanfile, TecanfilesGroup, _extract_ctrl_cols
+from .models import PlateScheme, Tecanfile, TecanfilesGroup
 from .parsers import dilution_correction
 
 # Constants for Tecan file parsing
@@ -434,8 +411,7 @@ class TitrationResults:
 
     scheme: PlateScheme
     fit_keys: set[str]
-    compute_func: Callable[[str], FitResult[MiniT]]
-    results: dict[str, FitResult[MiniT]] = field(default_factory=dict)
+    results: dict[str, FitResult[typing.Any]] = field(default_factory=dict)
     _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
@@ -443,8 +419,7 @@ class TitrationResults:
         """Convert FitResult dictionary to a DataFrame."""
         if all(key in list(self._dataframe.index) for key in self.fit_keys):
             return self._dataframe
-        if not self.results:
-            self.compute_all()
+
         data = []
         for lbl, fr in self.results.items():
             pars = fr.result.params if fr.result else None
@@ -463,13 +438,8 @@ class TitrationResults:
         """Get or lazily compute a result for a given key."""
         return repr(self.results)
 
-    def __getitem__(self, key: str) -> FitResult[MiniT]:
-        """Get or lazily compute a result for a given key."""
-        if key not in self.results:
-            if key not in self.fit_keys:
-                msg = f"Key '{key}' is not a valid fit key."
-                raise KeyError(msg)
-            self.results[key] = self.compute_func(key)
+    def __getitem__(self, key: str) -> FitResult[typing.Any]:
+        """Fetch result for a single key."""
         return self.results[key]
 
     def __bool__(self) -> bool:
@@ -477,8 +447,7 @@ class TitrationResults:
         return bool(self.results)
 
     def __call__(self) -> None:
-        """Ensure all results are computed when called."""
-        self.compute_all()
+        """Call object to ensure all results are computed."""
 
     def __len__(self) -> int:
         """Ensure length is accurate after full computation."""
@@ -486,9 +455,6 @@ class TitrationResults:
 
     def compute_all(self) -> None:
         """Compute results for all keys."""
-        for key in self.fit_keys:
-            # Access each key to trigger computation
-            self[key]
 
     def n_sd(self, par: str = "K", expected_sd: float = 0.15) -> float:
         """Compute median of K."""
@@ -509,9 +475,10 @@ class TitrationResults:
             n_sd = 1.0
         return n_sd
 
-    def all_computed(self) -> bool:
+    @staticmethod
+    def all_computed() -> bool:
         """Check if all keys have been computed."""
-        return all(key in self.results for key in self.fit_keys)
+        return True
 
     def export_pngs(self, folder: str | Path) -> None:
         """Export all fit result plots as PNG files."""
@@ -609,7 +576,7 @@ class TitrationResults:
         return xlim
 
 
-@dataclass  # noqa: PLR0904 # Too many public methods - acceptable for complex classes
+@dataclass  # Too many public methods - acceptable for complex classes
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
@@ -726,7 +693,7 @@ class Titration(TecanfilesGroup):
         for well in candidate_wells:
             discard_well = False
             for label in label_ids:
-                ds = self._create_ds(well, label)
+                ds = self.create_ds(well, label)
                 if outlier_threshold is not None:
                     ds = apply_outlier_mask(ds, threshold=outlier_threshold)
                 y = np.asarray(ds[str(label)].y, dtype=float)
@@ -1043,286 +1010,6 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    @staticmethod
-    def _generate_combinations() -> list[tuple[tuple[bool, ...], str]]:
-        """Generate parameter combinations for export and fitting."""
-        bool_iter = itertools.product([False, True], repeat=4)
-        return [
-            (tuple(bool_combo), method)
-            for bool_combo in bool_iter
-            for method in ["mean", "meansd", "fit"]
-        ]
-
-    def _apply_combination(self, combination: tuple[tuple[bool, ...], str]) -> None:
-        """Apply a combination of parameters to the Titration."""
-        (bg, adj, dil, nrm), method = combination
-        logger.info("Params are: ........... %s", ((bg, adj, dil, nrm), method))
-        self.params.bg = bg
-        self.params.bg_adj = adj
-        self.params.dil = dil
-        self.params.nrm = nrm
-        self.params.bg_mth = method
-
-    def _prepare_output_folder(self, base_path: Path) -> Path:
-        """Prepare the output folder for a given combination of parameters."""
-        p = self.params
-        sbg = "_bg" if p.bg else ""
-        sadj = "_adj" if p.bg_adj else ""
-        sdil = "_dil" if p.dil else ""
-        snrm = "_nrm" if p.nrm else ""
-        sfit = "_fit" if p.bg_mth == "fit" else ""
-        smeansd = "_1sd" if p.bg_mth == "meansd" else ""
-        subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit + smeansd
-        subfolder = base_path / subfolder_name
-        subfolder.mkdir(parents=True, exist_ok=True)
-        return subfolder
-
-    def _run_pre_fit_detection(self, subfolder: Path) -> None:
-        """Detect and discard bad wells before fitting; write discarded_wells.txt."""
-        discards = self.detect_and_discard_bad_wells()
-        if discards:
-            logger.info("Pre-fit bad-well detection: discarding %s", discards)
-            (subfolder / "discarded_wells.txt").write_text(
-                "\n".join(sorted(discards)) + "\n", encoding="utf-8"
-            )
-
-    def _export_fit(self, subfolder: Path, config: TecanConfig) -> None:
-        outfit = subfolder / "fit"
-        outfit.mkdir(parents=True, exist_ok=True)
-        export_list = self._ordered_result_sets()
-        for i, results in enumerate(export_list):
-            png_dir = outfit / f"lb{i}"
-            data_dir = png_dir / "ds"
-            # Iterate keys one-by-one: write each well's PNG+data immediately
-            # after its fit completes, before moving on to the next well.
-            for key in results.fit_keys:
-                fr = results[key]
-                if config.png:
-                    if fr.figure:
-                        png_dir.mkdir(parents=True, exist_ok=True)
-                        fr.figure.savefig(png_dir / f"{key}.png")
-                    if fr.dataset:
-                        data_dir.mkdir(parents=True, exist_ok=True)
-                        fr.dataset.export(data_dir / f"{key}.csv")
-            # Aggregate outputs require all wells to be done first
-            fit = results.dataframe
-            fit.sort_index().to_csv(outfit / f"ffit{i}.csv")
-            title = config.title + f"lb:{i}"
-            f = results.plot_k(xlim=config.lim, title=title)
-            f.savefig(outfit / f"K{i}.png")
-            self._export_residuals(outfit, results.results, i)
-        # Write trace files after all per-well results are exported so that
-        # lb0-lb3 stream without waiting for the MCMC to complete.
-        if self.params.mcmc == "multi-noise":
-            self._export_noise_extras(outfit)
-        elif self.params.mcmc == "multi-noise-xrw":
-            self._export_noise_xrw_extras(outfit)
-        # Post-fit bad-well summary from global fit results
-        if config.detect_bad:
-            self._export_bad_wells(outfit)
-
-    def export_data_fit(self, tecan_config: TecanConfig) -> None:
-        """Export dat files [x,y1,..,yN] from copy of self.data.
-
-        Creates data files for fitting with columns [x, y1, y2, ...].
-
-        Parameters
-        ----------
-        tecan_config : TecanConfig
-            Configuration object with export options.
-        """
-
-        def write(
-            x: ArrayF, data: dict[int, dict[str, ArrayF]], out_folder: Path
-        ) -> None:
-            """Write datasets to CSV files in the specified output folder.
-
-            Creates CSV files for each well in the format [x, y1, y2, ...].
-
-            Parameters
-            ----------
-            x : ArrayF
-                Concentration or pH values (independent variable).
-            data : dict[int, dict[str, ArrayF]]
-                Dictionary mapping label indices to well data dictionaries.
-            out_folder : Path
-                Output directory for the CSV files.
-            """
-            if any(data):
-                out_folder.mkdir(parents=True, exist_ok=True)
-                columns = ["x"] + [f"y{i}" for i in data]
-                first_label = next(iter(self.labelblocksgroups.keys()))
-                for key in data[first_label]:
-                    dat = np.vstack((x, [data[i][key] for i in data]))
-                    datxy = pd.DataFrame(dat.T, columns=columns)
-                    datxy.to_csv(out_folder / f"{key}.dat", index=False)
-
-        if tecan_config.comb:
-            saved_p = copy.copy(self.params)
-            combinations = self._generate_combinations()
-            for combination in combinations:
-                self._apply_combination(combination)
-                subfolder = self._prepare_output_folder(tecan_config.out_fp)
-                write(self.x, self.data, subfolder)
-                if tecan_config.fit:
-                    if tecan_config.detect_bad:
-                        self._run_pre_fit_detection(subfolder)
-                    self._export_fit(subfolder, tecan_config)
-            self.params = saved_p
-        else:
-            subfolder = self._prepare_output_folder(tecan_config.out_fp)
-            write(self.x, self.data, subfolder)
-            if tecan_config.fit:
-                if tecan_config.detect_bad:
-                    self._run_pre_fit_detection(subfolder)
-                self._export_fit(subfolder, tecan_config)
-
-    # TODO: test cases are:
-    # 1) len(w)>1 from buffer
-    # 2) len(w)=1 from weight_multi_ds_titration() with/out masked da
-    """
-    def export_data_fit(self, tecan_config: TecanConfig) -> None:
-        ""\"Export data files [x, y1, ..., yN] and optionally perform fit exports.""\"
-        def write_data(
-            x: ArrayF, datasets: list[dict[str, ArrayF]], output_folder: Path
-        ) -> None:
-            "\""Write datasets to `.dat` files in the specified output folder.""\"
-            if not datasets:
-                return  # No data to write
-            output_folder.mkdir(parents=True, exist_ok=True)
-            columns = ["x"] + [f"y{i}" for i in range(1, len(datasets) + 1)]
-            for key in datasets[0]:
-                # Stack x and y datasets vertically and save as DataFrame
-                data_matrix = np.vstack((x, [dataset[key] for dataset in datasets]))
-                data_df = pd.DataFrame(data_matrix.T, columns=columns)
-                data_df.to_csv(output_folder / f"{key}.dat", index=False)
-        def process_combination(combination: dict, base_output_path: Path) -> None:
-            ""\"Apply a combination and export its data and fit results.""\"
-            self._apply_combination(combination)
-            output_folder = self._prepare_output_folder(base_output_path)
-            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
-            if tecan_config.fit:
-                self._export_fit(output_folder, tecan_config)
-        # Export combinations or default data
-        if tecan_config.comb:
-            saved_params = copy.copy(self.params)  # Save current parameters
-            combinations = self._generate_combinations()  # Generate all combinations
-            for combination in combinations:
-                process_combination(combination, tecan_config.out_fp)
-            self.params = saved_params  # Restore saved parameters
-        else:
-            output_folder = self._prepare_output_folder(tecan_config.out_fp)
-            write_data(self.x, [dataset for dataset in self.data if dataset], output_folder)
-            if tecan_config.fit:
-                self._export_fit(output_folder, tecan_config)
-    """
-
-    @property
-    def results(self) -> dict[int, TitrationResults]:
-        """Fit results for all single titration dataset."""
-        if "results" not in self.__dict__:
-            self._ensure_bad_wells_detected()
-            fittings = {}
-            for label, dat in enumerate(self.data, start=1):
-                if dat:
-                    fit = TitrationResults(
-                        self.scheme,
-                        self.fit_keys,
-                        partial(self._compute_fit, label=label),
-                    )
-                    fittings[label] = fit
-            self.__dict__["results"] = fittings
-        return typing.cast("dict[int, TitrationResults]", self.__dict__["results"])
-
-    @property
-    def result_global(self) -> TitrationResults:
-        """Perform global fitting lazily."""
-        if "result_global" not in self.__dict__:
-            self._ensure_bad_wells_detected()
-            self.__dict__["result_global"] = TitrationResults(
-                self.scheme, self.fit_keys, self._compute_global_fit
-            )
-        return typing.cast("TitrationResults", self.__dict__["result_global"])
-
-    @cached_property
-    def result_odr(self) -> TitrationResults:
-        """Perform global ODR fitting."""
-        return TitrationResults(self.scheme, self.fit_keys, self._compute_odr_fit)
-
-    @cached_property
-    def fit_pipeline(self) -> dict[str, TitrationResults]:
-        """Ordered registry of fitting stages for the current titration analysis."""
-        pipeline = {
-            f"label_{label}": results for label, results in sorted(self.results.items())
-        }
-        pipeline["global"] = self.result_global
-        pipeline["odr"] = self.result_odr
-        mcmc_stage = self._mcmc_stage_result()
-        if mcmc_stage is not None:
-            stage_name, stage_results = mcmc_stage
-            pipeline[stage_name] = stage_results
-        return pipeline
-
-    def _mcmc_stage_result(self) -> tuple[str, TitrationResults] | None:
-        """Return the configured MCMC stage, if any."""
-        stage_map = {
-            "single": ("mcmc_single", self.result_mcmc),
-            "multi": ("mcmc_multi", self.result_multi_mcmc),
-            "multi-noise": ("mcmc_multi_noise", self.result_multi_noise_mcmc),
-            "multi-noise-xrw": (
-                "mcmc_multi_noise_xrw",
-                self.result_multi_noise_xrw_mcmc,
-            ),
-        }
-        return stage_map.get(self.params.mcmc)
-
-    def _ordered_result_sets(self) -> list[TitrationResults]:
-        """Return fit result collections in execution/export order."""
-        return list(self.fit_pipeline.values())
-
-    def _fit(self, ds: Dataset) -> FitResult[Minimizer]:
-        """Call fit_binding_glob with parameters from current config."""
-        method_map: dict[str, tuple[str, str | None]] = {
-            "lm": ("lm", None),
-            "huber": ("huber", None),
-            "irls": ("lm", "irls"),
-        }
-        method, reweight = method_map.get(self.params.fit_method, ("huber", None))
-        return fit_binding_glob(
-            ds,
-            method=method,
-            reweight=reweight,
-            remove_outliers=self.params.outlier,
-        )
-
-    def _compute_fit(self, key: str, label: int) -> FitResult[Minimizer]:
-        """Compute individual dataset fit for a single key."""
-        try:
-            ds = self._create_ds(key, label)
-            if self.params.mask_outliers:
-                ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
-            return self._fit(ds)
-        except InsufficientDataError:
-            logger.warning("Skip fit for well %s for Label:%s.", key, label)
-            return FitResult()
-
-    def _compute_global_fit(self, key: str) -> FitResult[Minimizer]:
-        """Compute global fit for a single key.
-
-        The physics-based errors from ``_create_data_array`` already encode
-        heteroscedasticity (y1 ~2-6x noisier than y2).  The fitting method
-        is controlled by ``TitrationConfig.fit_method`` (default: Huber loss).
-        """
-        try:
-            ds = self._create_global_ds(key)
-            print(ds)
-            if self.params.mask_outliers:
-                ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
-            return self._fit(ds)
-        except InsufficientDataError:
-            logger.warning("Skipping global fit for well %s.", key)
-            return FitResult()
-
     def _create_data_array(self, key: str, label: int) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
@@ -1351,394 +1038,15 @@ class Titration(TecanfilesGroup):
         y_errc = np.sqrt(var)
         return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
-    def _create_ds(self, key: str, label: int) -> Dataset:
+    def create_ds(self, key: str, label: int) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
         return Dataset({f"{label}": da}, is_ph=self.is_ph)
 
-    def _create_global_ds(self, key: str) -> Dataset:
+    def create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
         data_arrays_dict = {f"y{i}": self._create_data_array(key, i) for i in self.data}
         return Dataset(data_arrays_dict, is_ph=self.is_ph)
-
-    def _compute_odr_fit(self, key: str) -> FitResult[OdrResult]:
-        """Compute global ODR fit for a single key.
-
-        if not self.result_global[key]:
-            logger.warning(
-                f"Global fitting results for {key} are empty. ODR fitting skipped."
-            )
-        """
-        result_glob = self.result_global[key]
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always", RuntimeWarning)  # Catch RuntimeWarnings
-            try:
-                result_odr = fit_binding_odr(result_glob)
-            except Exception:
-                logger.exception("Error during ODR fitting for well '%s'", key)
-                result_odr = FitResult()
-            # Log any warnings captured during the process
-            for warn in caught_warnings:
-                if issubclass(warn.category, RuntimeWarning):
-                    logger.warning("Warning for well '%s': %s", key, warn.message)
-        return result_odr
-
-    @cached_property
-    def result_mcmc(self) -> TitrationResults:
-        """Perform global MCMC fitting."""
-        # FIXME: 0.15 vs. 0.05
-        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
-        return TitrationResults(
-            self.scheme,
-            self.fit_keys,
-            partial(
-                self._compute_mcmc_fit,
-                n_sd=n_sd,
-                n_samples=self.params.n_mcmc_samples,
-                nuts_sampler=self.params.nuts_sampler,
-            ),
-        )
-
-    def _compute_mcmc_fit(
-        self,
-        key: str,
-        n_sd: float,
-        n_samples: int = 2000,
-        nuts_sampler: str = "default",
-    ) -> FitResult[xr.DataTree]:
-        """Compute global MCMC fit for a single key."""
-        logger.info("Starting PyMC sampling for key: %s", key)
-        try:  # FIXME: Global vs. ODR
-            result_pymc = fit_binding_pymc(
-                self.result_global[key],
-                n_sd=n_sd,
-                n_xerr=1,
-                n_samples=n_samples,
-                nuts_sampler=nuts_sampler,
-            )
-        except ImportError:
-            raise
-        except Exception:
-            logger.exception("Error during MCMC sampling for key: %s", key)
-            result_pymc = FitResult()  # empty result
-        finally:
-            logger.info("MCMC fitting completed for well: %s", key)
-        return result_pymc
-
-    @cached_property
-    def result_multi_trace(self) -> tuple[xr.DataTree, pd.DataFrame]:
-        """Perform global MCMC fitting and x_true."""
-        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
-        results = self.result_global.results
-        trace = fit_binding_pymc_multi(
-            results,
-            self.scheme,
-            n_sd=n_sd,
-            n_samples=self.params.n_mcmc_samples,
-            nuts_sampler=self.params.nuts_sampler,
-            ctr_free_k=self.params.ctr_free_k,
-        )
-        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
-        da_true = x_true_from_trace_df(trace_df)
-        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame({
-            "filenames": filenames,
-            "x": da_true.x,
-            "x_err": da_true.x_err,
-        }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
-
-    @cached_property
-    def result_multi_trace2(self) -> tuple[xr.DataTree, pd.DataFrame]:
-        """Perform global MCMC fitting and x_true."""
-        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
-        results = self.result_global.results
-        trace = fit_binding_pymc_multi(
-            results, self.scheme, bg_noise=self.bg_noise, n_sd=n_sd
-        )
-        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
-        da_true = x_true_from_trace_df(trace_df)
-        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame({
-            "filenames": filenames,
-            "x": da_true.x,
-            "x_err": da_true.x_err,
-        }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
-
-    @cached_property
-    def result_multi_noise(self) -> tuple[xr.DataTree, pd.DataFrame]:
-        """Perform global MCMC fitting with learned per-label noise model."""
-        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info("n_sd[Global] estimated for MCMC fitting: %.3f", n_sd)
-        results = dict(self.result_global.results)
-        trace = fit_binding_pymc_multi(
-            results,
-            self.scheme,
-            n_sd=n_sd,
-            n_samples=self.params.n_mcmc_samples,
-            bg_noise=self.bg_noise,
-        )
-        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
-        da_true = x_true_from_trace_df(trace_df)
-        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame({
-            "filenames": filenames,
-            "x": da_true.x,
-            "x_err": da_true.x_err,
-        }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
-
-    @cached_property
-    def result_multi_noise_xrw(self) -> tuple[xr.DataTree, pd.DataFrame]:
-        """Perform global MCMC with noise model and per-well pH random walk."""
-        n_sd = self.result_global.n_sd(par="K", expected_sd=0.15)
-        logger.info("n_sd[Global] estimated for MCMC XRW fitting: %.3f", n_sd)
-        results = dict(self.result_global.results)
-        trace = fit_binding_pymc_multi(
-            results,
-            self.scheme,
-            n_sd=n_sd,
-            n_samples=self.params.n_mcmc_samples,
-            bg_noise=self.bg_noise,
-            x_error_model="random_walk",
-            nuts_sampler=self.params.nuts_sampler,
-            ctr_free_k=self.params.ctr_free_k,
-        )
-        trace_df = typing.cast("pd.DataFrame", az.summary(trace, fmt="wide"))
-        trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
-        da_true = x_true_from_trace_df(trace_df)
-        filenames = [tf.path.stem + tf.path.suffix for tf in self.tecanfiles]
-        pd.DataFrame({
-            "filenames": filenames,
-            "x": da_true.x,
-            "x_err": da_true.x_err,
-        }).to_csv("list_x_true.csv", index=False, header=False)
-        return trace, trace_df
-
-    @cached_property
-    def result_multi_mcmc(self) -> TitrationResults:
-        """Perform global MCMC fitting and x_true."""
-        return TitrationResults(
-            scheme=self.scheme,
-            fit_keys=self.fit_keys,
-            compute_func=partial(self._compute_multi_mcmc_fit),
-        )
-
-    @cached_property
-    def result_multi_noise_mcmc(self) -> TitrationResults:
-        """Perform multi-well MCMC with learned noise model, return per-well results."""
-        return TitrationResults(
-            scheme=self.scheme,
-            fit_keys=self.fit_keys,
-            compute_func=partial(self._compute_multi_noise_fit),
-        )
-
-    @cached_property
-    def result_multi_noise_xrw_mcmc(self) -> TitrationResults:
-        """Perform multi-well MCMC with noise model + per-well pH random walk."""
-        return TitrationResults(
-            scheme=self.scheme,
-            fit_keys=self.fit_keys,
-            compute_func=partial(self._compute_multi_noise_xrw_fit),
-        )
-
-    @staticmethod
-    def _export_residuals(
-        outfit: Path,
-        fit_results: dict[str, FitResult[MiniT]],
-        index: int,
-    ) -> None:
-        """Save per-well residuals, statistics, and diagnostic plots alongside fit results.
-
-        Writes the following files into *outfit*:
-
-        - ``residuals_{index}.csv``: all weighted/raw residuals per well and label
-        - ``residual_stats_{index}.csv``: mean, std, median, MAD, outlier count by label
-        - ``residual_vs_predicted_{index}.png``: |standardized residual| vs predicted signal
-        - ``residual_vs_yerr_{index}.png``: raw residual² vs assigned y_err²
-
-        Parameters
-        ----------
-        outfit : Path
-            Output directory (the ``fit/`` subfolder).
-        fit_results : dict[str, FitResult[MiniT]]
-            Per-well fit results (already computed).
-        index : int
-            Export slot index used to distinguish multiple result sets.
-        """
-        try:
-            all_res = collect_multi_residuals(fit_results)
-        except (ValueError, KeyError):
-            return
-        all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)
-        stats = residual_statistics(all_res)
-        stats.to_csv(outfit / f"residual_stats_{index}.csv")
-        label = str(index)
-        fig_pred = plot_residual_vs_predicted(all_res, title=label)
-        fig_pred.savefig(outfit / f"residual_vs_predicted_{index}.png", dpi=150)
-        fig_yerr = plot_residual_vs_yerr(all_res, title=label)
-        fig_yerr.savefig(outfit / f"residual_vs_yerr_{index}.png", dpi=150)
-
-    def _export_bad_wells(self, outfit: Path) -> None:
-        """Write bad_wells.csv from post-fit quality checks on the global fit.
-
-        Reads ``result_global.dataframe``, runs :func:`detect_bad_wells`, and
-        writes ``bad_wells.csv`` into *outfit*.  Wells flagged by any criterion
-        are listed first (sorted by ``flag_count`` descending).
-
-        Parameters
-        ----------
-        outfit : Path
-            Output directory (the ``fit/`` subfolder).
-        """
-        ffit = self.result_global.dataframe.reset_index()
-        if ffit.empty or "K" not in ffit.columns:
-            logger.debug("_export_bad_wells: global ffit has no K column — skipping")
-            return
-        k_min = _PH_K_MIN if self.is_ph else 0.0
-        k_max = _PH_K_MAX if self.is_ph else float("inf")
-        ctr_cols = _extract_ctrl_cols(self.scheme)
-        flags = detect_bad_wells(
-            ffit,
-            k_min=k_min,
-            k_max=k_max,
-            is_ph=self.is_ph,
-            ctr_cols=ctr_cols,
-        )
-        flags.to_csv(outfit / "bad_wells.csv", index=False)
-        n_flagged = int(flags["flag_any"].sum())
-        logger.info(
-            "_export_bad_wells: %d/%d wells flagged → %s",
-            n_flagged,
-            len(flags),
-            outfit / "bad_wells.csv",
-        )
-
-    def _export_noise_extras(self, outfit: Path) -> None:
-        """Save the noise-model trace and shared parameters for multi-noise MCMC.
-
-        Writes two files into *outfit*:
-
-        - ``trace_multi_noise.nc``: full ``xr.DataTree`` in NetCDF format
-          (can be reloaded with ``az.from_netcdf``).
-        - ``shared_noise_params.csv``: arviz summary (mean, sd, HDI 94%) for
-          the per-label noise parameters (``alpha_*``, ``gain_*``,
-          ``sigma_read_*``) and group-level K parameters.
-
-        Parameters
-        ----------
-        outfit : Path
-            Directory where the files are written (created by ``_export_fit``).
-        """
-        trace, trace_df = self.result_multi_noise
-
-        trace.to_netcdf(str(outfit / "trace_multi_noise.nc"))
-        logger.info("Saved MCMC trace to %s", outfit / "trace_multi_noise.nc")
-
-        shared_prefixes = (
-            "alpha_",
-            "gain_",
-            "sigma_read_",
-            "x_true",
-            "x_diff",
-            "x_start",
-        )
-        group_k_names = {f"K_{name}" for name in self.scheme.names}
-        mask = trace_df.index.map(
-            lambda n: n.startswith(shared_prefixes) or n in group_k_names
-        )
-        shared_df = trace_df.loc[mask]
-        shared_df.to_csv(outfit / "shared_noise_params.csv")
-        logger.info(
-            "Saved shared noise parameters to %s", outfit / "shared_noise_params.csv"
-        )
-
-    def _export_noise_xrw_extras(self, outfit: Path) -> None:
-        """Save the xrw noise-model trace and shared parameters.
-
-        Writes into *outfit*:
-
-        - ``trace_multi_noise_xrw.nc``: full ``xr.DataTree`` in NetCDF.
-        - ``shared_noise_xrw_params.csv``: arviz summary for noise/gain/alpha
-          parameters, group-level K values, ``sigma_pip``, and the global
-          ``x_true`` / ``x_diff`` / ``x_start`` pH steps.  Per-well
-          ``x_per_well`` is omitted here — it is stored in the per-well
-          dataset files under ``lb4/ds/``.
-
-        Parameters
-        ----------
-        outfit : Path
-            Directory where the files are written (created by ``_export_fit``).
-        """
-        trace, trace_df = self.result_multi_noise_xrw
-
-        trace.to_netcdf(str(outfit / "trace_multi_noise_xrw.nc"))
-        logger.info("Saved XRW MCMC trace to %s", outfit / "trace_multi_noise_xrw.nc")
-
-        shared_prefixes = (
-            "alpha_",
-            "gain_",
-            "sigma_read_",
-            "sigma_pip",
-            "x_true",
-            "x_diff",
-            "x_start",
-        )
-        group_k_names = {f"K_{name}" for name in self.scheme.names}
-        if self.params.ctr_free_k:
-            # Flat free-CTR mode: no shared K hyperparams — per-well K values
-            # are already in ffit*.csv via extract_fit; nothing extra to export.
-            group_k_names = set()
-        mask = trace_df.index.map(
-            lambda n: n.startswith(shared_prefixes) or n in group_k_names
-        )
-        shared_df = trace_df.loc[mask]
-        shared_df.to_csv(outfit / "shared_noise_xrw_params.csv")
-        logger.info(
-            "Saved shared XRW parameters to %s",
-            outfit / "shared_noise_xrw_params.csv",
-        )
-
-    def _compute_multi_mcmc_fit(self, key: str) -> FitResult[xr.DataTree]:
-        """Compute individual dataset fit for a single key."""
-        ctr = self.get_scheme_name(key, self.scheme.names)
-        ds = self.result_global[key].dataset
-        if ds:
-            return extract_fit(key, ctr, self.result_multi_trace[1], ds)
-        return FitResult()
-
-    def _compute_multi_noise_fit(self, key: str) -> FitResult[xr.DataTree]:
-        """Compute per-well fit from the noise-model MCMC trace."""
-        ctr = self.get_scheme_name(key, self.scheme.names)
-        ds = self.result_global[key].dataset
-        if ds:
-            return extract_fit(key, ctr, self.result_multi_noise[1], ds)
-        return FitResult()
-
-    def _compute_multi_noise_xrw_fit(self, key: str) -> FitResult[xr.DataTree]:
-        """Compute per-well fit from the noise+random-walk MCMC trace."""
-        ctr = self.get_scheme_name(key, self.scheme.names)
-        ds = self.result_global[key].dataset
-        if ds:
-            return extract_fit(
-                key, ctr, self.result_multi_noise_xrw[1], ds, well_key=key
-            )
-        return FitResult()
-
-    @staticmethod
-    def get_scheme_name(key: str, scheme_map: dict[str, set[str]]) -> str:
-        """Extract ctr name."""
-        for scheme, keys in scheme_map.items():
-            if key in keys:
-                return scheme
-        return ""
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups.
