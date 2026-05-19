@@ -3,6 +3,223 @@
 
 # Changelog
 
+## [0.13.0] - 2026-05-19
+
+### 🚀 Features
+
+- *(tecan)* Improve loggings and warnings
+- *(tecan)* Mcmc delta pH as TruncatedNormal
+- *(tecan)* Multi mcmc with scheme return not only trace
+- *(tecan)* Drop emcee fit
+- Add logging_config
+- *(tecan)* Pymc_odr
+- *(tecan)* Pymc_odr use exact xc not x_true
+- *(tecan)* Add Reweighted LS and glob IRLS
+- *(tecan)* Add ye_mag for each label
+- *(tecan)* Add result_multi_mcmc (#1000)
+- New pymc_multi and outlier2 fit (#1025)
+- Enhance CLI error handling
+- *(fitting)* Add residuals analysis module and bayes robustness fixes
+- *(benchmarks)* Final fitting method comparison
+- *(benchmarks)* Comprehensive fitting method comparison
+- *(bayes)* Add fit_binding_pymc_multi_noise with learned noise model
+- *(cli)* Add --mcmc multi-noise option for noise-aware MCMC fitting
+- *(prtecan)* Export trace NetCDF and shared noise params for multi-noise MCMC
+- *(prtecan)* Auto-export residual CSVs alongside fit results
+- *(residuals)* Add diagnostic plots exported alongside fit results
+- *(bayes)* Add fit_binding_pymc_multi_noise_xrw with per-well pH random walk
+- *(bayes)* Add --nuts-sampler CLI option with GPU support and clear import errors
+- *(bayes)* Use per-well x_per_well for lb4 xrw .dat/.png export
+- *(cli)* Rationalize ppr tecan options and add --fit-method/--outlier
+- *(bayes)* Add --ctr-free-k hierarchical CTR replicate K
+- *(cli)* Add --mcmc-samples option and outlier/sampler comparison scripts
+- *(scripts)* Test outlier zscore at 3.0, 2.5, and 2.0 thresholds
+- *(scripts)* Extend compare to L1/L3; document α estimation analysis
+- *(prtecan)* Add --noise-alpha for proportional noise correction
+- Add mcmc_multi_noise_xrw_free_ctr mode and noise calibration helpers
+- *(fitting)* Add detect_bad_wells() in diagnostics module
+- *(diagnostics)* Add detect_bad_wells_from_dat() and ppr detect-bad-wells CLI
+- *(tecan)* Extend benchmark runner
+- *(tecan)* Add factorized Tecan registry
+- *(tecan)* Add real data benchmark
+- Add mcmc noise plots and detect and discard bad wells
+- *(fitting)* Add robust options to consolidated multi mcmc
+- *(fitting)* Add buffer bg_noise as sigma_read estimate
+- Add outlier masking, bad-well detection, and infer_gain support
+
+### 🐛 Bug Fixes
+
+- *(tecan)* Typing in pymc ODR fit
+- *(tecan)* Tutorial
+- Empty result when mcmc fails
+- *(tecan)* Returned FitResult ds
+- *(tecan)* Global fit test
+- Renovate configuration file
+- Logger for outliers in glob_reweighted
+- Yanked click 8.2.2
+- Cruft-update
+- *(ci)* Remove .rej files in cruft-update workflow
+- *(prtecan)* Switch global fit from outlier2 to Huber-loss WLS
+- *(prtecan)* Stream per-well PNG+data export as each fit completes
+- *(prtecan)* Move noise-extras export after per-well loop to restore streaming
+- *(bayes)* Disable progressbar for JAX vectorized chain_method
+- *(plot)* Sort wells within each CTR group in K{i}.png top panel
+- *(bayes)* Handle None stderr in weighted_stats and n_sd
+- *(scripts)* Capture ppr exit code via temp file, not SIGPIPE-prone pipeline
+- Typing error
+- Guard against NaN z-scores in outlier2 for zero-noise datasets
+- *(bayes)* Fix zip length mismatch in fit_binding_pymc_multi_noise_xrw
+- *(bayes)* Replace hierarchical CTR K with flat per-well priors in ctr_free_k mode
+- Lmfit covariance edge case in test
+- Make type|xdoc after diagnostic
+- *(bayes,synthetic,tests)* Resolve pre-commit lint issues from new CTR K init and tecan error model
+- Set optimizer=fast_compile in PYTENSOR_FLAGS to prevent nutpie kernel limit
+- Set JAX_PLATFORM_NAME=cpu to prevent GPU OOM with blackjax/numpyro
+- Accept underscores in --mcmc option (e.g. multi_noise_xrw)
+- Update plot_ppc_well variable names to match new likelihood naming conventions
+- *(docs)* Update notebooks and plotting.py for arviz 1.x API
+- Plot_qc_mean_vs_std after Arviz 1.x
+- Detect and discard logic
+
+### 🚜 Refactor
+
+- *(tecan)* Redesign Titration fit; results as cached_property
+- *(tecan)* Add TitrationResults remove Plotter and print_fitting
+- *(tecan)* Removed verbose from cli
+- *(tecan)* Create dataset (any number)
+- *(tecan)* Dict (with label as key) for data, results, bg
+- *(tecan)* Simplify plot_k and dataframes export
+- *(tecan)* Pymc removing priors with cov
+- *(tecan)* Core data structure in data.py
+- *(tecan)* Pymc_many_scheme
+- *(tecan)* Fit_binding_pymc_multi
+- Logger config
+- Rename binding to fitting
+- *(tecan)* Move plot_fit into plotting
+- *(fitting)* Move out ODR
+- *(fitting)* Move out PyMC
+- *(fitting)* Rename fitting -> core
+- FitResult and scipy-stubs (#1035)
+- Improve prtecan error handling and validation
+- Improve fit_bayes test coverage
+- The logger; add tests for tecan
+- Dilution correction and removed redundant tests
+- Add benchmarks to compare fit and error models
+- Merge refactor_benchmark branch
+- Remove redundant fit; improve synthetic data
+- Ds.plot() make_dataset
+- Bayes tests and add transitive deps
+- *(odr)* Switch ODR backend to odrpack and add shared utils
+- *(fitting)* [**breaking**] Unify fit_binding_glob with method/reweight/remove_outliers params
+- *(fitting)* Remove redundant wls and iterative fit methods
+- Remove outlier2, recursive, reweighted because redundant
+- Fit-combination registry
+- *(fitting)* Consodidate odr and single mcmc
+- *(fitting)* Remove redundant functions
+- Plot_qc_mean_vs_std
+- Clean uo bayes
+- Decouple error modeling and orchestrator, fix pipeline tests
+
+### 📚 Documentation
+
+- Fix prtecan tutorial
+- Add back ReadTheDocs
+- Try fix RtD
+- Add pdf and epub to RtD
+- Try not using requirements.txt
+- Update readme to cruft template
+- Improve documentation for core fitting models
+- Devel
+- Fix make docs warnings and errors
+- Add expand prtecan docstrings
+- *(todo)* Record L2/L4 fit-method and MCMC comparison conclusions
+- *(todo)* Update fit-method tables with L1/L3 results (all 4 plates)
+- *(todo)* Add L1 MCMC results; buffer well contamination findings; correct xrw assessment
+- Further adjust tutorial after Arviz 1.x
+
+### 🎨 Styling
+
+- Consistent test dependency requirements
+
+### 🧪 Testing
+
+- For fitting
+- Few prtecan edge cases" (#1109)
+- Remove duplicate prtecan test classes
+
+### 🦾 Build
+
+- *(deps)* Bump pymc from <=5.18.2 to 6.0.0
+- *(deps)* Bump codecov/codecov-action from 5.0.7 to v5.5.1
+- *(deps)* Bump ruff from <=0.8.1 to <=0.11.10
+- *(deps)* Bump coverage[toml] from <=7.6.8 to <=7.8.1
+- *(deps)* Bump commitizen from <=4.0.0 to <=4.8.1
+- *(deps)* Bump numpy from <=2.1.3 to <=2.2.3
+- *(pre-commit)* Update hooks
+- *(deps)* Bump hatch from 1.13.0 to 1.14.1
+- *(deps)* Bump matplotlib from <=3.9.3 to 3.10.9
+- *(deps)* Update pydata-sphinx-theme requirement
+- Update ruff codes in pyproject
+- *(deps)* Bump mypy from <=1.13.0 to <=1.15.0
+- *(deps)* Update types-setuptools
+- *(deps)* Bump click from <=8.1.7 to 8.3.1
+- *(deps)* Bump nbsphinx from <=0.9.5 to <=0.9.7
+- *(deps)* Update sphinx-autodoc-typehints
+- *(deps)* Bump scipy from <=1.14.1 to 1.17.1
+- *(deps)* Bump pygments from <=2.18.0 to <=2.19.1
+- *(deps)* Bump pre-commit from <=4.0.1 to <=4.2.0
+- *(deps)* Bump pip from 24.3.1 to 25.1.1
+- Drop ruff-lsp
+- Remove isort from toml
+- Add uv to hatch
+- Lint with npm prettier
+- *(deps)* Bump sphinx from <=8.1.3 to <=8.2.3
+- *(deps)* Bump pytest from <=8.3.4 to <=8.3.5
+- *(deps)* Bump arviz from <=0.20.0 to 0.23.4
+- *(deps)* Bump pandas-stubs from <=2.2.3.241126 to <=2.2.3.250308
+- *(deps)* Bump lmfit from <=1.3.2 to 1.3.4
+- Add uv.lock
+- Fix python version for default hatch env
+- Adopt .venv and auto update uv.lock
+- *(deps)* Bump actions/setup-python from 4 to v6
+- Update renovate lint and release (#936)
+- *(deps)* Bump python Docker tag to v3.13 (#940)
+- *(deps)* Bump sympy from 1.13.3 to 1.14.0
+- *(deps)* Bump pandas from 2.2.3 to 3.0.3
+- *(deps)* Bump xlrd from 2.0.1 to 2.0.2
+- Drop py3.10
+- *(deps)* Bump actions/download-artifact from v4 to v7
+- *(deps)* Bump actions/checkout from v4 to v6
+- *(deps)* Bump actions/upload-pages-artifact from v3 to v4
+- *(deps)* Bump git-cliff from 2.10.0 to 2.10.1
+- *(deps)* Bump coverage from 7.10.6 to 7.10.7
+- Add cruft
+- Cruft update
+- Drop Python 3.11
+- *(deps)* Bump astral-sh/setup-uv from v6 to v7
+- *(deps)* Bump peter-evans/create-pull-request from v7 to v8
+- *(deps)* Bump actions/cache from v4 to v5
+- *(deps)* Bump python Docker tag to v3.14 (#1121)
+- Manual cruft upgrade
+- Manual cruft update
+- *(deps)* Bump tqdm from 4.67.1 to 4.67.3
+- Manual cruft update to autoapi docs
+
+### 🐙 CI/CD
+
+- Add back pre-commit.ci to autofix uv lock with yanked pkgs
+- *(fix)* Pre-commit.ci autofix labl
+- Drop hatch; improve release
+- *(fix)* Cruft-update
+- Add `uv lock --upgrade` into renovate
+- Cruft manages workflows and docs/dev/lint/test deps
+- Test temporary downgrade in cookiecutter
+- Fix cruft-update
+- Fix cruft-update uv lock error
+- Manual update typos in pre-commit-config
+- Skip slow real-data benchmark in default CI
+- Cruft manual update
+
 ## v0.12.0 (2024-12-03)
 
 ### Feat
