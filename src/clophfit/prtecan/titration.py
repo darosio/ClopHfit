@@ -1048,6 +1048,33 @@ class Titration(TecanfilesGroup):
         data_arrays_dict = {f"y{i}": self._create_data_array(key, i) for i in self.data}
         return Dataset(data_arrays_dict, is_ph=self.is_ph)
 
+    def create_dataset_dict(self, label: int | None = None) -> dict[str, Dataset]:
+        """Create a dictionary of datasets for all fit_keys, optionally masking outliers.
+
+        Parameters
+        ----------
+        label : int | None, optional
+            Specific label to extract. If None, creates global datasets containing
+            all labels. Default is None.
+
+        Returns
+        -------
+        dict[str, Dataset]
+            A dictionary mapping well keys to their corresponding Datasets.
+        """
+        ds_dict = {}
+        for key in sorted(self.fit_keys):
+            if label is None:
+                ds_dict[key] = self.create_global_ds(key)
+            else:
+                ds_dict[key] = self.create_ds(key, label)
+        if self.params.mask_outliers:
+            for key, ds in ds_dict.items():
+                ds_dict[key] = apply_outlier_mask(
+                    ds, threshold=self.params.outlier_threshold
+                )
+        return ds_dict
+
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups.
 

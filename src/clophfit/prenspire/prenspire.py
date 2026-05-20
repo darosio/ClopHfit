@@ -15,7 +15,7 @@ import pandas as pd
 import pyparsing
 
 from clophfit import __enspire_out_dir__
-from clophfit.prtecan import lookup_listoflines
+from clophfit.utils import lookup_listoflines
 
 # MAYBE: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 

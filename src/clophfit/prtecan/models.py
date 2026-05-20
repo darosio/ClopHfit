@@ -19,13 +19,16 @@ if TYPE_CHECKING:
 
 # TODO: Add tqdm progress bar
 # TODO: sort before computing to have outlier output sorted
+from clophfit.utils import (
+    lookup_listoflines,
+    read_xls,
+    strip_lines,
+)
+
 from .parsers import (
     Metadata,
     extract_metadata,
-    lookup_listoflines,
     merge_md,
-    read_xls,
-    strip_lines,
 )
 
 # Constants for Tecan file parsing

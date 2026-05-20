@@ -38,9 +38,9 @@ def configure_logging(
     # Get appropriate log level
     verbosity = min(max(verbose + 1, 0), 3) if not quiet else 0
     log_level = level_mapping.get(verbosity, logging.ERROR)
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Capture all messages, filter via handlers
+    # Configure namespace logger
+    logger = logging.getLogger("clophfit")
+    logger.setLevel(logging.DEBUG)  # Capture all messages, filter via handlers
 
     # --- Idempotent configuration: check existing handlers
     def has_handler_of_type(
@@ -71,7 +71,7 @@ def configure_logging(
 
     # File handler (optional, if not already added) - always at DEBUG level to capture everything
     if log_file and not has_handler_of_type(
-        root_logger, RotatingFileHandler, match_file=log_file
+        logger, RotatingFileHandler, match_file=log_file
     ):
         file_handler = RotatingFileHandler(log_file, maxBytes=10**6, backupCount=3)
         file_handler.setLevel(logging.DEBUG)
@@ -80,7 +80,7 @@ def configure_logging(
             datefmt="%Y-%m-%d %H:%M",
         )
         file_handler.setFormatter(file_formatter)
-        root_logger.addHandler(file_handler)
+        logger.addHandler(file_handler)
 
     # Console handler (if verbosity > 0 or interactive)
     if verbosity > 0 or (sys.stderr.isatty() and verbose == 0):
@@ -88,12 +88,13 @@ def configure_logging(
         console_handler.setLevel(log_level)
         console_formatter = logging.Formatter(fmt="[%(levelname)-8s]  %(message)s")
         console_handler.setFormatter(console_formatter)
-        root_logger.addHandler(console_handler)
+        logger.addHandler(console_handler)
 
-    # Automatically set propagate=True for all clophfit loggers
-    logger_dict = logging.Logger.manager.loggerDict
-    for name in logger_dict:
-        if name.startswith("clophfit."):
-            logging.getLogger(name).propagate = True
-    # Capture warnings as logs
+    # We configured 'clophfit' logger. We don't need to iterate over all loggers anymore.
+    # But if someone wants warnings, we can capture them.
     logging.captureWarnings(capture=True)
+    warnings_logger = logging.getLogger("py.warnings")
+    if not has_handler_of_type(warnings_logger, logging.StreamHandler):
+        # Only add to warnings if not already handled
+        # Typically warnings shouldn't be spammed if quiet, but let's let python handle it
+        pass

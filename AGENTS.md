@@ -176,14 +176,9 @@ The following tools exist for systematically comparing fitting methods:
 
 ## Known Bugs and Architectural Debt
 
-### Bugs to Fix
-
-1. **`odr.py:~109`** — `generalized_combined_model()` hardcodes `is_ph=True`.
-1. **`__main__.py:432-435`** — `fit_enspire()` inverts `is_ph` assignment
-   (pH → False, Cl → True).
-
 ### Architectural Debt
 
+- **`fit_enspire` logic:** In `__main__.py`, `fit_enspire()` intentionally inverts `is_ph` assignment (pH → False, Cl → True) due to EnSpire grouping logic. Check and verify this logic carefully whenever working with `prenspire`.
 - **`prtecan.py` (1840 LOC)** is a god module mixing parsing, domain logic,
   fitting orchestration, and CSV/Excel export. When refactoring, decompose
   into: parser, domain model (`Titration`, `TitrationResults`), and

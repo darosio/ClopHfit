@@ -16,6 +16,12 @@ Please consult the documentation for each function in this module for more
 detailed information on their operation and use.
 """
 
+from clophfit.utils import (
+    lookup_listoflines,
+    read_xls,
+    strip_lines,
+)
+
 from .models import (
     Labelblock,
     LabelblocksGroup,
@@ -28,10 +34,7 @@ from .parsers import (
     calculate_conc,
     dilution_correction,
     extract_metadata,
-    lookup_listoflines,
     merge_md,
-    read_xls,
-    strip_lines,
 )
 from .titration import (
     Buffer,

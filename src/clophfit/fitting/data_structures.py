@@ -355,6 +355,7 @@ class Dataset(UserDict[str, DataArray]):
         *,
         title: str | None = None,
         ax: Axes | None = None,
+        colors: dict[str, str] | None = None,
     ) -> Figure:
         """Plot the dataset with error bars.
 
@@ -364,6 +365,9 @@ class Dataset(UserDict[str, DataArray]):
             Plot title.
         ax : Axes | None
             Axes to plot on. If None, creates a new figure.
+        colors : dict[str, str] | None
+            Optional dictionary mapping labels to matplotlib color strings.
+            Defaults to {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}.
 
         Returns
         -------
@@ -375,7 +379,9 @@ class Dataset(UserDict[str, DataArray]):
         else:
             fig = cast("Figure", ax.get_figure())
 
-        colors = {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}
+        if colors is None:
+            colors = {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}
+
         for label, da in self.items():
             color = colors.get(label)
             ax.errorbar(
