@@ -110,7 +110,7 @@ def detect_bad_wells_cmd(
 ) -> None:
     """Flag unreliable wells from raw .dat files in DATA_DIR.
 
-    Reads every *.dat file (one per well, columns: x, y1[, y2, ...]) and
+    Reads every `*.dat` file (one per well, columns: x, 1[, 2, ...]) and
     reports wells with very low signal or flat curves across all labels.
     No fitting is required.
 
@@ -157,8 +157,8 @@ def detect_bad_wells_cmd(
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
-@click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label (y1, y2, ...). Adds alpha^2*signal^2 to y_err^2. Obtain from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).")  # fmt: skip
-@click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label (y1, y2, ...). Replaces hardcoded gain=1 in shot-noise term: y_err^2=gain*signal+bg_err^2+(alpha*signal)^2. Obtain from MCMC multi-noise shared_noise_params.csv (gain_y1, gain_y2).")  # fmt: skip
+@click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label. Adds proportional term to y_err variance. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
+@click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label. Replaces hardcoded gain=1 in shot-noise term. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
 @click.option("--discard-bad-wells/--no-discard-bad-wells", default=True, show_default=True, help="Automatically detect and discard bad wells before fitting.")  # fmt: skip

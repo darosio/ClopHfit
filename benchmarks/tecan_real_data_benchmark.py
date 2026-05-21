@@ -4,12 +4,12 @@ Quick start
 -----------
 Use this script when you want to compare fitting workflows on real wells,
 not synthetic data. The most useful default comparison is dual-channel
-`y1+y2`, because it lets you compare the joint fit against single-channel
+`1+2`, because it lets you compare the joint fit against single-channel
 alternatives with the same wells and samples.
 
 Recommended progression:
 1. Smoke run on a few wells with `--skip-loo` to confirm filters and outputs.
-2. Small informative run with `--channel y1+y2` and LOO enabled.
+2. Small informative run with `--channel 1+2` and LOO enabled.
 3. Broader run across all realizations of the same sample so that paired,
    win-rate, and agreement summaries compare like with like.
 
@@ -24,7 +24,7 @@ Suggested first informative command:
   --additions-file tests/Tecan/140220/additions.pH \
   --scheme-file tests/Tecan/140220/scheme.txt \
   --sample G03 \
-  --channel y1+y2 \
+  --channel 1+2 \
   --final-stage huber \
   --final-stage odr \
   --loo-max-points 3 \
@@ -113,7 +113,7 @@ def resolve_output_paths(output_dir: Path | None) -> dict[str, Path]:
 
 
 def _normalize_channel_groups(channels: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
-    """Convert CLI channel strings like 'y1+y2' into channel tuples."""
+    """Convert CLI channel strings like '1+2' into channel tuples."""
     if not channels:
         return (("y1",), ("y2",), ("y1", "y2"))
     groups: list[tuple[str, ...]] = []
@@ -753,7 +753,7 @@ def paired_metric_agreement(
 @click.option("--include-mcmc/--no-include-mcmc", default=False, show_default=True)
 @click.option("--max-wells", type=int, default=None)
 @click.option("--sample", "samples", multiple=True)
-@click.option("--channel", "channels", multiple=True, help="Repeatable. Use y1, y2, or y1+y2.")
+@click.option("--channel", "channels", multiple=True, help="Repeatable. Use y1, y2, or 1+2.")
 @click.option("--final-stage", "final_stages", multiple=True)
 @click.option("--weighting", "weightings", multiple=True)
 @click.option("--skip-loo", is_flag=True, default=False)

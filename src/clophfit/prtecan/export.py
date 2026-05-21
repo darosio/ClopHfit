@@ -171,10 +171,10 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
 def export_data_fit(titration: Titration, tecan_config: TecanConfig) -> None:
     """Export dat files [x,y1,..,yN] from copy of titration.data."""
 
-    def write(x: ArrayF, data: dict[int, dict[str, ArrayF]], out_folder: Path) -> None:
+    def write(x: ArrayF, data: dict[str, dict[str, ArrayF]], out_folder: Path) -> None:
         if any(data):
             out_folder.mkdir(parents=True, exist_ok=True)
-            columns = ["x"] + [f"y{i}" for i in data]
+            columns = ["x"] + [str(i) for i in data]
             first_label = next(iter(titration.labelblocksgroups.keys()))
             for key in data[first_label]:
                 dat = np.vstack((x, [data[i][key] for i in data]))

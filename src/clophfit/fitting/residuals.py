@@ -94,7 +94,7 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
     >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"y1": da}, is_ph=True)
+    >>> dataset = Dataset({"1": da}, is_ph=True)
     >>> fr = fit_binding_glob(dataset)
     >>> residuals = extract_residual_points(fr)
     >>> len(residuals) > 0
@@ -158,7 +158,7 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"y1": da}, is_ph=True)
+    >>> dataset = Dataset({"1": da}, is_ph=True)
     >>> fr = fit_binding_glob(dataset)
     >>> df = residual_dataframe(fr)
     >>> "label" in df.columns and "x" in df.columns
@@ -194,7 +194,7 @@ def collect_multi_residuals(
     >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"y1": da}, is_ph=True)
+    >>> dataset = Dataset({"1": da}, is_ph=True)
     >>> results = {"A01": fit_binding_glob(dataset), "A02": fit_binding_glob(dataset)}
     >>> all_res = collect_multi_residuals(results)
     >>> "well" in all_res.columns
@@ -236,7 +236,7 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"y1": da}, is_ph=True)
+    >>> dataset = Dataset({"1": da}, is_ph=True)
     >>> results = {"A01": fit_binding_glob(dataset)}
     >>> all_res = collect_multi_residuals(results)
     >>> stats = residual_statistics(all_res)
@@ -293,7 +293,7 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
     >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"y1": da}, is_ph=True)
+    >>> dataset = Dataset({"1": da}, is_ph=True)
     >>> fr = fit_binding_glob(dataset)
     >>> checks = validate_residuals(fr, verbose=False)
     >>> isinstance(checks, dict) and "bias_ok" in checks

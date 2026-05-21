@@ -72,4 +72,4 @@ def multi_dataset() -> Dataset:
     y1 = np.array([1.90909091, 1.5, 1.09090909])
     # y2: example reference curve for K=7, S0=0, S1=1
     y2 = np.array([0.09090909, 0.5, 0.90909091])
-    return Dataset({"y1": DataArray(x, y1), "y2": DataArray(x, y2)}, is_ph=True)
+    return Dataset({"1": DataArray(x, y1), "2": DataArray(x, y2)}, is_ph=True)

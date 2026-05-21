@@ -37,7 +37,7 @@ if typing.TYPE_CHECKING:
 def get_pymc_noise_priors(
     labels: list[str],
     model_type: Literal["constant", "proportional", "comprehensive"],
-    bg_noise: dict[int, float] | None = None,
+    bg_noise: dict[str, float] | None = None,
     ye_scaling: float = 1.0,
     n_buf: int = 1,
 ) -> dict[str, typing.Any]:
@@ -53,8 +53,8 @@ def get_pymc_noise_priors(
     elif model_type in {"proportional", "comprehensive"}:
         est_sigma = {}
         if bg_noise:
-            for i, lbl in enumerate(labels, start=1):
-                est_sigma[lbl] = float(bg_noise[i])
+            for lbl in labels:
+                est_sigma[lbl] = float(bg_noise[lbl])
         else:
             for lbl in labels:
                 est_sigma[lbl] = 10.0  # Fallback
@@ -848,7 +848,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
     sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
-    bg_noise: dict[int, float] | None = None,
+    bg_noise: dict[str, float] | None = None,
     sample_ppc: bool = False,
     infer_gain: bool = False,
     robust: bool = False,
@@ -882,7 +882,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         hierarchical shrinkage.  The spread of K posteriors across replicates
         then quantifies between-replicate accuracy.  If False (default), all
         replicates of the same CTR share a single K.
-    bg_noise : dict[int, float] | None
+    bg_noise : dict[str, float] | None
         Background noise for each signal band. If provided, uses heteroscedastic
         noise model combining buffer and signal, ignoring `ye_scaling`.
     sample_ppc : bool

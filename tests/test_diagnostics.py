@@ -269,12 +269,12 @@ def dat_dir(tmp_path: Path) -> str:
     """Create a minimal plate with 4 wells: 2 good, 1 low-signal, 1 flat."""
     wells = {
         # Good wells: strong signal, clear dynamic range
-        "A02": "x,y1,y2\n8,100,200\n7,90,190\n6,50,120\n5,10,30\n",
-        "B02": "x,y1,y2\n8,110,210\n7,95,195\n6,55,130\n5,15,35\n",
+        "A02": "x,1,2\n8,100,200\n7,90,190\n6,50,120\n5,10,30\n",
+        "B02": "x,1,2\n8,110,210\n7,95,195\n6,55,130\n5,15,35\n",
         # Low-signal: ~1% of plate median (should fire flag_low_signal)
-        "G12": "x,y1,y2\n8,1.0,0.5\n7,1.1,0.6\n6,0.9,0.4\n5,0.8,0.3\n",
+        "G12": "x,1,2\n8,1.0,0.5\n7,1.1,0.6\n6,0.9,0.4\n5,0.8,0.3\n",
         # Flat curve: no dynamic range in y1 (should fire flag_flat_curve)
-        "H05": "x,y1,y2\n8,500,200\n7,499,190\n6,500,120\n5,501,30\n",
+        "H05": "x,1,2\n8,500,200\n7,499,190\n6,500,120\n5,501,30\n",
     }
     for name, content in wells.items():
         (tmp_path / f"{name}.dat").write_text(content)
@@ -326,10 +326,10 @@ def test_from_dat_ctr_cols_logged(dat_dir: str) -> None:
 
 def test_from_dat_empty_series_flagged(tmp_path: Path) -> None:
     """Header-only .dat files must be treated as bad wells instead of crashing."""
-    (tmp_path / "A01.dat").write_text("x,y1,y2\n8,100,200\n7,90,190\n")
-    (tmp_path / "A02.dat").write_text("x,y1,y2\n")
-    (tmp_path / "A03.dat").write_text("x,y1,y2\n8,101,199\n7,91,191\n")
-    (tmp_path / "A04.dat").write_text("x,y1,y2\n8,102,202\n7,89,188\n")
+    (tmp_path / "A01.dat").write_text("x,1,2\n8,100,200\n7,90,190\n")
+    (tmp_path / "A02.dat").write_text("x,1,2\n")
+    (tmp_path / "A03.dat").write_text("x,1,2\n8,101,199\n7,91,191\n")
+    (tmp_path / "A04.dat").write_text("x,1,2\n8,102,202\n7,89,188\n")
 
     flags = detect_bad_wells_from_dat(tmp_path)
 

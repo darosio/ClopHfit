@@ -57,7 +57,7 @@ def test_leave_one_out_rmse_returns_finite_value_for_realistic_synthetic_curve()
     dataset, _truth = make_dataset(seed=42, randomize_signals=True, error_model="tecan")
     combination = TecanFitCombination(
         name="y2_huber_auto",
-        channels=("y2",),
+        channels=("2",),
         prefit="huber",
         final_stage="huber",
         weighting="auto",
@@ -74,7 +74,7 @@ def test_leave_one_out_rmse_honors_max_points() -> None:
     dataset, _truth = make_dataset(seed=7, randomize_signals=True, error_model="tecan")
     combination = TecanFitCombination(
         name="y2_huber_auto",
-        channels=("y2",),
+        channels=("2",),
         prefit="huber",
         final_stage="huber",
         weighting="auto",
@@ -102,7 +102,7 @@ def test_run_real_data_benchmark_supports_filters_and_skip_loo(tmp_path: Path) -
         output_csv=output_csv,
         max_wells=2,
         samples=("G03",),
-        channels=("y1+y2",),
+        channels=("1+2",),
         final_stages=("huber",),
         skip_loo=True,
     )
@@ -110,7 +110,7 @@ def test_run_real_data_benchmark_supports_filters_and_skip_loo(tmp_path: Path) -
     assert output_csv.exists()
     assert not df.empty
     assert set(df["sample"]) == {"G03"}
-    assert set(df["channels"]) == {"y1+y2"}
+    assert set(df["channels"]) == {"1+2"}
     assert set(df["final_stage"]) == {"huber"}
     assert df["well"].nunique() <= 2
     assert df["loo_rmse"].isna().all()
@@ -132,7 +132,7 @@ def test_run_real_data_benchmark_supports_multiple_weightings_and_mcmc_stages(
         output_csv=output_csv,
         max_wells=1,
         samples=("G03",),
-        channels=("y2", "y1+y2"),
+        channels=("2", "1+2"),
         final_stages=(
             "huber",
             "mcmc_single",
@@ -204,10 +204,10 @@ def test_resolve_output_paths_creates_named_outputs_from_one_directory(
 
 
 def test_module_docstring_mentions_y1_y2_and_output_dir_quick_start() -> None:
-    """README-style guidance should mention y1+y2 and simplified output-dir usage."""
+    """README-style guidance should mention 1+2 and simplified output-dir usage."""
     doc = MODULE.__doc__ or ""
 
-    assert "y1+y2" in doc
+    assert "1+2" in doc
     assert "--output-dir" in doc
     assert "agreement" in doc
 
@@ -217,7 +217,7 @@ def test_summarize_real_results_retains_loo_rmse_and_factor_columns() -> None:
     df = pd.DataFrame({
         "method": ["m1", "m1", "m2"],
         "sample": ["G03", "G03", "G04"],
-        "channels": ["y1", "y1", "y2"],
+        "channels": ["1", "1", "2"],
         "prefit": ["huber", "huber", "lm"],
         "final_stage": ["odr", "odr", "huber"],
         "weighting": ["auto", "auto", "none"],
@@ -234,7 +234,7 @@ def test_summarize_real_results_retains_loo_rmse_and_factor_columns() -> None:
     summary = summarize_real_results(df)
     row_m1 = summary.loc[summary["method"] == "m1"].iloc[0]
 
-    assert row_m1["channels"] == "y1"
+    assert row_m1["channels"] == "1"
     assert row_m1["prefit"] == "huber"
     assert row_m1["final_stage"] == "odr"
     assert row_m1["mean_loo_rmse"] == pytest.approx(2.5)
@@ -245,7 +245,7 @@ def test_summarize_real_factor_effects_aggregates_loo_rmse() -> None:
     """Factor summaries should average real-data metrics across levels."""
     summary_df = pd.DataFrame({
         "method": ["m1", "m2", "m3"],
-        "channels": ["y1", "y1", "y2"],
+        "channels": ["1", "1", "2"],
         "prefit": ["huber", "lm", "huber"],
         "final_stage": ["odr", "huber", "odr"],
         "weighting": ["auto", "none", "auto"],
@@ -260,13 +260,13 @@ def test_summarize_real_factor_effects_aggregates_loo_rmse() -> None:
     })
 
     effects = summarize_real_factor_effects(summary_df)
-    channels_y1 = effects.loc[
-        (effects["factor"] == "channels") & (effects["level"] == "y1")
+    channels_1 = effects.loc[
+        (effects["factor"] == "channels") & (effects["level"] == "1")
     ].iloc[0]
 
-    assert channels_y1["n_methods"] == 2
-    assert channels_y1["mean_mean_loo_rmse"] == pytest.approx(2.5)
-    assert channels_y1["mean_mean_residual_std"] == pytest.approx(1.25)
+    assert channels_1["n_methods"] == 2
+    assert channels_1["mean_mean_loo_rmse"] == pytest.approx(2.5)
+    assert channels_1["mean_mean_residual_std"] == pytest.approx(1.25)
 
 
 def test_rank_real_methods_orders_by_metric_priority() -> None:
@@ -276,7 +276,7 @@ def test_rank_real_methods_orders_by_metric_priority() -> None:
         "mean_loo_rmse": [3.0, 1.5, 2.0],
         "mean_residual_std": [1.2, 0.9, 1.1],
         "finite_fit_rate": [0.9, 0.8, 1.0],
-        "channels": ["y1", "y1+y2", "y2"],
+        "channels": ["1", "1+2", "2"],
     })
 
     ranked = rank_real_methods(summary_df, metric="mean_loo_rmse")
@@ -289,7 +289,7 @@ def test_summarize_real_interactions_aggregates_factor_pairs() -> None:
     """Interaction summaries should aggregate pairwise factor combinations."""
     summary_df = pd.DataFrame({
         "method": ["m1", "m2", "m3", "m4"],
-        "channels": ["y1", "y1", "y1+y2", "y1+y2"],
+        "channels": ["1", "1", "1+2", "1+2"],
         "final_stage": ["huber", "odr", "huber", "odr"],
         "prefit": ["huber", "huber", "lm", "lm"],
         "weighting": ["auto", "auto", "none", "none"],
@@ -306,7 +306,7 @@ def test_summarize_real_interactions_aggregates_factor_pairs() -> None:
     )
     row = interactions.loc[
         (interactions["factor_a"] == "channels")
-        & (interactions["level_a"] == "y1")
+        & (interactions["level_a"] == "1")
         & (interactions["factor_b"] == "final_stage")
         & (interactions["level_b"] == "odr")
     ].iloc[0]

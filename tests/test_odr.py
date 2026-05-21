@@ -51,7 +51,7 @@ def test_fit_binding_odr_tiny_dataset() -> None:
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     y1 = binding_1site(x, 7.0, 2.0, 1.0, is_ph=True)
     y2 = binding_1site(x, 7.0, 0.0, 1.0, is_ph=True)
-    ds = Dataset({"y1": DataArray(x, y1), "y2": DataArray(x, y2)}, is_ph=True)
+    ds = Dataset({"1": DataArray(x, y1), "2": DataArray(x, y2)}, is_ph=True)
     # Provide small errors so ODR has finite weights
     for da in ds.values():
         da.y_err = np.full_like(x, 0.05)

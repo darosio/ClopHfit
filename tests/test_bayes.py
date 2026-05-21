@@ -31,10 +31,10 @@ def lmfit_params() -> Parameters:
     params = Parameters()
     params.add("K", value=7.0, min=5.0, max=9.0)
     params["K"].stderr = 0.2
-    params.add("S0_y1", value=2.0, min=0.0, max=5.0)
-    params["S0_y1"].stderr = 0.1
-    params.add("S1_y1", value=1.0, min=0.0, max=5.0)
-    params["S1_y1"].stderr = 0.05
+    params.add("S0_1", value=2.0, min=0.0, max=5.0)
+    params["S0_1"].stderr = 0.1
+    params.add("S1_1", value=1.0, min=0.0, max=5.0)
+    params["S1_1"].stderr = 0.05
     return params
 
 
@@ -112,12 +112,12 @@ def test_create_parameter_priors_basic(lmfit_params: Parameters) -> None:
         priors = create_parameter_priors(lmfit_params, n_sd=5.0)
         # Check that all parameters are created
         assert "K" in priors
-        assert "S0_y1" in priors
-        assert "S1_y1" in priors
+        assert "S0_1" in priors
+        assert "S1_1" in priors
         # Check that they have PyMC-like attributes
         assert hasattr(priors["K"], "eval")
-        assert hasattr(priors["S0_y1"], "eval")
-        assert hasattr(priors["S1_y1"], "eval")
+        assert hasattr(priors["S0_1"], "eval")
+        assert hasattr(priors["S1_1"], "eval")
 
 
 def test_create_parameter_priors_with_key(lmfit_params: Parameters) -> None:
@@ -127,8 +127,8 @@ def test_create_parameter_priors_with_key(lmfit_params: Parameters) -> None:
         priors = create_parameter_priors(lmfit_params, n_sd=5.0, key="A01")
         # Check that parameter names include the key
         assert "K_A01" in priors
-        assert "S0_y1_A01" in priors
-        assert "S1_y1_A01" in priors
+        assert "S0_1_A01" in priors
+        assert "S1_1_A01" in priors
 
 
 def test_create_parameter_priors_no_stderr() -> None:
@@ -155,8 +155,8 @@ def test_create_parameter_priors_skip_shared_k(lmfit_params: Parameters) -> None
         # K should be skipped (not created with _A01 suffix)
         assert "K_A01" not in priors
         # But other parameters should still be created
-        assert "S0_y1_A01" in priors
-        assert "S1_y1_A01" in priors
+        assert "S0_1_A01" in priors
+        assert "S1_1_A01" in priors
 
 
 def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None:
@@ -179,14 +179,14 @@ def test_rename_keys_basic() -> None:
     """Test basic key renaming."""
     data = {
         "K_A01": 7.0,
-        "S0_y1_A01": 2.0,
-        "S1_y1_A01": 1.0,
+        "S0_1_A01": 2.0,
+        "S1_1_A01": 1.0,
     }
     result = rename_keys(data)
     assert result == {
         "K": 7.0,
-        "S0_y1": 2.0,
-        "S1_y1": 1.0,
+        "S0_1": 2.0,
+        "S1_1": 1.0,
     }
 
 
@@ -215,13 +215,13 @@ def test_rename_keys_mixed() -> None:
     """Test renaming with mixed key formats."""
     data = {
         "K_A01": 7.0,
-        "S0_y1_A01": 2.0,
+        "S0_1_A01": 2.0,
         "simple": 1.0,
         "K_B02": 7.2,
     }
     result = rename_keys(data)
     assert "K" in result
-    assert "S0_y1" in result
+    assert "S0_1" in result
     assert "simple" in result
 
 
@@ -236,11 +236,11 @@ def test_rename_keys_preserves_values() -> None:
     """Test that values are preserved during renaming."""
     data = {
         "K_A01": 7.123456,
-        "S0_y1_A01": 2.987654,
+        "S0_1_A01": 2.987654,
     }
     result = rename_keys(data)
     assert result["K"] == 7.123456
-    assert result["S0_y1"] == 2.987654
+    assert result["S0_1"] == 2.987654
 
 
 ###############################################################################
@@ -453,7 +453,7 @@ def test_rename_keys_with_underscores() -> None:
         "K_": 7.0,  # Single underscore at end
         "S0_": 2.0,
         "_K": 7.5,  # Underscore at start
-        "S0__y1": 2.5,  # Double underscore
+        "S0__1": 2.5,  # Double underscore
     }
     result = rename_keys(data)
     # Should handle these edge cases without crashing

@@ -26,7 +26,7 @@ def test_summarize_factor_effects_aggregates_by_factor_level() -> None:
     """Factor summaries should aggregate metrics across combinations per level."""
     df = pd.DataFrame({
         "method": ["m1", "m2", "m3", "m4"],
-        "channels": ["y1", "y1", "y1+y2", "y1+y2"],
+        "channels": ["1", "1", "1+2", "1+2"],
         "prefit": ["huber", "lm", "huber", "lm"],
         "final_stage": ["odr", "huber", "odr", "huber"],
         "weighting": ["auto", "none", "auto", "none"],
@@ -40,16 +40,16 @@ def test_summarize_factor_effects_aggregates_by_factor_level() -> None:
     })
 
     effects = summarize_factor_effects(df)
-    channels_y1 = effects.loc[
-        (effects["factor"] == "channels") & (effects["level"] == "y1")
+    channels_1 = effects.loc[
+        (effects["factor"] == "channels") & (effects["level"] == "1")
     ].iloc[0]
     stage_odr = effects.loc[
         (effects["factor"] == "final_stage") & (effects["level"] == "odr")
     ].iloc[0]
 
-    assert channels_y1["n_methods"] == 2
-    assert channels_y1["mean_success_rate"] == pytest.approx(0.75)
-    assert channels_y1["mean_rmse"] == pytest.approx(0.3)
+    assert channels_1["n_methods"] == 2
+    assert channels_1["mean_success_rate"] == pytest.approx(0.75)
+    assert channels_1["mean_rmse"] == pytest.approx(0.3)
     assert stage_odr["n_methods"] == 2
     assert stage_odr["mean_coverage"] == pytest.approx(0.85)
 
@@ -58,7 +58,7 @@ def test_summarize_results_retains_factor_columns() -> None:
     """Summary rows should carry factor metadata for downstream analysis."""
     df = pd.DataFrame({
         "method": ["combo_a", "combo_a", "combo_b"],
-        "channels": ["y1+y2", "y1+y2", "y1"],
+        "channels": ["1+2", "1+2", "1"],
         "prefit": ["huber", "huber", "lm"],
         "final_stage": ["odr", "odr", "lm"],
         "weighting": ["auto", "auto", "none"],
@@ -77,12 +77,12 @@ def test_summarize_results_retains_factor_columns() -> None:
     row_a = summary.loc[summary["method"] == "combo_a"].iloc[0]
     row_b = summary.loc[summary["method"] == "combo_b"].iloc[0]
 
-    assert row_a["channels"] == "y1+y2"
+    assert row_a["channels"] == "1+2"
     assert row_a["prefit"] == "huber"
     assert row_a["final_stage"] == "odr"
     assert row_a["weighting"] == "auto"
     assert row_a["outlier_handling"] == "zscore:2.5:5"
-    assert row_b["channels"] == "y1"
+    assert row_b["channels"] == "1"
     assert row_b["weighting"] == "none"
 
 

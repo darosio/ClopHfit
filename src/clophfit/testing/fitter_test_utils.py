@@ -106,7 +106,7 @@ def _combination_name(
 
 def build_factorized_tecan_fit_combinations(
     *,
-    channels: tuple[tuple[str, ...], ...] = (("y1",), ("y2",), ("y1", "y2")),
+    channels: tuple[tuple[str, ...], ...] = (("1",), ("2",), ("1", "2")),
     prefits: tuple[TecanFitMethod, ...] = ("huber",),
     final_stages: tuple[TecanFinalStage, ...] = ("huber", "odr"),
     weightings: tuple[TecanWeighting, ...] = ("auto",),
@@ -148,29 +148,29 @@ def build_tecan_fit_combinations(
 ) -> dict[str, TecanFitCombination]:
     """Build named Tecan fit combinations for paired benchmark comparisons."""
     combinations = {
-        "y1_huber": TecanFitCombination(
-            name="y1_huber",
-            channels=("y1",),
+        "1_huber": TecanFitCombination(
+            name="1_huber",
+            channels=("1",),
             prefit=base_method,
             final_stage=base_method,
         ),
-        "y2_huber": TecanFitCombination(
-            name="y2_huber",
-            channels=("y2",),
+        "2_huber": TecanFitCombination(
+            name="2_huber",
+            channels=("2",),
             prefit=base_method,
             final_stage=base_method,
         ),
-        "y1y2_huber": TecanFitCombination(
-            name="y1y2_huber",
-            channels=("y1", "y2"),
+        "12_huber": TecanFitCombination(
+            name="12_huber",
+            channels=("1", "2"),
             prefit=base_method,
             final_stage=base_method,
         ),
     }
     if include_odr:
-        combinations["y1y2_odr_from_huber"] = TecanFitCombination(
-            name="y1y2_odr_from_huber",
-            channels=("y1", "y2"),
+        combinations["12_odr_from_huber"] = TecanFitCombination(
+            name="12_odr_from_huber",
+            channels=("1", "2"),
             prefit=base_method,
             final_stage="odr",
         )
@@ -183,9 +183,9 @@ def build_tecan_fit_combinations(
         }
         for mode in mcmc_modes:
             final_stage = stage_map[mode]
-            combinations[f"y1y2_{final_stage}_from_huber"] = TecanFitCombination(
-                name=f"y1y2_{final_stage}_from_huber",
-                channels=("y1", "y2"),
+            combinations[f"12_{final_stage}_from_huber"] = TecanFitCombination(
+                name=f"12_{final_stage}_from_huber",
+                channels=("1", "2"),
                 prefit=base_method,
                 final_stage=final_stage,
             )

@@ -210,10 +210,9 @@ ph = np.array([5.0, 6.0, 7.0, 8.0, 9.0])
 channel1 = np.array([100, 150, 200, 250, 280])  # Increases with pH
 channel2 = np.array([500, 450, 400, 350, 320])  # Decreases with pH
 
-ds = Dataset({
-    "ch1": DataArray(ph, channel1),
-    "ch2": DataArray(ph, channel2)
-}, is_ph=True)
+ds = Dataset(
+    {"ch1": DataArray(ph, channel1), "ch2": DataArray(ph, channel2)}, is_ph=True
+)
 
 result = fit_binding_glob(ds)
 print(f"pKa = {result.result.params['K'].value:.2f}")

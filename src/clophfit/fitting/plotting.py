@@ -1351,7 +1351,7 @@ def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
         # Fallback if method is missing or not a prtecan Titration
         data = getattr(tit, "data", {})
 
-    bg_noise: dict[int, float] | None = None
+    bg_noise: dict[str, float] | None = None
     if hasattr(tit, "bg_noise") and tit.bg_noise:
         bg_noise = tit.bg_noise
     return plot_qc_span_vs_center(

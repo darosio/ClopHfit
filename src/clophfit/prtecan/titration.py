@@ -64,20 +64,22 @@ class TitrationConfig:
     n_mcmc_samples: int = 2000
     ctr_free_k: bool = False
     noise_alpha: tuple[float, ...] = ()
-    """Proportional noise coefficients per label (y1, y2, ...).
+    """Proportional noise coefficients per label.
 
-    When provided, adds an alpha^2*signal^2 term to the y_err^2 estimate so that
+    When provided, adds a proportional term to the error estimate so that
     high-signal wells are appropriately down-weighted:
-        y_err^2 = gain*signal + bg_err^2 + (alpha*signal)^2
-    Values from MCMC multi-noise shared_noise_params.csv (alpha_y1, alpha_y2).
+    `y_err^2 = gain * signal + bg_err^2 + (alpha * signal)^2`
+
+    Values typically from MCMC multi-noise shared_noise_params.csv.
     Empty tuple disables the correction (legacy behaviour).
     """
     noise_gain: tuple[float, ...] = ()
-    """Poisson gain coefficients per label (y1, y2, ...).
+    """Poisson gain coefficients per label.
 
     Replaces the hardcoded gain=1 in the shot-noise Poisson term:
-        y_err^2 = gain*signal + bg_err^2 + (alpha*signal)^2
-    Values from MCMC multi-noise shared_noise_params.csv (gain_y1, gain_y2).
+    `y_err^2 = gain * signal + bg_err^2 + (alpha * signal)^2`
+
+    Values typically from MCMC multi-noise shared_noise_params.csv.
     Empty tuple keeps gain=1 (legacy behaviour).
     """
 
@@ -140,14 +142,14 @@ class Buffer:
     tit: Titration
 
     _wells: list[str] = field(default_factory=list)
-    _bg: dict[int, ArrayF] = field(init=False, default_factory=dict)
-    _bg_err: dict[int, ArrayF] = field(init=False, default_factory=dict)
+    _bg: dict[str, ArrayF] = field(init=False, default_factory=dict)
+    _bg_err: dict[str, ArrayF] = field(init=False, default_factory=dict)
 
-    fit_results: dict[int, BufferFit] = field(init=False, default_factory=dict)
-    fit_results_nrm: dict[int, BufferFit] = field(init=False, default_factory=dict)
+    fit_results: dict[str, BufferFit] = field(init=False, default_factory=dict)
+    fit_results_nrm: dict[str, BufferFit] = field(init=False, default_factory=dict)
 
     @cached_property
-    def dataframes(self) -> dict[int, pd.DataFrame]:
+    def dataframes(self) -> dict[str, pd.DataFrame]:
         # def dataframes(self) -> list[pd.DataFrame]:
         """Buffer dataframes with fit."""
         if not self.wells:
@@ -162,7 +164,7 @@ class Buffer:
         return dfs
 
     @cached_property
-    def dataframes_nrm(self) -> dict[int, pd.DataFrame]:
+    def dataframes_nrm(self) -> dict[str, pd.DataFrame]:
         # def dataframes_nrm(self) -> list[pd.DataFrame]:
         """Buffer normalized dataframes with fit."""
         if not self.wells:
@@ -193,32 +195,32 @@ class Buffer:
                 del self.__dict__[cached_attr]
 
     @property
-    def bg(self) -> dict[int, ArrayF]:
+    def bg(self) -> dict[str, ArrayF]:
         """List of buffer values."""
         if not self._bg:
             self._bg, self._bg_err = self._compute_bg_and_sd()
         return self._bg
 
     @bg.setter
-    def bg(self, value: dict[int, ArrayF]) -> None:
+    def bg(self, value: dict[str, ArrayF]) -> None:
         """Set the buffer values and reset SEM."""
         self._bg = value
 
     @property
-    def bg_err(self) -> dict[int, ArrayF]:
+    def bg_err(self) -> dict[str, ArrayF]:
         """List of buffer SEM values."""
         if not self._bg_err:
             self._bg, self._bg_err = self._compute_bg_and_sd()
         return self._bg_err
 
     @bg_err.setter
-    def bg_err(self, value: dict[int, ArrayF]) -> None:
+    def bg_err(self, value: dict[str, ArrayF]) -> None:
         # def bg_err(self, value: list[ArrayF]) -> None:
         """Set the buffer SEM values manually."""
         self._bg_err = value
 
     @property
-    def bg_noise(self) -> dict[int, float]:
+    def bg_noise(self) -> dict[str, float]:
         """Intrinsic well noise (RMSE/pooled SD) values."""
         buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
         noise = {}
@@ -231,7 +233,7 @@ class Buffer:
                 noise[label] = float(bdf[noise_col].iloc[0])
         return noise
 
-    def _compute_bg_and_sd(self) -> tuple[dict[int, ArrayF], dict[int, ArrayF]]:
+    def _compute_bg_and_sd(self) -> tuple[dict[str, ArrayF], dict[str, ArrayF]]:
         """Compute and return buffer values and their SEM."""
         buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
         bg = {}
@@ -260,7 +262,7 @@ class Buffer:
                 bg_err[label] = bdf[error_col].to_numpy()
         return bg, bg_err
 
-    def _fit_buffer(self, dataframed: dict[int, pd.DataFrame]) -> dict[int, BufferFit]:
+    def _fit_buffer(self, dataframed: dict[str, pd.DataFrame]) -> dict[str, BufferFit]:
         """Fit buffers of all labelblocksgroups."""
 
         def linear_model(x: ArrayF, beta: ArrayF) -> ArrayF:
@@ -366,7 +368,7 @@ class Buffer:
                     x=pp.kind,
                     hue="well",
                     ax=g.axes_dict[label],
-                    legend=label == num_labels,
+                    legend=label == str(num_labels),
                 )
                 g.axes_dict[label].errorbar(
                     x=self.tit.x,
@@ -606,9 +608,9 @@ class Titration(TecanfilesGroup):
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
-    _bg: dict[int, ArrayF] = field(init=False, default_factory=dict)
-    _bg_err: dict[int, ArrayF] = field(init=False, default_factory=dict)
-    _data: dict[int, dict[str, ArrayF]] = field(init=False, default_factory=dict)
+    _bg: dict[str, ArrayF] = field(init=False, default_factory=dict)
+    _bg_err: dict[str, ArrayF] = field(init=False, default_factory=dict)
+    _data: dict[str, dict[str, ArrayF]] = field(init=False, default_factory=dict)
 
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
     _bad_wells_detected: bool = field(init=False, default=False)
@@ -686,7 +688,7 @@ class Titration(TecanfilesGroup):
 
         label_ids = sorted(self.labelblocksgroups)
         new_discards: set[str] = set()
-        trend_inputs: dict[int, dict[str, dict[str, float]]] = {
+        trend_inputs: dict[str, dict[str, dict[str, float]]] = {
             label: {} for label in label_ids
         }
 
@@ -806,31 +808,31 @@ class Titration(TecanfilesGroup):
         self._reset_data_results_and_bg()
 
     @property
-    def bg(self) -> dict[int, ArrayF]:
+    def bg(self) -> dict[str, ArrayF]:
         # def bg(self) -> list[ArrayF]:
         """List of buffer values."""
         return self.buffer.bg
 
     @bg.setter
-    def bg(self, value: dict[int, ArrayF]) -> None:
+    def bg(self, value: dict[str, ArrayF]) -> None:
         # def bg(self, value: list[ArrayF]) -> None:
         self.buffer.bg = value
         self._reset_data_and_results()
 
     @property
-    def bg_err(self) -> dict[int, ArrayF]:
+    def bg_err(self) -> dict[str, ArrayF]:
         # def bg_err(self) -> list[ArrayF]:
         """List of buffer SEM values."""
         return self.buffer.bg_err
 
     @bg_err.setter
-    def bg_err(self, value: dict[int, ArrayF]) -> None:
+    def bg_err(self, value: dict[str, ArrayF]) -> None:
         # def bg_err(self, value: list[ArrayF]) -> None:
         self.buffer.bg_err = value
         self._reset_data_and_results()
 
     @property
-    def bg_noise(self) -> dict[int, float]:
+    def bg_noise(self) -> dict[str, float]:
         """Intrinsic well noise (RMSE/pooled SD) values."""
         return self.buffer.bg_noise
 
@@ -911,7 +913,7 @@ class Titration(TecanfilesGroup):
         self.additions = additions["add"].tolist()
 
     @property
-    def data(self) -> dict[int, dict[str, ArrayF]]:
+    def data(self) -> dict[str, dict[str, ArrayF]]:
         # def data(self) -> list[dict[str, ArrayF]]:
         """Buffer subtracted and corrected for dilution data."""
         if not self._data:
@@ -919,7 +921,7 @@ class Titration(TecanfilesGroup):
         return self._data
 
     # def _prepare_data(self) -> list[dict[str, ArrayF]]:
-    def _prepare_data(self) -> dict[int, dict[str, ArrayF]]:
+    def _prepare_data(self) -> dict[str, dict[str, ArrayF]]:
         """Prepare and return the processed data."""
         # Step 1: Get raw or normalized data
         data = self._get_normalized_or_raw_data()
@@ -935,8 +937,8 @@ class Titration(TecanfilesGroup):
         return data
 
     def _apply_dilution_correction(
-        self, data: dict[int, dict[str, ArrayF]]
-    ) -> dict[int, dict[str, ArrayF]]:
+        self, data: dict[str, dict[str, ArrayF]]
+    ) -> dict[str, dict[str, ArrayF]]:
         """Apply dilution correction to the data (works with nan values)."""
         return {
             label: {k: v * self._dil_corr for k, v in dd.items()}
@@ -944,7 +946,7 @@ class Titration(TecanfilesGroup):
         }
 
     # def _get_normalized_or_raw_data(self) -> list[dict[str, ArrayF]]:
-    def _get_normalized_or_raw_data(self) -> dict[int, dict[str, ArrayF]]:
+    def _get_normalized_or_raw_data(self) -> dict[str, dict[str, ArrayF]]:
         """Fetch raw or normalized data, transforming into arrays."""
         if self.params.nrm:
             return {
@@ -957,8 +959,8 @@ class Titration(TecanfilesGroup):
         }
 
     def _subtract_background(
-        self, data: dict[int, dict[str, ArrayF]]
-    ) -> dict[int, dict[str, ArrayF]]:
+        self, data: dict[str, dict[str, ArrayF]]
+    ) -> dict[str, dict[str, ArrayF]]:
         """Subtract background from data."""
         return {
             label: {k: v - self.bg[label] for k, v in dd.items()}
@@ -966,8 +968,8 @@ class Titration(TecanfilesGroup):
         }
 
     def _adjust_negative_values(
-        self, data: dict[int, dict[str, ArrayF]]
-    ) -> dict[int, dict[str, ArrayF]]:
+        self, data: dict[str, dict[str, ArrayF]]
+    ) -> dict[str, dict[str, ArrayF]]:
         """Adjust negative values in the data."""
 
         def _adjust_subtracted_data(
@@ -1010,7 +1012,7 @@ class Titration(TecanfilesGroup):
         self._scheme = PlateScheme(schemefile)
         self.buffer.wells = self._scheme.buffer
 
-    def _create_data_array(self, key: str, label: int) -> DataArray:
+    def _create_data_array(self, key: str, label: str) -> DataArray:
         """Create a DataArray for a specific key and label."""
         y = np.array(self.data[label][key])
         label_idx = sorted(self.data.keys()).index(label)
@@ -1038,22 +1040,22 @@ class Titration(TecanfilesGroup):
         y_errc = np.sqrt(var)
         return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
-    def create_ds(self, key: str, label: int) -> Dataset:
+    def create_ds(self, key: str, label: str) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
-        return Dataset({f"{label}": da}, is_ph=self.is_ph)
+        return Dataset({label: da}, is_ph=self.is_ph)
 
     def create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
-        data_arrays_dict = {f"y{i}": self._create_data_array(key, i) for i in self.data}
+        data_arrays_dict = {i: self._create_data_array(key, i) for i in self.data}
         return Dataset(data_arrays_dict, is_ph=self.is_ph)
 
-    def create_dataset_dict(self, label: int | None = None) -> dict[str, Dataset]:
+    def create_dataset_dict(self, label: str | None = None) -> dict[str, Dataset]:
         """Create a dictionary of datasets for all fit_keys, optionally masking outliers.
 
         Parameters
         ----------
-        label : int | None, optional
+        label : str | None, optional
             Specific label to extract. If None, creates global datasets containing
             all labels. Default is None.
 

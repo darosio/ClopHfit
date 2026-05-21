@@ -218,7 +218,7 @@ def outlier_scores_extended(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Compute outlier scores for each point using geometric deviation.
 
     Uses a hybrid approach for edge points:
-    - If |edge_step| > 2 * |local_step|: anomalously large jump → use full projection deviation
+    - If `edge_step` > 2 * `local_step`: anomalously large jump → use full projection deviation
     - Elif wrong direction (reversal): use projection deviation
     - Else (correct direction / plateau approach): score = 0
 
@@ -373,21 +373,25 @@ def assign_error_model(
     >>> from clophfit.fitting.data_structures import Dataset, DataArray
     >>> y = np.array([100.0, 200.0, 300.0])
     >>> da = DataArray(xc=np.array([1.0, 2.0, 3.0]), yc=y, y_errc=np.ones_like(y))
-    >>> ds = Dataset({"y1": da})
+    >>> ds = Dataset({"1": da})
     >>> ds_new = assign_error_model(ds, sigma_floor=10.0, gain=0.0, rel_error=0.05)
-    >>> np.round(ds_new["y1"].y_errc, 2)
+    >>> np.round(ds_new["1"].y_errc, 2)
     array([11.18, 14.14, 18.03])
     """
     updated_ds = copy.deepcopy(ds)
-    gain_defaults = {"y1": 1.8, "y2": 0.7}
+    gain_defaults = {"1": 1.8, "2": 0.7}
     for lbl, da in updated_ds.items():
-        floor = sigma_floor[lbl] if isinstance(sigma_floor, dict) else sigma_floor
-        alpha = rel_error[lbl] if isinstance(rel_error, dict) else rel_error
+        floor = (
+            sigma_floor.get(lbl, 1.0) if isinstance(sigma_floor, dict) else sigma_floor
+        )
+        alpha = float(
+            rel_error.get(lbl, 0.03) if isinstance(rel_error, dict) else rel_error
+        )
 
         if gain is None:
             poisson_term = gain_defaults.get(lbl, 0.0) * np.maximum(da.yc, 0.0)
         else:
-            g = gain[lbl] if isinstance(gain, dict) else float(gain)
+            g = float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
             poisson_term = g * np.maximum(da.yc, 0.0)
 
         floor_val = np.asarray(floor, dtype=float)
@@ -435,9 +439,9 @@ def fit_rel_error_from_residuals(
     >>> floor, true_alpha = 5.0, 0.02
     >>> sigma = np.sqrt(floor**2 + (true_alpha * y_pred) ** 2)
     >>> resid = sigma * rng.standard_normal(200)
-    >>> df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y_pred})
-    >>> alpha = fit_rel_error_from_residuals(df, sigma_floor={"y1": floor})
-    >>> round(alpha["y1"], 2)  # should be close to true_alpha=0.02
+    >>> df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    >>> alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": floor})
+    >>> round(alpha["1"], 2)  # should be close to true_alpha=0.02
     0.02
     """
     result: dict[str, float] = {}
@@ -445,7 +449,7 @@ def fit_rel_error_from_residuals(
         lbl_str = str(lbl)
         r2_mean = float((grp["resid_raw"] ** 2).mean())
         pred2_mean = float((grp["predicted"] ** 2).mean())
-        floor = sigma_floor.get(lbl_str, 0.0)
+        floor = float(sigma_floor.get(lbl_str, 0.0))
         alpha_sq = max(0.0, r2_mean - floor**2) / max(pred2_mean, 1e-12)
         result[lbl_str] = float(np.sqrt(alpha_sq))
     return result
@@ -513,7 +517,7 @@ def fit_gain_and_rel_error_from_residuals(
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
         y = grp["predicted"].to_numpy()
-        floor = sigma_floor.get(lbl_str, 0.0)
+        floor = float(sigma_floor.get(lbl_str, 0.0))
         adjusted = grp["resid_raw"].to_numpy() ** 2 - floor**2
         # No-intercept OLS: adjusted = gain * y + c * y^2
         x_mat = np.column_stack([y, y**2])

@@ -124,11 +124,11 @@ def test_fit_binding_glob_multi(multi_dataset: Dataset) -> None:
     # Check shared parameter K
     assert np.isclose(f_res.result.params["K"].value, 7.0, atol=1e-4)
     # Check parameters for the first dataset
-    assert np.isclose(f_res.result.params["S0_y1"].value, 1.0, atol=1e-4)
-    assert np.isclose(f_res.result.params["S1_y1"].value, 2.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_1"].value, 1.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S1_1"].value, 2.0, atol=1e-4)
     # Check parameters for the second dataset
-    assert np.isclose(f_res.result.params["S0_y2"].value, 1.0, atol=1e-3)
-    assert np.isclose(f_res.result.params["S1_y2"].value, 0.0, atol=1e-4)
+    assert np.isclose(f_res.result.params["S0_2"].value, 1.0, atol=1e-3)
+    assert np.isclose(f_res.result.params["S1_2"].value, 0.0, atol=1e-4)
 
 
 def test_fit_binding_insufficient_data() -> None:
@@ -159,10 +159,10 @@ def test_weight_da(ph_dataset: Dataset) -> None:
 def test_weight_multi_ds_titration(multi_dataset: Dataset) -> None:
     """Test weighting on a multi-label dataset."""
     weight_multi_ds_titration(multi_dataset)
-    assert multi_dataset["y1"].y_err.size > 0
-    assert multi_dataset["y2"].y_err.size > 0
-    assert np.all(multi_dataset["y1"].y_err > 0)
-    assert np.all(multi_dataset["y2"].y_err > 0)
+    assert multi_dataset["1"].y_err.size > 0
+    assert multi_dataset["2"].y_err.size > 0
+    assert np.all(multi_dataset["1"].y_err > 0)
+    assert np.all(multi_dataset["2"].y_err > 0)
 
 
 ###############################################################################
@@ -289,9 +289,9 @@ def test_dataset_single_array_no_nan() -> None:
     dataarray = DataArray(x, y)
     dataset = Dataset.from_da([dataarray])
     assert len(dataset) == 1
-    assert isinstance(dataset["y0"], DataArray)
-    assert np.array_equal(dataset["y0"].x, x)
-    assert np.array_equal(dataset["y0"].y, y)
+    assert isinstance(dataset["0"], DataArray)
+    assert np.array_equal(dataset["0"].x, x)
+    assert np.array_equal(dataset["0"].y, y)
 
 
 def test_dataset_single_array_with_nan() -> None:
@@ -311,12 +311,12 @@ def test_dataset_dict_no_nan() -> None:
     y0, y1 = np.array([7, 8, 9]), np.array([10, 11, 12])
     da1 = DataArray(x0, y0)
     da2 = DataArray(x1, y1)
-    dataset = Dataset({"y0": da1, "y1": da2})
+    dataset = Dataset({"0": da1, "1": da2})
     assert len(dataset) == 2
-    assert np.array_equal(dataset["y0"].x, x0)
-    assert np.array_equal(dataset["y0"].y, y0)
-    assert np.array_equal(dataset["y1"].x, x1)
-    assert np.array_equal(dataset["y1"].y, y1)
+    assert np.array_equal(dataset["0"].x, x0)
+    assert np.array_equal(dataset["0"].y, y0)
+    assert np.array_equal(dataset["1"].x, x1)
+    assert np.array_equal(dataset["1"].y, y1)
 
 
 def test_dataset_dict_with_nan() -> None:
@@ -325,12 +325,12 @@ def test_dataset_dict_with_nan() -> None:
     y0, y1 = np.array([7, np.nan, 9]), np.array([10, 11, np.nan])
     da1 = DataArray(x0, y0)
     da2 = DataArray(x1, y1)
-    dataset = Dataset({"y0": da1, "y1": da2})
+    dataset = Dataset({"0": da1, "1": da2})
     assert len(dataset) == 2
-    assert np.array_equal(dataset["y0"].x, np.array([1, 3]))
-    assert np.array_equal(dataset["y0"].y, np.array([7, 9]))
-    assert np.array_equal(dataset["y1"].x, np.array([4, 5]))
-    assert np.array_equal(dataset["y1"].y, np.array([10, 11]))
+    assert np.array_equal(dataset["0"].x, np.array([1, 3]))
+    assert np.array_equal(dataset["0"].y, np.array([7, 9]))
+    assert np.array_equal(dataset["1"].x, np.array([4, 5]))
+    assert np.array_equal(dataset["1"].y, np.array([10, 11]))
 
 
 def test_dataset_single_x_dict_y_with_nan() -> None:
@@ -339,12 +339,12 @@ def test_dataset_single_x_dict_y_with_nan() -> None:
     y0, y1 = np.array([5, 6, np.nan, 8]), np.array([9, 10, np.nan, 12])
     da1 = DataArray(x, y0)
     da2 = DataArray(x, y1)
-    dataset = Dataset({"y0": da1, "y1": da2})
+    dataset = Dataset({"0": da1, "1": da2})
     assert len(dataset) == 2
-    assert np.array_equal(dataset["y0"].x, np.array([1, 2, 4]))
-    assert np.array_equal(dataset["y0"].y, np.array([5, 6, 8]))
-    assert np.array_equal(dataset["y1"].x, np.array([1, 2, 4]))
-    assert np.array_equal(dataset["y1"].y, np.array([9, 10, 12]))
+    assert np.array_equal(dataset["0"].x, np.array([1, 2, 4]))
+    assert np.array_equal(dataset["0"].y, np.array([5, 6, 8]))
+    assert np.array_equal(dataset["1"].x, np.array([1, 2, 4]))
+    assert np.array_equal(dataset["1"].y, np.array([9, 10, 12]))
 
 
 def test_dataset_class() -> None:
@@ -367,18 +367,18 @@ def test_dataset_class() -> None:
     assert np.array_equal(ds["default"].y, y0)
     # Test the case where x is a single ArrayF and y is an ArrayDict.
     # The keys should come from y.
-    ds = Dataset({"y0": DataArray(x0, y0), "y1": DataArray(x0, y1)})
-    assert np.array_equal(ds["y0"].x, x0)
-    assert np.array_equal(ds["y1"].x, x0)
-    assert np.array_equal(ds["y0"].y, y0)
-    assert np.array_equal(ds["y1"].y, y1)
+    ds = Dataset({"0": DataArray(x0, y0), "1": DataArray(x0, y1)})
+    assert np.array_equal(ds["0"].x, x0)
+    assert np.array_equal(ds["1"].x, x0)
+    assert np.array_equal(ds["0"].y, y0)
+    assert np.array_equal(ds["1"].y, y1)
     # Test the case where x and y are both ArrayDict and keys match.
     # The keys should match between x and y.
-    ds = Dataset({"A": DataArray(x0, y0), "y1": DataArray(x1, y1)})
+    ds = Dataset({"A": DataArray(x0, y0), "1": DataArray(x1, y1)})
     assert np.array_equal(ds["A"].x, x0)
-    assert np.array_equal(ds["y1"].x, x1)
+    assert np.array_equal(ds["1"].x, x1)
     assert np.array_equal(ds["A"].y, y0)
-    assert np.array_equal(ds["y1"].y, y1)
+    assert np.array_equal(ds["1"].y, y1)
 
 
 ###############################################################################
@@ -453,13 +453,13 @@ def test_dataset_copy(multi_dataset: Dataset) -> None:
     # Test full copy
     ds_copy = multi_dataset.copy()
     assert ds_copy.is_ph == multi_dataset.is_ph
-    assert "y1" in ds_copy
-    assert "y2" in ds_copy
+    assert "1" in ds_copy
+    assert "2" in ds_copy
     # Test partial copy
-    ds_copy_partial = multi_dataset.copy(keys={"y2"})
+    ds_copy_partial = multi_dataset.copy(keys={"2"})
     assert ds_copy_partial.is_ph == multi_dataset.is_ph
-    assert "y2" in ds_copy_partial
-    assert "y1" not in ds_copy_partial
+    assert "2" in ds_copy_partial
+    assert "1" not in ds_copy_partial
     # Test KeyError for non-existent key
     with pytest.raises(KeyError):
         multi_dataset.copy(keys={"nonexistent"})
@@ -470,15 +470,15 @@ def test_export_ds(multi_dataset: Dataset, tmp_path: Path) -> None:
     file_path = tmp_path / "A01.csv"
     multi_dataset.export(str(file_path))
     # Check if files are created for each label
-    assert (tmp_path / "A01_y1.csv").exists()
-    assert (tmp_path / "A01_y2.csv").exists()
+    assert (tmp_path / "A01_1.csv").exists()
+    assert (tmp_path / "A01_2.csv").exists()
     # Read back one file and check content
-    read_df = pd.read_csv(tmp_path / "A01_y1.csv")
+    read_df = pd.read_csv(tmp_path / "A01_1.csv")
     np.testing.assert_allclose(
-        multi_dataset["y1"].y, read_df.yc.to_numpy().astype(float)
+        multi_dataset["1"].y, read_df.yc.to_numpy().astype(float)
     )
     np.testing.assert_allclose(
-        multi_dataset["y1"].x, read_df.xc.to_numpy().astype(float)
+        multi_dataset["1"].x, read_df.xc.to_numpy().astype(float)
     )
 
 
@@ -498,7 +498,7 @@ def test_dataset_plot_ph() -> None:
     """Test Dataset.plot() with pH data."""
     x = np.array([5.0, 6.0, 7.0, 8.0])
     y = np.array([100.0, 150.0, 180.0, 195.0])
-    ds = Dataset({"y0": DataArray(x, y)}, is_ph=True)
+    ds = Dataset({"0": DataArray(x, y)}, is_ph=True)
     fig = ds.plot()
     ax = fig.axes[0]
     assert ax.get_xlabel() == "pH"
@@ -658,7 +658,7 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     seed: int = 42,
     *,
     add_outlier: bool = False,
-    outlier_label: str = "y1",
+    outlier_label: str = "1",
     outlier_idx: int = 2,
     outlier_magnitude: float = 5.0,
 ) -> Dataset:
@@ -668,17 +668,17 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     x = np.linspace(5.5, 9.0, n_points)
     x_err = 0.05 * np.ones_like(x)
 
-    y1_true = binding_1site(x, true_k, _TRUE_S0_Y1, _TRUE_S1_Y1, is_ph=True)
+    ytrue_1 = binding_1site(x, true_k, _TRUE_S0_Y1, _TRUE_S1_Y1, is_ph=True)
     y2_true = binding_1site(x, true_k, _TRUE_S0_Y2, _TRUE_S1_Y2, is_ph=True)
 
-    y1_err = np.sqrt(np.maximum(y1_true, 1.0) + _BUFFER_SD**2)
+    y1_err = np.sqrt(np.maximum(ytrue_1, 1.0) + _BUFFER_SD**2)
     y2_err = np.sqrt(np.maximum(y2_true, 1.0) + _BUFFER_SD**2)
 
-    y1 = y1_true + rng.normal(0, y1_err)
+    y1 = ytrue_1 + rng.normal(0, y1_err)
     y2 = y2_true + rng.normal(0, y2_err)
 
     if add_outlier:
-        if outlier_label == "y1":
+        if outlier_label == "1":
             y1[outlier_idx] += outlier_magnitude * y1_err[outlier_idx]
         else:
             y2[outlier_idx] += outlier_magnitude * y2_err[outlier_idx]
@@ -686,7 +686,7 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     da1 = DataArray(x, y1, x_errc=x_err, y_errc=y1_err)
     da2 = DataArray(x, y2, x_errc=x_err, y_errc=y2_err)
 
-    return Dataset({"y1": da1, "y2": da2}, is_ph=True)
+    return Dataset({"1": da1, "2": da2}, is_ph=True)
 
 
 def _fit_binding_glob_huber_outlier(
@@ -720,25 +720,25 @@ class TestFitBindingGlobOutlierRemoval:
         k_est = fr.result.params["K"].value
         assert abs(k_est - _TRUE_K) < 0.5
 
-    def test_detects_outlier_in_y1(self) -> None:
+    def test_detects_outlier_in_1(self) -> None:
         """Should detect large outlier in y1."""
         ds = _create_synthetic_dataset(
-            add_outlier=True, outlier_label="y1", outlier_idx=3, outlier_magnitude=10.0
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
         )
         fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
 
         assert fr.dataset is not None
-        assert len(fr.dataset["y1"].y) < 7
+        assert len(fr.dataset["1"].y) < 7
 
     def test_detects_outlier_in_y2(self) -> None:
         """Should detect large outlier in y2."""
         ds = _create_synthetic_dataset(
-            add_outlier=True, outlier_label="y2", outlier_idx=4, outlier_magnitude=10.0
+            add_outlier=True, outlier_label="2", outlier_idx=4, outlier_magnitude=10.0
         )
         fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
 
         assert fr.dataset is not None
-        assert len(fr.dataset["y2"].y) < 7
+        assert len(fr.dataset["2"].y) < 7
 
     def test_no_false_positives_clean_data(self) -> None:
         """Should not remove points from clean data."""
@@ -746,8 +746,8 @@ class TestFitBindingGlobOutlierRemoval:
         fr = _fit_binding_glob_huber_outlier(ds, threshold=3.0)
 
         assert fr.dataset is not None
-        assert len(fr.dataset["y1"].y) == 7
-        assert len(fr.dataset["y2"].y) == 7
+        assert len(fr.dataset["1"].y) == 7
+        assert len(fr.dataset["2"].y) == 7
 
     def test_correct_residual_slicing(self) -> None:
         """Residuals should be correctly sliced for each label."""
@@ -756,7 +756,7 @@ class TestFitBindingGlobOutlierRemoval:
         assert fr_init.result is not None
 
         total_residuals = len(fr_init.result.residual)
-        assert total_residuals == len(ds["y1"].y) + len(ds["y2"].y)
+        assert total_residuals == len(ds["1"].y) + len(ds["2"].y)
 
     def test_single_label_dataset(self) -> None:
         """Should work with single-label dataset."""
@@ -767,7 +767,7 @@ class TestFitBindingGlobOutlierRemoval:
         y = y_true + rng.normal(0, y_err)
 
         da = DataArray(x, y, x_errc=0.05 * np.ones_like(x), y_errc=y_err)
-        ds = Dataset({"y1": da}, is_ph=True)
+        ds = Dataset({"1": da}, is_ph=True)
 
         fr = _fit_binding_glob_huber_outlier(ds)
         assert fr.result is not None
@@ -840,14 +840,14 @@ def test_fit_binding_odr_multi(multi_dataset: Dataset) -> None:
     fr = fit_binding_odr(multi_dataset)
     assert fr.result is not None
     assert "K" in fr.result.params
-    assert "S0_y1" in fr.result.params
-    assert "S1_y1" in fr.result.params
-    assert "S0_y2" in fr.result.params
-    assert "S1_y2" in fr.result.params
+    assert "S0_1" in fr.result.params
+    assert "S1_1" in fr.result.params
+    assert "S0_2" in fr.result.params
+    assert "S1_2" in fr.result.params
     assert np.isclose(fr.result.params["K"].value, 7.0, atol=0.5)
     assert fr.result.residual is not None
     # Total residuals should match concatenated y data
-    total_y_points = len(multi_dataset["y1"].y) + len(multi_dataset["y2"].y)
+    total_y_points = len(multi_dataset["1"].y) + len(multi_dataset["2"].y)
     assert len(fr.result.residual) == total_y_points
 
 
@@ -909,8 +909,8 @@ def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
     fr = fit_binding_pymc(multi_dataset, n_samples=50, n_sd=1.0)
     assert fr.result is not None
     assert "K" in fr.result.params
-    assert "S0_y1" in fr.result.params
-    assert "S1_y1" in fr.result.params
+    assert "S0_1" in fr.result.params
+    assert "S1_1" in fr.result.params
     assert fr.result.residual is not None
 
 
@@ -927,8 +927,8 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
 
     np.random.default_rng(42)
     bg_noise = {
-        1: 250.0,
-        2: 5.0,
+        "1": 250.0,
+        "2": 5.0,
     }
 
     trace = fit_binding_pymc_multi(
@@ -943,7 +943,7 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
 
     assert hasattr(trace, "posterior")
     assert "rel_error" in trace.posterior
-    assert "gain_y1" in trace.posterior
+    assert "gain_1" in trace.posterior
 
 
 @pytest.mark.slow
@@ -958,8 +958,8 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
 
     np.random.default_rng(42)
     bg_noise = {
-        1: 250.0,
-        2: 5.0,
+        "1": 250.0,
+        "2": 5.0,
     }
 
     trace = fit_binding_pymc_multi(
@@ -986,8 +986,8 @@ def test_extract_sigma_df_from_datatree_posterior() -> None:
     """Sigma extraction should work directly from posterior variables."""
     posterior = xr.Dataset(
         data_vars={
-            "sigma_obs_y1_A01": (
-                ("chain", "draw", "sigma_obs_y1_A01_dim_0"),
+            "sigma_obs_1_A01": (
+                ("chain", "draw", "sigma_obs_1_A01_dim_0"),
                 np.array([
                     [
                         [1.0, 2.0, 3.0],
@@ -995,8 +995,8 @@ def test_extract_sigma_df_from_datatree_posterior() -> None:
                     ]
                 ]),
             ),
-            "sigma_obs_y2_A01": (
-                ("chain", "draw", "sigma_obs_y2_A01_dim_0"),
+            "sigma_obs_2_A01": (
+                ("chain", "draw", "sigma_obs_2_A01_dim_0"),
                 np.array([
                     [
                         [4.0, 5.0, 6.0],
@@ -1008,8 +1008,8 @@ def test_extract_sigma_df_from_datatree_posterior() -> None:
         coords={
             "chain": [0],
             "draw": [0, 1],
-            "sigma_obs_y1_A01_dim_0": [0, 1, 2],
-            "sigma_obs_y2_A01_dim_0": [0, 1, 2],
+            "sigma_obs_1_A01_dim_0": [0, 1, 2],
+            "sigma_obs_2_A01_dim_0": [0, 1, 2],
         },
     )
     trace = xr.DataTree.from_dict({"posterior": posterior})
@@ -1017,18 +1017,18 @@ def test_extract_sigma_df_from_datatree_posterior() -> None:
     sigma_df = extract_sigma_df(trace)
 
     assert len(sigma_df) == 6
-    assert set(sigma_df["label"]) == {"y1", "y2"}
+    assert set(sigma_df["label"]) == {"1", "2"}
     assert set(sigma_df["well"]) == {"A01"}
     np.testing.assert_array_equal(
-        sigma_df[sigma_df["label"] == "y1"].sort_values("idx")["idx"].to_numpy(),
+        sigma_df[sigma_df["label"] == "1"].sort_values("idx")["idx"].to_numpy(),
         np.array([0, 1, 2]),
     )
     np.testing.assert_allclose(
-        sigma_df[sigma_df["label"] == "y1"].sort_values("idx")["mean"].to_numpy(),
+        sigma_df[sigma_df["label"] == "1"].sort_values("idx")["mean"].to_numpy(),
         np.array([1.5, 2.5, 3.5]),
     )
     np.testing.assert_allclose(
-        sigma_df[sigma_df["label"] == "y2"].sort_values("idx")["mean"].to_numpy(),
+        sigma_df[sigma_df["label"] == "2"].sort_values("idx")["mean"].to_numpy(),
         np.array([5.0, 6.0, 7.0]),
     )
 
@@ -1037,14 +1037,14 @@ def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
     """Fallback sigma extraction should use posterior ye_mag directly."""
     posterior = xr.Dataset(
         data_vars={
-            "ye_mag_y1": (("chain", "draw"), np.array([[2.0, 4.0]])),
+            "ye_mag_1": (("chain", "draw"), np.array([[2.0, 4.0]])),
         },
         coords={"chain": [0], "draw": [0, 1]},
     )
     trace = xr.DataTree.from_dict({"posterior": posterior})
     ds = Dataset(
         {
-            "y1": DataArray(
+            "1": DataArray(
                 np.array([6.0, 7.0]),
                 np.array([1.0, 2.0]),
                 y_errc=np.array([10.0, 20.0]),
@@ -1067,29 +1067,29 @@ def _make_direct_sigma_trace_and_results() -> tuple[
 ]:
     posterior = xr.Dataset(
         data_vars={
-            "sigma_obs_y1_A01": (
-                ("chain", "draw", "sigma_obs_y1_A01_dim_0"),
+            "sigma_obs_1_A01": (
+                ("chain", "draw", "sigma_obs_1_A01_dim_0"),
                 np.array([[[1.0, 1.1, 1.2], [1.3, 1.4, 1.5]]]),
             ),
-            "sigma_obs_y1_A02": (
-                ("chain", "draw", "sigma_obs_y1_A02_dim_0"),
+            "sigma_obs_1_A02": (
+                ("chain", "draw", "sigma_obs_1_A02_dim_0"),
                 np.array([[[0.9, 1.0, 1.1], [1.2, 1.3, 1.4]]]),
             ),
         },
         coords={
             "chain": [0],
             "draw": [0, 1],
-            "sigma_obs_y1_A01_dim_0": [0, 1, 2],
-            "sigma_obs_y1_A02_dim_0": [0, 1, 2],
+            "sigma_obs_1_A01_dim_0": [0, 1, 2],
+            "sigma_obs_1_A02_dim_0": [0, 1, 2],
         },
     )
     trace = xr.DataTree.from_dict({"posterior": posterior})
     ds_a01 = Dataset(
-        {"y1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([10.0, 11.0, 12.0]))},
+        {"1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([10.0, 11.0, 12.0]))},
         is_ph=True,
     )
     ds_a02 = Dataset(
-        {"y1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([9.0, 10.0, 11.0]))},
+        {"1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([9.0, 10.0, 11.0]))},
         is_ph=True,
     )
     results: dict[str, FitResult[xr.DataTree]] = {
@@ -1117,13 +1117,13 @@ def test_plot_qc_mean_vs_std_preserves_annotations_and_legend_semantics() -> Non
     fig = plot_qc_mean_vs_std(
         trace,
         results,
-        bg_noise={"y1": 0.29},
+        bg_noise={"1": 0.29},
         annotate_wells=["A01"],
     )
 
     assert isinstance(fig, Figure)
     ax = fig.axes[0]
-    assert ax.get_title() == r"QC: Span vs Mean of inferred $\sigma$ (y1)"
+    assert ax.get_title() == r"QC: Span vs Mean of inferred $\sigma$ (1)"
     assert ax.get_xlabel() == r"Mean($\sigma_{obs}$)"
     assert ax.get_ylabel() == r"Span($\sigma_{obs}$) [max - min]"
     legend = ax.get_legend()
@@ -1138,11 +1138,11 @@ def test_plot_qc_mean_vs_std_preserves_annotations_and_legend_semantics() -> Non
 
 class _FakeTitration:
     def __init__(self) -> None:
-        self.bg_noise = {1: np.array([0.2, 0.25, 0.3])}
+        self.bg_noise = {"1": np.array([0.2, 0.25, 0.3])}
 
-    def _get_normalized_or_raw_data(self) -> dict[int, dict[str, np.ndarray]]:
+    def _get_normalized_or_raw_data(self) -> dict[str, dict[str, np.ndarray]]:
         return {
-            1: {
+            "1": {
                 "A01": np.array([0.05, 0.05, 0.06]),
                 "A02": np.array([1.0, 1.4, 1.8]),
                 "A03": np.array([1.1, 1.2, 1.25]),

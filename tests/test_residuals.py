@@ -35,7 +35,7 @@ def simple_fit_result() -> FitResult[MinimizerResult]:
     y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
     y_err = np.ones_like(y) * 10.0
     da = DataArray(xc=x, yc=y, y_errc=y_err)
-    dataset = Dataset({"y1": da}, is_ph=True)
+    dataset = Dataset({"1": da}, is_ph=True)
     return fit_binding_glob(dataset)
 
 
@@ -48,7 +48,7 @@ def noisy_fit_result() -> FitResult[MinimizerResult]:
     y_err = np.ones_like(y_true) * 20.0
     y = y_true + rng.normal(0, 10, size=len(y_true))
     da = DataArray(xc=x, yc=y, y_errc=y_err)
-    dataset = Dataset({"y1": da}, is_ph=True)
+    dataset = Dataset({"1": da}, is_ph=True)
     return fit_binding_glob(dataset)
 
 
@@ -61,7 +61,7 @@ def multi_label_fit_result() -> FitResult[MinimizerResult]:
     y_err = np.ones_like(y1) * 10.0
     da1 = DataArray(xc=x, yc=y1, y_errc=y_err)
     da2 = DataArray(xc=x, yc=y2, y_errc=y_err)
-    dataset = Dataset({"y1": da1, "y2": da2}, is_ph=True)
+    dataset = Dataset({"1": da1, "2": da2}, is_ph=True)
     return fit_binding_glob(dataset)
 
 
@@ -82,7 +82,7 @@ class TestResidualPoint:
     def test_creation(self) -> None:
         """Test ResidualPoint creation."""
         point = ResidualPoint(
-            label="y1",
+            label="1",
             x=7.0,
             resid_weighted=0.5,
             resid_raw=5.0,
@@ -90,7 +90,7 @@ class TestResidualPoint:
             y_err=10.0,
             predicted=995.0,
         )
-        assert point.label == "y1"
+        assert point.label == "1"
         assert point.x == 7.0
         assert point.resid_weighted == 0.5
         assert point.resid_raw == 5.0
@@ -101,7 +101,7 @@ class TestResidualPoint:
     def test_frozen(self) -> None:
         """Test that ResidualPoint is immutable."""
         point = ResidualPoint(
-            label="y1",
+            label="1",
             x=7.0,
             resid_weighted=0.5,
             resid_raw=5.0,
@@ -125,7 +125,7 @@ class TestExtractResidualPoints:
         """Test extraction from single-label fit."""
         points = extract_residual_points(simple_fit_result)
         assert len(points) == 5
-        assert all(p.label == "y1" for p in points)
+        assert all(p.label == "1" for p in points)
         assert all(isinstance(p.resid_weighted, float) for p in points)
         assert all(isinstance(p.resid_raw, float) for p in points)
 
@@ -135,8 +135,8 @@ class TestExtractResidualPoints:
         """Test extraction from multi-label fit."""
         points = extract_residual_points(multi_label_fit_result)
         assert len(points) == 10  # 5 points * 2 labels
-        y1_points = [p for p in points if p.label == "y1"]
-        y2_points = [p for p in points if p.label == "y2"]
+        y1_points = [p for p in points if p.label == "1"]
+        y2_points = [p for p in points if p.label == "2"]
         assert len(y1_points) == 5
         assert len(y2_points) == 5
 
@@ -280,14 +280,14 @@ class TestResidualStatistics:
         df = collect_multi_residuals(results)
         stats = residual_statistics(df)
         assert len(stats) == 2  # y1 and y2
-        assert "y1" in stats.index
-        assert "y2" in stats.index
+        assert "1" in stats.index
+        assert "2" in stats.index
 
     def test_outlier_count(self) -> None:
         """Test outlier counting."""
         # Create DataFrame with known outliers
         data = {
-            "label": ["y1"] * 10,
+            "label": ["1"] * 10,
             "resid_weighted": [0.0, 0.1, -0.1, 0.2, -0.2, 3.0, -3.0, 0.0, 0.1, -0.1],
             "x": list(range(10)),
             "resid_raw": [0.0] * 10,
@@ -296,12 +296,12 @@ class TestResidualStatistics:
         df = pd.DataFrame(data)
         stats = residual_statistics(df)
         # 2 outliers beyond ±2-sigma (3.0 and -3.0)
-        assert stats.loc["y1", "outlier_count"] == 2
+        assert stats.loc["1", "outlier_count"] == 2
 
     def test_outlier_rate(self) -> None:
         """Test outlier rate calculation."""
         data = {
-            "label": ["y1"] * 10,
+            "label": ["1"] * 10,
             "resid_weighted": [0.0] * 8 + [3.0, -3.0],  # 2 outliers out of 10
             "x": list(range(10)),
             "resid_raw": [0.0] * 10,
@@ -309,7 +309,7 @@ class TestResidualStatistics:
         }
         df = pd.DataFrame(data)
         stats = residual_statistics(df)
-        assert stats.loc["y1", "outlier_rate"] == 0.2  # 2/10
+        assert stats.loc["1", "outlier_rate"] == 0.2  # 2/10
 
 
 ###############################################################################
@@ -345,7 +345,7 @@ class TestValidateResiduals:
         y = y_true + 50.0 + np.array([0.5, -0.25, 0.0, 0.25, -0.5])
         y_err = np.ones_like(y) * 10.0
         da = DataArray(xc=x, yc=y, y_errc=y_err)
-        dataset = Dataset({"y1": da}, is_ph=True)
+        dataset = Dataset({"1": da}, is_ph=True)
         fr = fit_binding_glob(dataset)
         # With a constant offset, the fit should still be good
         # (offset absorbed by S0/S1), so bias_ok should be True
@@ -404,7 +404,7 @@ class TestResidualWorkflow:
         y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
         y_err = np.ones_like(y) * 10.0
         da = DataArray(xc=x, yc=y, y_errc=y_err)
-        dataset = Dataset({"y1": da}, is_ph=True)
+        dataset = Dataset({"1": da}, is_ph=True)
 
         # Fit multiple "wells"
         fit_results = {f"A{i:02d}": fit_binding_glob(dataset) for i in range(1, 4)}
@@ -416,7 +416,7 @@ class TestResidualWorkflow:
         # Compute statistics
         stats = residual_statistics(all_residuals)
         assert len(stats) == 1  # 1 label
-        assert stats.loc["y1", "n_points"] == 15
+        assert stats.loc["1", "n_points"] == 15
 
         # Validate individual fits
         for fr in fit_results.values():
@@ -432,7 +432,7 @@ class TestResidualWorkflow:
 
         da1 = DataArray(xc=x, yc=y1, y_errc=y_err)
         da2 = DataArray(xc=x, yc=y2, y_errc=y_err)
-        dataset = Dataset({"y1": da1, "y2": da2}, is_ph=True)
+        dataset = Dataset({"1": da1, "2": da2}, is_ph=True)
 
         fr = fit_binding_glob(dataset)
 
@@ -443,7 +443,7 @@ class TestResidualWorkflow:
         # Convert to DataFrame
         df = residual_dataframe(fr)
         assert len(df) == 10
-        assert set(df["label"].unique()) == {"y1", "y2"}
+        assert set(df["label"].unique()) == {"1", "2"}
 
         # Statistics by label
         stats = residual_statistics(df)

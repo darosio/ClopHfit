@@ -32,20 +32,20 @@ class TestMakeBenchmarkDataset:
         ds, truth = make_benchmark_dataset(k=7.0, n_labels=1, seed=42)
 
         assert len(ds) == 1
-        assert "y1" in ds
+        assert "1" in ds
         assert truth.K == 7.0
-        assert len(ds["y1"].y) == 7
-        assert np.all(ds["y1"].y_err > 0)
+        assert len(ds["1"].y) == 7
+        assert np.all(ds["1"].y_err > 0)
 
     def test_two_labels_clean(self) -> None:
         """Test two label clean data generation."""
         ds, _truth = make_benchmark_dataset(k=7.0, n_labels=2, seed=42)
 
         assert len(ds) == 2
-        assert "y1" in ds
-        assert "y2" in ds
-        assert len(ds["y1"].y) == 7
-        assert len(ds["y2"].y) == 7
+        assert "1" in ds
+        assert "2" in ds
+        assert len(ds["1"].y) == 7
+        assert len(ds["2"].y) == 7
 
     def test_error_ratio(self) -> None:
         """Test that error_ratio correctly scales y2 errors."""
@@ -53,11 +53,11 @@ class TestMakeBenchmarkDataset:
         ds2, _ = make_benchmark_dataset(n_labels=2, error_ratio=0.2, seed=42)
 
         # With ratio=1.0, errors should be similar
-        ratio1 = ds1["y2"].y_err.mean() / ds1["y1"].y_err.mean()
+        ratio1 = ds1["2"].y_err.mean() / ds1["1"].y_err.mean()
         assert 0.8 < ratio1 < 1.2
 
         # With ratio=0.2, y2 errors should be smaller
-        ratio2 = ds2["y2"].y_err.mean() / ds2["y1"].y_err.mean()
+        ratio2 = ds2["2"].y_err.mean() / ds2["1"].y_err.mean()
         assert ratio2 < 0.6
 
     def test_low_ph_drop(self) -> None:
@@ -69,8 +69,8 @@ class TestMakeBenchmarkDataset:
 
         # Low-pH drop should reduce the signal at the lowest pH point
         # The lowest pH is at the highest index (since pH is sorted high to low)
-        idx_low = int(np.argmin(ds_clean["y1"].x))
-        ratio = ds_drop["y1"].y[idx_low] / ds_clean["y1"].y[idx_low]
+        idx_low = int(np.argmin(ds_clean["1"].x))
+        ratio = ds_drop["1"].y[idx_low] / ds_clean["1"].y[idx_low]
         # With 40% drop, ratio should be around 0.6
         assert 0.5 < ratio < 0.8
 
@@ -79,8 +79,8 @@ class TestMakeBenchmarkDataset:
         ds1, truth1 = make_benchmark_dataset(k=7.0, n_labels=2, seed=123)
         ds2, truth2 = make_benchmark_dataset(k=7.0, n_labels=2, seed=123)
 
-        np.testing.assert_array_equal(ds1["y1"].y, ds2["y1"].y)
-        np.testing.assert_array_equal(ds1["y2"].y, ds2["y2"].y)
+        np.testing.assert_array_equal(ds1["1"].y, ds2["1"].y)
+        np.testing.assert_array_equal(ds1["2"].y, ds2["2"].y)
         assert truth1.K == truth2.K
 
     def test_rng_parameter(self) -> None:
@@ -89,7 +89,7 @@ class TestMakeBenchmarkDataset:
         ds, _ = make_benchmark_dataset(k=7.0, n_labels=1, rng=rng)
 
         assert len(ds) == 1
-        assert len(ds["y1"].y) == 7
+        assert len(ds["1"].y) == 7
 
 
 class TestSyntheticDataGeneration:
@@ -98,15 +98,15 @@ class TestSyntheticDataGeneration:
     def test_make_synthetic_ds_ph(self) -> None:
         """Test synthetic pH dataset generation."""
         k = 7.2
-        s0 = {"y0": 2.0, "y1": 2.2}
-        s1 = {"y0": 1.0, "y1": 1.1}
+        s0 = {"0": 2.0, "1": 2.2}
+        s1 = {"0": 1.0, "1": 1.1}
 
         ds, truth = make_synthetic_ds(k, s0, s1, is_ph=True, noise=0.01, seed=42)
 
         assert ds.is_ph
         assert len(ds) == 2
-        assert "y0" in ds
-        assert "y1" in ds
+        assert "0" in ds
+        assert "1" in ds
         assert k == truth.K
         assert s0 == truth.S0
         assert s1 == truth.S1
@@ -127,12 +127,12 @@ class TestSyntheticDataGeneration:
 
         assert not ds.is_ph
         assert len(ds) == 1
-        assert "y0" in ds
+        assert "0" in ds
         assert k == truth.K
-        assert truth.S0 == {"y0": 3.0}
-        assert truth.S1 == {"y0": 0.5}
+        assert truth.S0 == {"0": 3.0}
+        assert truth.S1 == {"0": 0.5}
 
-        da = ds["y0"]
+        da = ds["0"]
         assert len(da.x) == 7  # Default Cl points
         assert np.all(da.x >= 0.01)  # Cl concentrations should be positive
 
@@ -143,12 +143,12 @@ class TestSyntheticDataGeneration:
         ds1, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=42)
         ds2, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=42)
 
-        np.testing.assert_array_equal(ds1["y0"].y, ds2["y0"].y)
+        np.testing.assert_array_equal(ds1["0"].y, ds2["0"].y)
 
         # Also ensure different when seed is None (random)
         ds3, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=None)
         ds4, _ = make_synthetic_ds(k, s0, s1, is_ph=True, seed=None)
-        assert not np.array_equal(ds3["y0"].y, ds4["y0"].y)
+        assert not np.array_equal(ds3["0"].y, ds4["0"].y)
 
     def test_make_synthetic_ds_different_noise_levels(self) -> None:
         """Test different noise levels produce different standard deviations."""
@@ -159,10 +159,10 @@ class TestSyntheticDataGeneration:
         ds_high, _ = make_synthetic_ds(k, s0, s1, is_ph=True, noise=0.1, seed=43)
 
         # Compare standard deviation of residuals from clean model
-        clean_y = binding_1site(ds_low["y0"].x, k, s0, s1, is_ph=True)
+        clean_y = binding_1site(ds_low["0"].x, k, s0, s1, is_ph=True)
 
-        residuals_low = np.abs(ds_low["y0"].y - clean_y)
-        residuals_high = np.abs(ds_high["y0"].y - clean_y)
+        residuals_low = np.abs(ds_low["0"].y - clean_y)
+        residuals_high = np.abs(ds_high["0"].y - clean_y)
 
         std_low = np.std(residuals_low)
         std_high = np.std(residuals_high)
@@ -176,14 +176,14 @@ class TestSyntheticDataGeneration:
         ds_rel_high, _ = make_dataset(k, s0, s1, is_ph=True, rel_error=0.1, seed=11)
         res_low = np.std(
             np.abs(
-                ds_rel_low["y0"].y
-                - binding_1site(ds_rel_low["y0"].x, k, s0, s1, is_ph=True)
+                ds_rel_low["0"].y
+                - binding_1site(ds_rel_low["0"].x, k, s0, s1, is_ph=True)
             )
         )
         res_high = np.std(
             np.abs(
-                ds_rel_high["y0"].y
-                - binding_1site(ds_rel_high["y0"].x, k, s0, s1, is_ph=True)
+                ds_rel_high["0"].y
+                - binding_1site(ds_rel_high["0"].x, k, s0, s1, is_ph=True)
             )
         )
         assert res_high >= res_low
@@ -196,38 +196,38 @@ class TestTecanErrorModel:
         """y2 errors are dominated by read noise — nearly constant ~10 counts."""
         ds, _ = make_dataset(
             k=7.0,
-            s0={"y1": 634, "y2": 903},
-            s1={"y1": 1024, "y2": 177},
+            s0={"1": 634, "2": 903},
+            s1={"1": 1024, "2": 177},
             error_model="tecan",
             seed=0,
         )
-        y2_err = ds["y2"].y_err
-        assert y2_err is not None
-        assert y2_err.mean() == pytest.approx(10.0, abs=1.0)
-        assert y2_err.std() < 1.0  # nearly uniform
+        yerr_2 = ds["2"].y_err
+        assert yerr_2 is not None
+        assert yerr_2.mean() == pytest.approx(10.0, abs=1.0)
+        assert yerr_2.std() < 1.0  # nearly uniform
 
-    def test_y1_noisier_than_y2(self) -> None:
+    def test_1_noisier_than_y2(self) -> None:
         """y1 errors are substantially larger than y2 at typical signals."""
         ds, _ = make_dataset(
             k=7.0,
-            s0={"y1": 634, "y2": 903},
-            s1={"y1": 1024, "y2": 177},
+            s0={"1": 634, "2": 903},
+            s1={"1": 1024, "2": 177},
             error_model="tecan",
             seed=0,
         )
-        y1_err = ds["y1"].y_err
-        y2_err = ds["y2"].y_err
-        assert y1_err is not None
-        assert y2_err is not None
-        assert y1_err.mean() > 4 * y2_err.mean()
+        err_1 = ds["1"].y_err
+        yerr_2 = ds["2"].y_err
+        assert err_1 is not None
+        assert yerr_2 is not None
+        assert err_1.mean() > 4 * yerr_2.mean()
 
     def test_tecan_with_randomized_signals(self) -> None:
         """Tecan model works with randomize_signals=True."""
         ds, truth = make_dataset(randomize_signals=True, error_model="tecan", seed=42)
-        assert "y1" in ds
-        assert "y2" in ds
-        assert ds["y1"].y_err is not None
-        assert ds["y2"].y_err is not None
+        assert "1" in ds
+        assert "2" in ds
+        assert ds["1"].y_err is not None
+        assert ds["2"].y_err is not None
         assert truth.K > 0
 
 
@@ -281,12 +281,12 @@ class TestResultExtraction:
         """Test S parameter extraction for multi-label datasets."""
         params = Parameters()
         params.add("S0_y0", value=2.0)
-        params.add("S0_y1", value=2.2)
+        params.add("S0_1", value=2.2)
         params.add("S1_y0", value=1.0)
         params.add("K", value=7.0)
 
         params["S0_y0"].stderr = 0.05
-        params["S0_y1"].stderr = 0.06
+        params["S0_1"].stderr = 0.06
         params["S1_y0"].stderr = 0.02
         params["K"].stderr = 0.1
 
@@ -298,7 +298,7 @@ class TestResultExtraction:
         s0_vals = s_from_result(fr, "S0")
         s1_vals = s_from_result(fr, "S1")
 
-        assert s0_vals == {"S0_y0": 2.0, "S0_y1": 2.2}
+        assert s0_vals == {"S0_y0": 2.0, "S0_1": 2.2}
         assert s1_vals == {"S1_y0": 1.0}
 
 
@@ -363,20 +363,20 @@ class TestTecanFitCombinations:
         combinations = build_tecan_fit_combinations()
 
         expected_names = {
-            "y1_huber",
-            "y2_huber",
-            "y1y2_huber",
-            "y1y2_odr_from_huber",
+            "1_huber",
+            "2_huber",
+            "12_huber",
+            "12_odr_from_huber",
         }
         assert set(combinations) == expected_names
         assert all(
             isinstance(combo, TecanFitCombination) for combo in combinations.values()
         )
-        assert combinations["y1_huber"].channels == ("y1",)
-        assert combinations["y2_huber"].channels == ("y2",)
-        assert combinations["y1y2_huber"].channels == ("y1", "y2")
-        assert combinations["y1y2_odr_from_huber"].final_stage == "odr"
-        assert combinations["y1y2_odr_from_huber"].prefit == "huber"
+        assert combinations["1_huber"].channels == ("1",)
+        assert combinations["2_huber"].channels == ("2",)
+        assert combinations["12_huber"].channels == ("1", "2")
+        assert combinations["12_odr_from_huber"].final_stage == "odr"
+        assert combinations["12_odr_from_huber"].prefit == "huber"
 
     def test_build_tecan_fit_combinations_with_mcmc(self) -> None:
         """Optional MCMC stages should be appended as named combinations."""
@@ -385,18 +385,18 @@ class TestTecanFitCombinations:
             mcmc_modes=("single", "multi-noise"),
         )
 
-        assert "y1y2_mcmc_single_from_huber" in combinations
-        assert "y1y2_mcmc_multi-noise_from_huber" in combinations
-        assert combinations["y1y2_mcmc_single_from_huber"].final_stage == "mcmc_single"
+        assert "12_mcmc_single_from_huber" in combinations
+        assert "12_mcmc_multi-noise_from_huber" in combinations
+        assert combinations["12_mcmc_single_from_huber"].final_stage == "mcmc_single"
         assert (
-            combinations["y1y2_mcmc_multi-noise_from_huber"].final_stage
+            combinations["12_mcmc_multi-noise_from_huber"].final_stage
             == "mcmc_multi-noise"
         )
 
     def test_build_factorized_tecan_fit_combinations_crosses_factors(self) -> None:
         """Factorized registry should generate the requested cross-product."""
         combinations = build_factorized_tecan_fit_combinations(
-            channels=(("y1",), ("y1", "y2")),
+            channels=(("1",), ("1", "2")),
             prefits=("huber",),
             final_stages=("huber", "odr", "mcmc_single"),
             weightings=("auto", "none"),
@@ -404,41 +404,39 @@ class TestTecanFitCombinations:
         )
 
         assert set(combinations) == {
-            "y1_huber_auto",
-            "y1_huber_auto_outlier_zscore-2.5-5",
-            "y1_huber_none",
-            "y1_huber_none_outlier_zscore-2.5-5",
-            "y1_odr_from_huber_auto",
-            "y1_odr_from_huber_auto_outlier_zscore-2.5-5",
-            "y1_odr_from_huber_none",
-            "y1_odr_from_huber_none_outlier_zscore-2.5-5",
-            "y1_mcmc_single_from_huber_auto",
-            "y1_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
-            "y1_mcmc_single_from_huber_none",
-            "y1_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
-            "y1y2_huber_auto",
-            "y1y2_huber_auto_outlier_zscore-2.5-5",
-            "y1y2_huber_none",
-            "y1y2_huber_none_outlier_zscore-2.5-5",
-            "y1y2_odr_from_huber_auto",
-            "y1y2_odr_from_huber_auto_outlier_zscore-2.5-5",
-            "y1y2_odr_from_huber_none",
-            "y1y2_odr_from_huber_none_outlier_zscore-2.5-5",
-            "y1y2_mcmc_single_from_huber_auto",
-            "y1y2_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
-            "y1y2_mcmc_single_from_huber_none",
-            "y1y2_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+            "1_huber_auto",
+            "1_huber_auto_outlier_zscore-2.5-5",
+            "1_huber_none",
+            "1_huber_none_outlier_zscore-2.5-5",
+            "1_odr_from_huber_auto",
+            "1_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "1_odr_from_huber_none",
+            "1_odr_from_huber_none_outlier_zscore-2.5-5",
+            "1_mcmc_single_from_huber_auto",
+            "1_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "1_mcmc_single_from_huber_none",
+            "1_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+            "12_huber_auto",
+            "12_huber_auto_outlier_zscore-2.5-5",
+            "12_huber_none",
+            "12_huber_none_outlier_zscore-2.5-5",
+            "12_odr_from_huber_auto",
+            "12_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "12_odr_from_huber_none",
+            "12_odr_from_huber_none_outlier_zscore-2.5-5",
+            "12_mcmc_single_from_huber_auto",
+            "12_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "12_mcmc_single_from_huber_none",
+            "12_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
         }
-        assert combinations["y1_huber_none"].weighting == "none"
-        assert combinations["y1_odr_from_huber_auto"].final_stage == "odr"
+        assert combinations["1_huber_none"].weighting == "none"
+        assert combinations["1_odr_from_huber_auto"].final_stage == "odr"
         assert (
-            combinations["y1_mcmc_single_from_huber_auto"].final_stage == "mcmc_single"
+            combinations["1_mcmc_single_from_huber_auto"].final_stage == "mcmc_single"
         )
-        assert combinations["y1y2_odr_from_huber_auto"].prefit == "huber"
+        assert combinations["12_odr_from_huber_auto"].prefit == "huber"
         assert (
-            combinations[
-                "y1y2_odr_from_huber_auto_outlier_zscore-2.5-5"
-            ].outlier_handling
+            combinations["12_odr_from_huber_auto_outlier_zscore-2.5-5"].outlier_handling
             == "zscore:2.5:5"
         )
 
@@ -447,7 +445,7 @@ class TestTecanFitCombinations:
     ) -> None:
         """Single-channel ODR and MCMC workflows should remain benchmarkable."""
         combinations = build_factorized_tecan_fit_combinations(
-            channels=(("y1",), ("y2",), ("y1", "y2")),
+            channels=(("1",), ("2",), ("1", "2")),
             prefits=("huber",),
             final_stages=("odr", "mcmc_single"),
             weightings=("auto",),
@@ -455,12 +453,12 @@ class TestTecanFitCombinations:
         )
 
         assert {
-            "y1_odr_from_huber_auto",
-            "y2_odr_from_huber_auto",
-            "y1y2_odr_from_huber_auto",
-            "y1_mcmc_single_from_huber_auto",
-            "y2_mcmc_single_from_huber_auto",
-            "y1y2_mcmc_single_from_huber_auto",
+            "1_odr_from_huber_auto",
+            "2_odr_from_huber_auto",
+            "12_odr_from_huber_auto",
+            "1_mcmc_single_from_huber_auto",
+            "2_mcmc_single_from_huber_auto",
+            "12_mcmc_single_from_huber_auto",
         } <= set(combinations)
 
     def test_apply_tecan_combination_uses_fresh_dataset_copy(self) -> None:
@@ -471,20 +469,20 @@ class TestTecanFitCombinations:
             seed=42,
         )
         combo = TecanFitCombination(
-            name="y1_huber",
-            channels=("y1",),
+            name="1_huber",
+            channels=("1",),
             prefit="huber",
             final_stage="huber",
         )
 
-        y_before = ds["y1"].y.copy()
-        mask_before = ds["y1"].mask.copy()
+        y_before = ds["1"].y.copy()
+        mask_before = ds["1"].mask.copy()
 
         result = apply_tecan_combination(ds, combo)
 
         assert isinstance(result, FitResult)
-        np.testing.assert_array_equal(ds["y1"].y, y_before)
-        np.testing.assert_array_equal(ds["y1"].mask, mask_before)
+        np.testing.assert_array_equal(ds["1"].y, y_before)
+        np.testing.assert_array_equal(ds["1"].mask, mask_before)
 
     def test_apply_tecan_combination_restricts_channels(self) -> None:
         """Single-channel combinations should fit only the requested channel."""
@@ -494,8 +492,8 @@ class TestTecanFitCombinations:
             seed=42,
         )
         combo = TecanFitCombination(
-            name="y2_huber",
-            channels=("y2",),
+            name="2_huber",
+            channels=("2",),
             prefit="huber",
             final_stage="huber",
         )
@@ -503,7 +501,7 @@ class TestTecanFitCombinations:
         result = apply_tecan_combination(ds, combo)
 
         assert result.dataset is not None
-        assert set(result.dataset.keys()) == {"y2"}
+        assert set(result.dataset.keys()) == {"2"}
 
     def test_apply_tecan_combination_odr_uses_global_prefit(self) -> None:
         """ODR combinations should run on top of a preceding global fit result."""
@@ -513,8 +511,8 @@ class TestTecanFitCombinations:
             seed=42,
         )
         combo = TecanFitCombination(
-            name="y1y2_odr_from_huber",
-            channels=("y1", "y2"),
+            name="12_odr_from_huber",
+            channels=("1", "2"),
             prefit="huber",
             final_stage="odr",
         )
@@ -524,7 +522,7 @@ class TestTecanFitCombinations:
         assert isinstance(result, FitResult)
         assert result.result is not None
         assert result.dataset is not None
-        assert set(result.dataset.keys()) == {"y1", "y2"}
+        assert set(result.dataset.keys()) == {"1", "2"}
 
 
 class TestEdgeCases:

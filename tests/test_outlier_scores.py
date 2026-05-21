@@ -18,7 +18,7 @@ def _make_da(x: np.ndarray, y: np.ndarray) -> DataArray:
     return DataArray(xc=x, yc=y)
 
 
-def _make_ds(x: np.ndarray, y: np.ndarray, lbl: str = "y1") -> Dataset:
+def _make_ds(x: np.ndarray, y: np.ndarray, lbl: str = "1") -> Dataset:
     return Dataset({lbl: _make_da(x, y)}, is_ph=True)
 
 
@@ -84,7 +84,7 @@ def test_apply_outlier_mask() -> None:
     y = np.array([10.0, 8.0, 25.0, 4.0, 2.0])
     ds = _make_ds(x, y)
     result = apply_outlier_mask(ds, threshold=0.2)
-    da = result["y1"]
+    da = result["1"]
     assert not da.mask[2]
 
 
@@ -94,7 +94,7 @@ def test_apply_outlier_mask_preserves_good_data() -> None:
     y = np.array([10.0, 8.0, 6.0, 4.0, 2.0])
     ds = _make_ds(x, y)
     result = apply_outlier_mask(ds, threshold=0.2)
-    da = result["y1"]
+    da = result["1"]
     assert np.all(da.mask)
 
 
@@ -104,7 +104,7 @@ def test_apply_outlier_mask_iterative_advantage() -> None:
     y = np.array([1.0, 2.0, 3.0, 10.0, 5.0, 6.0, 7.0])
     ds = _make_ds(x, y)
     result = apply_outlier_mask(ds, threshold=0.15, min_keep=3)
-    da = result["y1"]
+    da = result["1"]
     assert not da.mask[3]
 
 
@@ -114,7 +114,7 @@ def test_apply_outlier_mask_min_keep() -> None:
     y = np.array([1.0, 100.0, 200.0, 50.0])
     ds = _make_ds(x, y)
     result = apply_outlier_mask(ds, threshold=0.01, min_keep=3)
-    da = result["y1"]
+    da = result["1"]
     assert da.mask.sum() >= 3
 
 
@@ -128,10 +128,10 @@ def test_fit_noise_model_recovers_known_params() -> None:
     y = np.linspace(10, 1000, 300)
     sigma = np.sqrt(true_floor**2 + true_gain * y + (rel * y) ** 2)
     resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
     floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=rel)
-    assert abs(floor_d["y1"] - true_floor) <= true_floor
-    assert abs(gain_d["y1"] - true_gain) < true_gain * 3
+    assert abs(floor_d["1"] - true_floor) <= true_floor
+    assert abs(gain_d["1"] - true_gain) < true_gain * 3
 
 
 def test_fit_noise_model_fallback_on_negative_params() -> None:
@@ -139,10 +139,10 @@ def test_fit_noise_model_fallback_on_negative_params() -> None:
     rng = np.random.default_rng(0)
     y = np.ones(50)
     resid = rng.standard_normal(50) * 0.01
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
     floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=0.003)
-    assert floor_d["y1"] >= 0.0
-    assert gain_d["y1"] >= 0.0
+    assert floor_d["1"] >= 0.0
+    assert gain_d["1"] >= 0.0
 
 
 def test_fit_noise_model_multi_label() -> None:
@@ -150,14 +150,14 @@ def test_fit_noise_model_multi_label() -> None:
     rng = np.random.default_rng(7)
     y = np.linspace(10, 500, 100)
     parts = []
-    for lbl, floor in [("y1", 3.0), ("y2", 10.0)]:
+    for lbl, floor in [("1", 3.0), ("2", 10.0)]:
         sigma = np.sqrt(floor**2 + 1.0 * y + (0.003 * y) ** 2)
         resid = sigma * rng.standard_normal(100)
         parts.append(pd.DataFrame({"label": lbl, "resid_raw": resid, "predicted": y}))
     df = pd.concat(parts, ignore_index=True)
     floor_d, _ = fit_noise_model_from_residuals(df, rel_error=0.003)
-    assert "y1" in floor_d
-    assert "y2" in floor_d
+    assert "1" in floor_d
+    assert "2" in floor_d
 
 
 # --- fit_gain_and_rel_error_from_residuals ---
@@ -170,11 +170,11 @@ def test_fit_gain_and_rel_error_recovers_known_params() -> None:
     y = np.linspace(50, 500, 300)
     sigma = np.sqrt(floor**2 + true_gain * y + (true_alpha * y) ** 2)
     resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
-    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"y1": floor})
-    assert gain_d["y1"] >= 0.0
-    assert alpha_d["y1"] >= 0.0
-    combined_est = gain_d["y1"] * np.mean(y) + (alpha_d["y1"] * np.mean(y)) ** 2
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
+    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"1": floor})
+    assert gain_d["1"] >= 0.0
+    assert alpha_d["1"] >= 0.0
+    combined_est = gain_d["1"] * np.mean(y) + (alpha_d["1"] * np.mean(y)) ** 2
     combined_true = true_gain * np.mean(y) + (true_alpha * np.mean(y)) ** 2
     assert combined_est < 3 * combined_true
 
@@ -184,10 +184,10 @@ def test_fit_gain_and_rel_error_non_negative() -> None:
     rng = np.random.default_rng(1)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
-    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"y1": 10.0})
-    assert gain_d["y1"] >= 0.0
-    assert alpha_d["y1"] >= 0.0
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
+    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"1": 10.0})
+    assert gain_d["1"] >= 0.0
+    assert alpha_d["1"] >= 0.0
 
 
 # --- fit_rel_error_from_residuals ---
@@ -200,9 +200,9 @@ def test_fit_rel_error_recovers_known_alpha() -> None:
     floor, true_alpha = 5.0, 0.02
     sigma = np.sqrt(floor**2 + (true_alpha * y_pred) ** 2)
     resid = sigma * rng.standard_normal(400)
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y_pred})
-    alpha = fit_rel_error_from_residuals(df, sigma_floor={"y1": floor})
-    assert abs(alpha["y1"] - true_alpha) / true_alpha < 0.2
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": floor})
+    assert abs(alpha["1"] - true_alpha) / true_alpha < 0.2
 
 
 def test_fit_rel_error_multi_label() -> None:
@@ -210,16 +210,16 @@ def test_fit_rel_error_multi_label() -> None:
     rng = np.random.default_rng(3)
     y = np.linspace(50, 500, 200)
     parts = []
-    for lbl, alpha_true, floor in [("y1", 0.02, 5.0), ("y2", 0.04, 3.0)]:
+    for lbl, alpha_true, floor in [("1", 0.02, 5.0), ("2", 0.04, 3.0)]:
         sigma = np.sqrt(floor**2 + (alpha_true * y) ** 2)
         resid = sigma * rng.standard_normal(200)
         parts.append(pd.DataFrame({"label": lbl, "resid_raw": resid, "predicted": y}))
     df = pd.concat(parts, ignore_index=True)
-    alpha = fit_rel_error_from_residuals(df, sigma_floor={"y1": 5.0, "y2": 3.0})
-    assert "y1" in alpha
-    assert "y2" in alpha
-    assert alpha["y1"] >= 0.0
-    assert alpha["y2"] >= 0.0
+    alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": 5.0, "2": 3.0})
+    assert "1" in alpha
+    assert "2" in alpha
+    assert alpha["1"] >= 0.0
+    assert alpha["2"] >= 0.0
 
 
 def test_fit_rel_error_non_negative_clamped() -> None:
@@ -227,9 +227,9 @@ def test_fit_rel_error_non_negative_clamped() -> None:
     rng = np.random.default_rng(5)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
-    df = pd.DataFrame({"label": "y1", "resid_raw": resid, "predicted": y})
-    alpha = fit_rel_error_from_residuals(df, sigma_floor={"y1": 100.0})
-    assert alpha["y1"] >= 0.0
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
+    alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": 100.0})
+    assert alpha["1"] >= 0.0
 
 
 # --- assign_error_model ---
@@ -244,8 +244,6 @@ def test_assign_error_model_gain_zero_is_no_poisson() -> None:
     result_no_poisson = assign_error_model(
         ds, sigma_floor=2.0, gain=0.0, rel_error=0.03
     )
-    np.testing.assert_allclose(
-        result_gain0["y1"].y_errc, result_no_poisson["y1"].y_errc
-    )
+    np.testing.assert_allclose(result_gain0["1"].y_errc, result_no_poisson["1"].y_errc)
     expected = np.sqrt(2.0**2 + (0.03 * y) ** 2)
-    np.testing.assert_allclose(result_gain0["y1"].y_errc, expected, rtol=1e-6)
+    np.testing.assert_allclose(result_gain0["1"].y_errc, expected, rtol=1e-6)

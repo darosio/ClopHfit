@@ -134,7 +134,7 @@ return outlier2(ds, key)  # Overwrites y_err with residual-based estimates
 
 ```python
 # Uses y_err from outlier2 (residual-based), NOT the original √y + σ_buffer
-sigma=ye_mag * da.y_err  # da.y_err comes from outlier2's reweighting
+sigma = ye_mag * da.y_err  # da.y_err comes from outlier2's reweighting
 ```
 
 This means the physics-informed prior (`√y + σ_buffer²`) is computed but then **overwritten** by `outlier2` before reaching PyMC. The Bayesian stage inherits residual-based errors, not the mechanistic model.

@@ -72,7 +72,7 @@ def test_compare_lm_variants(
     y = y_true + rng.normal(scale=noise_sd, size=y_true.shape)
 
     da = DataArray(xc=x, yc=y, x_errc=x_err)
-    ds = Dataset({"y1": da}, is_ph=True)
+    ds = Dataset({"1": da}, is_ph=True)
 
     # Initial weighting makes baseline fair; it will be updated by iterative fits
     weight_multi_ds_titration(ds)
@@ -131,7 +131,7 @@ def test_iterative_outlier_removal_is_stable(csv_name: str) -> None:
     y = y.copy()
     y[np.argmax(x)] += 0.5
 
-    ds = Dataset({"y1": DataArray(xc=x, yc=y, x_errc=x_err)}, is_ph=True)
+    ds = Dataset({"1": DataArray(xc=x, yc=y, x_errc=x_err)}, is_ph=True)
     weight_multi_ds_titration(ds)
 
     fr = fit_binding_glob(ds, reweight="irls", remove_outliers="zscore:2.5:0")

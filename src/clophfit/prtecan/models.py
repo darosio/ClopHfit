@@ -245,7 +245,7 @@ class Tecanfile:
     path: Path
     metadata: dict[str, Metadata] = field(init=False, repr=False)
     """General metadata for Tecanfile, like `Date` and `Shaking Duration`."""
-    labelblocks: dict[int, Labelblock] = field(
+    labelblocks: dict[str, Labelblock] = field(
         init=False, repr=False, default_factory=dict
     )
     """All labelblocks contained in this file."""
@@ -261,7 +261,7 @@ class Tecanfile:
         n_labelblocks = len(idxs)
         idxs.append(len(csvl))
         labelblocks = {
-            i + 1: Labelblock(csvl[idxs[i] : idxs[i + 1]], str(self.path))
+            str(i + 1): Labelblock(csvl[idxs[i] : idxs[i + 1]], str(self.path))
             for i in range(n_labelblocks)
         }
         self.labelblocks = labelblocks
@@ -358,7 +358,7 @@ class TecanfilesGroup:
     """
 
     tecanfiles: list[Tecanfile]
-    labelblocksgroups: dict[int, LabelblocksGroup] = field(
+    labelblocksgroups: dict[str, LabelblocksGroup] = field(
         init=False, default_factory=dict
     )
     """Each group contains its own data like a titration."""

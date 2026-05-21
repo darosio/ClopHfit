@@ -27,21 +27,21 @@ L2_PH_ERRORS = np.array([0.005, 0.045, 0.087, 0.026, 0.16, 0.157, 0.157])
 # Updated from analysis of 250 valid wells across L1-L4 datasets
 REAL_DATA_STATS: dict[str, dict[str, float]] = {
     "K": {"mean": 6.8, "std": 1.35, "min": 5.3, "max": 8.2},
-    "S0_y1": {"mean": 634.0, "std": 567.0 / 10, "min": 30.0, "max": 2700.0},
-    "S1_y1": {"mean": 1024.0, "std": 989.0 / 10, "min": 36.0, "max": 5142.0},
-    "S0_y2": {"mean": 903.0, "std": 740.0 / 2, "min": 136.0, "max": 4416.0},
-    "S1_y2": {"mean": 177.0, "std": 198.0 / 2, "min": 6.0, "max": 1212.0},
+    "S0_1": {"mean": 634.0, "std": 567.0 / 10, "min": 30.0, "max": 2700.0},
+    "S1_1": {"mean": 1024.0, "std": 989.0 / 10, "min": 36.0, "max": 5142.0},
+    "S0_2": {"mean": 903.0, "std": 740.0 / 2, "min": 136.0, "max": 4416.0},
+    "S1_2": {"mean": 177.0, "std": 198.0 / 2, "min": 6.0, "max": 1212.0},
 }
 
 # Log-space covariance matrix for correlated signal sampling
-# Rows/cols: [log10(S0_y1), log10(S1_y1), log10(S0_y2), log10(S1_y2)]
+# Rows/cols: [log10(S0_1), log10(S1_1), log10(S0_2), log10(S1_2)]
 # From real data: strong correlation between y1 and y2 signals (r~0.76-0.78)
 REAL_DATA_LOG_MEAN = np.array([2.54, 2.70, 2.80, 1.95])  # log10 scale
 REAL_DATA_LOG_COV = np.array([
-    [0.329, 0.339, 0.188, 0.256],  # log_S0_y1
-    [0.339, 0.408, 0.213, 0.305],  # log_S1_y1
-    [0.188, 0.213, 0.185, 0.192],  # log_S0_y2
-    [0.256, 0.305, 0.192, 0.372],  # log_S1_y2
+    [0.329, 0.339, 0.188, 0.256],  # log_S0_1
+    [0.339, 0.408, 0.213, 0.305],  # log_S1_1
+    [0.188, 0.213, 0.185, 0.192],  # log_S0_2
+    [0.256, 0.305, 0.192, 0.372],  # log_S1_2
 ])
 
 # Calibrated Tecan plate-reader noise parameters from MCMC posterior on L2 data.
@@ -77,10 +77,10 @@ def _sample_correlated_signals(rng: np.random.Generator) -> dict[str, float]:
     # Convert to linear scale with clipping
     signals = 10.0**log_samples
     return {
-        "S0_y1": float(np.clip(signals[0], 30, 3000)),
-        "S1_y1": float(np.clip(signals[1], 36, 5500)),
-        "S0_y2": float(np.clip(signals[2], 100, 4500)),
-        "S1_y2": float(np.clip(signals[3], 5, 1300)),
+        "S0_1": float(np.clip(signals[0], 30, 3000)),
+        "S1_1": float(np.clip(signals[1], 36, 5500)),
+        "S0_2": float(np.clip(signals[2], 100, 4500)),
+        "S1_2": float(np.clip(signals[3], 5, 1300)),
     }
 
 
@@ -121,12 +121,12 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
     min_error: float | dict[str, float] = 1.0,
     # Physics error model: shot noise + buffer noise
     buffer_sd: float | dict[str, float] = 50.0,
-    # Error ratio for two-label (y2_buffer / y1_buffer, physics model)
+    # Error ratio for two-label (2_buffer / 1_buffer, physics model)
     error_ratio: float = 1.0,
     # Low-pH drop (acidic tail collapse) - realistic artifact
     low_ph_drop: bool = False,
     low_ph_drop_magnitude: float = 0.4,
-    low_ph_drop_label: str = "y1",
+    low_ph_drop_label: str = "1",
     n_low_ph_drops: int = 1,
     # Saturation/masking
     saturation_prob: float = 0.0,
@@ -150,10 +150,10 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         Equilibrium constant (pKa for pH, Kd for Cl). If None and randomize_signals
         is True, sampled from real data distribution.
     s0 : dict[str, float] | float | None
-        Signal at unbound state. Use dict for multiple labels: {"y1": 700, "y2": 1000}.
+        Signal at unbound state. Use dict for multiple labels: {"1": 700, "2": 1000}.
         If None and randomize_signals is True, sampled from real data distribution.
     s1 : dict[str, float] | float | None
-        Signal at bound state. Use dict for multiple labels: {"y1": 1200, "y2": 200}.
+        Signal at bound state. Use dict for multiple labels: {"1": 1200, "2": 200}.
         If None and randomize_signals is True, sampled from real data distribution.
     is_ph : bool
         True for pH titration, False for Cl titration.
@@ -173,32 +173,32 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         - "realistic": Relative error with floor (uses `rel_error`, `min_error`).
         - "physics": Shot noise + buffer noise (uses `buffer_sd`, `error_ratio`).
         - "tecan": Calibrated model from MCMC posterior on real L2 data.
-          err = sqrt(gain * signal + sigma_read^2 + (alpha * signal)^2).
+          `err = sqrt(gain * signal + sigma_read^2 + (alpha * signal)^2)`.
           y1: gain=1.78, sigma_read=8.6, alpha=5.9%  → ~49 counts at signal=600.
           y2: gain≈0, sigma_read=9.78, alpha≈0.2%  → ~10 counts (uniform).
     noise : float | dict[str, float]
         For "simple" model: relative noise as fraction of dynamic range.
-        Use dict for per-label: {"y1": 0.05, "y2": 0.02}.
+        Use dict for per-label: {"1": 0.05, "2": 0.02}.
     y_err : float | dict[str, float] | None
         For "uniform" model: constant absolute error per label.
-        Use dict for per-label: {"y1": 10.0, "y2": 3.0}.
+        Use dict for per-label: {"1": 10.0, "2": 3.0}.
     rel_error : float | dict[str, float]
         For "realistic" model: relative error as fraction of signal.
-        Use dict for per-label: {"y1": 0.07, "y2": 0.025} for 3x y1/y2 ratio.
+        Use dict for per-label: {"1": 0.07, "2": 0.025} for 3x y1/y2 ratio.
     min_error : float | dict[str, float]
         For "realistic" model: minimum error floor (instrument noise).
     buffer_sd : float | dict[str, float]
         For "physics" model: base buffer SD where err = sqrt(signal + buffer_sd^2).
         For y2, scaled by error_ratio if not a dict.
     error_ratio : float
-        For two-label physics model: ratio of y2_buffer_sd to y1_buffer_sd.
+        For two-label physics model: ratio of 2_buffer_sd to 1_buffer_sd.
         1.0 = equal errors, 0.2 = y2 has 1/5 the error of y1.
     low_ph_drop : bool
         Simulate acidic tail collapse at lowest pH (realistic artifact).
     low_ph_drop_magnitude : float
         Fraction of signal to drop at lowest pH (0-1).
     low_ph_drop_label : str
-        Which label to apply the pH drop to ("y1" or "y2").
+        Which label to apply the pH drop to ("1" or "2").
     n_low_ph_drops : int
         Number of low-pH points to drop (default 1). Points are selected by
         ascending pH (lowest first).
@@ -239,8 +239,8 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
 
     >>> ds, truth = make_dataset(
     ...     k=7.0,
-    ...     s0={"y1": 1000, "y2": 800},
-    ...     s1={"y1": 200, "y2": 300},
+    ...     s0={"1": 1000, "2": 800},
+    ...     s1={"1": 200, "2": 300},
     ...     error_model="physics",
     ...     buffer_sd=50.0,
     ...     error_ratio=0.2,
@@ -274,28 +274,28 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
             corr_signals = _sample_correlated_signals(rng)
             if n_labels == 1:
                 if s0 is None:
-                    s0 = {"y1": corr_signals["S0_y1"]}
+                    s0 = {"1": corr_signals["S0_1"]}
                 if s1 is None:
-                    s1 = {"y1": corr_signals["S1_y1"]}
+                    s1 = {"1": corr_signals["S1_1"]}
             else:
                 if s0 is None:
-                    s0 = {"y1": corr_signals["S0_y1"], "y2": corr_signals["S0_y2"]}
+                    s0 = {"1": corr_signals["S0_1"], "2": corr_signals["S0_2"]}
                 if s1 is None:
-                    s1 = {"y1": corr_signals["S1_y1"], "y2": corr_signals["S1_y2"]}
+                    s1 = {"1": corr_signals["S1_1"], "2": corr_signals["S1_2"]}
     else:
         # Require k, s0, s1 when not randomizing
         if k is None:
             k = 7.0
         if s0 is None:
-            s0 = {"y0": 500.0}
+            s0 = {"0": 500.0}
         if s1 is None:
-            s1 = {"y0": 1000.0}
+            s1 = {"0": 1000.0}
 
     # Convert scalar inputs to dicts
     if not isinstance(s0, dict):
-        s0 = {"y0": float(s0)}
+        s0 = {"0": float(s0)}
     if not isinstance(s1, dict):
-        s1 = {"y0": float(s1)}
+        s1 = {"0": float(s1)}
 
     # Determine labels from s0/s1
     all_labels = set(s0.keys()) | set(s1.keys())
@@ -321,7 +321,7 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
         # Apply error_ratio for y2 if not explicitly a dict
         buffer_sd_d = {}
         for lbl in all_labels:
-            if lbl in {"y1", "y0"}:
+            if lbl in {"1", "0"}:
                 buffer_sd_d[lbl] = float(buffer_sd)
             else:  # y2 or others
                 buffer_sd_d[lbl] = float(buffer_sd) * error_ratio
@@ -352,8 +352,8 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
 
     for label in sorted(all_labels):
         # Get truth parameters with fallback
-        truth_s0[label] = s0.get(label, s0.get("y0", 1.0))
-        truth_s1[label] = s1.get(label, s1.get("y0", 1.0))
+        truth_s0[label] = s0.get(label, s0.get("0", 1.0))
+        truth_s1[label] = s1.get(label, s1.get("0", 1.0))
 
         # Generate clean signal
         clean = binding_1site(x, k, truth_s0[label], truth_s1[label], is_ph=is_ph)
@@ -372,7 +372,7 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
             # Calibrated model from MCMC posterior on real L2 Tecan data.
             # Quadrature sum of gain*signal, read noise squared, and (alpha*signal) squared.
             s = np.maximum(clean, 0.0)
-            if label in {"y1", "y0"}:
+            if label in {"1", "0"}:
                 y_err_arr = np.sqrt(
                     TECAN_Y1_GAIN * s
                     + TECAN_Y1_SIGMA_READ**2
@@ -433,9 +433,9 @@ def make_simple_dataset(  # noqa: PLR0913
     to use default weighting.
     """
     if not isinstance(s0, dict):
-        s0 = {"y0": float(s0)}
+        s0 = {"0": float(s0)}
     if not isinstance(s1, dict):
-        s1 = {"y0": float(s1)}
+        s1 = {"0": float(s1)}
 
     rng = np.random.default_rng(seed)
 
@@ -465,7 +465,7 @@ def make_benchmark_dataset(  # noqa: PLR0913
     n_points: int = 7,
     error_ratio: float = 1.0,
     add_outlier: bool = False,
-    outlier_label: str = "y1",
+    outlier_label: str = "1",
     outlier_sigma: float = 4.0,
     n_outliers: int = 1,
     seed: int | None = None,
@@ -485,12 +485,12 @@ def make_benchmark_dataset(  # noqa: PLR0913
     n_points : int
         Number of pH points (default 7).
     error_ratio : float
-        Ratio of y2_buffer_sd to y1_buffer_sd.
+        Ratio of 2_buffer_sd to 1_buffer_sd.
         1.0 = equal errors, 0.2 = y2 has 1/5 the error of y1.
     add_outlier : bool
         If True, add a low-pH drop in the specified label.
     outlier_label : str
-        Label to add pH drop to ("y1" or "y2").
+        Label to add pH drop to ("1" or "2").
     outlier_sigma : float
         Magnitude of low-pH drop (fraction of signal, 0-1).
         Default 4.0 is converted to 0.4 (40% drop).
@@ -519,19 +519,19 @@ def make_benchmark_dataset(  # noqa: PLR0913
 
     Two labels with low-pH drop in noisy channel:
     >>> ds, truth = make_benchmark_dataset(
-    ...     k=7.0, n_labels=2, error_ratio=0.2, add_outlier=True, outlier_label="y1"
+    ...     k=7.0, n_labels=2, error_ratio=0.2, add_outlier=True, outlier_label="1"
     ... )
     """
     # Convert outlier_sigma to magnitude if > 1 (backward compat)
     drop_magnitude = outlier_sigma / 10.0 if outlier_sigma > 1 else outlier_sigma
 
     # Build s0/s1 based on n_labels
-    s0_vals = {"y1": 1000.0, "y2": 800.0}
-    s1_vals = {"y1": 200.0, "y2": 300.0}
+    s0_vals = {"1": 1000.0, "2": 800.0}
+    s1_vals = {"1": 200.0, "2": 300.0}
 
     if n_labels == 1:
-        s0 = {"y1": s0_vals["y1"]}
-        s1 = {"y1": s1_vals["y1"]}
+        s0 = {"1": s0_vals["1"]}
+        s1 = {"1": s1_vals["1"]}
     else:
         s0 = s0_vals
         s1 = s1_vals

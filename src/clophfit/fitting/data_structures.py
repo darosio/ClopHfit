@@ -234,7 +234,7 @@ class Dataset(UserDict[str, DataArray]):
         if not da:
             return cls({})
         if isinstance(da, list):
-            data = {f"y{i}": da_item for i, da_item in enumerate(da)}
+            data = {str(i): da_item for i, da_item in enumerate(da)}
         elif isinstance(da, DataArray):
             data = {"default": da}
         return cls(data, is_ph=is_ph)
@@ -367,7 +367,7 @@ class Dataset(UserDict[str, DataArray]):
             Axes to plot on. If None, creates a new figure.
         colors : dict[str, str] | None
             Optional dictionary mapping labels to matplotlib color strings.
-            Defaults to {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}.
+            Defaults to {"1": "tab:blue", "2": "tab:orange", "0": "tab:blue"}.
 
         Returns
         -------
@@ -380,7 +380,7 @@ class Dataset(UserDict[str, DataArray]):
             fig = cast("Figure", ax.get_figure())
 
         if colors is None:
-            colors = {"y1": "tab:blue", "y2": "tab:orange", "y0": "tab:blue"}
+            colors = {"1": "tab:blue", "2": "tab:orange", "0": "tab:blue"}
 
         for label, da in self.items():
             color = colors.get(label)
