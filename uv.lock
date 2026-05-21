@@ -694,7 +694,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.17.1" },
     { name = "pygments", marker = "extra == 'docs'", specifier = ">=2.20.0" },
-    { name = "pymc", specifier = ">=6.0.0" },
+    { name = "pymc", specifier = ">=6.0.1" },
     { name = "pyparsing", specifier = ">=3.3.2" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -3379,7 +3379,7 @@ wheels = [
 
 [[package]]
 name = "pymc"
-version = "6.0.0"
+version = "6.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arviz" },
@@ -3393,9 +3393,9 @@ dependencies = [
     { name = "threadpoolctl" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1b/e2/e6baceb1b041aadd07c0f1f9ea385ebe7207be130143b09692f8b1330b87/pymc-6.0.0.tar.gz", hash = "sha256:0f8eae739a7e159deec03dbaed44068ea4d05f8d3e3b9aa0bcc0740a908fb86e", size = 530907, upload-time = "2026-05-13T08:46:41.787Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/ee/0340f92961de7e2f7a4a877d8715e43ec58061650bd613b64073a085624d/pymc-6.0.1.tar.gz", hash = "sha256:faa38320a2e034fb153cd0ba2f08e204f14ab68938131bfefa94a2fa8b9f99e2", size = 531456, upload-time = "2026-05-20T21:15:11.979Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/51/24190be8c14571b2b8a7ab04f12e528ecaa33158b9aa03ae9f68e3e36d62/pymc-6.0.0-py3-none-any.whl", hash = "sha256:c5229e6654fcf6fb7d636e703b51e1b412cfc2b38981213f307c5c6bb9809c54", size = 583523, upload-time = "2026-05-13T08:46:39.642Z" },
+    { url = "https://files.pythonhosted.org/packages/77/38/e86045374f31679798e0a09ab5cc9cbb22d2b18f8af6e249cb39a6a64110/pymc-6.0.1-py3-none-any.whl", hash = "sha256:b58bfa2b7abeed5a15281fd937c03affce57377c88efdcbb71a988f31301d22f", size = 584172, upload-time = "2026-05-20T21:15:09.815Z" },
 ]
 
 [[package]]
