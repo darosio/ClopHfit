@@ -43,7 +43,7 @@ class ResidualPoint:
     Attributes
     ----------
     label : str
-        Dataset label (e.g., 'y1', 'y2' for multi-label fits)
+        Dataset label (e.g., '1', '2' for multi-label fits)
     x : float
         X-value (pH or ligand concentration)
     resid_weighted : float
@@ -100,7 +100,7 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
     >>> len(residuals) > 0
     True
     >>> residuals[0].label
-    'y1'
+    '1'
     """
     if fr.result is None or fr.dataset is None:
         return []
