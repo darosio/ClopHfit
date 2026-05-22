@@ -284,6 +284,7 @@ def _fit_real_curve_with_titration(
     additions_file: Path,
     scheme_file: Path,
     is_ph: bool,
+    n_mcmc_samples: int = 200,
 ) -> FitResult[Any]:
     """Run combinations requiring pooled real-data context on a fresh Titration."""
     tit = _load_real_titration(
@@ -294,7 +295,7 @@ def _fit_real_curve_with_titration(
     )
     requested_well = well
     tit.params.fit_method = combination.prefit
-    tit.params.n_mcmc_samples = 200
+    tit.params.n_mcmc_samples = n_mcmc_samples
     mcmc_mode, result_attr = _resolve_titration_stage(combination.final_stage)
     tit.params.mcmc = mcmc_mode
 
@@ -312,8 +313,64 @@ def _fit_real_curve_with_titration(
         tit.params.noise_alpha = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[2] for label in label_names)
         tit.params.noise_gain = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[1] for label in label_names)
 
-    result_set = getattr(tit, result_attr)
-    return result_set[requested_well]
+    datasets = {fit_well: tit.create_global_ds(fit_well) for fit_well in sorted(tit.fit_keys)}
+
+    # Apply sub_res trick: subset the dataset to requested_well and 1 well from each scheme group
+    # to dramatically speed up tests/benchmarks on multi-well models.
+    subset_keys = {requested_well}
+    for keys in tit.scheme.names.values():
+        for key in keys:
+            if key in datasets:
+                subset_keys.add(key)
+                break  # just need 1 from each group
+
+    datasets = {k: datasets[k] for k in subset_keys}
+
+    # We must also redefine scheme names to match the subset
+    tit.scheme.names = {
+        grp: {k for k in keys if k in subset_keys}
+        for grp, keys in tit.scheme.names.items()
+    }
+    # Remove empty groups
+    tit.scheme.names = {grp: keys for grp, keys in tit.scheme.names.items() if keys}
+
+    if result_attr in ("result_multi_noise_mcmc", "result_multi_noise_xrw_mcmc", "result_multi_mcmc"):
+        from clophfit.fitting.pipeline import fit_plate
+        from clophfit.fitting.bayes import fit_binding_pymc_multi, extract_fit
+
+        results = fit_plate(datasets, method=combination.prefit)
+        x_error_model = "random_walk" if "xrw" in result_attr else "deterministic"
+        bg_noise = {}
+        for lbl in tit.bg_noise:
+            arr = tit.bg_noise[lbl]
+            bg_noise[str(lbl)] = float(np.nanmean(arr)) if np.any(np.isfinite(arr)) else 0.0
+
+        trace = fit_binding_pymc_multi(
+            results,
+            tit.scheme,
+            n_samples=tit.params.n_mcmc_samples,
+            n_tune=tit.params.n_mcmc_samples // 2,
+            bg_noise=bg_noise if "noise" in result_attr else None,
+            x_error_model=x_error_model,
+        )
+
+        ctr = ""
+        for scheme_name, keys in tit.scheme.names.items():
+            if requested_well in keys:
+                ctr = scheme_name
+                break
+        return extract_fit(requested_well, ctr, trace, datasets[requested_well])
+    else:
+        from clophfit.fitting.pipeline import fit_plate
+        method_map = {"result_global": "lm", "result_odr": "odr", "result_mcmc": "mcmc"}
+        method = method_map.get(result_attr, combination.prefit)
+
+        if method == "mcmc":
+            results = fit_plate(datasets, method="mcmc", n_samples=tit.params.n_mcmc_samples, n_tune=tit.params.n_mcmc_samples // 2)
+        else:
+            results = fit_plate(datasets, method=method)
+
+        return results[requested_well]
 
 
 def run_real_data_benchmark(
@@ -322,15 +379,16 @@ def run_real_data_benchmark(
     additions_file: Path,
     scheme_file: Path,
     is_ph: bool,
-    include_mcmc: bool,
-    output_csv: Path | None,
+    include_mcmc: bool = False,
+    output_csv: Path | None = None,
     max_wells: int | None = None,
     samples: tuple[str, ...] = (),
     channels: tuple[str, ...] = (),
     final_stages: tuple[str, ...] = (),
-    weightings: tuple[TecanWeighting, ...] = ("auto",),
-    skip_loo: bool = False,
+    weightings: tuple[str, ...] = ("auto",),
     loo_max_points: int | None = None,
+    skip_loo: bool = False,
+    n_mcmc_samples: int = 200,
 ) -> pd.DataFrame:
     """Run configured combinations on filtered real per-well curves."""
     curves = load_real_tecan_curves(
@@ -369,6 +427,7 @@ def run_real_data_benchmark(
                         additions_file=additions_file,
                         scheme_file=scheme_file,
                         is_ph=is_ph,
+                        n_mcmc_samples=n_mcmc_samples,
                     )
                 else:
                     ds_fresh = curve.dataset.copy()

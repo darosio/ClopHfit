@@ -845,6 +845,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     n_samples: int = 2000,
     nuts_sampler: str = "default",
     *,
+    n_tune: int | None = None,
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
     sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
@@ -872,6 +873,8 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     nuts_sampler : str
         NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
         ``"nutpie"``).
+    n_tune : int | None
+        Number of tuning steps for MCMC. If None, defaults to n_samples // 2.
     x_error_model : Literal["deterministic", "random_walk"]
         Model for x-error propagation (default: "deterministic").
     sigma_pip_prior : float
@@ -1035,8 +1038,11 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
                             observed=da.y,
                         )
 
+        tune_steps = n_tune if n_tune is not None else n_samples // 2
+
         trace: xr.DataTree = pm.sample(
             n_samples,
+            tune=tune_steps,
             target_accept=0.9,
             return_inferencedata=True,
             **_pymc_sample_parallel_args(nuts_sampler),

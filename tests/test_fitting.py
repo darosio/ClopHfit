@@ -938,6 +938,7 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
         n_sd=3.0,
         n_xerr=0.0,
         n_samples=50,
+        n_tune=25,
         infer_gain=True,
     )
 
@@ -970,6 +971,7 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
         n_sd=3.0,
         n_xerr=0.0,
         n_samples=50,
+        n_tune=25,
         infer_gain=True,
     )
 

@@ -141,6 +141,7 @@ def test_run_real_data_benchmark_supports_multiple_weightings_and_mcmc_stages(
         ),
         weightings=("auto", "none", "calibrated"),
         skip_loo=True,
+        n_mcmc_samples=20,
     )
 
     assert output_csv.exists()
