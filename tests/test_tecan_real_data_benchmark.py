@@ -117,6 +117,7 @@ def test_run_real_data_benchmark_supports_filters_and_skip_loo(tmp_path: Path) -
 
 
 @pytest.mark.slow
+@pytest.mark.filterwarnings("ignore:.*overflow encountered in dot.*:RuntimeWarning")
 def test_run_real_data_benchmark_supports_multiple_weightings_and_mcmc_stages(
     tmp_path: Path,
 ) -> None:

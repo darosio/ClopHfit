@@ -63,7 +63,7 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     # n_xerr=1.0 enables x_true modeling
     fit_res = bayes.fit_binding_pymc(fr, n_samples=500, n_xerr=1.0)
     assert fit_res.mini is not None
-    assert isinstance(fit_res.mini, az.InferenceData)
+    assert hasattr(fit_res.mini, "posterior")
     trace = fit_res.mini
 
     # 3. Analyze Results

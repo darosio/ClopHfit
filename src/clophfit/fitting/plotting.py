@@ -30,6 +30,7 @@ Classes:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
@@ -1121,16 +1122,18 @@ def plot_noise_vs_signal(
         )
 
         # Add a trendline to highlight the heteroscedastic curve shape
-        sns.regplot(
-            data=data,
-            x="y_obs",
-            y="sigma_mean",
-            scatter=False,
-            order=2,
-            color="orange",
-            line_kws={"linestyle": "--", "linewidth": 2},
-            ax=ax,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=np.exceptions.RankWarning)
+            sns.regplot(
+                data=data,
+                x="y_obs",
+                y="sigma_mean",
+                scatter=False,
+                order=2,
+                color="orange",
+                line_kws={"linestyle": "--", "linewidth": 2},
+                ax=ax,
+            )
 
         ax.set_title(f"Band {lbl} (All Wells)")
         ax.set_xlabel("Observed Fluorescence ($y$)")
