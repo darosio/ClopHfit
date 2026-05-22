@@ -1019,6 +1019,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
                         sigma_obs = pm.Deterministic(
                             f"sigma_obs_{lbl}_{key}",
                             pm_math.sqrt(noise_var),
+                            dims=("step",),
                         )
                         sigma_val = sigma_obs[da.mask]
 

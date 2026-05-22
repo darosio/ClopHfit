@@ -269,9 +269,9 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
     """Validate residual quality for a fit result.
 
     Checks for common issues:
-    - Systematic bias (mean significantly different from 0)
-    - Outliers (more than 5% beyond ±3-sigma)
-    - Serial correlation (adjacent residuals)
+    - Systematic bias (mean significantly different from 0, checked per label)
+    - Outliers (more than 5% beyond ±2-sigma overall)
+    - Serial correlation (adjacent residuals within each label)
 
     Parameters
     ----------
@@ -301,35 +301,53 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
     """
     checks = {"bias_ok": True, "outliers_ok": True, "correlation_ok": True}
 
-    if fr.result is None or fr.result.residual is None:
+    if fr.result is None or fr.result.residual is None or fr.dataset is None:
         return checks
 
-    r = fr.result.residual
+    # Extract clean residuals per label to avoid cross-label boundary artifacts
+    pts = extract_residual_points(fr)
+    if not pts:
+        return checks
 
-    # Check 1: Systematic bias (t-test against 0)
-    _t_stat, p_value = sp_stats.ttest_1samp(r, 0)
-    checks["bias_ok"] = bool(p_value > BIAS_P_VALUE_THRESHOLD)  # 99% confidence
-    if not checks["bias_ok"] and verbose:
-        print(f"⚠️  Systematic bias detected (mean={r.mean():.3f}, p={p_value:.4f})")
+    df = pd.DataFrame([asdict(p) for p in pts])
+
+    # Check 1: Systematic bias (t-test against 0) per label
+    for lbl, group in df.groupby("label"):
+        r_lbl = group["resid_weighted"].to_numpy()
+        if len(r_lbl) > 1:
+            _t_stat, p_value = sp_stats.ttest_1samp(r_lbl, 0)
+            if p_value < BIAS_P_VALUE_THRESHOLD:
+                checks["bias_ok"] = False
+                if verbose:
+                    print(
+                        f"⚠️  Systematic bias detected in label {lbl} (mean={r_lbl.mean():.3f}, p={p_value:.4f})"
+                    )
 
     # Check 2: Outliers (more than 5% beyond ±2-sigma)
-    outliers = np.abs(r) > OUTLIER_THRESHOLD_2SIGMA
-    outlier_rate = outliers.mean()
-    checks["outliers_ok"] = outlier_rate < OUTLIER_RATE_THRESHOLD
+    r_all = df["resid_weighted"].to_numpy()
+    outlier_rate = (np.abs(r_all) > OUTLIER_THRESHOLD_2SIGMA).mean()
+    checks["outliers_ok"] = bool(outlier_rate < OUTLIER_RATE_THRESHOLD)
     if not checks["outliers_ok"] and verbose:
         print(f"⚠️  High outlier rate: {outlier_rate:.1%} beyond ±2-sigma")
 
-    # Check 3: Serial correlation (Durbin-Watson test approximation)
-    if len(r) > 1:
-        diff = np.diff(r)
-        ss = float(np.sum(r**2))
-        if ss > 0:
-            dw_stat = float(np.sum(diff**2)) / ss
-            checks["correlation_ok"] = bool(DW_LOWER_BOUND < dw_stat < DW_UPPER_BOUND)
-            if not checks["correlation_ok"] and verbose:
-                print(f"⚠️  Serial correlation detected (DW={dw_stat:.2f})")
-        else:
-            checks["correlation_ok"] = True
+    # Check 3: Serial correlation (Durbin-Watson test approximation within labels)
+    ss_diff = 0.0
+    ss_total = 0.0
+    for _lbl, group in df.groupby("label"):
+        # Sort by x to ensure temporal/spatial adjacent ordering is correct
+        g_sorted = group.sort_values("x")
+        r_lbl = g_sorted["resid_weighted"].to_numpy()
+        if len(r_lbl) > 1:
+            ss_diff += np.sum(np.diff(r_lbl) ** 2)
+            ss_total += np.sum(r_lbl**2)
+
+    if ss_total > 0:
+        dw_stat = float(ss_diff / ss_total)
+        checks["correlation_ok"] = bool(DW_LOWER_BOUND < dw_stat < DW_UPPER_BOUND)
+        if not checks["correlation_ok"] and verbose:
+            print(f"⚠️  Serial correlation detected (DW={dw_stat:.2f})")
+    else:
+        checks["correlation_ok"] = True
 
     return checks
 
