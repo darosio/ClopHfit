@@ -17,10 +17,9 @@ import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
-from clophfit.fitting.error_models import ComprehensiveErrorModel
 from clophfit.fitting.odr import format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.utils import apply_outlier_mask
+from clophfit.fitting.utils import apply_outlier_mask, assign_error_model
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -1013,42 +1012,46 @@ class Titration(TecanfilesGroup):
         self.buffer.wells = self._scheme.buffer
 
     def _create_data_array(self, key: str, label: str) -> DataArray:
-        """Create a DataArray for a specific key and label."""
+        """Create a DataArray for a specific key and label with unit weights."""
         y = np.array(self.data[label][key])
-        label_idx = sorted(self.data.keys()).index(label)
-        gain = (
-            self.params.noise_gain[label_idx]
-            if self.params.noise_gain and label_idx < len(self.params.noise_gain)
-            else 1.0
-        )
-        sigma_read = self.bg_err[label] if self.bg_err else 0.0
-        alpha = (
-            self.params.noise_alpha[label_idx]
-            if self.params.noise_alpha and label_idx < len(self.params.noise_alpha)
-            else 0.0
-        )
+        return DataArray(self.x, y, x_errc=self.x_err, y_errc=np.ones_like(y))
 
-        error_model = ComprehensiveErrorModel(
-            sigma_read=sigma_read, gain=gain, rel_error=alpha
+    def _apply_error_model(self, ds: Dataset) -> Dataset:
+        """Apply the physical error model from TitrationConfig to the Dataset."""
+        sigma_floor: dict[str, float | ArrayF] = {}
+        gain: dict[str, float] = {}
+        rel_error: dict[str, float] = {}
+
+        labels = sorted(self.data.keys())
+        for i, lbl in enumerate(labels):
+            sigma_floor[lbl] = self.bg_err[lbl] if self.bg_err else 0.0
+
+            gain[lbl] = (
+                self.params.noise_gain[i]
+                if self.params.noise_gain and i < len(self.params.noise_gain)
+                else 1.0
+            )
+            rel_error[lbl] = (
+                self.params.noise_alpha[i]
+                if self.params.noise_alpha and i < len(self.params.noise_alpha)
+                else 0.0
+            )
+
+        return assign_error_model(
+            ds, sigma_floor=sigma_floor, gain=gain, rel_error=rel_error
         )
-
-        # Calculate errors using the unified ErrorModel.
-        # Ensure variance is at least 1.0 to avoid division by zero in weighting
-        var = error_model.compute_variance(y)
-        var = np.maximum(1.0, var)
-
-        y_errc = np.sqrt(var)
-        return DataArray(self.x, y, x_errc=self.x_err, y_errc=y_errc)
 
     def create_ds(self, key: str, label: str) -> Dataset:
         """Create a dataset for the given key."""
         da = self._create_data_array(key, label)
-        return Dataset({label: da}, is_ph=self.is_ph)
+        ds = Dataset({label: da}, is_ph=self.is_ph)
+        return self._apply_error_model(ds)
 
     def create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
         data_arrays_dict = {i: self._create_data_array(key, i) for i in self.data}
-        return Dataset(data_arrays_dict, is_ph=self.is_ph)
+        ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
+        return self._apply_error_model(ds)
 
     def create_dataset_dict(self, label: str | None = None) -> dict[str, Dataset]:
         """Create a dictionary of datasets for all fit_keys, optionally masking outliers.

@@ -396,7 +396,10 @@ def assign_error_model(
 
         floor_val = np.asarray(floor, dtype=float)
         poisson_term = g * np.maximum(da.yc, 0.0)
-        da.y_errc = np.sqrt(floor_val**2 + poisson_term + (alpha * da.yc) ** 2)
+        var = floor_val**2 + poisson_term + (alpha * da.yc) ** 2
+        # Ensure variance is strictly positive to prevent division by zero in weights
+        var = np.maximum(1.0, var)
+        da.y_errc = np.sqrt(var)
 
     return updated_ds
 
