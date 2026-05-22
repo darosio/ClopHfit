@@ -8,7 +8,6 @@ from scipy import stats
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 from clophfit.fitting.data_structures import Dataset
-from clophfit.fitting.error_models import ComprehensiveErrorModel
 
 
 def parse_remove_outliers(spec: str) -> tuple[str, float, int]:
@@ -395,8 +394,9 @@ def assign_error_model(
             else float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
         )
 
-        model = ComprehensiveErrorModel(sigma_read=floor, gain=g, rel_error=alpha)
-        da.y_errc = np.sqrt(model.compute_variance(da.yc))
+        floor_val = np.asarray(floor, dtype=float)
+        poisson_term = g * np.maximum(da.yc, 0.0)
+        da.y_errc = np.sqrt(floor_val**2 + poisson_term + (alpha * da.yc) ** 2)
 
     return updated_ds
 

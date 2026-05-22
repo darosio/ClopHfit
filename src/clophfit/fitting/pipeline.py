@@ -3,16 +3,16 @@
 import logging
 import typing
 
-import numpy as np
-
 from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import Dataset, FitResult
-from clophfit.fitting.error_models import ComprehensiveErrorModel
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr
 from clophfit.fitting.residuals import collect_multi_residuals
-from clophfit.fitting.utils import fit_gain_and_rel_error_from_residuals
+from clophfit.fitting.utils import (
+    assign_error_model,
+    fit_gain_and_rel_error_from_residuals,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,13 +87,6 @@ def fgls_plate_fit(
             alpha,
         )
 
-    # Instantiate the global error model
-    global_error_model = ComprehensiveErrorModel(
-        sigma_read=typing.cast("dict[int | str, float]", sigma_floor),
-        gain=typing.cast("dict[int | str, float]", gains),
-        rel_error=typing.cast("dict[int | str, float]", alphas),
-    )
-
     # 4. Second Pass
     logger.info(
         "Starting FGLS Pass 2: %s fit with calibrated weights", second_pass_method
@@ -101,13 +94,14 @@ def fgls_plate_fit(
     final_results = {}
     for well, ds in datasets.items():
         # Update ds with new variance model
-        for lbl, da in ds.items():
-            var = global_error_model.compute_variance(da.yc, lbl)
-            var = np.maximum(1.0, var)  # avoid division by zero
-            da.y_err = np.sqrt(var)
+        ds_updated = assign_error_model(
+            ds, sigma_floor=sigma_floor, gain=gains, rel_error=alphas
+        )
 
         try:
-            final_results[well] = fit_binding_glob(ds, method=second_pass_method)
+            final_results[well] = fit_binding_glob(
+                ds_updated, method=second_pass_method
+            )
         except InsufficientDataError:
             logger.warning("Skip FGLS Pass 2 fit for well %s.", well)
             final_results[well] = FitResult()
