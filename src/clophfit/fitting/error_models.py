@@ -16,72 +16,12 @@ class ErrorModel(Protocol):
         ...
 
 
-class ConstantErrorModel:
-    """Homoscedastic error.
-
-    Parameters
-    ----------
-    sigma_read : float | ArrayF | Mapping[int | str, float | ArrayF]
-        Constant error/variance floor.
-    """
-
-    def __init__(
-        self, sigma_read: float | ArrayF | Mapping[int | str, float | ArrayF]
-    ) -> None:
-        self.sigma_read = sigma_read
-
-    def compute_variance(self, signal: ArrayF, label: int | str = "") -> ArrayF:
-        """Compute variance."""
-        sigma = (
-            self.sigma_read[label]
-            if isinstance(self.sigma_read, Mapping)
-            else self.sigma_read
-        )
-        return np.full_like(signal, sigma**2)
-
-
-class ProportionalErrorModel:
-    """Simple Heteroscedastic: var = sigma_read^2 + (rel_error * signal)^2.
-
-    Read noise + proportional noise (ignoring Poisson scaling).
-
-    Parameters
-    ----------
-    sigma_read : float | ArrayF | Mapping[int | str, float | ArrayF]
-        Read noise floor.
-    rel_error : float | Mapping[int | str, float]
-        Proportional error coefficient.
-    """
-
-    def __init__(
-        self,
-        sigma_read: float | ArrayF | Mapping[int | str, float | ArrayF],
-        rel_error: float | Mapping[int | str, float],
-    ) -> None:
-        self.sigma_read = sigma_read
-        self.rel_error = rel_error
-
-    def compute_variance(self, signal: ArrayF, label: int | str = "") -> ArrayF:
-        """Compute variance."""
-        sigma = (
-            self.sigma_read[label]
-            if isinstance(self.sigma_read, Mapping)
-            else self.sigma_read
-        )
-        rel_err = (
-            self.rel_error[label]
-            if isinstance(self.rel_error, Mapping)
-            else self.rel_error
-        )
-        # Protect against negative signal for physical models, though for squared it matters less
-        # We use absolute value for proportional noise
-        return sigma**2 + (rel_err * np.abs(signal)) ** 2
-
-
 class ComprehensiveErrorModel:
     """Physical error: var = sigma_read^2 + gain * signal + (rel_error * signal)^2.
 
     Shot Noise + Proportional: Read noise + Poisson shot noise + Scintillation/Proportional noise.
+    Can be used as a Constant Error Model by setting `gain=0` and `rel_error=0`, or
+    as a Proportional Error Model by setting `gain=0`.
 
     Parameters
     ----------

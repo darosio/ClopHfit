@@ -8,6 +8,7 @@ from scipy import stats
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 from clophfit.fitting.data_structures import Dataset
+from clophfit.fitting.error_models import ComprehensiveErrorModel
 
 
 def parse_remove_outliers(spec: str) -> tuple[str, float, int]:
@@ -344,7 +345,7 @@ def assign_error_model(
     - **Simplified model** (``gain=0`` or omitted, proportional-only):
       ``sigma_i = sqrt(floor² + (rel_error * y_i)²)``
 
-    When *gain* is ``None`` a per-label heuristic is used (y1: 1.8, y2: 0.7).
+    When *gain* is ``None`` a per-label heuristic is used (1: 1.8, 2: 0.7).
     Pass ``gain=0`` explicitly to use the simplified proportional model.
 
     Parameters
@@ -356,7 +357,7 @@ def assign_error_model(
         (e.g. ``{f"y{lbl}": float(np.mean(v)) for lbl, v in tit.bg_noise.items()}``).
     gain : float | dict[str, float] | None, optional
         Poisson shot-noise scaling factor. ``None`` -> per-label defaults
-        (y1: 1.8, y2: 0.7). Pass ``0`` to disable the Poisson term entirely.
+        (1: 1.8, 2: 0.7). Pass ``0`` to disable the Poisson term entirely.
     rel_error : float | dict[str, float], optional
         Proportional error coefficient. Can be a per-label dict when estimated
         separately per label (e.g. from :func:`fit_rel_error_from_residuals`).
@@ -388,15 +389,14 @@ def assign_error_model(
             rel_error.get(lbl, 0.03) if isinstance(rel_error, dict) else rel_error
         )
 
-        if gain is None:
-            poisson_term = gain_defaults.get(lbl, 0.0) * np.maximum(da.yc, 0.0)
-        else:
-            g = float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
-            poisson_term = g * np.maximum(da.yc, 0.0)
+        g = (
+            gain_defaults.get(lbl, 0.0)
+            if gain is None
+            else float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
+        )
 
-        floor_val = np.asarray(floor, dtype=float)
-        new_err = np.sqrt(floor_val**2 + poisson_term + (alpha * da.yc) ** 2)
-        da.y_errc = new_err
+        model = ComprehensiveErrorModel(sigma_read=floor, gain=g, rel_error=alpha)
+        da.y_errc = np.sqrt(model.compute_variance(da.yc))
 
     return updated_ds
 
