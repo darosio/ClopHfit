@@ -332,67 +332,39 @@ def apply_outlier_mask(
 def assign_error_model(
     ds: Dataset,
     sigma_floor: float | ArrayF | dict[str, float | ArrayF] = 1.0,
-    gain: float | dict[str, float] | None = None,
-    rel_error: float | dict[str, float] = 0.03,
+    gain: float | dict[str, float] = 1.0,
+    rel_error: float | dict[str, float] = 0.0,
 ) -> Dataset:
     """Assign heteroscedastic weights based on a physical detector noise model.
 
-    Supports two model variants depending on which parameters are supplied:
-
-    - **Full model** (``gain`` provided):
-      ``sigma_i = sqrt(floor² + gain * max(y_i, 0) + (rel_error * y_i)²)``
-    - **Simplified model** (``gain=0`` or omitted, proportional-only):
-      ``sigma_i = sqrt(floor² + (rel_error * y_i)²)``
-
-    When *gain* is ``None`` a per-label heuristic is used (1: 1.8, 2: 0.7).
-    Pass ``gain=0`` explicitly to use the simplified proportional model.
+    ``sigma_i = sqrt(floor² + gain * max(y_i, 0) + (rel_error * y_i)²)``
 
     Parameters
     ----------
     ds : Dataset
         The dataset to update.
     sigma_floor : float | ArrayF | dict[str, float | ArrayF]
-        Baseline noise floor. Can be a single value or a per-label dict
-        (e.g. ``{f"y{lbl}": float(np.mean(v)) for lbl, v in tit.bg_noise.items()}``).
-    gain : float | dict[str, float] | None, optional
-        Poisson shot-noise scaling factor. ``None`` -> per-label defaults
-        (1: 1.8, 2: 0.7). Pass ``0`` to disable the Poisson term entirely.
+        Baseline noise floor. Can be a single value or a per-label dict.
+    gain : float | dict[str, float], optional
+        Poisson shot-noise scaling factor. Default is 1.0 (standard Poisson).
+        Pass ``0.0`` to disable the Poisson term entirely.
     rel_error : float | dict[str, float], optional
-        Proportional error coefficient. Can be a per-label dict when estimated
-        separately per label (e.g. from :func:`fit_rel_error_from_residuals`).
-        Default is 0.03 (3 %).
+        Proportional error coefficient. Default is 0.0.
 
     Returns
     -------
     Dataset
         A deep copy with physically modelled ``y_errc`` weights.
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> from clophfit.fitting.data_structures import Dataset, DataArray
-    >>> y = np.array([100.0, 200.0, 300.0])
-    >>> da = DataArray(xc=np.array([1.0, 2.0, 3.0]), yc=y, y_errc=np.ones_like(y))
-    >>> ds = Dataset({"1": da})
-    >>> ds_new = assign_error_model(ds, sigma_floor=10.0, gain=0.0, rel_error=0.05)
-    >>> np.round(ds_new["1"].y_errc, 2)
-    array([11.18, 14.14, 18.03])
     """
     updated_ds = copy.deepcopy(ds)
-    gain_defaults = {"1": 1.8, "2": 0.7}
     for lbl, da in updated_ds.items():
         floor = (
             sigma_floor.get(lbl, 1.0) if isinstance(sigma_floor, dict) else sigma_floor
         )
         alpha = float(
-            rel_error.get(lbl, 0.03) if isinstance(rel_error, dict) else rel_error
+            rel_error.get(lbl, 0.0) if isinstance(rel_error, dict) else rel_error
         )
-
-        g = (
-            gain_defaults.get(lbl, 0.0)
-            if gain is None
-            else float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
-        )
+        g = float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
 
         floor_val = np.asarray(floor, dtype=float)
         poisson_term = g * np.maximum(da.yc, 0.0)
