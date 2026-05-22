@@ -1,6 +1,7 @@
 """Utility functions for fitting modules."""
 
 import copy
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -331,9 +332,9 @@ def apply_outlier_mask(
 
 def assign_error_model(
     ds: Dataset,
-    sigma_floor: float | ArrayF | dict[str, float | ArrayF] = 1.0,
-    gain: float | dict[str, float] = 1.0,
-    rel_error: float | dict[str, float] = 0.0,
+    sigma_floor: float | ArrayF | Mapping[str, float | ArrayF] = 1.0,
+    gain: float | Mapping[str, float] = 1.0,
+    rel_error: float | Mapping[str, float] = 0.0,
 ) -> Dataset:
     """Assign heteroscedastic weights based on a physical detector noise model.
 
@@ -343,12 +344,12 @@ def assign_error_model(
     ----------
     ds : Dataset
         The dataset to update.
-    sigma_floor : float | ArrayF | dict[str, float | ArrayF]
+    sigma_floor : float | ArrayF | Mapping[str, float | ArrayF]
         Baseline noise floor. Can be a single value or a per-label dict.
-    gain : float | dict[str, float], optional
+    gain : float | Mapping[str, float], optional
         Poisson shot-noise scaling factor. Default is 1.0 (standard Poisson).
         Pass ``0.0`` to disable the Poisson term entirely.
-    rel_error : float | dict[str, float], optional
+    rel_error : float | Mapping[str, float], optional
         Proportional error coefficient. Default is 0.0.
 
     Returns
@@ -359,12 +360,14 @@ def assign_error_model(
     updated_ds = copy.deepcopy(ds)
     for lbl, da in updated_ds.items():
         floor = (
-            sigma_floor.get(lbl, 1.0) if isinstance(sigma_floor, dict) else sigma_floor
+            sigma_floor.get(lbl, 1.0)
+            if isinstance(sigma_floor, Mapping)
+            else sigma_floor
         )
         alpha = float(
-            rel_error.get(lbl, 0.0) if isinstance(rel_error, dict) else rel_error
+            rel_error.get(lbl, 0.0) if isinstance(rel_error, Mapping) else rel_error
         )
-        g = float(gain.get(lbl, 1.0) if isinstance(gain, dict) else gain)
+        g = float(gain.get(lbl, 1.0) if isinstance(gain, Mapping) else gain)
 
         floor_val = np.asarray(floor, dtype=float)
         poisson_term = g * np.maximum(da.yc, 0.0)
