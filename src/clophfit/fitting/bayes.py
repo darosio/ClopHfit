@@ -59,17 +59,20 @@ def get_pymc_noise_priors(
             for lbl in labels:
                 est_sigma[lbl] = 10.0  # Fallback
 
-        # Without raw arrays, assume a reasonable number of buffer points (~4 per buffer)
         n_pts = 4 if bg_noise else 1
         dof = max(1, n_pts * n_buf - 2)
         rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
 
-        priors["floor"] = {
-            lbl: pm.Normal(
-                f"floor_{lbl}", mu=est_sigma[lbl], sigma=rel_sigma * est_sigma[lbl]
+        priors["floor"] = {}
+        for lbl in labels:
+            mu_floor = est_sigma[lbl]
+            sigma_floor = rel_sigma * mu_floor
+            # Guard against degenerate Normal when mu → 0: enforce
+            # a minimum prior width so the sampler can move.
+            sigma_floor = max(sigma_floor, 0.01)
+            priors["floor"][lbl] = pm.Normal(
+                f"floor_{lbl}", mu=mu_floor, sigma=sigma_floor
             )
-            for lbl in labels
-        }
 
         if model_type == "comprehensive":
             priors["gain"] = {lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels}

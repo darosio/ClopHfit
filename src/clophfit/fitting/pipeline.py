@@ -111,7 +111,7 @@ def fgls_plate_fit(
 
 def fit_plate(
     datasets: dict[str, Dataset],
-    method: str = "lm",
+    method: str = "",
     **kwargs: typing.Any,  # noqa: ANN401
 ) -> dict[str, FitResult[typing.Any]]:
     """Run a single-pass fit on an entire plate of datasets.
@@ -121,7 +121,9 @@ def fit_plate(
     datasets : dict[str, Dataset]
         A mapping of well keys (e.g. 'A01') to `Dataset` objects.
     method : str
-        The fitting method to use: 'lm' (default), 'odr', or 'mcmc'.
+        The fitting method to use: 'lm' (default), 'huber', 'odr', or 'mcmc'.
+        Other methods supported by :func:`clophfit.fitting.core.fit_binding_glob`
+        may also be used.
     **kwargs : typing.Any
         Additional keyword arguments passed to the specific fitting function.
 
@@ -147,6 +149,9 @@ def fit_plate(
                 logger.warning("Skip MCMC fit for well %s.", well)
                 results[well] = FitResult()
     else:
+        if not method:
+            method = "lm"
+        print(method)
         for well, ds in datasets.items():
             try:
                 results[well] = fit_binding_glob(ds, method=method, **kwargs)

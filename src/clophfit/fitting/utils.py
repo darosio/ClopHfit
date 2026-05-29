@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy import optimize, stats
 
 from clophfit.clophfit_types import ArrayF, ArrayMask
 from clophfit.fitting.data_structures import Dataset
@@ -433,39 +433,113 @@ def fit_rel_error_from_residuals(
     return result
 
 
-def fit_noise_model_from_residuals(
-    df: "pd.DataFrame",
-    rel_error: float = 0.003,
-) -> tuple[dict[str, float], dict[str, float]]:
-    r"""Fit per-label noise model parameters from first-pass residuals.
+def fit_noise_model_nnls(
+    df: pd.DataFrame,
+    sigma_floor_fixed: dict[str, float] | None = None,
+    rel_error_fixed: dict[str, float] | None = None,
+) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    r"""Fit heteroscedastic noise model via non-negative least squares.
 
-    With ``rel_error`` fixed, the noise equation becomes linear in two unknowns.
-    Rearranging: ``r_i^2 - (rel_error * y_i)^2 = sigma_read^2 + gain * y_i``
-    → OLS on the adjusted residuals.
+    Model:  :math:`\sigma^2 = \sigma_\text{floor}^2 + \text{gain} \cdot y
+    + \alpha^2 \cdot y^2`
+
+    Uses :func:`scipy.optimize.nnls` to enforce non-negativity on all
+    parameters, which stabilises estimates when :math:`y` and :math:`y^2`
+    are highly collinear (typical for narrow-range titrations).
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with columns ``label``, ``resid_raw``, ``y`` from a first-pass fit.
-    rel_error : float, optional
-        Fixed proportional error (default 0.003).
+        Residual DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
+    sigma_floor_fixed : dict[str, float] | None
+        If given, fix floor per label and only fit gain and alpha.
+    rel_error_fixed : dict[str, float] | None
+        If given, fix alpha per label and only fit floor and gain.
+
+    Returns
+    -------
+    tuple[dict[str, float], dict[str, float], dict[str, float]]
+        ``(sigma_floor, gain, alpha)`` per label — all non-negative.
+
+    Raises
+    ------
+    ValueError
+        If both *sigma_floor_fixed* and *rel_error_fixed* are provided.
+    """
+    if sigma_floor_fixed is not None and rel_error_fixed is not None:
+        msg = "Cannot fix both sigma_floor and rel_error simultaneously."
+        raise ValueError(msg)
+
+    sigma_floor_out: dict[str, float] = {}
+    gain_out: dict[str, float] = {}
+    alpha_out: dict[str, float] = {}
+
+    for lbl, grp in df.groupby("label"):
+        lbl_str = str(lbl)
+        y = grp["predicted"].to_numpy().astype(float)
+        r2 = grp["resid_raw"].to_numpy().astype(float) ** 2
+
+        if sigma_floor_fixed is not None:
+            floor = sigma_floor_fixed.get(lbl_str, 0.0)
+            adjusted = r2 - floor**2
+            positive = adjusted > 0
+            if positive.sum() < 2:  # noqa: PLR2004
+                gain_out[lbl_str] = 0.0
+                alpha_out[lbl_str] = 0.0
+                sigma_floor_out[lbl_str] = floor
+                continue
+            x_mat = np.column_stack([y[positive], y[positive] ** 2])
+            b_vec = adjusted[positive]
+            coeffs, _ = optimize.nnls(x_mat, b_vec)
+            sigma_floor_out[lbl_str] = floor
+            gain_out[lbl_str] = float(coeffs[0])
+            alpha_out[lbl_str] = float(np.sqrt(coeffs[1]))
+
+        elif rel_error_fixed is not None:
+            alpha_fixed = rel_error_fixed.get(lbl_str, 0.0)
+            adjusted = r2 - (alpha_fixed * y) ** 2
+            x_mat = np.column_stack([np.ones_like(y), y])
+            coeffs, _ = optimize.nnls(x_mat, adjusted)
+            sigma_floor_out[lbl_str] = float(np.sqrt(coeffs[0]))
+            gain_out[lbl_str] = float(coeffs[1])
+            alpha_out[lbl_str] = alpha_fixed
+
+        else:
+            x_mat = np.column_stack([np.ones_like(y), y, y**2])
+            coeffs, _ = optimize.nnls(x_mat, r2)
+            sigma_floor_out[lbl_str] = float(np.sqrt(coeffs[0]))
+            gain_out[lbl_str] = float(coeffs[1])
+            alpha_out[lbl_str] = float(np.sqrt(coeffs[2]))
+
+    return sigma_floor_out, gain_out, alpha_out
+
+
+def fit_noise_model_from_residuals(
+    df: "pd.DataFrame",
+    rel_error: float | dict[str, float] = 0.003,
+) -> tuple[dict[str, float], dict[str, float]]:
+    r"""Fit per-label noise model parameters from first-pass residuals.
+
+    With ``rel_error`` fixed, the noise equation becomes linear in two unknowns
+    via non-negative least squares.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
+    rel_error : float | dict[str, float], optional
+        Fixed proportional error. A single float is broadcast to all labels.
+        Default is 0.003.
 
     Returns
     -------
     tuple[dict[str, float], dict[str, float]]
-        ``(sigma_floor_dict, gain_dict)`` per label (non-negative, clamped).
+        ``(sigma_floor_dict, gain_dict)`` per label (non-negative).
     """
-    sigma_floor: dict[str, float] = {}
-    gain_d: dict[str, float] = {}
-    for lbl, grp in df.groupby("label"):
-        lbl_str = str(lbl)
-        y = grp["predicted"].to_numpy()
-        adjusted = grp["resid_raw"].to_numpy() ** 2 - (rel_error * y) ** 2
-        # OLS: adjusted = sigma_read^2 + gain * y  →  x_mat = [1, y]
-        x_mat = np.column_stack([np.ones_like(y), y])
-        coeffs, _, _, _ = np.linalg.lstsq(x_mat, adjusted, rcond=None)
-        sigma_floor[lbl_str] = float(np.sqrt(max(0.0, coeffs[0])))
-        gain_d[lbl_str] = float(max(0.0, coeffs[1]))
+    if isinstance(rel_error, float):
+        labels = df["label"].unique()
+        rel_error = {str(lbl): rel_error for lbl in labels}
+    sigma_floor, gain_d, _ = fit_noise_model_nnls(df, rel_error_fixed=rel_error)
     return sigma_floor, gain_d
 
 
@@ -475,32 +549,20 @@ def fit_gain_and_rel_error_from_residuals(
 ) -> tuple[dict[str, float], dict[str, float]]:
     r"""Fit gain and rel_error per label from residuals with known floor.
 
-    No-intercept OLS on ``adjusted = gain * y + rel_error^2 * y^2``
-    where ``adjusted = r^2 - floor^2``.
+    Uses non-negative least squares on ``r^2 - floor^2 = gain * y + alpha^2 * y^2``
+    to handle collinearity between :math:`y` and :math:`y^2`.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with columns ``label``, ``resid_raw``, ``y``.
+        DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
     sigma_floor : dict[str, float]
         Known noise floor per label.
 
     Returns
     -------
     tuple[dict[str, float], dict[str, float]]
-        ``(gain_dict, rel_error_dict)`` per label (non-negative, clamped).
+        ``(gain_dict, rel_error_dict)`` per label (non-negative).
     """
-    gain_d: dict[str, float] = {}
-    rel_error_d: dict[str, float] = {}
-    for lbl, grp in df.groupby("label"):
-        lbl_str = str(lbl)
-        y = grp["predicted"].to_numpy()
-        floor = float(sigma_floor.get(lbl_str, 0.0))
-        adjusted = grp["resid_raw"].to_numpy() ** 2 - floor**2
-        # No-intercept OLS: adjusted = gain * y + c * y^2
-        x_mat = np.column_stack([y, y**2])
-        coeffs, _, _, _ = np.linalg.lstsq(x_mat, adjusted, rcond=None)
-        gain_d[lbl_str] = float(max(0.0, coeffs[0]))
-        c_raw = coeffs[1]
-        rel_error_d[lbl_str] = float(np.sqrt(max(0.0, float(c_raw))))
-    return gain_d, rel_error_d
+    _, gain_d, alpha_d = fit_noise_model_nnls(df, sigma_floor_fixed=sigma_floor)
+    return gain_d, alpha_d
