@@ -5,12 +5,16 @@ import typing
 
 from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import fit_binding_glob
-from clophfit.fitting.data_structures import Dataset, FitResult
+from clophfit.fitting.data_structures import (
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr
 from clophfit.fitting.residuals import collect_multi_residuals
 from clophfit.fitting.utils import (
-    assign_error_model,
     fit_gain_and_rel_error_from_residuals,
 )
 
@@ -23,7 +27,7 @@ def fgls_plate_fit(
     *,
     first_pass_method: str = "huber",  # noqa: S107
     second_pass_method: str = "lm",  # noqa: S107
-) -> tuple[dict[str, FitResult[typing.Any]], dict[str, tuple[float, float, float]]]:
+) -> tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]:
     """Two-stage Feasible Generalized Least Squares (FGLS) plate fit.
 
     1. First-pass fit (typically robust like 'huber') on each well.
@@ -44,9 +48,9 @@ def fgls_plate_fit(
 
     Returns
     -------
-    tuple[dict[str, FitResult[typing.Any]], dict[str, tuple[float, float, float]]]
+    tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]
         Final fit results and the calibrated error model parameters
-        (sigma_read, gain, alpha) for each label.
+        for each label.
     """
     # 1. First Pass
     logger.info("Starting FGLS Pass 1: %s fit", first_pass_method)
@@ -73,11 +77,11 @@ def fgls_plate_fit(
         alphas = dict.fromkeys(sigma_floor, 0.03)
 
     # Format the noise parameters for the return value and logging
-    noise_params = {}
+    noise_params = PlateNoiseModel()
     for lbl, sr in sigma_floor.items():
         gain = gains.get(lbl, 0.0)
         alpha = alphas.get(lbl, 0.0)
-        noise_params[lbl] = (sr, gain, alpha)
+        noise_params[lbl] = NoiseModelParams(sigma_floor=sr, gain=gain, alpha=alpha)
 
         logger.info(
             "Calibrated Noise [%s]: sigma=%.2f, gain=%.3f, alpha=%.3f",
@@ -94,9 +98,7 @@ def fgls_plate_fit(
     final_results = {}
     for well, ds in datasets.items():
         # Update ds with new variance model
-        ds_updated = assign_error_model(
-            ds, sigma_floor=sigma_floor, gain=gains, rel_error=alphas
-        )
+        ds_updated = noise_params.apply_to(ds)
 
         try:
             final_results[well] = fit_binding_glob(

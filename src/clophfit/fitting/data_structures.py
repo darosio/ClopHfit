@@ -27,6 +27,8 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 from .errors import InvalidDataError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from lmfit import Parameters  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -485,3 +487,65 @@ class SpectraGlobResults:
     bands: FitResult[Minimizer] | None = field(default=None)
     """The `FitResult` object representing the outcome of the bands fit, or
     `None` if the bands fit was not performed."""
+
+
+@dataclass
+class NoiseModelParams:
+    """Noise model parameters for a single label.
+
+    Attributes
+    ----------
+    sigma_floor : float
+        Baseline read-noise floor.
+    gain : float
+        Poisson shot-noise scaling factor.
+    alpha : float
+        Proportional error coefficient.
+    """
+
+    sigma_floor: float
+    gain: float
+    alpha: float
+
+    def __getitem__(self, index: int) -> float:
+        """Allow legacy index-based tuple unpacking/access."""
+        return (self.sigma_floor, self.gain, self.alpha)[index]
+
+    def __iter__(self) -> Iterator[float]:
+        """Allow legacy tuple unpacking/iteration."""
+        return iter((self.sigma_floor, self.gain, self.alpha))
+
+
+class PlateNoiseModel(UserDict[str, NoiseModelParams]):
+    """Container for noise parameters of all labels on a plate.
+
+    Behaves like a dictionary mapping label names to NoiseModelParams,
+    but provides convenient properties to extract individual parameters
+    and apply the noise model to a Dataset.
+    """
+
+    @property
+    def sigma_floor(self) -> dict[str, float]:
+        """Get baseline noise floor per label."""
+        return {lbl: params.sigma_floor for lbl, params in self.data.items()}
+
+    @property
+    def gain(self) -> dict[str, float]:
+        """Get Poisson shot-noise scaling factor per label."""
+        return {lbl: params.gain for lbl, params in self.data.items()}
+
+    @property
+    def alpha(self) -> dict[str, float]:
+        """Get proportional error coefficient per label."""
+        return {lbl: params.alpha for lbl, params in self.data.items()}
+
+    def apply_to(self, ds: Dataset) -> Dataset:
+        """Apply this noise model to a Dataset."""
+        from clophfit.fitting.utils import assign_error_model  # noqa: PLC0415
+
+        return assign_error_model(
+            ds,
+            sigma_floor=self.sigma_floor,
+            gain=self.gain,
+            rel_error=self.alpha,
+        )

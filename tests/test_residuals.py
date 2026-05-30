@@ -6,8 +6,15 @@ import pytest
 from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 
 from clophfit.fitting.core import fit_binding_glob
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.models import binding_1site
+from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.residuals import (
     BIAS_P_VALUE_THRESHOLD,
     DW_LOWER_BOUND,
@@ -448,3 +455,78 @@ class TestResidualWorkflow:
         # Statistics by label
         stats = residual_statistics(df)
         assert len(stats) == 2
+
+
+class TestNoiseModelContainers:
+    """Test cases for NoiseModelParams and PlateNoiseModel."""
+
+    def test_noise_model_params(self) -> None:
+        """Test NoiseModelParams creation and backward-compatible access."""
+        params = NoiseModelParams(sigma_floor=1.5, gain=0.5, alpha=0.02)
+        assert params.sigma_floor == 1.5
+        assert params.gain == 0.5
+        assert params.alpha == 0.02
+
+        # Test index-based access (legacy list/tuple compatibility)
+        assert params[0] == 1.5
+        assert params[1] == 0.5
+        assert params[2] == 0.02
+
+        # Test unpacking (legacy tuple unpacking compatibility)
+        floor, gain, alpha = params
+        assert floor == 1.5
+        assert gain == 0.5
+        assert alpha == 0.02
+
+    def test_plate_noise_model(self) -> None:
+        """Test PlateNoiseModel properties and application to Dataset."""
+        params1 = NoiseModelParams(sigma_floor=1.5, gain=0.5, alpha=0.02)
+        params2 = NoiseModelParams(sigma_floor=2.0, gain=0.0, alpha=0.01)
+
+        model = PlateNoiseModel({"lbl1": params1, "lbl2": params2})
+
+        # Test properties extraction
+        assert model.sigma_floor == {"lbl1": 1.5, "lbl2": 2.0}
+        assert model.gain == {"lbl1": 0.5, "lbl2": 0.0}
+        assert model.alpha == {"lbl1": 0.02, "lbl2": 0.01}
+
+        # Test applying to Dataset
+        x = np.array([5.0, 6.0, 7.0])
+        y1 = np.array([100.0, 200.0, 300.0])
+        y2 = np.array([50.0, 100.0, 150.0])
+        da1 = DataArray(xc=x, yc=y1)
+        da2 = DataArray(xc=x, yc=y2)
+        ds = Dataset({"lbl1": da1, "lbl2": da2}, is_ph=True)
+
+        ds_updated = model.apply_to(ds)
+
+        # Verify y_errc on updated datasets
+        # Check first label calculation matches error formula
+        expected_err1 = np.sqrt(1.5**2 + 0.5 * y1 + (0.02 * y1) ** 2)
+        assert np.allclose(ds_updated["lbl1"].y_errc, expected_err1)
+
+        # Check second label calculation matches error formula
+        expected_err2 = np.sqrt(2.0**2 + (0.01 * y2) ** 2)
+        assert np.allclose(ds_updated["lbl2"].y_errc, expected_err2)
+
+
+def test_fgls_plate_fit_workflow() -> None:
+    """Smoke test of the complete FGLS pipeline fit workflow."""
+    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
+    y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
+    # create dataset with small noise
+    rng = np.random.default_rng(42)
+    y_noisy = y + rng.normal(0, 2.0, size=len(y))
+    da = DataArray(xc=x, yc=y_noisy)
+    datasets = {"well1": Dataset({"1": da}, is_ph=True)}
+
+    sigma_floor = {"1": 1.0}
+    final_results, noise_params = fgls_plate_fit(datasets, sigma_floor)
+
+    assert "well1" in final_results
+    assert final_results["well1"].result.success
+    assert isinstance(noise_params, PlateNoiseModel)
+    assert "1" in noise_params
+    assert noise_params["1"].sigma_floor == 1.0
+    assert noise_params["1"].gain >= 0.0
+    assert noise_params["1"].alpha >= 0.0

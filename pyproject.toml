@@ -279,6 +279,7 @@ max-complexity = 12
   "PLR2004",
   "PLC2701",
   "RUF001", # Ambiguous unicode characters (e.g., Greek letters in scientific notebooks)
+  "S106", # False positives on parameter names like first_pass_method
   "SLF001",
   "T20",
 ]
