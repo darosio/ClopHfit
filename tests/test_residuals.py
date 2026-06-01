@@ -524,6 +524,7 @@ def test_fgls_plate_fit_workflow() -> None:
     final_results, noise_params = fgls_plate_fit(datasets, sigma_floor)
 
     assert "well1" in final_results
+    assert final_results["well1"].result is not None
     assert final_results["well1"].result.success
     assert isinstance(noise_params, PlateNoiseModel)
     assert "1" in noise_params
