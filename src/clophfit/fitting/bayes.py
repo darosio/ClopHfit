@@ -5,14 +5,12 @@ from __future__ import annotations
 import copy
 import os
 import typing
-from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
-import pymc.math  # type: ignore[import-untyped]
 import pytensor.tensor as pt
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
@@ -243,22 +241,7 @@ def create_parameter_priors(
     return priors
 
 
-# TODO:
-# 🧪 Test posterior integrity (e.g., credible intervals contain true Kd)
-# 🧱 Replace repetitive for lbl in ds.items() logic using helper functions
-# 🔁 Use pm.MutableData (in newer PyMC versions) to avoid model recompilation
-def rename_keys(data: dict[str, typing.Any]) -> dict[str, typing.Any]:
-    """Rename dictionary keys coming from multi-trace into base names."""
-    renamed_dict: dict[str, typing.Any] = {}
-    for key, value in data.items():
-        if key.startswith("K_"):
-            new_key = "K"
-        elif key.rfind("_") > 1:
-            new_key = key[: key.rfind("_")]
-        else:
-            new_key = key
-        renamed_dict[new_key] = value
-    return renamed_dict
+# NOTE: If model recompilation becomes a bottleneck, consider pm.MutableData.
 
 
 def _hdi_bounds_or_none(row: pd.Series) -> tuple[float | None, float | None]:
@@ -290,8 +273,28 @@ def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> Non
     rpars[name].init_value = row.get("r_hat", np.nan)
 
 
+def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
+    """Compute weighted residuals from posterior mean predictions.
+
+    Weighted residuals = (1 / y_err) * (observed - predicted), using masked
+    values (``.x``, ``.y``, ``.y_err``) for consistency.
+    """
+    residuals_list: list[np.ndarray] = []
+    for lbl, da in ds.items():
+        model = binding_1site(
+            da.x,
+            rpars["K"].value,
+            rpars[f"S0_{lbl}"].value,
+            rpars[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+        raw = da.y - model
+        residuals_list.append((1.0 / da.y_err * raw) if da.y_err.size > 0 else raw)
+    return np.concatenate(residuals_list)
+
+
 def process_trace(
-    trace: xr.DataTree, p_names: typing.KeysView[str], ds: Dataset, n_xerr: float
+    trace: xr.DataTree, p_names: typing.KeysView[str], ds: Dataset
 ) -> FitResult[xr.DataTree]:
     """Process the trace to extract parameter estimates and update datasets.
 
@@ -303,8 +306,6 @@ def process_trace(
         Parameter names.
     ds : Dataset
         The dataset containing titration data.
-    n_xerr : float
-        Scaling factor for `x_errc`.
 
     Returns
     -------
@@ -334,7 +335,7 @@ def process_trace(
     if nxc.size > 0:
         for da in ds.values():
             da.xc = nxc  # Update x_true values in the dataset
-            da.x_errc = nx_errc * n_xerr  # Scale the errors FIXME: n_xerr not needed
+            da.x_errc = nx_errc  # Posterior already incorporates n_xerr prior scaling
     # Scale y_errc if present
     try:
         mag = float(rdf.loc["ye_mag", "mean"])
@@ -345,33 +346,9 @@ def process_trace(
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
-    # FIXME: multi need this renaming quite surely
-    rename_keys(rpars)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
-    # Compute weighted residuals from posterior mean predictions
-    # Weighted residuals = (1/y_err) * (observed - predicted)
-    # Use masked values (.x, .y, .y_err) for consistency
-    residuals_list: list[np.ndarray] = []
-    for lbl, da in ds.items():
-        model = binding_1site(
-            da.x,
-            rpars["K"].value,
-            rpars[f"S0_{lbl}"].value,
-            rpars[f"S1_{lbl}"].value,
-            is_ph=ds.is_ph,
-        )
-        raw_residuals = da.y - model
-        # Weight by precision (1/y_err)
-        if da.y_err.size > 0:
-            weight = 1 / da.y_err
-            weighted = weight * raw_residuals
-        else:
-            weighted = raw_residuals
-        residuals_list.append(weighted)
-    residuals = np.concatenate(residuals_list)
-
-    # Return the fit result
+    residuals = _compute_weighted_residuals(ds, rpars)
     return FitResult(fig, _Result(rpars, residual=residuals), trace, ds)
 
 
@@ -404,6 +381,8 @@ def extract_fit(
     FitResult[xr.DataTree]
         Fit result with figure, parameters, and dataset using posterior x.
     """
+    # Ensure numeric types (ArviZ 1.x might return strings)
+    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     rpars = Parameters()
     rdf = trace_df[trace_df.index.str.endswith(key)]
     for name, row in rdf.iterrows():
@@ -434,27 +413,7 @@ def extract_fit(
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-    # Compute weighted residuals from posterior mean predictions
-    # Weighted residuals = (1/y_err) * (observed - predicted)
-    # Use masked values (.x, .y, .y_err) for consistency
-    residuals_list: list[np.ndarray] = []
-    for lbl, da in ds.items():
-        model = binding_1site(
-            da.x,
-            rpars["K"].value,
-            rpars[f"S0_{lbl}"].value,
-            rpars[f"S1_{lbl}"].value,
-            is_ph=ds.is_ph,
-        )
-        raw_residuals = da.y - model
-        # Weight by precision (1/y_err)
-        if da.y_err.size > 0:
-            weight = 1 / da.y_err
-            weighted = weight * raw_residuals
-        else:
-            weighted = raw_residuals
-        residuals_list.append(weighted)
-    residuals = np.concatenate(residuals_list)
+    residuals = _compute_weighted_residuals(ds, rpars)
     return FitResult(fig, _Result(rpars, residual=residuals), xr.DataTree(), ds)
 
 
@@ -473,8 +432,6 @@ def _extract_x_true_from_trace_df(
     tuple[np.ndarray, np.ndarray]
         Arrays of x_true means and standard deviations.
     """
-    # Ensure numeric types (ArviZ 1.x might return strings)
-    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     nxc: list[float] = []
     nx_errc: list[float] = []
     for name, row in trace_df.iterrows():
@@ -482,18 +439,6 @@ def _extract_x_true_from_trace_df(
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
     return np.array(nxc), np.array(nx_errc)
-
-
-# TODO: This is a bit hacky but allows us to support per-well x posteriors from
-# the xrw model without changing the overall trace processing logic. We look for
-# rows named like "x_per_well[{step}, {well_key}]", extract the step index and
-# well key, and collect those for the specified well_key. If found, these
-# per-well x values take precedence over the global x_true.
-
-# FIXME: returned arrays are ordered by step index, but we currently assume the
-# original xc order matches the step order. This is true for the current xrw
-# implementation but could be made more robust by explicitly matching steps to
-# xc indices if needed.
 
 
 def _extract_x_per_well_from_trace_df(
@@ -505,6 +450,9 @@ def _extract_x_per_well_from_trace_df(
     ArviZ names the ``x_per_well`` deterministic (with dims ``step`` x ``well``)
     as ``x_per_well[{step}, {well}]``.  This function collects those rows for a
     specific well and returns them sorted by step index.
+
+    When found, per-well x values take precedence over the global ``x_true``,
+    allowing each well in an xrw fit to use its own inferred pH axis.
 
     Parameters
     ----------
@@ -518,9 +466,14 @@ def _extract_x_per_well_from_trace_df(
     tuple[np.ndarray, np.ndarray]
         Arrays of per-well x posterior means and standard deviations ordered
         by step.  Both arrays are empty if ``x_per_well`` rows are absent.
+
+    Notes
+    -----
+    Returned arrays are ordered by step index.  We assume the original ``xc``
+    order matches the step order, which holds for the current xrw
+    implementation.  A more robust future approach would explicitly match
+    steps to ``xc`` indices.
     """
-    # Ensure numeric types (ArviZ 1.x might return strings)
-    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     suffix = f", {well_key}]"
     rows: dict[int, tuple[float, float]] = {}
     for name, row in trace_df.iterrows():
@@ -590,7 +543,7 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
         return FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
-    xc = next(iter(ds.values())).xc  # # TODO: move up out
+    xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     with pm.Model():
         pars = create_parameter_priors(params, n_sd)
@@ -629,7 +582,7 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
             **_pymc_sample_parallel_args(nuts_sampler),
         )
         trace = _compute_sample_log_likelihood(trace)
-    return process_trace(trace, params.keys(), ds, n_xerr)
+    return process_trace(trace, params.keys(), ds)
 
 
 # ------------------------------------------------------------------
@@ -921,7 +874,6 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
     ValueError
         If no valid dataset is found in results.
     """
-    # FIXME: pytensor.config.floatX = "float32"  # type: ignore[attr-defined]
     ds = next((r.dataset for r in results.values() if r.dataset), None)
     if ds is None:
         msg = "No valid dataset found in results."

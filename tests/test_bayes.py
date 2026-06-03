@@ -13,7 +13,6 @@ from clophfit.fitting.bayes import (
     extract_fit,
     fit_binding_pymc,
     process_trace,
-    rename_keys,
     weighted_stats,
     x_true_from_trace_df,
 )
@@ -171,79 +170,6 @@ def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None
 
 
 ###############################################################################
-# Tests for rename_keys
-###############################################################################
-
-
-def test_rename_keys_basic() -> None:
-    """Test basic key renaming."""
-    data = {
-        "K_A01": 7.0,
-        "S0_1_A01": 2.0,
-        "S1_1_A01": 1.0,
-    }
-    result = rename_keys(data)
-    assert result == {
-        "K": 7.0,
-        "S0_1": 2.0,
-        "S1_1": 1.0,
-    }
-
-
-def test_rename_keys_k_prefix() -> None:
-    """Test that K_ prefix is properly renamed to K."""
-    data = {
-        "K_control": 7.5,
-        "K_sample": 8.0,
-    }
-    result = rename_keys(data)
-    # Both should be renamed to "K", last one wins
-    assert "K" in result
-
-
-def test_rename_keys_no_suffix() -> None:
-    """Test keys without suffix remain unchanged."""
-    data = {
-        "K": 7.0,
-        "S0": 2.0,
-    }
-    result = rename_keys(data)
-    assert result == data
-
-
-def test_rename_keys_mixed() -> None:
-    """Test renaming with mixed key formats."""
-    data = {
-        "K_A01": 7.0,
-        "S0_1_A01": 2.0,
-        "simple": 1.0,
-        "K_B02": 7.2,
-    }
-    result = rename_keys(data)
-    assert "K" in result
-    assert "S0_1" in result
-    assert "simple" in result
-
-
-def test_rename_keys_empty() -> None:
-    """Test renaming with empty dictionary."""
-    data: dict[str, float] = {}
-    result = rename_keys(data)
-    assert result == {}
-
-
-def test_rename_keys_preserves_values() -> None:
-    """Test that values are preserved during renaming."""
-    data = {
-        "K_A01": 7.123456,
-        "S0_1_A01": 2.987654,
-    }
-    result = rename_keys(data)
-    assert result["K"] == 7.123456
-    assert result["S0_1"] == 2.987654
-
-
-###############################################################################
 # Tests for weighted_stats
 ###############################################################################
 
@@ -344,7 +270,6 @@ def test_bayes_module_imports() -> None:
     # Check functions are callable
     assert callable(create_x_true)
     assert callable(create_parameter_priors)
-    assert callable(rename_keys)
     assert callable(weighted_stats)
     assert callable(fit_binding_pymc)
     assert callable(process_trace)
@@ -445,19 +370,6 @@ def test_create_x_true_zero_errors() -> None:
         # Should handle zero errors gracefully
         result = create_x_true(xc, x_errc, n_xerr)
         assert hasattr(result, "eval")
-
-
-def test_rename_keys_with_underscores() -> None:
-    """Test rename_keys with various underscore patterns."""
-    data = {
-        "K_": 7.0,  # Single underscore at end
-        "S0_": 2.0,
-        "_K": 7.5,  # Underscore at start
-        "S0__1": 2.5,  # Double underscore
-    }
-    result = rename_keys(data)
-    # Should handle these edge cases without crashing
-    assert isinstance(result, dict)
 
 
 def test_weighted_stats_zero_stderr() -> None:
