@@ -434,7 +434,6 @@ def extract_fit(
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
-
     # Compute weighted residuals from posterior mean predictions
     # Weighted residuals = (1/y_err) * (observed - predicted)
     # Use masked values (.x, .y, .y_err) for consistency
@@ -456,7 +455,6 @@ def extract_fit(
             weighted = raw_residuals
         residuals_list.append(weighted)
     residuals = np.concatenate(residuals_list)
-
     return FitResult(fig, _Result(rpars, residual=residuals), xr.DataTree(), ds)
 
 
@@ -484,6 +482,18 @@ def _extract_x_true_from_trace_df(
             nxc.append(row["mean"])
             nx_errc.append(row["sd"])
     return np.array(nxc), np.array(nx_errc)
+
+
+# TODO: This is a bit hacky but allows us to support per-well x posteriors from
+# the xrw model without changing the overall trace processing logic. We look for
+# rows named like "x_per_well[{step}, {well_key}]", extract the step index and
+# well key, and collect those for the specified well_key. If found, these
+# per-well x values take precedence over the global x_true.
+
+# FIXME: returned arrays are ordered by step index, but we currently assume the
+# original xc order matches the step order. This is true for the current xrw
+# implementation but could be made more robust by explicitly matching steps to
+# xc indices if needed.
 
 
 def _extract_x_per_well_from_trace_df(
@@ -1055,4 +1065,4 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         if sample_ppc:
             pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
-    return trace
+        return _compute_sample_log_likelihood(trace)

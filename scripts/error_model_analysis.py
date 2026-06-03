@@ -40,7 +40,7 @@ from clophfit.fitting.residuals import (  # noqa: E402
     residual_statistics,
     validate_residuals,
 )
-from clophfit.prtecan.prtecan import Titration  # noqa: E402
+from clophfit.prtecan import Titration  # noqa: E402
 
 TECAN_DIR = REPO / "tests" / "Tecan"
 OUTPUT_DIR = REPO / "scripts" / "error_model_output"
