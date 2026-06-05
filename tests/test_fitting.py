@@ -22,7 +22,13 @@ from clophfit.fitting.core import (
     weight_da,
     weight_multi_ds_titration,
 )
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.errors import InsufficientDataError, InvalidDataError
 from clophfit.fitting.models import binding_1site, kd
 from clophfit.fitting.odr import (
@@ -897,8 +903,11 @@ def test_fit_binding_pymc_from_fitresult(ph_dataset: Dataset) -> None:
 
 
 def test_fit_binding_pymc_separate_ph(ph_dataset: Dataset) -> None:
-    """Test PyMC with per-label noise scaling."""
-    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0, error_model="separate")
+    """Test PyMC with per-label noise floors."""
+    noise_model = PlateNoiseModel({
+        lbl: NoiseModelParams(sigma_floor=10.0) for lbl in ph_dataset
+    })
+    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0, noise_model=noise_model)
     assert fr.result is not None
     assert "K" in fr.result.params
     assert fr.result.residual is not None
@@ -926,20 +935,20 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     np.random.default_rng(42)
-    bg_noise = {
-        "1": 250.0,
-        "2": 5.0,
-    }
+    # Comprehensive noise: per-label floor + per-label gain + shared alpha
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=250.0, gain=1.0, alpha=0.04),
+        "2": NoiseModelParams(sigma_floor=5.0, gain=1.0, alpha=0.04),
+    })
 
     trace = fit_binding_pymc_multi(
         results,
         scheme,
-        bg_noise=bg_noise,
+        noise_model=noise_model,
         n_sd=3.0,
         n_xerr=0.0,
         n_samples=50,
         n_tune=25,
-        infer_gain=True,
     )
 
     assert hasattr(trace, "posterior")
@@ -958,21 +967,21 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     np.random.default_rng(42)
-    bg_noise = {
-        "1": 250.0,
-        "2": 5.0,
-    }
+    # Comprehensive noise with x_error_model="random_walk"
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=250.0, gain=1.0, alpha=0.04),
+        "2": NoiseModelParams(sigma_floor=5.0, gain=1.0, alpha=0.04),
+    })
 
     trace = fit_binding_pymc_multi(
         results,
         scheme,
-        bg_noise=bg_noise,
+        noise_model=noise_model,
         x_error_model="random_walk",
         n_sd=3.0,
         n_xerr=0.0,
         n_samples=50,
         n_tune=25,
-        infer_gain=True,
     )
 
     assert hasattr(trace, "posterior")

@@ -95,15 +95,11 @@ def fgls_plate_fit(
     logger.info(
         "Starting FGLS Pass 2: %s fit with calibrated weights", second_pass_method
     )
+    datasets_calibrated = noise_params.apply_to_plate(datasets)
     final_results = {}
-    for well, ds in datasets.items():
-        # Update ds with new variance model
-        ds_updated = noise_params.apply_to(ds)
-
+    for well, ds in datasets_calibrated.items():
         try:
-            final_results[well] = fit_binding_glob(
-                ds_updated, method=second_pass_method
-            )
+            final_results[well] = fit_binding_glob(ds, method=second_pass_method)
         except InsufficientDataError:
             logger.warning("Skip FGLS Pass 2 fit for well %s.", well)
             final_results[well] = FitResult()

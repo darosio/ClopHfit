@@ -461,53 +461,66 @@ class TestNoiseModelContainers:
     """Test cases for NoiseModelParams and PlateNoiseModel."""
 
     def test_noise_model_params(self) -> None:
-        """Test NoiseModelParams creation and backward-compatible access."""
+        """Test NoiseModelParams creation, compute_y_err, and frozen/hashable."""
         params = NoiseModelParams(sigma_floor=1.5, gain=0.5, alpha=0.02)
         assert params.sigma_floor == 1.5
         assert params.gain == 0.5
         assert params.alpha == 0.02
 
-        # Test index-based access (legacy list/tuple compatibility)
-        assert params[0] == 1.5
-        assert params[1] == 0.5
-        assert params[2] == 0.02
+        # compute_y_err for fixed noise model application
+        y = np.array([100.0, 200.0, 300.0])
+        expected = np.sqrt(1.5**2 + 0.5 * y + (0.02 * y) ** 2)
+        assert np.allclose(params.compute_y_err(y), expected)
 
-        # Test unpacking (legacy tuple unpacking compatibility)
-        floor, gain, alpha = params
-        assert floor == 1.5
-        assert gain == 0.5
-        assert alpha == 0.02
+        # Frozen → cannot mutate
+        with pytest.raises(AttributeError):
+            params.sigma_floor = 3.0  # type: ignore[misc]
+
+        # Hashable (frozen dataclass)
+        d = {params: "test"}
+        assert d[params] == "test"
+
+    def test_noise_model_params_zero_terms(self) -> None:
+        """NoiseModelParams with gain=0 or alpha=0 disables those terms."""
+        # gain=0: no Poisson contribution
+        p_no_gain = NoiseModelParams(sigma_floor=2.0, alpha=0.03)
+        assert p_no_gain.gain == 0.0
+        y = np.array([100.0, 200.0])
+        expected = np.sqrt(2.0**2 + (0.03 * y) ** 2)
+        assert np.allclose(p_no_gain.compute_y_err(y), expected)
+
+        # alpha=0: no proportional contribution
+        p_no_alpha = NoiseModelParams(sigma_floor=2.0, gain=1.0)
+        assert p_no_alpha.alpha == 0.0
+        expected = np.sqrt(2.0**2 + y)  # gain=1 * y
+        assert np.allclose(p_no_alpha.compute_y_err(y), expected)
 
     def test_plate_noise_model(self) -> None:
-        """Test PlateNoiseModel properties and application to Dataset."""
+        """Test PlateNoiseModel properties and direct apply_to."""
         params1 = NoiseModelParams(sigma_floor=1.5, gain=0.5, alpha=0.02)
         params2 = NoiseModelParams(sigma_floor=2.0, gain=0.0, alpha=0.01)
 
         model = PlateNoiseModel({"lbl1": params1, "lbl2": params2})
 
-        # Test properties extraction
+        # Properties still work
         assert model.sigma_floor == {"lbl1": 1.5, "lbl2": 2.0}
         assert model.gain == {"lbl1": 0.5, "lbl2": 0.0}
         assert model.alpha == {"lbl1": 0.02, "lbl2": 0.01}
 
-        # Test applying to Dataset
+        # Test direct apply_to
         x = np.array([5.0, 6.0, 7.0])
         y1 = np.array([100.0, 200.0, 300.0])
         y2 = np.array([50.0, 100.0, 150.0])
-        da1 = DataArray(xc=x, yc=y1)
-        da2 = DataArray(xc=x, yc=y2)
-        ds = Dataset({"lbl1": da1, "lbl2": da2}, is_ph=True)
+        ds = Dataset(
+            {"lbl1": DataArray(xc=x, yc=y1), "lbl2": DataArray(xc=x, yc=y2)},
+            is_ph=True,
+        )
 
         ds_updated = model.apply_to(ds)
 
-        # Verify y_errc on updated datasets
-        # Check first label calculation matches error formula
-        expected_err1 = np.sqrt(1.5**2 + 0.5 * y1 + (0.02 * y1) ** 2)
-        assert np.allclose(ds_updated["lbl1"].y_errc, expected_err1)
-
-        # Check second label calculation matches error formula
-        expected_err2 = np.sqrt(2.0**2 + (0.01 * y2) ** 2)
-        assert np.allclose(ds_updated["lbl2"].y_errc, expected_err2)
+        # Refactored apply_to uses params.compute_y_err directly
+        assert np.allclose(ds_updated["lbl1"].y_errc, params1.compute_y_err(y1))
+        assert np.allclose(ds_updated["lbl2"].y_errc, params2.compute_y_err(y2))
 
 
 def test_fgls_plate_fit_workflow() -> None:

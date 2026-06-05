@@ -3,10 +3,13 @@
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    NoiseModelParams,
+)
 from clophfit.fitting.utils import (
     apply_outlier_mask,
-    assign_error_model,
     fit_gain_and_rel_error_from_residuals,
     fit_noise_model_from_residuals,
     fit_rel_error_from_residuals,
@@ -232,18 +235,13 @@ def test_fit_rel_error_non_negative_clamped() -> None:
     assert alpha["1"] >= 0.0
 
 
-# --- assign_error_model ---
+# --- NoiseModelParams.compute_y_err ---
 
 
-def test_assign_error_model_gain_zero_is_no_poisson() -> None:
-    """With gain=0 the model should equal the pure floor+proportional model."""
-    x = np.linspace(5, 10, 7)
+def test_noise_model_params_compute_y_err_gain_zero() -> None:
+    """With gain=0 the model equals pure floor+proportional."""
     y = np.linspace(100, 500, 7)
-    ds = _make_ds(x, y)
-    result_gain0 = assign_error_model(ds, sigma_floor=2.0, gain=0, rel_error=0.03)
-    result_no_poisson = assign_error_model(
-        ds, sigma_floor=2.0, gain=0.0, rel_error=0.03
-    )
-    np.testing.assert_allclose(result_gain0["1"].y_errc, result_no_poisson["1"].y_errc)
+    params = NoiseModelParams(sigma_floor=2.0, gain=0.0, alpha=0.03)
+    result = params.compute_y_err(y)
     expected = np.sqrt(2.0**2 + (0.03 * y) ** 2)
-    np.testing.assert_allclose(result_gain0["1"].y_errc, expected, rtol=1e-6)
+    np.testing.assert_allclose(result, expected, rtol=1e-6)

@@ -16,10 +16,16 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.odr import format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.utils import apply_outlier_mask, assign_error_model
+from clophfit.fitting.utils import apply_outlier_mask
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -1018,28 +1024,27 @@ class Titration(TecanfilesGroup):
 
     def _apply_error_model(self, ds: Dataset) -> Dataset:
         """Apply the physical error model from TitrationConfig to the Dataset."""
-        sigma_floor: dict[str, float | ArrayF] = {}
-        gain: dict[str, float] = {}
-        rel_error: dict[str, float] = {}
-
         labels = sorted(self.data.keys())
+        noise_model = PlateNoiseModel()
         for i, lbl in enumerate(labels):
-            sigma_floor[lbl] = self.bg_err[lbl] if self.bg_err else 0.0
+            floor = float(self.bg_noise.get(lbl, 0.0)) if self.bg_noise else 0.0
 
-            gain[lbl] = (
+            gain = (
                 self.params.noise_gain[i]
                 if self.params.noise_gain and i < len(self.params.noise_gain)
-                else 1.0
+                else 0.0
             )
-            rel_error[lbl] = (
+            alpha = (
                 self.params.noise_alpha[i]
                 if self.params.noise_alpha and i < len(self.params.noise_alpha)
                 else 0.0
             )
 
-        return assign_error_model(
-            ds, sigma_floor=sigma_floor, gain=gain, rel_error=rel_error
-        )
+            noise_model[lbl] = NoiseModelParams(
+                sigma_floor=floor, gain=gain, alpha=alpha
+            )
+
+        return noise_model.apply_to(ds)
 
     def create_ds(self, key: str, label: str) -> Dataset:
         """Create a dataset for the given key."""

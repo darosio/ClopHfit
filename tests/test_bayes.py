@@ -17,7 +17,13 @@ from clophfit.fitting.bayes import (
     x_true_from_trace_df,
 )
 from clophfit.fitting.core import fit_binding_glob
-from clophfit.fitting.data_structures import Dataset, FitResult, MiniT
+from clophfit.fitting.data_structures import (
+    Dataset,
+    FitResult,
+    MiniT,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 
 ###############################################################################
 # Fixtures
@@ -290,9 +296,7 @@ def test_fit_binding_pymc_smoke_test(ph_dataset: Dataset) -> None:
     assert initial_fit.dataset is not None
     # Now, run the pymc fitter with very few samples (just to test it runs)
     # Use tune=50 to reduce sampling time
-    fit_result_pymc = fit_binding_pymc(
-        initial_fit, n_samples=50, n_xerr=0, ye_scaling=1.0, n_sd=10.0
-    )
+    fit_result_pymc = fit_binding_pymc(initial_fit, n_samples=50, n_xerr=0, n_sd=10.0)
     # Check that we got a result
     assert fit_result_pymc.mini is not None
     assert fit_result_pymc.result is not None
@@ -314,9 +318,7 @@ def test_fit_binding_pymc_with_xerr(ph_dataset: Dataset) -> None:
     assert initial_fit.result is not None
     assert initial_fit.dataset is not None
     # Run PyMC with x error modeling (reduced samples for speed)
-    fit_result = fit_binding_pymc(
-        initial_fit, n_samples=50, n_xerr=1.0, ye_scaling=1.0, n_sd=10.0
-    )
+    fit_result = fit_binding_pymc(initial_fit, n_samples=50, n_xerr=1.0, n_sd=10.0)
     assert fit_result.result is not None
     assert "K" in fit_result.result.params
     # Check that K is reasonably close to expected value
@@ -333,9 +335,12 @@ def test_fit_binding_pymc_separate_smoke_test(multi_dataset: Dataset) -> None:
     initial_fit = fit_binding_glob(multi_dataset)
     assert initial_fit.result is not None
     assert initial_fit.dataset is not None
-    # Run PyMC with separate noise scaling (reduced samples for speed)
+    # Run PyMC with per-label noise floors (similar to old separate ye_mag)
+    noise_model = PlateNoiseModel({
+        lbl: NoiseModelParams(sigma_floor=10.0) for lbl in initial_fit.dataset
+    })
     fit_result = fit_binding_pymc(
-        initial_fit, n_samples=50, n_xerr=0, n_sd=10.0, error_model="separate"
+        initial_fit, n_samples=50, n_xerr=0, n_sd=10.0, noise_model=noise_model
     )
     assert fit_result.result is not None
     assert "K" in fit_result.result.params

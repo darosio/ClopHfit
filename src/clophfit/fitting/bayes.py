@@ -23,7 +23,14 @@ from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
 from .core import N_BOOT, fit_binding_glob  # local to avoid circular import
-from .data_structures import DataArray, Dataset, FitResult, MiniT, _Result
+from .data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    MiniT,
+    PlateNoiseModel,
+    _Result,
+)
 
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -32,81 +39,118 @@ if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
 
 
-def get_pymc_noise_priors(
-    labels: list[str],
-    model_type: Literal["constant", "proportional", "comprehensive"],
-    bg_noise: dict[str, float] | None = None,
-    ye_scaling: float = 1.0,
-    n_buf: int = 1,
+def build_pymc_noise_priors(
+    noise_model: PlateNoiseModel,
+    *,
+    shared_alpha: bool = True,
+    shared_gain: bool = False,
 ) -> dict[str, typing.Any]:
-    """Create PyMC priors for the specified error model.
+    """Create PyMC priors from a ``PlateNoiseModel`` specification.
 
-    Returns a dictionary of priors that can be passed to ``get_pymc_variance``.
+    Parameters
+    ----------
+    noise_model : PlateNoiseModel
+        Per-label noise parameter specification.
+    shared_alpha : bool
+        If ``True``, use a single ``rel_error`` variable for all labels.
+        If ``False``, use per-label ``rel_error_{lbl}`` variables.
+    shared_gain : bool
+        If ``True``, use a single ``gain`` variable for all labels.
+        If ``False``, use per-label ``gain_{lbl}`` variables.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        Priors dict consumed by :func:`get_pymc_variance`.
     """
     priors: dict[str, typing.Any] = {}
-    if model_type == "constant":
-        priors["ye_mag"] = {
-            lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=ye_scaling) for lbl in labels
-        }
-    elif model_type in {"proportional", "comprehensive"}:
-        est_sigma = {}
-        if bg_noise:
-            for lbl in labels:
-                est_sigma[lbl] = float(bg_noise[lbl])
+    labels = list(noise_model.keys())
+
+    # Floor priors — always per-label, Normal centred at the provided estimate.
+    # Sigma is a fraction of the estimate, clamped for numerical stability.
+    n_pts, n_buf = 4, 1
+    dof = max(1, n_pts * n_buf - 2)
+    rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+    priors["floor"] = {}
+    for lbl in labels:
+        mu = noise_model[lbl].sigma_floor
+        sigma = max(rel_sigma * mu, 0.01)
+        priors["floor"][lbl] = pm.Normal(f"floor_{lbl}", mu=mu, sigma=sigma)
+
+    # Gain (Poisson term) — present when any label has gain > 0
+    has_gain = any(p.gain > 0 for p in noise_model.values())
+    if has_gain:
+        if shared_gain:
+            priors["gain"] = pm.Exponential("gain", 1.0)
         else:
-            for lbl in labels:
-                est_sigma[lbl] = 10.0  # Fallback
+            priors["gain"] = {
+                lbl: pm.Exponential(f"gain_{lbl}", 1.0)
+                for lbl in labels
+                if noise_model[lbl].gain > 0
+            }
 
-        n_pts = 4 if bg_noise else 1
-        dof = max(1, n_pts * n_buf - 2)
-        rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
-
-        priors["floor"] = {}
-        for lbl in labels:
-            mu_floor = est_sigma[lbl]
-            sigma_floor = rel_sigma * mu_floor
-            # Guard against degenerate Normal when mu → 0: enforce
-            # a minimum prior width so the sampler can move.
-            sigma_floor = max(sigma_floor, 0.01)
-            priors["floor"][lbl] = pm.Normal(
-                f"floor_{lbl}", mu=mu_floor, sigma=sigma_floor
-            )
-
-        if model_type == "comprehensive":
-            priors["gain"] = {lbl: pm.Exponential(f"gain_{lbl}", 1.0) for lbl in labels}
+    # Alpha (proportional error) — present when any label has alpha > 0
+    has_alpha = any(p.alpha > 0 for p in noise_model.values())
+    if has_alpha:
+        if shared_alpha:
             priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.04)
         else:
             priors["rel_error"] = {
-                lbl: pm.HalfNormal(f"rel_error_{lbl}", sigma=0.2) for lbl in labels
+                lbl: pm.HalfNormal(f"rel_error_{lbl}", sigma=0.2)
+                for lbl in labels
+                if noise_model[lbl].alpha > 0
             }
+
     return priors
 
 
 def get_pymc_variance(
     mu: pm.math.TensorVariable,
     label: str,
-    model_type: Literal["constant", "proportional", "comprehensive"],
+    noise_model: PlateNoiseModel,
     priors: dict[str, typing.Any],
-    y_errc: np.ndarray | None = None,
 ) -> pm.math.TensorVariable:
-    """Construct the PyMC symbolic variance based on the chosen error model."""
-    if model_type == "constant":
-        if y_errc is None:
-            msg = "y_errc must be provided for constant error model"
-            raise ValueError(msg)
-        return (priors["ye_mag"][label] * y_errc) ** 2
+    """Construct PyMC symbolic variance from a noise model specification.
 
+    Parameters
+    ----------
+    mu : pm.math.TensorVariable
+        Symbolic predicted signal (must be positive).
+    label : str
+        Label key into *noise_model*.
+    noise_model : PlateNoiseModel
+        Per-label noise parameter specification.
+    priors : dict[str, typing.Any]
+        Priors dict from :func:`build_pymc_noise_priors`.
+
+    Returns
+    -------
+    pm.math.TensorVariable
+        Symbolic variance tensor.
+    """
+    params = noise_model[label]
     y_pos = pm_math.maximum(1e-6, mu)
-    floor_sq = priors["floor"][label] ** 2
+    # Broadcast floor² to match y_pos shape so the result is always
+    # per-point (never 0-d), even when gain and alpha are both absent.
+    var = priors["floor"][label] ** 2 * pt.ones_like(y_pos)  # type: ignore[no-untyped-call]
 
-    if model_type == "comprehensive":
-        return (
-            floor_sq
-            + priors["gain"][label] * y_pos
-            + (priors["rel_error"] * y_pos) ** 2
+    if params.gain > 0:
+        gain = (
+            priors["gain"][label]
+            if isinstance(priors["gain"], dict)
+            else priors["gain"]
         )
-    # Proportional
-    return floor_sq + (priors["rel_error"][label] * y_pos) ** 2
+        var += gain * y_pos
+
+    if params.alpha > 0:
+        alpha = (
+            priors["rel_error"][label]
+            if isinstance(priors["rel_error"], dict)
+            else priors["rel_error"]
+        )
+        var += (alpha * y_pos) ** 2
+
+    return var
 
 
 __all__ = [
@@ -271,6 +315,21 @@ def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> Non
         rpars.add(name, value=mean, min=lo, max=hi)
     rpars[name].stderr = float(row["sd"])
     rpars[name].init_value = row.get("r_hat", np.nan)
+
+
+def _add_y_likelihood(
+    name: str,
+    y_model: typing.Any,  # noqa: ANN401  # pt.TensorVariable (no stubs)
+    da: DataArray,
+    sigma: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
+    *,
+    robust: bool = False,
+) -> None:
+    """Add a Normal or StudentT likelihood for one label."""
+    if robust:
+        pm.StudentT(name, nu=3.0, mu=y_model[da.mask], sigma=sigma, observed=da.y)
+    else:
+        pm.Normal(name, mu=y_model[da.mask], sigma=sigma, observed=da.y)
 
 
 def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
@@ -501,15 +560,15 @@ def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
     return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
 
 
-def fit_binding_pymc(  # noqa: PLR0913,PLR0917
+def fit_binding_pymc(  # noqa: PLR0913
     ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
-    ye_scaling: float = 1.0,
     n_samples: int = 2000,
     nuts_sampler: str = "default",
     *,
-    error_model: str = "shared",
+    noise_model: PlateNoiseModel | None = None,
+    robust: bool = False,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -521,15 +580,18 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
         Number of standard deviations for parameter priors.
     n_xerr : float
         Scaling factor for x-error.
-    ye_scaling : float
-        Scaling factor for y-error magnitude prior.
     n_samples : int
         Number of MCMC samples.
     nuts_sampler : str
         NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
         ``"numpyro"``, or ``"nutpie"``.
-    error_model : str
-        Error model to use: ``"shared"`` (single ye_mag) or ``"separate"`` (per-label ye_mag).
+    noise_model : PlateNoiseModel | None
+        Noise model specification.  ``None`` (default) uses a simple shared
+        ``ye_mag`` HalfNormal to scale the existing ``y_err``.  Pass a
+        ``PlateNoiseModel`` to infer per-label floor, gain, and alpha
+        from the full heteroscedastic noise model.
+    robust : bool
+        If ``True``, use StudentT likelihood (nu=3) for robust regression.
 
     Returns
     -------
@@ -548,30 +610,37 @@ def fit_binding_pymc(  # noqa: PLR0913,PLR0917
     with pm.Model():
         pars = create_parameter_priors(params, n_sd)
         x_true = create_x_true(xc, x_errc, n_xerr)
-        # Add likelihoods for each dataset
-        if error_model == "separate":
-            ye_mag_dict: dict[str, pm.Distribution] = {
-                lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=ye_scaling * 10.0)
-                for lbl in ds
-            }
-        else:
-            ye_mag_shared = pm.HalfNormal("ye_mag", sigma=ye_scaling)
 
-        for lbl, da in ds.items():
-            y_model = binding_1site(
-                x_true, pars["K"], pars[f"S0_{lbl}"], pars[f"S1_{lbl}"], is_ph=ds.is_ph
-            )
-            sigma = (
-                ye_mag_dict[lbl] * np.ones_like(da.y_err)
-                if error_model == "separate"
-                else ye_mag_shared * da.y_err
-            )
-            pm.Normal(
-                f"y_likelihood_{lbl}",
-                mu=y_model[da.mask],
-                sigma=sigma,
-                observed=da.y,
-            )
+        if noise_model is None:
+            ye_mag = pm.HalfNormal("ye_mag", sigma=1.0)
+            for lbl, da in ds.items():
+                y_model = binding_1site(
+                    x_true,
+                    pars["K"],
+                    pars[f"S0_{lbl}"],
+                    pars[f"S1_{lbl}"],
+                    is_ph=ds.is_ph,
+                )
+                sigma = ye_mag * da.y_err
+                _add_y_likelihood(
+                    f"y_likelihood_{lbl}", y_model, da, sigma, robust=robust
+                )
+        else:
+            noise_priors = build_pymc_noise_priors(noise_model)
+            for lbl, da in ds.items():
+                y_model = binding_1site(
+                    x_true,
+                    pars["K"],
+                    pars[f"S0_{lbl}"],
+                    pars[f"S1_{lbl}"],
+                    is_ph=ds.is_ph,
+                )
+                noise_var = get_pymc_variance(y_model, lbl, noise_model, noise_priors)
+                sigma = pm.Deterministic(f"sigma_obs_{lbl}", pm_math.sqrt(noise_var))
+                _add_y_likelihood(
+                    f"y_likelihood_{lbl}", y_model, da, sigma[da.mask], robust=robust
+                )
+
         # Inference
         tune = n_samples // 2
         trace = pm.sample(
@@ -802,22 +871,22 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
+def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
-    ye_scaling: float = 1.0,
     n_samples: int = 2000,
     nuts_sampler: str = "default",
     *,
+    noise_model: PlateNoiseModel | None = None,
+    shared_alpha: bool = True,
+    shared_gain: bool = False,
     n_tune: int | None = None,
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
     sigma_pip_prior: float = 0.02,
     ctr_free_k: bool = False,
-    bg_noise: dict[str, float] | None = None,
     sample_ppc: bool = False,
-    infer_gain: bool = False,
     robust: bool = False,
 ) -> xr.DataTree:
     """Multi-well PyMC with shared K per control group and per-label noise.
@@ -832,13 +901,25 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         Prior width multiplier for per-well S0/S1 parameters.
     n_xerr : float
         Scaling factor applied to x-value uncertainties.
-    ye_scaling : float
-        HalfNormal sigma for the per-label y-error scaling factor.
     n_samples : int
         Number of MCMC posterior samples per chain.
     nuts_sampler : str
         NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
         ``"nutpie"``).
+    noise_model : PlateNoiseModel | None
+        Noise model specification.  ``None`` (default) uses per-label
+        ``ye_mag_{lbl}`` HalfNormal to scale existing ``y_err``.  Pass a
+        ``PlateNoiseModel`` to infer floor, gain, and alpha from the full
+        heteroscedastic noise model.
+    shared_alpha : bool
+        If ``True`` (default), use a single ``rel_error`` variable for all
+        labels (comprehensive model).  If ``False``, use per-label
+        ``rel_error_{lbl}`` (proportional model).  Only used when
+        *noise_model* is provided.
+    shared_gain : bool
+        If ``True``, use a single ``gain`` variable for all labels.
+        If ``False`` (default), use per-label ``gain_{lbl}``.  Only used
+        when *noise_model* is provided and gain terms are present.
     n_tune : int | None
         Number of tuning steps for MCMC. If None, defaults to n_samples // 2.
     x_error_model : Literal["deterministic", "random_walk"]
@@ -851,18 +932,12 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         hierarchical shrinkage.  The spread of K posteriors across replicates
         then quantifies between-replicate accuracy.  If False (default), all
         replicates of the same CTR share a single K.
-    bg_noise : dict[str, float] | None
-        Background noise for each signal band. If provided, uses heteroscedastic
-        noise model combining buffer and signal, ignoring `ye_scaling`.
     sample_ppc : bool
         If True, generates posterior predictive samples and adds them to the
         returned InferenceData object. Needed for `plot_ppc_well`.
-    infer_gain : bool
-        If True (and ``bg_noise`` is provided), jointly infer per-label Poisson
-        gain and a single shared relative error. If False (default), infer
-        per-label relative error with no gain term.
     robust : bool
-        If True, use StudentT likelihood (nu=3) for robust regression instead of Normal.
+        If True, use StudentT likelihood (nu=3) for robust regression instead
+        of Normal.
 
     Returns
     -------
@@ -880,7 +955,7 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
         raise ValueError(msg)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
-    labels = list(ds.keys())
+    list(ds.keys())
     values: dict[str, list[float | None]] = {}
     stderr: dict[str, list[float | None]] = {}
 
@@ -933,18 +1008,12 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
             well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
-        model_type: Literal["constant", "proportional", "comprehensive"]
-        if bg_noise is None:
-            model_type = "constant"
-        elif infer_gain:
-            model_type = "comprehensive"
+        if noise_model is not None:
+            noise_priors = build_pymc_noise_priors(
+                noise_model, shared_alpha=shared_alpha, shared_gain=shared_gain
+            )
         else:
-            model_type = "proportional"
-
-        n_buf = len(scheme.buffer) if scheme.buffer else 1
-        noise_priors = get_pymc_noise_priors(
-            labels, model_type, bg_noise, ye_scaling, n_buf
-        )
+            noise_priors = {}
 
         for key, r in results.items():
             if r.result and r.dataset:
@@ -972,37 +1041,27 @@ def fit_binding_pymc_multi(  # noqa: C901,PLR0912,PLR0913,PLR0915,PLR0917
                         is_ph=ds_well.is_ph,
                     )
 
-                    noise_var = get_pymc_variance(
-                        y_model, lbl, model_type, noise_priors, da.y_err
-                    )
-
-                    if model_type == "constant":
-                        sigma_val = (
-                            noise_var**0.5
-                        )  # Since constant returns variance=sigma^2
-                    else:
+                    if noise_model is not None:
+                        noise_var = get_pymc_variance(
+                            y_model, lbl, noise_model, noise_priors
+                        )
                         sigma_obs = pm.Deterministic(
                             f"sigma_obs_{lbl}_{key}",
                             pm_math.sqrt(noise_var),
                             dims=("step",),
                         )
                         sigma_val = sigma_obs[da.mask]
-
-                    if robust:
-                        pm.StudentT(
-                            f"y_likelihood_{lbl}_{key}",
-                            nu=3.0,
-                            mu=y_model[da.mask],
-                            sigma=sigma_val,
-                            observed=da.y,
-                        )
                     else:
-                        pm.Normal(
-                            f"y_likelihood_{lbl}_{key}",
-                            mu=y_model[da.mask],
-                            sigma=sigma_val,
-                            observed=da.y,
-                        )
+                        ye_mag = pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0)
+                        sigma_val = ye_mag * da.y_err
+
+                    _add_y_likelihood(
+                        f"y_likelihood_{lbl}_{key}",
+                        y_model,
+                        da,
+                        sigma_val,
+                        robust=robust,
+                    )
 
         tune_steps = n_tune if n_tune is not None else n_samples // 2
 

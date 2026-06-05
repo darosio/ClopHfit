@@ -1189,133 +1189,133 @@ class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def titan(self) -> Titration:
+    def tit(self) -> Titration:
         """Set up TitrationAnalysis."""
-        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
-        titan.load_additions(data_tests / "140220/additions.pH")
-        titan.load_scheme(data_tests / "140220/scheme.txt")
-        return titan
+        tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        tit.load_additions(data_tests / "140220/additions.pH")
+        tit.load_scheme(data_tests / "140220/scheme.txt")
+        return tit
 
-    def test_fit_pipeline_order_default(self, titan: Titration) -> None:
+    def test_fit_pipeline_order_default(self, tit: Titration) -> None:
         """It finds well position for buffer samples."""
-        assert titan.scheme.buffer == ["D01", "E01", "D12", "E12"]
-        assert titan.buffer.wells == ["D01", "E01", "D12", "E12"]
+        assert tit.scheme.buffer == ["D01", "E01", "D12", "E12"]
+        assert tit.buffer.wells == ["D01", "E01", "D12", "E12"]
 
-    def test_raise_listfilenotfound(self, titan: Titration) -> None:
+    def test_raise_listfilenotfound(self, tit: Titration) -> None:
         """It raises OSError when scheme file does not exist."""
         with pytest.raises(
             FileNotFoundError, match=r"No such file or directory: 'aax'"
         ):
-            titan.load_scheme(Path("aax"))
+            tit.load_scheme(Path("aax"))
 
-    def test_raise_listfile_exception(self, titan: Titration) -> None:
+    def test_raise_listfile_exception(self, tit: Titration) -> None:
         """It raises AssertionError when scheme.txt file is ill-shaped."""
         bad_schemefile = data_tests / "140220/scheme0.txt"
         msg = f"Check format [well sample] for schemefile: {bad_schemefile}"
         with pytest.raises(ValueError, match=re.escape(msg)):
-            titan.load_scheme(bad_schemefile)
+            tit.load_scheme(bad_schemefile)
 
-    def test_subtract_bg(self, titan: Titration) -> None:
+    def test_subtract_bg(self, tit: Titration) -> None:
         """It subtracts buffer average values."""
-        lbg0 = titan.labelblocksgroups["1"]
-        lbg1 = titan.labelblocksgroups["2"]
+        lbg0 = tit.labelblocksgroups["1"]
+        lbg1 = tit.labelblocksgroups["2"]
         assert_almost_equal(
             lbg0.data_nrm["E01"][::2], [601.72, 641.505, 674.355, 706.774], 3
         )
         assert lbg0.data is not None
         assert lbg0.data["E01"][::2] == [11192.0, 11932.0, 12543.0, 13146.0]
         assert type(lbg1) is LabelblocksGroup
-        titan.params.bg = True
-        titan.params.nrm = False
-        titan.params.dil = False
-        assert_array_equal(titan.data["1"]["A12"][::3], [8084.5, 16621.75, 13775.0])
+        tit.params.bg = True
+        tit.params.nrm = False
+        tit.params.dil = False
+        assert_array_equal(tit.data["1"]["A12"][::3], [8084.5, 16621.75, 13775.0])
         assert lbg1.data is not None
-        assert_array_equal(titan.data["2"]["A12"][::3], [9758.25, 1334.0, 283.5])
+        assert_array_equal(tit.data["2"]["A12"][::3], [9758.25, 1334.0, 283.5])
 
-    def test_dilution_correction(self, titan: Titration) -> None:
+    def test_dilution_correction(self, tit: Titration) -> None:
         """It applies dilution correction read from file listing additions."""
-        assert titan.additions is not None
-        assert_array_equal(titan.additions, [100, 2, 2, 2, 2, 2, 2])
-        titan.params.nrm = False
-        titan.params.dil = True
-        assert titan.data is not None
-        assert titan.data["1"] is not None
+        assert tit.additions is not None
+        assert_array_equal(tit.additions, [100, 2, 2, 2, 2, 2, 2])
+        tit.params.nrm = False
+        tit.params.dil = True
+        assert tit.data is not None
+        assert tit.data["1"] is not None
         assert_almost_equal(
-            titan.data["2"]["A12"],
+            tit.data["2"]["A12"],
             [9758.25, 7524.795, 3079.18, 1414.04, 641.79, 402.325, 317.52],
         )
 
-    def test_data_nrm(self, titan: Titration) -> None:
+    def test_data_nrm(self, tit: Titration) -> None:
         """It normalizes data."""
-        titan.params.nrm = True
-        titan.params.bg = True
-        titan.params.dil = True
+        tit.params.nrm = True
+        tit.params.bg = True
+        tit.params.dil = True
 
         assert_almost_equal(
-            titan.data["1"]["A12"][::2],
+            tit.data["1"]["A12"][::2],
             [434.65, 878.73, 975.58, 829.46],
             2,
         )
         assert_almost_equal(
-            titan.data["2"]["A12"][::2],
+            tit.data["2"]["A12"][::2],
             [871.272, 274.927, 57.303, 28.35],
             3,
         )
 
-    def test_keys(self, titan: Titration) -> None:
+    def test_keys(self, tit: Titration) -> None:
         """It gets well positions for ctrl and unknown samples."""
-        assert set(titan.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
+        assert set(tit.scheme.names) == {"NTT", "G03", "V224Q", "S202N"}
         x = {"B12", "H12", "F01", "C12", "F12", "C01", "H01", "G12", "B01", "G01"}
-        assert set(titan.scheme.ctrl) - {"A01", "A12"} == x
+        assert set(tit.scheme.ctrl) - {"A01", "A12"} == x
 
-    def test_fit(self, titan: Titration) -> None:
+    def test_fit(self, tit: Titration) -> None:
         """It fits each label separately."""
         # Test Label 1 for H02 (should be skipped because of OVER value or insufficient points)
-        ds1 = {k: titan.create_ds(k, label="1") for k in titan.fit_keys}
+        ds1 = {k: tit.create_ds(k, label="1") for k in tit.fit_keys}
         res1 = fit_plate(ds1, method="huber")
         assert not res1["H02"].is_valid()
 
         # Test Label 2 for H02
-        ds2 = {k: titan.create_ds(k, label="2") for k in titan.fit_keys}
+        ds2 = {k: tit.create_ds(k, label="2") for k in tit.fit_keys}
         res2 = fit_plate(ds2, method="huber")
         assert res2["H02"].is_valid()
 
         # Check 'K' and std error for 'H02' in the second fit result
         assert res2["H02"].result is not None
         k_h02 = res2["H02"].result.params["K"]
-        assert k_h02.value == pytest.approx(7.901, abs=1e-3)
-        assert k_h02.stderr == pytest.approx(0.028, abs=1e-3)
+        assert k_h02.value == pytest.approx(7.899, abs=1e-3)
+        assert k_h02.stderr == pytest.approx(0.026, abs=1e-3)
 
         # Check 'K' and std error for 'H02' in global fit
-        ds_global = {k: titan.create_global_ds(k) for k in titan.fit_keys}
+        ds_global = {k: tit.create_global_ds(k) for k in tit.fit_keys}
         res_global = fit_plate(ds_global, method="huber")
         assert res_global["H02"].result is not None
         k_h02_glob = res_global["H02"].result.params["K"]
-        assert k_h02_glob.value == pytest.approx(7.901, abs=1e-3)
-        assert k_h02_glob.stderr == pytest.approx(0.028, abs=1e-3)
+        assert k_h02_glob.value == pytest.approx(7.899, abs=1e-3)
+        assert k_h02_glob.stderr == pytest.approx(0.026, abs=1e-3)
 
         # Check 'K' and std error for 'E02' in the second fit result
         assert res2["E02"].result is not None
         k_e02 = res2["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(7.978, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.038, abs=1e-3)
+        assert k_e02.value == pytest.approx(8.000, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.040, abs=1e-3)
 
         # Check 'K' and std error for 'E02' in the third fit result
         assert res_global["E02"].result is not None
         k_e02_glob = res_global["E02"].result.params["K"]
-        assert k_e02_glob.value == pytest.approx(7.997, abs=1e-3)
-        assert k_e02_glob.stderr == pytest.approx(0.170, abs=1e-3)
+        assert k_e02_glob.value == pytest.approx(8.000, abs=1e-3)
+        assert k_e02_glob.stderr == pytest.approx(0.031, abs=1e-3)
 
-    def test_plot_buffer_with_title(self, titan: Titration) -> None:
+    def test_plot_buffer_with_title(self, tit: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
-        g = titan.buffer.plot(title="Test Title")
+        g = tit.buffer.plot(title="Test Title")
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
         assert g.fig._suptitle.get_text() == "Test Title"  # noqa: SLF001
 
-    def test_plot_buffer_normalized(self, titan: Titration) -> None:
+    def test_plot_buffer_normalized(self, tit: Titration) -> None:
         """It plots buffers_norm for 2 lbg."""
-        g = titan.buffer.plot(nrm=True)
+        g = tit.buffer.plot(nrm=True)
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
 

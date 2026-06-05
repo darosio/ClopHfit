@@ -1,13 +1,12 @@
 """Utility functions for fitting modules."""
 
 import copy
-from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
 from scipy import optimize, stats
 
-from clophfit.clophfit_types import ArrayF, ArrayMask
+from clophfit.clophfit_types import ArrayMask
 from clophfit.fitting.data_structures import Dataset
 
 
@@ -328,55 +327,6 @@ def apply_outlier_mask(
             worst_global = unmasked[worst_local]
             da.mask[worst_global] = False
     return result
-
-
-def assign_error_model(
-    ds: Dataset,
-    sigma_floor: float | ArrayF | Mapping[str, float | ArrayF] = 1.0,
-    gain: float | Mapping[str, float] = 1.0,
-    rel_error: float | Mapping[str, float] = 0.0,
-) -> Dataset:
-    """Assign heteroscedastic weights based on a physical detector noise model.
-
-    ``sigma_i = sqrt(floor² + gain * max(y_i, 0) + (rel_error * y_i)²)``
-
-    Parameters
-    ----------
-    ds : Dataset
-        The dataset to update.
-    sigma_floor : float | ArrayF | Mapping[str, float | ArrayF]
-        Baseline noise floor. Can be a single value or a per-label dict.
-    gain : float | Mapping[str, float], optional
-        Poisson shot-noise scaling factor. Default is 1.0 (standard Poisson).
-        Pass ``0.0`` to disable the Poisson term entirely.
-    rel_error : float | Mapping[str, float], optional
-        Proportional error coefficient. Default is 0.0.
-
-    Returns
-    -------
-    Dataset
-        A deep copy with physically modelled ``y_errc`` weights.
-    """
-    updated_ds = copy.deepcopy(ds)
-    for lbl, da in updated_ds.items():
-        floor = (
-            sigma_floor.get(lbl, 1.0)
-            if isinstance(sigma_floor, Mapping)
-            else sigma_floor
-        )
-        alpha = float(
-            rel_error.get(lbl, 0.0) if isinstance(rel_error, Mapping) else rel_error
-        )
-        g = float(gain.get(lbl, 1.0) if isinstance(gain, Mapping) else gain)
-
-        floor_val = np.asarray(floor, dtype=float)
-        poisson_term = g * np.maximum(da.yc, 0.0)
-        var = floor_val**2 + poisson_term + (alpha * da.yc) ** 2
-        # Ensure variance is strictly positive to prevent division by zero in weights
-        var = np.maximum(1.0, var)
-        da.y_errc = np.sqrt(var)
-
-    return updated_ds
 
 
 def fit_rel_error_from_residuals(

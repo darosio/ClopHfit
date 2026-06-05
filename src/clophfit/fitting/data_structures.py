@@ -27,8 +27,6 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 from .errors import InvalidDataError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from lmfit import Parameters  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -489,7 +487,42 @@ class SpectraGlobResults:
     `None` if the bands fit was not performed."""
 
 
-@dataclass
+def compute_noise_variance(
+    y: ArrayF,
+    sigma_floor: float | ArrayF,
+    gain: float = 1.0,
+    alpha: float = 0.0,
+) -> ArrayF:
+    r"""Compute heteroscedastic noise variance from detector physics.
+
+    ``var = floor^2 + gain * max(y, 0) + (alpha * y)^2``
+
+    Parameters
+    ----------
+    y : ArrayF
+        Signal values.
+    sigma_floor : float | ArrayF
+        Baseline noise floor (scalar or per-point array).
+    gain : float
+        Poisson shot-noise scaling factor.  Pass ``0`` to disable the
+        Poisson term entirely.
+    alpha : float
+        Proportional error coefficient.  Pass ``0`` to disable the
+        proportional term.
+
+    Returns
+    -------
+    ArrayF
+        Variance array, clipped to a minimum of 1.0 to prevent
+        division-by-zero in downstream weighting.
+    """
+    floor_val = np.asarray(sigma_floor, dtype=float)
+    poisson = gain * np.maximum(y, 0.0)
+    var = floor_val**2 + poisson + (alpha * y) ** 2
+    return np.maximum(1.0, var)
+
+
+@dataclass(frozen=True)
 class NoiseModelParams:
     """Noise model parameters for a single label.
 
@@ -497,23 +530,36 @@ class NoiseModelParams:
     ----------
     sigma_floor : float
         Baseline read-noise floor.
-    gain : float
-        Poisson shot-noise scaling factor.
+    gain : float | None
+        Poisson shot-noise scaling factor.  Pass ``0`` to disable the
+        Poisson term.
     alpha : float
-        Proportional error coefficient.
+        Proportional error coefficient.  Pass ``0`` to disable the
+        proportional term.
     """
 
     sigma_floor: float
-    gain: float
-    alpha: float
+    gain: float = 0.0
+    alpha: float = 0.0
 
-    def __getitem__(self, index: int) -> float:
-        """Allow legacy index-based tuple unpacking/access."""
-        return (self.sigma_floor, self.gain, self.alpha)[index]
+    def compute_y_err(self, y: ArrayF) -> ArrayF:
+        """Compute per-point error from the noise model.
 
-    def __iter__(self) -> Iterator[float]:
-        """Allow legacy tuple unpacking/iteration."""
-        return iter((self.sigma_floor, self.gain, self.alpha))
+        ``sigma = sqrt(floor^2 + gain * max(y, 0) + (alpha * y)^2)``
+
+        Parameters
+        ----------
+        y : ArrayF
+            Signal values.
+
+        Returns
+        -------
+        ArrayF
+            Per-point error estimate.
+        """
+        return np.sqrt(
+            compute_noise_variance(y, self.sigma_floor, self.gain, self.alpha)
+        )
 
 
 class PlateNoiseModel(UserDict[str, NoiseModelParams]):
@@ -540,12 +586,24 @@ class PlateNoiseModel(UserDict[str, NoiseModelParams]):
         return {lbl: params.alpha for lbl, params in self.data.items()}
 
     def apply_to(self, ds: Dataset) -> Dataset:
-        """Apply this noise model to a Dataset."""
-        from clophfit.fitting.utils import assign_error_model  # noqa: PLC0415
+        """Apply noise model to a single Dataset in-place on a deep copy."""
+        updated_ds = copy.deepcopy(ds)
+        for lbl, da in updated_ds.items():
+            if lbl in self.data:
+                da.y_errc = self.data[lbl].compute_y_err(da.yc)
+        return updated_ds
 
-        return assign_error_model(
-            ds,
-            sigma_floor=self.sigma_floor,
-            gain=self.gain,
-            rel_error=self.alpha,
-        )
+    def apply_to_plate(self, datasets: dict[str, Dataset]) -> dict[str, Dataset]:
+        """Apply noise model to every Dataset in a plate.
+
+        Parameters
+        ----------
+        datasets : dict[str, Dataset]
+            Plate datasets keyed by well (e.g. ``{"A01": ds, ...}``).
+
+        Returns
+        -------
+        dict[str, Dataset]
+            New dict with the noise model applied to each dataset.
+        """
+        return {well: self.apply_to(ds) for well, ds in datasets.items()}
