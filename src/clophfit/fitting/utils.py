@@ -1,13 +1,18 @@
 """Utility functions for fitting modules."""
 
 import copy
+import typing
 
 import numpy as np
 import pandas as pd
 from scipy import optimize, stats
 
 from clophfit.clophfit_types import ArrayMask
-from clophfit.fitting.data_structures import Dataset
+from clophfit.fitting.data_structures import (
+    Dataset,
+    PlateNoiseModel,
+    compute_noise_variance,
+)
 
 
 def parse_remove_outliers(spec: str) -> tuple[str, float, int]:
@@ -516,3 +521,114 @@ def fit_gain_and_rel_error_from_residuals(
     """
     _, gain_d, alpha_d = fit_noise_model_nnls(df, sigma_floor_fixed=sigma_floor)
     return gain_d, alpha_d
+
+
+# ------------------------------------------------------------------
+# pH-dependent noise (pipetting error amplified by titration slope)
+# ------------------------------------------------------------------
+
+
+def compute_binding_slope(
+    ph: np.ndarray,
+    pka: float,
+    s0: float,
+    s1: float,
+) -> np.ndarray:
+    r"""Compute |dS/dpH| for the Henderson-Hasselbalch equation.
+
+    ``dS/dpH = (s1 - s0) * ln(10) * t / (1 + t)^2`` where ``t = 10^(pka - ph)``.
+    Returns the absolute value (sign irrelevant for variance).
+    """
+    t = 10.0 ** (pka - ph)
+    result: np.ndarray = np.abs((s1 - s0) * np.log(10) * t / (1.0 + t) ** 2)
+    return result
+
+
+def compute_plate_slopes(
+    results: dict[str, typing.Any],
+) -> dict[str, dict[str, np.ndarray]]:
+    """Compute per-well per-label ``∂S/∂pH`` from pass-1 fit results.
+
+    Parameters
+    ----------
+    results : dict[str, typing.Any]
+        Fit results keyed by well (must have ``.result`` and ``.dataset``).
+
+    Returns
+    -------
+    dict[str, dict[str, np.ndarray]]
+        ``{well: {label: slope_array}}``.
+    """
+    slopes: dict[str, dict[str, np.ndarray]] = {}
+    for well, fr in results.items():
+        if fr.result is None or fr.dataset is None:
+            continue
+        rpars = fr.result.params
+        if "K" not in rpars:
+            continue
+        pka = rpars["K"].value
+        well_slopes: dict[str, np.ndarray] = {}
+        for lbl, da in fr.dataset.items():
+            s0 = rpars[f"S0_{lbl}"].value
+            s1 = rpars[f"S1_{lbl}"].value
+            well_slopes[lbl] = compute_binding_slope(da.xc, pka, s0, s1)
+        slopes[well] = well_slopes
+    return slopes
+
+
+_MIN_POINTS_FOR_PH_SLOPE_FIT = 2
+
+
+def fit_ph_slope_noise(
+    df: pd.DataFrame,
+    noise_model: PlateNoiseModel,
+    plate_slopes: dict[str, dict[str, np.ndarray]],
+) -> float:
+    r"""Fit global ``sigma_ph`` from excess variance after per-label model.
+
+    After subtracting the per-label noise model variance, the leftover
+    ``r^2 - var_model`` is regressed against ``(dS/dpH)^2`` via NNLS.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Residual DataFrame with columns ``label``, ``well``, ``resid_raw``,
+        ``predicted``, and ``raw_i``.
+    noise_model : PlateNoiseModel
+        Per-label noise model (floor, gain, alpha) fitted in the same pass.
+    plate_slopes : dict[str, dict[str, np.ndarray]]
+        Per-well per-label derivative ``|dS/dpH|`` arrays.
+
+    Returns
+    -------
+    float
+        Global ``sigma_ph`` estimate (>= 0).
+    """
+    df = df.copy()
+    df["var_model"] = np.nan
+    for lbl in df["label"].unique():
+        params = noise_model[str(lbl)]
+        mask = df["label"] == lbl
+        df.loc[mask, "var_model"] = compute_noise_variance(
+            df.loc[mask, "predicted"].to_numpy(dtype=float),
+            params.sigma_floor,
+            params.gain,
+            params.alpha,
+        )
+    df["var_excess"] = df["resid_raw"] ** 2 - df["var_model"]
+    df["slope_sq"] = np.nan
+    for (lbl, well), grp in df.groupby(["label", "well"]):
+        w_slopes_dict = plate_slopes.get(str(well))
+        w_slopes = w_slopes_dict.get(str(lbl)) if w_slopes_dict is not None else None
+        if w_slopes is not None:
+            raw_is = grp["raw_i"].to_numpy(dtype=int)
+            df.loc[grp.index, "slope_sq"] = w_slopes[raw_is] ** 2
+
+    pos = df["var_excess"] > 0
+    valid = pos & df["slope_sq"].notna()
+    if valid.sum() < _MIN_POINTS_FOR_PH_SLOPE_FIT:
+        return 0.0
+    x = np.column_stack([df.loc[valid, "slope_sq"].to_numpy(dtype=float)])
+    b = df.loc[valid, "var_excess"].to_numpy(dtype=float)
+    coeffs, _ = optimize.nnls(x, b)
+    return float(np.sqrt(max(0.0, coeffs[0])))

@@ -530,36 +530,48 @@ class NoiseModelParams:
     ----------
     sigma_floor : float
         Baseline read-noise floor.
-    gain : float | None
+    gain : float
         Poisson shot-noise scaling factor.  Pass ``0`` to disable the
         Poisson term.
     alpha : float
         Proportional error coefficient.  Pass ``0`` to disable the
         proportional term.
+    sigma_ph : float
+        pH-pipetting noise (std dev in pH units).  Pass ``0`` to
+        disable the pH-dependent term.
     """
 
     sigma_floor: float
     gain: float = 0.0
     alpha: float = 0.0
+    sigma_ph: float = 0.0
 
-    def compute_y_err(self, y: ArrayF) -> ArrayF:
+    def compute_y_err(
+        self,
+        y: ArrayF,
+        dS_dph: ArrayF | None = None,  # noqa: N803
+    ) -> ArrayF:
         """Compute per-point error from the noise model.
 
-        ``sigma = sqrt(floor^2 + gain * max(y, 0) + (alpha * y)^2)``
+        ``sigma = sqrt(floor^2 + gain * max(y, 0) + (alpha * y)^2 + (sigma_ph * dS/dpH)^2)``
 
         Parameters
         ----------
         y : ArrayF
             Signal values.
+        dS_dph : ArrayF | None
+            Per-point derivative ``∂S/∂pH``.  If ``None`` (or
+            *sigma_ph* is 0), the pH-dependent term is disabled.
 
         Returns
         -------
         ArrayF
             Per-point error estimate.
         """
-        return np.sqrt(
-            compute_noise_variance(y, self.sigma_floor, self.gain, self.alpha)
-        )
+        var = compute_noise_variance(y, self.sigma_floor, self.gain, self.alpha)
+        if self.sigma_ph > 0 and dS_dph is not None:
+            var += (self.sigma_ph * dS_dph) ** 2
+        return np.sqrt(var)
 
 
 class PlateNoiseModel(UserDict[str, NoiseModelParams]):
@@ -585,25 +597,56 @@ class PlateNoiseModel(UserDict[str, NoiseModelParams]):
         """Get proportional error coefficient per label."""
         return {lbl: params.alpha for lbl, params in self.data.items()}
 
-    def apply_to(self, ds: Dataset) -> Dataset:
-        """Apply noise model to a single Dataset in-place on a deep copy."""
+    def apply_to(
+        self,
+        ds: Dataset,
+        slopes: dict[str, ArrayF] | None = None,
+    ) -> Dataset:
+        """Apply noise model to a single Dataset in-place on a deep copy.
+
+        Parameters
+        ----------
+        ds : Dataset
+            Dataset to update.
+        slopes : dict[str, ArrayF] | None
+            Per-label ``∂S/∂pH`` arrays.  If *sigma_ph* > 0 on any
+            label, these are required for the pH-dependent term.
+
+        Returns
+        -------
+        Dataset
+            Deep copy of *ds* with ``y_errc`` assigned from this noise model.
+        """
         updated_ds = copy.deepcopy(ds)
         for lbl, da in updated_ds.items():
             if lbl in self.data:
-                da.y_errc = self.data[lbl].compute_y_err(da.yc)
+                ds_dph = slopes.get(lbl) if slopes else None
+                da.y_errc = self.data[lbl].compute_y_err(da.yc, ds_dph)
         return updated_ds
 
-    def apply_to_plate(self, datasets: dict[str, Dataset]) -> dict[str, Dataset]:
+    def apply_to_plate(
+        self,
+        datasets: dict[str, Dataset],
+        plate_slopes: dict[str, dict[str, ArrayF]] | None = None,
+    ) -> dict[str, Dataset]:
         """Apply noise model to every Dataset in a plate.
 
         Parameters
         ----------
         datasets : dict[str, Dataset]
-            Plate datasets keyed by well (e.g. ``{"A01": ds, ...}``).
+            Plate datasets keyed by well.
+        plate_slopes : dict[str, dict[str, ArrayF]] | None
+            Per-well per-label ``∂S/∂pH`` arrays, keyed ``[well][label]``.
+            Required if *sigma_ph* > 0 on any label.
 
         Returns
         -------
         dict[str, Dataset]
             New dict with the noise model applied to each dataset.
         """
-        return {well: self.apply_to(ds) for well, ds in datasets.items()}
+        return {
+            well: self.apply_to(
+                ds, slopes=plate_slopes.get(well) if plate_slopes else None
+            )
+            for well, ds in datasets.items()
+        }

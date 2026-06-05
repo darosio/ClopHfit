@@ -955,7 +955,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
         raise ValueError(msg)
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc * n_xerr
-    list(ds.keys())
+    labels = list(ds.keys())
     values: dict[str, list[float | None]] = {}
     stderr: dict[str, list[float | None]] = {}
 
@@ -1014,6 +1014,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
             )
         else:
             noise_priors = {}
+            ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
 
         for key, r in results.items():
             if r.result and r.dataset:
@@ -1052,8 +1053,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
                         )
                         sigma_val = sigma_obs[da.mask]
                     else:
-                        ye_mag = pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0)
-                        sigma_val = ye_mag * da.y_err
+                        sigma_val = ye_mags[lbl] * da.y_err
 
                     _add_y_likelihood(
                         f"y_likelihood_{lbl}_{key}",

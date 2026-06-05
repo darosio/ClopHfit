@@ -15,96 +15,155 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.odr import fit_binding_odr
 from clophfit.fitting.residuals import collect_multi_residuals
 from clophfit.fitting.utils import (
-    fit_gain_and_rel_error_from_residuals,
+    compute_plate_slopes,
+    fit_noise_model_nnls,
+    fit_ph_slope_noise,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def fgls_plate_fit(
+def _noise_params_converged(
+    old: PlateNoiseModel,
+    new: PlateNoiseModel,
+    tol: float = 1e-3,
+) -> bool:
+    """Check whether gain and alpha converged across labels."""
+    for lbl in new:
+        if lbl not in old:
+            return False
+        for attr in ("gain", "alpha"):
+            old_val = getattr(old[lbl], attr)
+            new_val = getattr(new[lbl], attr)
+            denom = max(old_val, new_val, 1e-12)
+            if abs(new_val - old_val) / denom > tol:
+                return False
+    return True
+
+
+def _plate_noise_model_from_nnls(
+    sigma_floor: dict[str, float],
+    gains: dict[str, float],
+    alphas: dict[str, float],
+    sigma_ph: float = 0.0,
+) -> PlateNoiseModel:
+    """Build a PlateNoiseModel from NNLS output dicts."""
+    model = PlateNoiseModel()
+    for lbl in sigma_floor:
+        model[lbl] = NoiseModelParams(
+            sigma_floor=sigma_floor.get(lbl, 0.0),
+            gain=gains.get(lbl, 0.0),
+            alpha=alphas.get(lbl, 0.0),
+            sigma_ph=sigma_ph,
+        )
+    return model
+
+
+def fgls_plate_fit(  # noqa: PLR0913
     datasets: dict[str, Dataset],
     sigma_floor: dict[str, float],
     *,
     first_pass_method: str = "huber",  # noqa: S107
     second_pass_method: str = "lm",  # noqa: S107
+    max_iter: int = 3,
+    tol: float = 1e-3,
 ) -> tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]:
-    """Two-stage Feasible Generalized Least Squares (FGLS) plate fit.
+    """Run iterative Feasible Generalized Least Squares (FGLS) on a plate.
 
-    1. First-pass fit (typically robust like 'huber') on each well.
-    2. Extract residuals globally and calibrate the comprehensive error model,
-       anchoring the constant noise term to the provided ``sigma_floor``.
-    3. Second-pass fit using the exact pooled weights derived from the model.
+    1. First-pass fit (robust) on each well with existing ``y_errc``.
+    2. Calibrate noise model from residuals, anchoring floor to *sigma_floor*.
+    3. Re-apply calibrated weights, re-fit, re-calibrate — iterating until
+       gain and alpha converge or *max_iter* is reached.
+    4. Return final fits and the noise model from the last calibration.
 
     Parameters
     ----------
     datasets : dict[str, Dataset]
-        The dataset dictionary keyed by well name.
+        Plate datasets keyed by well name.
     sigma_floor : dict[str, float]
         Known read-noise floor per label (e.g. from buffer wells).
     first_pass_method : str
-        Method for the first-pass fit (default 'huber').
+        Method for the first-pass fit (default ``"huber"``).
     second_pass_method : str
-        Method for the second-pass, calibrated fit (default 'lm').
+        Method for subsequent passes (default ``"lm"``).
+    max_iter : int
+        Maximum FGLS iterations (default 3).
+    tol : float
+        Relative tolerance for gain/alpha convergence (default 1e-3).
 
     Returns
     -------
     tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]
-        Final fit results and the calibrated error model parameters
-        for each label.
+        Final fit results keyed by well, and the converged (or last)
+        calibrated noise model.
     """
-    # 1. First Pass
-    logger.info("Starting FGLS Pass 1: %s fit", first_pass_method)
-    first_pass_results = {}
-    for well, ds in datasets.items():
+    noise_model: PlateNoiseModel | None = None
+    results: dict[str, FitResult[typing.Any]] = {}
+
+    for iteration in range(max_iter):
+        # Choose method
+        method = first_pass_method if iteration == 0 else second_pass_method
+
+        # Apply current noise model (if any) and compute slopes
+        if iteration == 0:
+            current_ds = datasets
+            plate_slopes = None
+        else:
+            plate_slopes = compute_plate_slopes(results)
+            current_ds = noise_model.apply_to_plate(datasets, plate_slopes)  # type: ignore[union-attr]
+
+        logger.info("FGLS iteration %d: %s fit", iteration + 1, method)
+
+        # Fit all wells
+        results = {}
+        for well, ds in current_ds.items():
+            try:
+                results[well] = fit_binding_glob(ds, method=method)
+            except InsufficientDataError:
+                logger.warning(
+                    "Skip FGLS fit for well %s (iteration %d).", well, iteration + 1
+                )
+                results[well] = FitResult()
+
+        # Calibrate per-label noise (floor fixed, gain + alpha via NNLS)
+        df_res = collect_multi_residuals(results)
         try:
-            first_pass_results[well] = fit_binding_glob(ds, method=first_pass_method)
-        except InsufficientDataError:
-            logger.warning("Skip FGLS Pass 1 fit for well %s.", well)
-            first_pass_results[well] = FitResult()
+            floors, gains, alphas = fit_noise_model_nnls(
+                df_res, sigma_floor_fixed=sigma_floor
+            )
+        except ValueError as e:
+            logger.warning("FGLS calibration failed (%s).", e)
+            gains = dict.fromkeys(sigma_floor, 0.0)
+            alphas = dict.fromkeys(sigma_floor, 0.0)
+            floors = dict(sigma_floor)
 
-    # 2. Collect residuals for calibration
-    logger.info("Starting FGLS Noise Calibration")
-    df_res = collect_multi_residuals(first_pass_results)
+        # Fit global sigma_ph from excess variance after per-label model
+        plate_slopes = compute_plate_slopes(results)
+        tmp_noise = _plate_noise_model_from_nnls(floors, gains, alphas)
+        sigma_ph = fit_ph_slope_noise(df_res, tmp_noise, plate_slopes)
+        new_noise = _plate_noise_model_from_nnls(floors, gains, alphas, sigma_ph)
 
-    # 3. Calibrate noise parameters using physically anchored OLS
-    try:
-        gains, alphas = fit_gain_and_rel_error_from_residuals(df_res, sigma_floor)
-    except ValueError as e:
-        logger.warning(
-            "FGLS calibration failed (%s). Falling back to basic proportional error.", e
-        )
-        gains = dict.fromkeys(sigma_floor, 0.0)
-        alphas = dict.fromkeys(sigma_floor, 0.03)
+        for lbl, params in new_noise.items():
+            logger.info(
+                "Calibrated [%s] iter %d: sigma=%.2f, gain=%.3f, alpha=%.3f, "
+                "sigma_ph=%.4f",
+                lbl,
+                iteration + 1,
+                params.sigma_floor,
+                params.gain,
+                params.alpha,
+                params.sigma_ph,
+            )
 
-    # Format the noise parameters for the return value and logging
-    noise_params = PlateNoiseModel()
-    for lbl, sr in sigma_floor.items():
-        gain = gains.get(lbl, 0.0)
-        alpha = alphas.get(lbl, 0.0)
-        noise_params[lbl] = NoiseModelParams(sigma_floor=sr, gain=gain, alpha=alpha)
+        # Check convergence (skip on first iteration)
+        if iteration > 0 and _noise_params_converged(noise_model, new_noise, tol):  # type: ignore[arg-type]
+            logger.info("FGLS converged after %d iterations.", iteration + 1)
+            noise_model = new_noise
+            break
 
-        logger.info(
-            "Calibrated Noise [%s]: sigma=%.2f, gain=%.3f, alpha=%.3f",
-            lbl,
-            sr,
-            gain,
-            alpha,
-        )
+        noise_model = new_noise
 
-    # 4. Second Pass
-    logger.info(
-        "Starting FGLS Pass 2: %s fit with calibrated weights", second_pass_method
-    )
-    datasets_calibrated = noise_params.apply_to_plate(datasets)
-    final_results = {}
-    for well, ds in datasets_calibrated.items():
-        try:
-            final_results[well] = fit_binding_glob(ds, method=second_pass_method)
-        except InsufficientDataError:
-            logger.warning("Skip FGLS Pass 2 fit for well %s.", well)
-            final_results[well] = FitResult()
-
-    return final_results, noise_params
+    return results, noise_model  # type: ignore[return-value]
 
 
 def fit_plate(
