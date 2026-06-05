@@ -31,7 +31,7 @@ dependencies = [
   "scipy>=1.17.1",
   "seaborn>=0.13.2",
   "sympy>=1.14.0",
-  "tqdm>=4.68.0",
+  "tqdm>=4.68.1",
   "uncertainties>=3.2.3",
   "xlrd>=2.0.2",
 ]
