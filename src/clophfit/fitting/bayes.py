@@ -85,9 +85,7 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             priors["floor"][lbl] = pt.as_tensor_variable(mu)
         elif floor_mode == "free":
             # Uninformative prior, using mu only as a scale hint
-            priors["floor"][lbl] = pm.HalfNormal(
-                f"floor_{lbl}", sigma=max(mu, 1.0) * 10
-            )
+            priors["floor"][lbl] = pm.HalfNormal(f"floor_{lbl}", sigma=max(mu, 1.0))
         else:  # centered
             n_pts = 7
             dof = max(1, n_pts - 1)
@@ -975,7 +973,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     shared_gain: bool = False,
     n_tune: int | None = None,
     x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
-    sigma_pip_prior: float = 0.02,
+    sigma_pip_prior: float = 0.01,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     robust: bool = False,
