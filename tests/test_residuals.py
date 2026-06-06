@@ -38,8 +38,9 @@ from clophfit.fitting.residuals import (
 def simple_fit_result() -> FitResult[MinimizerResult]:
     """Create a simple fit result for testing residuals."""
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    # Perfect fit data with K=7
+    # Perfect fit data with K=7, adding tiny noise to avoid zero-division in lmfit
     y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
+    y[0] += 1e-10
     y_err = np.ones_like(y) * 10.0
     da = DataArray(xc=x, yc=y, y_errc=y_err)
     dataset = Dataset({"1": da}, is_ph=True)
@@ -65,6 +66,9 @@ def multi_label_fit_result() -> FitResult[MinimizerResult]:
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     y1 = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
     y2 = binding_1site(x, K=7.0, S0=200.0, S1=800.0, is_ph=True)
+    # Adding tiny noise to avoid zero-division in lmfit
+    y1[0] += 1e-10
+    y2[0] += 1e-10
     y_err = np.ones_like(y1) * 10.0
     da1 = DataArray(xc=x, yc=y1, y_errc=y_err)
     da2 = DataArray(xc=x, yc=y2, y_errc=y_err)
@@ -409,6 +413,7 @@ class TestResidualWorkflow:
         # Create multiple fit results
         x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
         y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
+        y[0] += 1e-10
         y_err = np.ones_like(y) * 10.0
         da = DataArray(xc=x, yc=y, y_errc=y_err)
         dataset = Dataset({"1": da}, is_ph=True)
@@ -435,6 +440,8 @@ class TestResidualWorkflow:
         x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
         y1 = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
         y2 = binding_1site(x, K=7.0, S0=200.0, S1=800.0, is_ph=True)
+        y1[0] += 1e-10
+        y2[0] += 1e-10
         y_err = np.ones_like(y1) * 10.0
 
         da1 = DataArray(xc=x, yc=y1, y_errc=y_err)
