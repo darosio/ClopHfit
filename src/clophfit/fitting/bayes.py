@@ -39,11 +39,17 @@ if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
 
 
-def build_pymc_noise_priors(
+NoiseParamMode = Literal["fixed", "free", "centered"]
+
+
+def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     noise_model: PlateNoiseModel,
     *,
-    shared_alpha: bool = True,
+    shared_alpha: bool = False,
     shared_gain: bool = False,
+    floor_mode: NoiseParamMode = "centered",
+    gain_mode: NoiseParamMode = "centered",
+    alpha_mode: NoiseParamMode = "centered",
 ) -> dict[str, typing.Any]:
     """Create PyMC priors from a ``PlateNoiseModel`` specification.
 
@@ -52,54 +58,105 @@ def build_pymc_noise_priors(
     noise_model : PlateNoiseModel
         Per-label noise parameter specification.
     shared_alpha : bool
-        If ``True``, use a single ``rel_error`` variable for all labels.
-        If ``False``, use per-label ``rel_error_{lbl}`` variables.
+        If ``True``, pool the proportional error into a single global variable.
     shared_gain : bool
-        If ``True``, use a single ``gain`` variable for all labels.
-        If ``False``, use per-label ``gain_{lbl}`` variables.
+        If ``True``, pool the photon gain into a single global variable.
+    floor_mode : NoiseParamMode
+        How to treat the floor parameter: "fixed", "free", or "centered".
+    gain_mode : NoiseParamMode
+        How to treat the gain parameter: "fixed", "free", or "centered".
+    alpha_mode : NoiseParamMode
+        How to treat the alpha (rel_error) parameter: "fixed", "free", or "centered".
 
     Returns
     -------
     dict[str, typing.Any]
-        Priors dict consumed by :func:`get_pymc_variance`.
+        A structured dictionary of PyMC random variables or constants representing
+        the noise model components, consumed by :func:`get_pymc_variance`.
     """
     priors: dict[str, typing.Any] = {}
     labels = list(noise_model.keys())
 
-    # Floor priors — always per-label, Normal centred at the provided estimate.
-    # Sigma is a fraction of the estimate, clamped for numerical stability.
-    n_pts, n_buf = 4, 1
-    dof = max(1, n_pts * n_buf - 2)
-    rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+    # 1. Floor Priors
     priors["floor"] = {}
     for lbl in labels:
         mu = noise_model[lbl].sigma_floor
-        sigma = max(rel_sigma * mu, 0.01)
-        priors["floor"][lbl] = pm.Normal(f"floor_{lbl}", mu=mu, sigma=sigma)
+        if floor_mode == "fixed":
+            priors["floor"][lbl] = pt.as_tensor_variable(mu)
+        elif floor_mode == "free":
+            # Uninformative prior, using mu only as a scale hint
+            priors["floor"][lbl] = pm.HalfNormal(
+                f"floor_{lbl}", sigma=max(mu, 1.0) * 10
+            )
+        else:  # centered
+            n_pts = 7
+            dof = max(1, n_pts - 1)
+            rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+            sigma = max(rel_sigma * mu, 0.01)
+            priors["floor"][lbl] = pm.Normal(f"floor_{lbl}", mu=mu, sigma=sigma)
 
-    # Gain (Poisson term) — present when any label has gain > 0
+    # 2. Gain (Poisson term)
     has_gain = any(p.gain > 0 for p in noise_model.values())
-    if has_gain:
+    if has_gain or gain_mode == "free":
         if shared_gain:
-            priors["gain"] = pm.Exponential("gain", 1.0)
+            gains = [p.gain for p in noise_model.values() if p.gain > 0]
+            mu_g = np.mean(gains) if gains else 1.0
+            if gain_mode == "fixed":
+                priors["gain"] = pt.as_tensor_variable(mu_g)
+            elif gain_mode == "free":
+                priors["gain"] = pm.Exponential("gain", lam=1.0)
+            else:  # centered
+                priors["gain"] = pm.Normal("gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1))
         else:
-            priors["gain"] = {
-                lbl: pm.Exponential(f"gain_{lbl}", 1.0)
-                for lbl in labels
-                if noise_model[lbl].gain > 0
-            }
+            priors["gain"] = {}
+            for lbl in labels:
+                mu_g = getattr(noise_model[lbl], "gain", 0.0)
+                if gain_mode == "fixed":
+                    priors["gain"][lbl] = pt.as_tensor_variable(mu_g)
+                elif gain_mode == "free":
+                    priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=1.0)
+                elif mu_g > 0.0:
+                    priors["gain"][lbl] = pm.Normal(
+                        f"gain_{lbl}", mu=mu_g, sigma=max(0.20 * mu_g, 0.01)
+                    )
+                else:
+                    priors["gain"][lbl] = pt.as_tensor_variable(0.0)
 
-    # Alpha (proportional error) — present when any label has alpha > 0
+    # 3. Alpha (proportional error)
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
-    if has_alpha:
+    if has_alpha or alpha_mode == "free":
         if shared_alpha:
-            priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.04)
+            alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
+            mu_a = np.mean(alphas) if alphas else 0.02
+            if alpha_mode == "fixed":
+                priors["rel_error"] = pt.as_tensor_variable(mu_a)
+            elif alpha_mode == "free":
+                priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.02)
+            else:  # centered
+                priors["rel_error"] = pm.TruncatedNormal(
+                    "rel_error", mu=mu_a, sigma=max(0.25 * mu_a, 0.001), lower=0.0
+                )
         else:
-            priors["rel_error"] = {
-                lbl: pm.HalfNormal(f"rel_error_{lbl}", sigma=0.2)
-                for lbl in labels
-                if noise_model[lbl].alpha > 0
-            }
+            priors["rel_error"] = {}
+            for lbl in labels:
+                mu_a = getattr(noise_model[lbl], "alpha", 0.0)
+                if alpha_mode == "fixed":
+                    priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
+                elif alpha_mode == "free":
+                    priors["rel_error"][lbl] = pm.HalfNormal(
+                        f"rel_error_{lbl}", sigma=0.02
+                    )
+                elif mu_a > 0.0:
+                    priors["rel_error"][lbl] = pm.TruncatedNormal(
+                        f"rel_error_{lbl}",
+                        mu=mu_a,
+                        sigma=max(0.25 * mu_a, 0.001),
+                        lower=0.0,
+                    )
+                else:
+                    priors["rel_error"][lbl] = pm.HalfNormal(
+                        f"rel_error_{lbl}", sigma=0.02
+                    )
 
     return priors
 
@@ -443,14 +500,16 @@ def extract_fit(
     # Ensure numeric types (ArviZ 1.x might return strings)
     trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
     rpars = Parameters()
-    rdf = trace_df[trace_df.index.str.endswith(key)]
-    for name, row in rdf.iterrows():
-        extracted_name = str(name).replace(f"_{key}", "")
-        # ctr_free_k=True: K for CTR wells is named K_{ctr}_{well}.
-        # After stripping _{well}, we get K_{ctr} — normalize to "K".
-        if extracted_name.startswith("K_"):
-            extracted_name = "K"
-        _add_param_from_summary(rpars, extracted_name, row)
+    # Handle both old _well and new [well] format
+    for name, row in trace_df.iterrows():
+        n_str = str(name)
+        if n_str.endswith((f"_{key}", f"[{key}]")):
+            extracted_name = n_str.replace(f"_{key}", "").replace(f"[{key}]", "")
+            # ctr_free_k=True: K for CTR wells is named K_{ctr}_{well}.
+            # After stripping _{well}, we get K_{ctr} — normalize to "K".
+            if extracted_name.startswith("K_"):
+                extracted_name = "K"
+            _add_param_from_summary(rpars, extracted_name, row)
     if ctr and "K" not in rpars:
         # Shared-K mode (ctr_free_k=False): CTR K is named with _ctr_ prefix.
         rdf = trace_df[trace_df.index == _ctr_param_name(ctr)]
@@ -569,6 +628,10 @@ def fit_binding_pymc(  # noqa: PLR0913
     *,
     noise_model: PlateNoiseModel | None = None,
     robust: bool = False,
+    floor_mode: NoiseParamMode = "centered",
+    gain_mode: NoiseParamMode = "centered",
+    alpha_mode: NoiseParamMode = "centered",
+    learn_ye_mags: bool = False,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -586,12 +649,21 @@ def fit_binding_pymc(  # noqa: PLR0913
         NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
         ``"numpyro"``, or ``"nutpie"``.
     noise_model : PlateNoiseModel | None
-        Noise model specification.  ``None`` (default) uses a simple shared
-        ``ye_mag`` HalfNormal to scale the existing ``y_err``.  Pass a
+        Noise model specification.  ``None`` (default) uses a simple per-label
+        ``ye_mag_{lbl}`` HalfNormal to scale the existing ``y_err``.  Pass a
         ``PlateNoiseModel`` to infer per-label floor, gain, and alpha
         from the full heteroscedastic noise model.
     robust : bool
         If ``True``, use StudentT likelihood (nu=3) for robust regression.
+    floor_mode : NoiseParamMode
+        How to treat the floor parameter: "fixed", "free", or "centered".
+    gain_mode : NoiseParamMode
+        How to treat the gain parameter: "fixed", "free", or "centered".
+    alpha_mode : NoiseParamMode
+        How to treat the alpha (rel_error) parameter: "fixed", "free", or "centered".
+    learn_ye_mags : bool
+        If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
+        when a full *noise_model* is provided.
 
     Returns
     -------
@@ -605,6 +677,7 @@ def fit_binding_pymc(  # noqa: PLR0913
         return FitResult()
     params = fr.result.params
     ds = copy.deepcopy(fr.dataset)
+    labels = list(ds.keys())
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     with pm.Model():
@@ -612,7 +685,7 @@ def fit_binding_pymc(  # noqa: PLR0913
         x_true = create_x_true(xc, x_errc, n_xerr)
 
         if noise_model is None:
-            ye_mag = pm.HalfNormal("ye_mag", sigma=1.0)
+            ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
             for lbl, da in ds.items():
                 y_model = binding_1site(
                     x_true,
@@ -621,12 +694,22 @@ def fit_binding_pymc(  # noqa: PLR0913
                     pars[f"S1_{lbl}"],
                     is_ph=ds.is_ph,
                 )
-                sigma = ye_mag * da.y_err
+                sigma = ye_mags[lbl] * da.y_err
                 _add_y_likelihood(
                     f"y_likelihood_{lbl}", y_model, da, sigma, robust=robust
                 )
         else:
-            noise_priors = build_pymc_noise_priors(noise_model)
+            noise_priors = build_pymc_noise_priors(
+                noise_model,
+                floor_mode=floor_mode,
+                gain_mode=gain_mode,
+                alpha_mode=alpha_mode,
+            )
+            if learn_ye_mags:
+                ye_mags = {
+                    lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels
+                }
+
             for lbl, da in ds.items():
                 y_model = binding_1site(
                     x_true,
@@ -636,9 +719,17 @@ def fit_binding_pymc(  # noqa: PLR0913
                     is_ph=ds.is_ph,
                 )
                 noise_var = get_pymc_variance(y_model, lbl, noise_model, noise_priors)
-                sigma = pm.Deterministic(f"sigma_obs_{lbl}", pm_math.sqrt(noise_var))
+                sigma = pm_math.sqrt(noise_var)
+                if learn_ye_mags:
+                    sigma = ye_mags[lbl] * sigma
+
+                sigma_det = pm.Deterministic(f"sigma_obs_{lbl}", sigma)
                 _add_y_likelihood(
-                    f"y_likelihood_{lbl}", y_model, da, sigma[da.mask], robust=robust
+                    f"y_likelihood_{lbl}",
+                    y_model,
+                    da,
+                    sigma_det[da.mask],
+                    robust=robust,
                 )
 
         # Inference
@@ -871,7 +962,7 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
+def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     results: dict[str, FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
@@ -888,6 +979,10 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     robust: bool = False,
+    floor_mode: NoiseParamMode = "free",
+    gain_mode: NoiseParamMode = "free",
+    alpha_mode: NoiseParamMode = "free",
+    learn_ye_mags: bool = False,
 ) -> xr.DataTree:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -938,6 +1033,18 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     robust : bool
         If True, use StudentT likelihood (nu=3) for robust regression instead
         of Normal.
+    floor_mode : NoiseParamMode
+        How to treat the floor parameter: "fixed", "free", or "centered"
+        (default).
+    gain_mode : NoiseParamMode
+        How to treat the gain parameter: "fixed", "free", or "centered"
+        (default).
+    alpha_mode : NoiseParamMode
+        How to treat the alpha (rel_error) parameter: "fixed", "free", or
+        "centered" (default).
+    learn_ye_mags : bool
+        If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
+        when a full *noise_model* is provided.
 
     Returns
     -------
@@ -975,7 +1082,7 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     wells_list = [
         key for key in results if results[key].result and results[key].dataset
     ]
-    well_idx = {key: i for i, key in enumerate(wells_list)}
+    {key: i for i, key in enumerate(wells_list)}
     n_wells = len(wells_list)
     n_steps = len(xc)
 
@@ -988,7 +1095,9 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     with pm.Model(coords=coords):
         x_true = create_x_true(xc, x_errc, n_xerr)
         if x_error_model == "random_walk":
-            sigma_pip = pm.HalfNormal("sigma_pip", sigma=sigma_pip_prior)
+            sigma_pip = pm.HalfNormal(
+                "sigma_pip", sigma=sigma_pip_prior
+            )  # pm.TruncatedNormal pm.Uniform
             z_pip = pm.Normal(
                 "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
             )
@@ -999,6 +1108,9 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
                 x_true[:, None] + x_dev,
                 dims=("step", "well"),
             )
+            x_w_all = x_per_well
+        else:
+            x_w_all = pt.tile(x_true[:, None], (1, n_wells))
 
         k_params, k_replicate = _build_ctr_k_params(
             scheme,
@@ -1008,60 +1120,136 @@ def fit_binding_pymc_multi(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
             well_k_init=_well_k_init_from_results(results, scheme, n_sd),
         )
 
+        # Collect vectorized K
+        k_list = []
+        for key in wells_list:
+            ctr_name = next(
+                (name for name, wells in scheme.names.items() if key in wells), ""
+            )
+            r = results[key]
+            if r.result is None:
+                msg = f"Fit result for well {key} is missing."
+                raise ValueError(msg)
+            # We need to access the pars dict to get the UNK K's, but we don't have it yet.
+            # Let's just resolve K here directly.
+            if ctr_free_k:
+                k_well = k_replicate.get(key)
+                if k_well is None:
+                    # It's an UNK well, create its K prior
+                    p = r.result.params["K"]
+                    sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
+                    k_well = pm.Normal(f"K_{key}", mu=p.value, sigma=sigma)
+            elif ctr_name:
+                k_well = k_params[ctr_name]
+            else:
+                # It's an UNK well, create its K prior
+                p = r.result.params["K"]
+                sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
+                k_well = pm.Normal(f"K_{key}", mu=p.value, sigma=sigma)
+            k_list.append(k_well)
+        k_all = pt.stack(k_list)  # (n_wells,)
+
+        # Collect and create vectorized S0 and S1 priors
+        s0_vars = {}
+        s1_vars = {}
+        for lbl in labels:
+            mu_s0, sig_s0 = [], []
+            mu_s1, sig_s1 = [], []
+            for key in wells_list:
+                r = results[key]
+                if r.result is None:
+                    msg = f"Fit result for well {key} is missing."
+                    raise ValueError(msg)
+                p_s0 = r.result.params[f"S0_{lbl}"]
+                p_s1 = r.result.params[f"S1_{lbl}"]
+                mu_s0.append(p_s0.value)
+                sig_s0.append(max(p_s0.stderr * n_sd, 1e-3) if p_s0.stderr else 1e-3)
+                mu_s1.append(p_s1.value)
+                sig_s1.append(max(p_s1.stderr * n_sd, 1e-3) if p_s1.stderr else 1e-3)
+            s0_vars[lbl] = pm.Normal(
+                f"S0_{lbl}", mu=np.array(mu_s0), sigma=np.array(sig_s0), dims="well"
+            )
+            s1_vars[lbl] = pm.Normal(
+                f"S1_{lbl}", mu=np.array(mu_s1), sigma=np.array(sig_s1), dims="well"
+            )
+
         if noise_model is not None:
             noise_priors = build_pymc_noise_priors(
-                noise_model, shared_alpha=shared_alpha, shared_gain=shared_gain
+                noise_model,
+                shared_alpha=shared_alpha,
+                shared_gain=shared_gain,
+                floor_mode=floor_mode,
+                gain_mode=gain_mode,
+                alpha_mode=alpha_mode,
             )
+            if learn_ye_mags:
+                ye_mags = {
+                    lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels
+                }
         else:
             noise_priors = {}
             ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
 
-        for key, r in results.items():
-            if r.result and r.dataset:
-                ds_well = r.dataset
-                ctr_name = next(
-                    (name for name, wells in scheme.names.items() if key in wells), ""
+        # Likelihoods
+        first_ds = next(iter(results.values())).dataset
+        if first_ds is None:
+            msg = "At least one dataset is required."
+            raise ValueError(msg)
+        is_ph = first_ds.is_ph
+        for lbl in labels:
+            y_obs_list = []
+            y_err_list = []
+            mask_lbl = np.zeros((n_steps, n_wells), dtype=bool)
+
+            for w_idx, key in enumerate(wells_list):
+                ds_well = results[key].dataset
+                if ds_well is None:
+                    msg = f"Dataset for well {key} is missing."
+                    raise ValueError(msg)
+                da = ds_well[lbl]
+                y_obs_list.append(da.y)
+                y_err_list.append(da.y_err)
+                mask_lbl[:, w_idx] = da.mask
+
+            y_model_all = binding_1site(
+                x_w_all, k_all, s0_vars[lbl], s1_vars[lbl], is_ph=is_ph
+            )
+            mu_vec = y_model_all[mask_lbl]
+            y_obs_vec = np.concatenate(y_obs_list)
+            y_err_vec = np.concatenate(y_err_list)
+
+            if noise_model is not None:
+                # Heteroscedastic noise model
+                noise_var = get_pymc_variance(
+                    y_model_all, lbl, noise_model, noise_priors
                 )
-                pars = create_parameter_priors(r.result.params, n_sd, key, ctr_name)
-                K = _resolve_well_k(  # noqa: N806
-                    key, ctr_name, pars, k_params, k_replicate, ctr_free_k=ctr_free_k
+                sigma_obs_all = pm_math.sqrt(noise_var)
+                if learn_ye_mags:
+                    sigma_obs_all = ye_mags[lbl] * sigma_obs_all
+
+                sigma_obs_all_det = pm.Deterministic(
+                    f"sigma_obs_{lbl}", sigma_obs_all, dims=("step", "well")
                 )
+                sigma_vec = sigma_obs_all_det[mask_lbl]
+            else:
+                # Homoscedastic (scaled) noise model
+                sigma_vec = ye_mags[lbl] * y_err_vec
 
-                if x_error_model == "random_walk":
-                    w_idx = well_idx[key]
-                    x_w = x_per_well[:, w_idx]
-                else:
-                    x_w = x_true
-
-                for _i, (lbl, da) in enumerate(ds_well.items(), start=1):
-                    y_model = binding_1site(
-                        x_w,
-                        K,
-                        pars[f"S0_{lbl}_{key}"],
-                        pars[f"S1_{lbl}_{key}"],
-                        is_ph=ds_well.is_ph,
-                    )
-
-                    if noise_model is not None:
-                        noise_var = get_pymc_variance(
-                            y_model, lbl, noise_model, noise_priors
-                        )
-                        sigma_obs = pm.Deterministic(
-                            f"sigma_obs_{lbl}_{key}",
-                            pm_math.sqrt(noise_var),
-                            dims=("step",),
-                        )
-                        sigma_val = sigma_obs[da.mask]
-                    else:
-                        sigma_val = ye_mags[lbl] * da.y_err
-
-                    _add_y_likelihood(
-                        f"y_likelihood_{lbl}_{key}",
-                        y_model,
-                        da,
-                        sigma_val,
-                        robust=robust,
-                    )
+            if robust:
+                pm.StudentT(
+                    f"y_likelihood_{lbl}",
+                    nu=3.0,
+                    mu=mu_vec,
+                    sigma=sigma_vec,
+                    observed=y_obs_vec,
+                )
+            else:
+                pm.Normal(
+                    f"y_likelihood_{lbl}",
+                    mu=mu_vec,
+                    sigma=sigma_vec,
+                    observed=y_obs_vec,
+                )
 
         tune_steps = n_tune if n_tune is not None else n_samples // 2
 

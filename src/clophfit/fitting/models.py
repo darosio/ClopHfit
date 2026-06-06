@@ -174,7 +174,15 @@ def binding_1site(
     array([2.48, 2.28, 1.3 , 0.32, 0.12])
     """
     if is_ph:
-        return S0 + (S1 - S0) * 10 ** (K - x) / (1 + 10 ** (K - x))
+        # Henderson-Hasselbalch: S = S0 + (S1 - S0) * 10^(K-pH) / (1 + 10^(K-pH))
+        # Equivalent to S = S0 + (S1 - S0) / (1 + 10^(pH-K))
+        # and also to S = S0 + (S1 - S0) * sigmoid((K - pH) * ln(10))
+        # We use a stable form to avoid overflow in 10^(K-pH)
+        (K - x) * np.log(10)
+        # For PyTensor/Symbolic, we'll use a form that works for both numpy and symbolic
+        # but let's stick to the basic one first, or use a conditional.
+        # Actually, 1 / (1 + 10**(x - K)) is very stable for pH.
+        return S0 + (S1 - S0) / (1 + 10 ** (x - K))
     return S0 + (S1 - S0) * x / K / (1 + x / K)
 
 
