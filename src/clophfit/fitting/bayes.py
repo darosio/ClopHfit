@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import typing
 from typing import Literal
 
@@ -28,6 +29,7 @@ from .data_structures import (
     Dataset,
     FitResult,
     MiniT,
+    MultiFitResult,
     PlateNoiseModel,
     _Result,
 )
@@ -40,6 +42,8 @@ if typing.TYPE_CHECKING:
 
 
 NoiseParamMode = Literal["fixed", "free", "centered"]
+
+_X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -189,7 +193,7 @@ def get_pymc_variance(
     # per-point (never 0-d), even when gain and alpha are both absent.
     var = priors["floor"][label] ** 2 * pt.ones_like(y_pos)  # type: ignore[no-untyped-call]
 
-    if params.gain > 0:
+    if params.gain > 0 or "gain" in priors:
         gain = (
             priors["gain"][label]
             if isinstance(priors["gain"], dict)
@@ -197,7 +201,7 @@ def get_pymc_variance(
         )
         var += gain * y_pos
 
-    if params.alpha > 0:
+    if params.alpha > 0 or "rel_error" in priors:
         alpha = (
             priors["rel_error"][label]
             if isinstance(priors["rel_error"], dict)
@@ -261,8 +265,183 @@ def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
     )
 
 
+def _normalize_fit_input(
+    ds_or_fr: Dataset | FitResult[MiniT],
+) -> tuple[FitResult[MiniT], bool]:
+    """Normalize PyMC input to a copied preliminary fit result.
+
+    Parameters
+    ----------
+    ds_or_fr : Dataset | FitResult[MiniT]
+        Either a raw dataset or a pre-fit result used to seed the Bayesian
+        model.
+
+    Returns
+    -------
+    tuple[FitResult[MiniT], bool]
+        The normalized fit result and whether the caller explicitly supplied a
+        pre-fit ``FitResult``.
+    """
+    if isinstance(ds_or_fr, Dataset):
+        return fit_binding_glob(ds_or_fr), False
+    return copy.deepcopy(ds_or_fr), True
+
+
+def _normalize_fit_inputs(
+    results: Mapping[str, Dataset | FitResult[MiniT]],
+) -> tuple[dict[str, FitResult[MiniT]], bool]:
+    """Normalize multi-well PyMC inputs to copied preliminary fit results.
+
+    Parameters
+    ----------
+    results : Mapping[str, Dataset | FitResult[MiniT]]
+        Per-well raw datasets or pre-fit results.
+
+    Returns
+    -------
+    tuple[dict[str, FitResult[MiniT]], bool]
+        Normalized per-well fit results and whether every input item was already
+        a ``FitResult``.
+    """
+    normalized: dict[str, FitResult[MiniT]] = {}
+    all_prefit = True
+    for key, value in results.items():
+        if isinstance(value, Dataset):
+            normalized[key] = fit_binding_glob(value)
+            all_prefit = False
+        else:
+            normalized[key] = copy.deepcopy(value)
+    return normalized, all_prefit
+
+
+def _resolve_noise_modes(
+    *,
+    prefer_centered: bool,
+    floor_mode: NoiseParamMode | None,
+    gain_mode: NoiseParamMode | None,
+    alpha_mode: NoiseParamMode | None,
+) -> tuple[NoiseParamMode, NoiseParamMode, NoiseParamMode]:
+    """Resolve automatic noise-mode defaults from the input kind."""
+    default_mode: NoiseParamMode = "centered" if prefer_centered else "free"
+    return (
+        floor_mode or default_mode,
+        gain_mode or default_mode,
+        alpha_mode or default_mode,
+    )
+
+
+def _masked_obs_err_matrices(
+    fit_results: Mapping[str, FitResult[MiniT]],
+    wells_list: Sequence[str],
+    lbl: str,
+    n_steps: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build row-major mask, observation, and error matrices for multi-well likelihood.
+
+    Parameters
+    ----------
+    fit_results : Mapping[str, FitResult[MiniT]]
+        Per-well fit results whose ``.dataset`` supplies the arrays.
+    wells_list : Sequence[str]
+        Well keys in the order they appear as columns.
+    lbl : str
+        Label key to extract from each well's dataset.
+    n_steps : int
+        Expected number of titration steps per well.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Row-major boolean mask, shape ``(n_steps, n_wells)``.
+    y_obs : np.ndarray
+        Row-major observation matrix, shape ``(n_steps, n_wells)``.
+    y_err : np.ndarray
+        Row-major error matrix, shape ``(n_steps, n_wells)``.
+
+    Raises
+    ------
+    ValueError
+        If a well's dataset or its arrays have unexpected shapes.
+    """
+    n_wells = len(wells_list)
+    mask = np.zeros((n_steps, n_wells), dtype=bool)
+    y_obs = np.full((n_steps, n_wells), np.nan, dtype=float)
+    y_err = np.full((n_steps, n_wells), np.nan, dtype=float)
+
+    for w_idx, key in enumerate(wells_list):
+        ds_well = fit_results[key].dataset
+        if ds_well is None:
+            msg = f"Dataset for well {key} is missing."
+            raise ValueError(msg)
+
+        da = ds_well[lbl]
+
+        if da.mask.shape != (n_steps,):
+            msg = (
+                f"Mask shape mismatch for well {key}, label {lbl}: "
+                f"{da.mask.shape} != {(n_steps,)}"
+            )
+            raise ValueError(msg)
+        if da.yc.shape != (n_steps,):
+            msg = (
+                f"yc shape mismatch for well {key}, label {lbl}: "
+                f"{da.yc.shape} != {(n_steps,)}"
+            )
+            raise ValueError(msg)
+
+        mask[:, w_idx] = da.mask
+        y_obs[:, w_idx] = np.asarray(da.yc, dtype=float)
+
+        if da.y_errc.size > 0:
+            if da.y_errc.shape != (n_steps,):
+                msg = (
+                    f"y_errc shape mismatch for well {key}, label {lbl}: "
+                    f"{da.y_errc.shape} != {(n_steps,)}"
+                )
+                raise ValueError(msg)
+            err = np.asarray(da.y_errc, dtype=float)
+            err = np.where(np.isfinite(err) & (err > 0), err, 1.0)
+        else:
+            err = np.ones(n_steps, dtype=float)
+
+        y_err[:, w_idx] = err
+
+    return mask, y_obs, y_err
+
+
+def _trace_summary_df(
+    trace_or_df: xr.DataTree | MultiFitResult | pd.DataFrame,
+) -> pd.DataFrame:
+    """Return a numeric ArviZ summary DataFrame from a trace or summary."""
+    if isinstance(trace_or_df, MultiFitResult):
+        trace_or_df = trace_or_df.trace
+    rdf = (
+        az.summary(trace_or_df) if isinstance(trace_or_df, xr.DataTree) else trace_or_df
+    )
+    if not isinstance(rdf, pd.DataFrame):
+        msg = "az.summary did not return a DataFrame"
+        raise TypeError(msg)
+    numeric_rdf = rdf.apply(pd.to_numeric, errors="coerce")
+    return typing.cast("pd.DataFrame", numeric_rdf)
+
+
+def _summary_mean_or_none(trace_df: pd.DataFrame, name: str) -> float | None:
+    """Return a summary mean if present and finite."""
+    try:
+        value = float(
+            np.asarray(trace_df.loc[name, "mean"], dtype=float).reshape(-1)[0]
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    return value if np.isfinite(value) else None
+
+
 def create_x_true(
-    xc: ArrayF, x_errc: ArrayF, n_xerr: float, lower_nsd: float = 2.5
+    xc: ArrayF,
+    x_errc: ArrayF,
+    n_xerr: float,
+    lower_nsd: float = 2.5,
+    min_x_step: float = 0.2,
 ) -> ArrayF | pm.Deterministic:
     """Create latent variables for x-values with uncertainty.
 
@@ -270,19 +449,35 @@ def create_x_true(
     or a numpy array when there's no uncertainty or no active Model.
     """
     if n_xerr > 0 and np.any(x_errc > 0):
-        x_errc_scaled = x_errc * n_xerr
-        xd = -np.diff(xc)
-        xd_err = np.sqrt(x_errc_scaled[:-1] ** 2 + x_errc_scaled[1:] ** 2)
-        lower = xd.min() - lower_nsd * xd_err[np.argmin(xd)]
-        # MAYBE: It was logger.info(f"min pH distance: {lower}")
-        x_diff = pm.TruncatedNormal(
-            "x_diff", mu=xd, sigma=xd_err, lower=lower, shape=len(xc) - 1
+        x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
+        x_errc_cumulative = np.maximum.accumulate(x_errc_scaled)
+        step_sigmas = np.empty_like(x_errc_cumulative)
+        step_sigmas[0] = x_errc_cumulative[0]
+        if len(xc) > 1:
+            step_var = np.maximum(
+                x_errc_cumulative[1:] ** 2 - x_errc_cumulative[:-1] ** 2,
+                1e-12,
+            )
+            step_sigmas[1:] = np.sqrt(step_var)
+
+        direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
+        step_nominal = direction * np.diff(xc)
+        min_steps = np.maximum(
+            step_nominal - lower_nsd * step_sigmas[1:],
+            min_x_step,
         )
-        x_start = pm.Normal("x_start", mu=xc[0], sigma=x_errc_scaled[0])
-        x_cumsum = pm.math.cumsum(x_diff)
-        return pm.Deterministic(
-            "x_true", pm.math.concatenate([[x_start], x_start - x_cumsum])
+
+        x_start = pm.Normal("x_start", mu=xc[0], sigma=step_sigmas[0])
+        x_step = pm.TruncatedNormal(
+            "x_step",
+            mu=step_nominal,
+            sigma=np.maximum(step_sigmas[1:], 1e-6),
+            lower=min_steps,
+            shape=len(xc) - 1,
         )
+        x_cumsum = pm.math.cumsum(x_step)
+        x_offsets = pm.math.concatenate([as_tensor_variable(np.array([0.0])), x_cumsum])
+        return pm.Deterministic("x_true", x_start + direction * x_offsets)
     # No uncertainty - check if we're in a Model context
     try:
         model = pm.Model.get_context(error_if_none=False)
@@ -428,18 +623,9 @@ def process_trace(
         Residuals are WEIGHTED (weight * (obs - pred)) where weight = 1/y_err,
         computed using posterior mean parameter estimates.
 
-    Raises
-    ------
-    TypeError
-        If az.summary does not return a DataFrame.
     """
     # Extract summary statistics for parameters
-    rdf = az.summary(trace)
-    if not isinstance(rdf, pd.DataFrame):
-        msg = "az.summary did not return a DataFrame"
-        raise TypeError(msg)
-    # Ensure numeric types (ArviZ 1.x might return strings)
-    rdf = rdf.apply(pd.to_numeric, errors="coerce")
+    rdf = _trace_summary_df(trace)
     rpars = Parameters()
     for name, row in rdf.iterrows():
         if name in p_names:
@@ -450,13 +636,15 @@ def process_trace(
         for da in ds.values():
             da.xc = nxc  # Update x_true values in the dataset
             da.x_errc = nx_errc  # Posterior already incorporates n_xerr prior scaling
-    # Scale y_errc if present
-    try:
-        mag = float(rdf.loc["ye_mag", "mean"])
-    except Exception:  # noqa: BLE001
-        mag = 1.0
-    for da in ds.values():
-        da.y_errc *= mag  # Scale y errors by the magnitude
+    # Scale y_errc if present. Newer models use per-label ye_mag_{lbl}; older
+    # traces may still carry a single global ye_mag.
+    global_mag = _summary_mean_or_none(rdf, "ye_mag")
+    for lbl, da in ds.items():
+        mag = _summary_mean_or_none(rdf, f"ye_mag_{lbl}")
+        if mag is None:
+            mag = global_mag
+        if mag is not None:
+            da.y_errc *= mag
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
@@ -469,7 +657,7 @@ def process_trace(
 def extract_fit(
     key: str,
     ctr: str,
-    trace_df: pd.DataFrame,
+    trace_df: xr.DataTree | MultiFitResult | pd.DataFrame,
     ds: Dataset,
     well_key: str = "",
 ) -> FitResult[xr.DataTree]:
@@ -481,8 +669,8 @@ def extract_fit(
         Well identifier used to filter per-well parameters in *trace_df*.
     ctr : str
         Control group name used to filter shared K parameters.
-    trace_df : pd.DataFrame
-        ArviZ summary DataFrame (``fmt="wide"``) from the multi-well MCMC run.
+    trace_df : xr.DataTree | MultiFitResult | pd.DataFrame
+        Either the raw multi-well PyMC trace or an ArviZ summary DataFrame.
     ds : Dataset
         Per-well dataset whose x values are updated in-place from the trace.
     well_key : str, optional
@@ -495,8 +683,8 @@ def extract_fit(
     FitResult[xr.DataTree]
         Fit result with figure, parameters, and dataset using posterior x.
     """
-    # Ensure numeric types (ArviZ 1.x might return strings)
-    trace_df = trace_df.apply(pd.to_numeric, errors="coerce")
+    trace_obj = trace_df.trace if isinstance(trace_df, MultiFitResult) else trace_df
+    trace_df = _trace_summary_df(trace_df)
     rpars = Parameters()
     # Handle both old _well and new [well] format
     for name, row in trace_df.iterrows():
@@ -522,15 +710,17 @@ def extract_fit(
     )
     if nxc.size == 0:
         nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
-    for da in ds.values():
-        da.xc = nxc
-        da.x_errc = nx_errc
+    if nxc.size > 0:
+        for da in ds.values():
+            da.xc = nxc
+            da.x_errc = nx_errc
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     residuals = _compute_weighted_residuals(ds, rpars)
-    return FitResult(fig, _Result(rpars, residual=residuals), xr.DataTree(), ds)
+    mini = trace_obj if isinstance(trace_obj, xr.DataTree) else xr.DataTree()
+    return FitResult(fig, _Result(rpars, residual=residuals), mini, ds)
 
 
 def _extract_x_true_from_trace_df(
@@ -548,12 +738,22 @@ def _extract_x_true_from_trace_df(
     tuple[np.ndarray, np.ndarray]
         Arrays of x_true means and standard deviations.
     """
-    nxc: list[float] = []
-    nx_errc: list[float] = []
+    rows: dict[int, tuple[float, float]] = {}
+    fallback_rows: list[tuple[float, float]] = []
     for name, row in trace_df.iterrows():
         if isinstance(name, str) and name.startswith("x_true"):
-            nxc.append(row["mean"])
-            nx_errc.append(row["sd"])
+            x_mean = float(row["mean"])
+            x_sd = float(row["sd"])
+            match = _X_TRUE_INDEX_RE.match(name)
+            if match:
+                rows[int(match.group(1))] = (x_mean, x_sd)
+            else:
+                fallback_rows.append((x_mean, x_sd))
+    ordered_rows = [rows[idx] for idx in sorted(rows)] if rows else fallback_rows
+    if not ordered_rows:
+        return np.array([]), np.array([])
+    nxc = [row[0] for row in ordered_rows]
+    nx_errc = [row[1] for row in ordered_rows]
     return np.array(nxc), np.array(nx_errc)
 
 
@@ -611,10 +811,38 @@ def _extract_x_per_well_from_trace_df(
     return np.array(nxc), np.array(nx_errc)
 
 
-def x_true_from_trace_df(trace_df: pd.DataFrame) -> DataArray:
-    """Extract x_true from an ArviZ summary DataFrame."""
-    nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
+def x_true_from_trace_df(
+    trace_df: xr.DataTree | MultiFitResult | pd.DataFrame,
+) -> DataArray:
+    """Extract x_true from a PyMC trace or ArviZ summary DataFrame."""
+    nxc, nx_errc = _extract_x_true_from_trace_df(_trace_summary_df(trace_df))
     return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
+
+
+def _per_well_fit_results_from_trace(
+    trace: xr.DataTree,
+    fit_results: Mapping[str, FitResult[MiniT]],
+    scheme: PlateScheme,
+    *,
+    x_error_model: Literal["deterministic", "per_well", "hierarchical_per_well"],
+) -> dict[str, FitResult[xr.DataTree]]:
+    """Reconstruct per-well fit results from a shared multi-well trace."""
+    trace_df = _trace_summary_df(trace)
+    per_well_results: dict[str, FitResult[xr.DataTree]] = {}
+    for key, fr in fit_results.items():
+        if fr.dataset is None:
+            continue
+        ctr = next((name for name, wells in scheme.names.items() if key in wells), "")
+        well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
+        per_well_results[key] = extract_fit(
+            key,
+            ctr,
+            trace_df,
+            copy.deepcopy(fr.dataset),
+            well_key=well_key,
+        )
+        per_well_results[key].mini = trace
+    return per_well_results
 
 
 def fit_binding_pymc(  # noqa: PLR0913
@@ -624,12 +852,16 @@ def fit_binding_pymc(  # noqa: PLR0913
     n_samples: int = 2000,
     nuts_sampler: str = "default",
     *,
+    n_tune: int | None = None,
+    target_accept: float | None = None,
+    max_treedepth: int | None = None,
     noise_model: PlateNoiseModel | None = None,
     robust: bool = False,
-    floor_mode: NoiseParamMode = "centered",
-    gain_mode: NoiseParamMode = "centered",
-    alpha_mode: NoiseParamMode = "centered",
+    floor_mode: NoiseParamMode | None = None,
+    gain_mode: NoiseParamMode | None = None,
+    alpha_mode: NoiseParamMode | None = None,
     learn_ye_mags: bool = False,
+    min_x_step: float = 0.2,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -646,6 +878,14 @@ def fit_binding_pymc(  # noqa: PLR0913
     nuts_sampler : str
         NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
         ``"numpyro"``, or ``"nutpie"``.
+    n_tune : int | None
+        Number of tuning steps. If ``None`` (default), use ``n_samples // 2``.
+    target_accept : float | None
+        NUTS target acceptance probability. If ``None`` (default), 0.95 is
+        used when *n_xerr* > 0 and 0.9 otherwise.
+    max_treedepth : int | None
+        Maximum tree depth for NUTS sampler. If ``None`` (default), PyMC's
+        default is used.
     noise_model : PlateNoiseModel | None
         Noise model specification.  ``None`` (default) uses a simple per-label
         ``ye_mag_{lbl}`` HalfNormal to scale the existing ``y_err``.  Pass a
@@ -653,23 +893,29 @@ def fit_binding_pymc(  # noqa: PLR0913
         from the full heteroscedastic noise model.
     robust : bool
         If ``True``, use StudentT likelihood (nu=3) for robust regression.
-    floor_mode : NoiseParamMode
-        How to treat the floor parameter: "fixed", "free", or "centered".
-    gain_mode : NoiseParamMode
-        How to treat the gain parameter: "fixed", "free", or "centered".
-    alpha_mode : NoiseParamMode
-        How to treat the alpha (rel_error) parameter: "fixed", "free", or "centered".
+    floor_mode : NoiseParamMode | None
+        How to treat the floor parameter.  ``None`` (default) resolves to
+        ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
+        ``Dataset`` input.
+    gain_mode : NoiseParamMode | None
+        How to treat the gain parameter.  ``None`` follows the same input-based
+        rule as *floor_mode*.
+    alpha_mode : NoiseParamMode | None
+        How to treat the alpha (rel_error) parameter.  ``None`` follows the
+        same input-based rule as *floor_mode*.
     learn_ye_mags : bool
         If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
         when a full *noise_model* is provided.
+    min_x_step : float
+        Minimum inferred change in ``x`` between consecutive titration steps
+        when latent-x modeling is enabled.
 
     Returns
     -------
     FitResult[xr.DataTree]
         Bayesian fitting results.
     """
-    # Handle both Dataset and FitResult inputs
-    fr = fit_binding_glob(ds_or_fr) if isinstance(ds_or_fr, Dataset) else ds_or_fr
+    fr, prefer_centered = _normalize_fit_input(ds_or_fr)
 
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -678,9 +924,15 @@ def fit_binding_pymc(  # noqa: PLR0913
     labels = list(ds.keys())
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
+    floor_mode, gain_mode, alpha_mode = _resolve_noise_modes(
+        prefer_centered=prefer_centered,
+        floor_mode=floor_mode,
+        gain_mode=gain_mode,
+        alpha_mode=alpha_mode,
+    )
     with pm.Model():
         pars = create_parameter_priors(params, n_sd)
-        x_true = create_x_true(xc, x_errc, n_xerr)
+        x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
 
         if noise_model is None:
             ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
@@ -731,14 +983,19 @@ def fit_binding_pymc(  # noqa: PLR0913
                 )
 
         # Inference
-        tune = n_samples // 2
-        trace = pm.sample(
-            n_samples,
-            tune=tune,
-            target_accept=0.9,
-            return_inferencedata=True,
-            **_pymc_sample_parallel_args(nuts_sampler),
+        tune = n_tune if n_tune is not None else n_samples // 2
+        target_accept_ = (
+            target_accept if target_accept is not None else 0.95 if n_xerr > 0 else 0.9
         )
+        sample_kwargs: dict[str, object] = {
+            "tune": tune,
+            "target_accept": target_accept_,
+            "return_inferencedata": True,
+            **_pymc_sample_parallel_args(nuts_sampler),
+        }
+        if max_treedepth is not None:
+            sample_kwargs["max_treedepth"] = max_treedepth
+        trace = pm.sample(n_samples, **sample_kwargs)
         trace = _compute_sample_log_likelihood(trace)
     return process_trace(trace, params.keys(), ds)
 
@@ -961,7 +1218,7 @@ def _well_k_init_from_results(
 
 
 def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
-    results: dict[str, FitResult[MiniT]],
+    results: Mapping[str, Dataset | FitResult[MiniT]],
     scheme: PlateScheme,
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
@@ -972,22 +1229,28 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     shared_alpha: bool = True,
     shared_gain: bool = False,
     n_tune: int | None = None,
-    x_error_model: Literal["deterministic", "random_walk"] = "deterministic",
-    sigma_pip_prior: float = 0.01,
+    target_accept: float | None = None,
+    max_treedepth: int | None = None,
+    x_error_model: Literal[
+        "deterministic", "per_well", "hierarchical_per_well"
+    ] = "deterministic",
+    acid_drop_between_sigma: float = 0.005,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     robust: bool = False,
-    floor_mode: NoiseParamMode = "free",
-    gain_mode: NoiseParamMode = "free",
-    alpha_mode: NoiseParamMode = "free",
+    floor_mode: NoiseParamMode | None = None,
+    gain_mode: NoiseParamMode | None = None,
+    alpha_mode: NoiseParamMode | None = None,
     learn_ye_mags: bool = False,
-) -> xr.DataTree:
+    min_x_step: float = 0.2,
+) -> MultiFitResult:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
     Parameters
     ----------
-    results : dict[str, FitResult[MiniT]]
-        Per-well initial fit results.
+    results : Mapping[str, Dataset | FitResult[MiniT]]
+        Per-well datasets or initial fit results. Raw datasets are first fitted
+        with :func:`fit_binding_glob` to seed the Bayesian model.
     scheme : PlateScheme
         Plate scheme defining control groups for shared-K priors.
     n_sd : float
@@ -1015,10 +1278,27 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         when *noise_model* is provided and gain terms are present.
     n_tune : int | None
         Number of tuning steps for MCMC. If None, defaults to n_samples // 2.
-    x_error_model : Literal["deterministic", "random_walk"]
-        Model for x-error propagation (default: "deterministic").
-    sigma_pip_prior : float
-        Prior for random_walk sigma pipette error parameter.
+    target_accept : float | None
+        NUTS target acceptance probability. If ``None`` (default), 0.95 is
+        used when *n_xerr* > 0 and 0.9 otherwise.
+    max_treedepth : int | None
+        Maximum tree depth for NUTS sampler. If ``None`` (default), PyMC's
+        default is used.
+    x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
+        Model for x-error propagation. ``"deterministic"`` uses one shared
+        ``x_true`` across all wells. ``"per_well"`` gives each well its own
+        independent ``x_step`` (shared ``x_start``, per-well cumulative
+        additions constrained by ``min_x_step``).
+        ``"hierarchical_per_well"`` uses an acid-addition formulation:
+        shared ``acid_drop_global`` per step (uncertainty from quadrature
+        sum of adjacent ``x_errc``), per-well ``acid_drop_well`` deviating
+        at fixed ``acid_drop_between_sigma`` scale (not inferred).
+    acid_drop_between_sigma : float
+        Fixed between-well scale for the ``acid_drop`` variation used by
+        ``"hierarchical_per_well"`` (not inferred — set to the experimental
+        tolerance).  0.005 (default) is very tight — suitable when all wells
+        receive identical 2 uL additions.  Increase to 0.01--0.02 for larger
+        pipetting/buffer differences.
     ctr_free_k : bool
         If True, each CTR replicate well gets its own independent flat K prior
         ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
@@ -1031,54 +1311,67 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     robust : bool
         If True, use StudentT likelihood (nu=3) for robust regression instead
         of Normal.
-    floor_mode : NoiseParamMode
-        How to treat the floor parameter: "fixed", "free", or "centered"
-        (default).
-    gain_mode : NoiseParamMode
-        How to treat the gain parameter: "fixed", "free", or "centered"
-        (default).
-    alpha_mode : NoiseParamMode
-        How to treat the alpha (rel_error) parameter: "fixed", "free", or
-        "centered" (default).
+    floor_mode : NoiseParamMode | None
+        How to treat the floor parameter.  ``None`` (default) resolves to
+        ``"centered"`` when every input is already a ``FitResult`` and to
+        ``"free"`` when any raw ``Dataset`` is supplied.
+    gain_mode : NoiseParamMode | None
+        How to treat the gain parameter.  ``None`` follows the same input-based
+        rule as *floor_mode*.
+    alpha_mode : NoiseParamMode | None
+        How to treat the alpha (rel_error) parameter.  ``None`` follows the
+        same input-based rule as *floor_mode*.
     learn_ye_mags : bool
         If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
         when a full *noise_model* is provided.
+    min_x_step : float
+        Minimum inferred change in ``x`` between consecutive titration steps
+        when latent-x modeling is enabled.
 
     Returns
     -------
-    xr.DataTree
-        The PyMC posterior trace.
+    MultiFitResult
+        Shared PyMC trace together with reconstructed per-well fit results.
 
     Raises
     ------
     ValueError
         If no valid dataset is found in results.
     """
-    ds = next((r.dataset for r in results.values() if r.dataset), None)
+    fit_results, prefer_centered = _normalize_fit_inputs(results)
+    ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     if ds is None:
         msg = "No valid dataset found in results."
         raise ValueError(msg)
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc * n_xerr
+    x_errc = next(iter(ds.values())).x_errc
     labels = list(ds.keys())
+    floor_mode, gain_mode, alpha_mode = _resolve_noise_modes(
+        prefer_centered=prefer_centered,
+        floor_mode=floor_mode,
+        gain_mode=gain_mode,
+        alpha_mode=alpha_mode,
+    )
     values: dict[str, list[float | None]] = {}
     stderr: dict[str, list[float | None]] = {}
 
     for name, wells in scheme.names.items():
         values[name] = [
             v.result.params["K"].value
-            for well, v in results.items()
+            for well, v in fit_results.items()
             if v.result and well in wells
         ]
         stderr[name] = [
             v.result.params["K"].stderr
-            for well, v in results.items()
+            for well, v in fit_results.items()
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
-    active_wells = {key for key, r in results.items() if r.result and r.dataset}
+    active_wells = {key for key, r in fit_results.items() if r.result and r.dataset}
     wells_list = [
-        key for key in results if results[key].result and results[key].dataset
+        key
+        for key in fit_results
+        if fit_results[key].result and fit_results[key].dataset
     ]
     {key: i for i, key in enumerate(wells_list)}
     n_wells = len(wells_list)
@@ -1091,23 +1384,109 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     }
 
     with pm.Model(coords=coords):
-        x_true = create_x_true(xc, x_errc, n_xerr)
-        if x_error_model == "random_walk":
-            sigma_pip = pm.HalfNormal(
-                "sigma_pip", sigma=sigma_pip_prior
-            )  # pm.TruncatedNormal pm.Uniform
-            z_pip = pm.Normal(
-                "z_pip", 0, 1, shape=(n_steps - 1, n_wells), dims=("step_diff", "well")
+        if x_error_model == "hierarchical_per_well" and n_xerr > 0:
+            if not np.all(np.diff(xc) < 0):
+                msg = (
+                    "hierarchical_per_well acid-addition model expects "
+                    "decreasing pH values."
+                )
+                raise ValueError(msg)
+
+            nominal_drop = -np.diff(xc)  # positive pH drops
+
+            x_sigma = np.maximum(x_errc * n_xerr, 1e-6)
+
+            # Uncertainty of a measured pH difference (quadrature sum).
+            drop_meas_sigma = np.sqrt(x_sigma[:-1] ** 2 + x_sigma[1:] ** 2)
+
+            lower_nsd = 2.5
+            min_acid_drop = 1e-6
+            min_drops = np.maximum(
+                nominal_drop - lower_nsd * drop_meas_sigma,
+                min_acid_drop,
             )
-            cum_dev = pm.math.cumsum(sigma_pip * z_pip, axis=0)
-            x_dev = pm.math.concatenate([pt.zeros((1, n_wells)), cum_dev], axis=0)
-            x_per_well = pm.Deterministic(
+
+            x_start = pm.Normal(
+                "x_start",
+                mu=xc[0],
+                sigma=max(x_sigma[0], 1e-6),
+            )
+
+            acid_drop_global = pm.TruncatedNormal(
+                "acid_drop_global",
+                mu=nominal_drop,
+                sigma=np.maximum(drop_meas_sigma, 1e-6),
+                lower=min_drops,
+                dims="step_diff",
+            )
+
+            # Fixed between-well scale — do not sample a variance parameter;
+            # the centered funnel destroys sampler performance.
+            acid_drop_well = pm.TruncatedNormal(
+                "acid_drop_well",
+                mu=acid_drop_global[:, None],
+                sigma=max(acid_drop_between_sigma, 1e-6),
+                lower=min_drops[:, None],
+                shape=(n_steps - 1, n_wells),
+                dims=("step_diff", "well"),
+            )
+
+            cumulative_drop = pm.math.cumsum(acid_drop_well, axis=0)
+
+            # Use ones_like on a slice to inherit the well-dimension shape.
+            start_row = pt.ones_like(acid_drop_well[:1, :]) * x_start  # type: ignore[no-untyped-call]
+            x_matrix = pm.math.concatenate(
+                [start_row, x_start - cumulative_drop], axis=0
+            )
+
+            x_w_all = pm.Deterministic(
                 "x_per_well",
-                x_true[:, None] + x_dev,
+                x_matrix,
                 dims=("step", "well"),
             )
-            x_w_all = x_per_well
+
+        elif x_error_model == "per_well" and n_xerr > 0:
+            x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
+            x_errc_cumulative = np.maximum.accumulate(x_errc_scaled)
+            step_sigmas = np.empty_like(x_errc_cumulative)
+            step_sigmas[0] = x_errc_cumulative[0]
+            if len(xc) > 1:
+                step_var = np.maximum(
+                    x_errc_cumulative[1:] ** 2 - x_errc_cumulative[:-1] ** 2,
+                    1e-12,
+                )
+                step_sigmas[1:] = np.sqrt(step_var)
+            direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
+            step_nominal = direction * np.diff(xc)
+            lower_nsd = 2.5
+            min_steps = np.maximum(
+                step_nominal - lower_nsd * step_sigmas[1:],
+                min_x_step,
+            )
+            x_start = pm.Normal("x_start", mu=xc[0], sigma=step_sigmas[0])
+            x_step = pm.TruncatedNormal(
+                "x_step",
+                mu=step_nominal[:, None],
+                sigma=np.maximum(step_sigmas[1:], 1e-6)[:, None],
+                lower=min_steps[:, None],
+                shape=(n_steps - 1, n_wells),
+                dims=("step_diff", "well"),
+            )
+            x_cumsum = pm.math.cumsum(x_step, axis=0)
+            x_offsets = pm.math.concatenate([pt.zeros((1, n_wells)), x_cumsum], axis=0)
+            x_w_all = pm.Deterministic(
+                "x_per_well",
+                x_start + direction * x_offsets,
+                dims=("step", "well"),
+            )
+
         else:
+            x_true: typing.Any = create_x_true(
+                xc,
+                x_errc,
+                n_xerr,
+                min_x_step=min_x_step,
+            )
             x_w_all = pt.tile(x_true[:, None], (1, n_wells))
 
         k_params, k_replicate = _build_ctr_k_params(
@@ -1115,7 +1494,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             ctr_ks,
             active_wells,
             ctr_free_k=ctr_free_k,
-            well_k_init=_well_k_init_from_results(results, scheme, n_sd),
+            well_k_init=_well_k_init_from_results(fit_results, scheme, n_sd),
         )
 
         # Collect vectorized K
@@ -1124,7 +1503,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             ctr_name = next(
                 (name for name, wells in scheme.names.items() if key in wells), ""
             )
-            r = results[key]
+            r = fit_results[key]
             if r.result is None:
                 msg = f"Fit result for well {key} is missing."
                 raise ValueError(msg)
@@ -1154,7 +1533,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             mu_s0, sig_s0 = [], []
             mu_s1, sig_s1 = [], []
             for key in wells_list:
-                r = results[key]
+                r = fit_results[key]
                 if r.result is None:
                     msg = f"Fit result for well {key} is missing."
                     raise ValueError(msg)
@@ -1189,32 +1568,22 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
 
         # Likelihoods
-        first_ds = next(iter(results.values())).dataset
+        first_ds = next(iter(fit_results.values())).dataset
         if first_ds is None:
             msg = "At least one dataset is required."
             raise ValueError(msg)
         is_ph = first_ds.is_ph
         for lbl in labels:
-            y_obs_list = []
-            y_err_list = []
-            mask_lbl = np.zeros((n_steps, n_wells), dtype=bool)
-
-            for w_idx, key in enumerate(wells_list):
-                ds_well = results[key].dataset
-                if ds_well is None:
-                    msg = f"Dataset for well {key} is missing."
-                    raise ValueError(msg)
-                da = ds_well[lbl]
-                y_obs_list.append(da.y)
-                y_err_list.append(da.y_err)
-                mask_lbl[:, w_idx] = da.mask
+            mask_lbl, y_obs_full, y_err_full = _masked_obs_err_matrices(
+                fit_results, wells_list, lbl, n_steps
+            )
 
             y_model_all = binding_1site(
                 x_w_all, k_all, s0_vars[lbl], s1_vars[lbl], is_ph=is_ph
             )
             mu_vec = y_model_all[mask_lbl]
-            y_obs_vec = np.concatenate(y_obs_list)
-            y_err_vec = np.concatenate(y_err_list)
+            y_obs_vec = y_obs_full[mask_lbl]
+            y_err_vec = y_err_full[mask_lbl]
 
             if noise_model is not None:
                 # Heteroscedastic noise model
@@ -1251,15 +1620,30 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
         tune_steps = n_tune if n_tune is not None else n_samples // 2
 
-        trace: xr.DataTree = pm.sample(
-            n_samples,
-            tune=tune_steps,
-            target_accept=0.9,
-            return_inferencedata=True,
-            **_pymc_sample_parallel_args(nuts_sampler),
+        target_accept_ = (
+            target_accept if target_accept is not None else 0.95 if n_xerr > 0 else 0.9
         )
+        sample_kwargs: dict[str, object] = {
+            "tune": tune_steps,
+            "target_accept": target_accept_,
+            "return_inferencedata": True,
+            **_pymc_sample_parallel_args(nuts_sampler),
+        }
+        if max_treedepth is not None:
+            sample_kwargs["max_treedepth"] = max_treedepth
+        trace: xr.DataTree = pm.sample(n_samples, **sample_kwargs)
 
         if sample_ppc:
             pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
-        return _compute_sample_log_likelihood(trace)
+        trace = _compute_sample_log_likelihood(trace)
+
+    return MultiFitResult(
+        trace=trace,
+        results=_per_well_fit_results_from_trace(
+            trace,
+            fit_results,
+            scheme,
+            x_error_model=x_error_model,
+        ),
+    )

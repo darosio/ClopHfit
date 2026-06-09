@@ -473,6 +473,26 @@ class FitResult[MiniType: MiniProtocol]:
 
 
 @dataclass
+class MultiFitResult:
+    """Container for multi-well Bayesian results.
+
+    Parameters
+    ----------
+    trace : xr.DataTree
+        Shared PyMC trace from the multi-well fit.
+    results : dict[str, FitResult[xr.DataTree]]
+        Per-well fit results reconstructed from the shared trace.
+    """
+
+    trace: xr.DataTree
+    results: dict[str, FitResult[xr.DataTree]]
+
+    def __getattr__(self, name: str) -> object:
+        """Delegate trace attributes for convenient compatibility."""
+        return getattr(self.trace, name)
+
+
+@dataclass
 class SpectraGlobResults:
     """A dataclass representing the results of both svd and bands fits."""
 

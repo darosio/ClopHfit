@@ -45,7 +45,7 @@ from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit.fitting.data_structures import Dataset
+from clophfit.fitting.data_structures import Dataset, MultiFitResult
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
@@ -910,9 +910,14 @@ def _summary_stats_from_scalar_var(
 
 
 def _extract_sigma_df(
-    trace: xr.DataTree, results: Mapping[str, FitResult[MiniT]] | None = None
+    trace: xr.DataTree | MultiFitResult,
+    results: Mapping[str, FitResult[MiniT]] | None = None,
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
+    if isinstance(trace, MultiFitResult):
+        if results is None:
+            results = trace.results
+        trace = trace.trace
     sigma_records = _sigma_records_from_posterior(trace)
     if sigma_records:
         return pd.DataFrame(sigma_records)
@@ -947,14 +952,15 @@ def _extract_sigma_df(
 
 
 def extract_sigma_df(
-    trace: xr.DataTree, results: Mapping[str, FitResult[MiniT]] | None = None
+    trace: xr.DataTree | MultiFitResult,
+    results: Mapping[str, FitResult[MiniT]] | None = None,
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma summaries from a PyMC trace."""
     return _extract_sigma_df(trace, results)
 
 
 def plot_noise_vs_index(
-    trace: xr.DataTree,
+    trace: xr.DataTree | MultiFitResult,
     results: Mapping[str, FitResult[MiniT]] | None = None,
     wells: Sequence[str] | str | None = None,
     figsize_per_well: tuple[float, float] = (5, 4),
@@ -964,8 +970,9 @@ def plot_noise_vs_index(
 
     Parameters
     ----------
-    trace : xr.DataTree
-        The PyMC inference trace containing `sigma_obs` deterministic nodes.
+    trace : xr.DataTree | MultiFitResult
+        The PyMC inference trace containing `sigma_obs` deterministic nodes, or
+        the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
     results : Mapping[str, FitResult[MiniT]] | None, optional
         The dictionary of well results to derive fallback sigma values.
     wells : Sequence[str] | str | None, optional
@@ -1037,7 +1044,7 @@ def plot_noise_vs_index(
 
 
 def plot_noise_vs_signal(
-    trace: xr.DataTree,
+    trace: xr.DataTree | MultiFitResult,
     results: Mapping[str, FitResult[MiniT]],
     figsize_per_label: tuple[float, float] = (6, 5),
 ) -> Figure:
@@ -1049,8 +1056,9 @@ def plot_noise_vs_signal(
 
     Parameters
     ----------
-    trace : xr.DataTree
-        The PyMC inference trace containing the `sigma_obs` deterministic nodes.
+    trace : xr.DataTree | MultiFitResult
+        The PyMC inference trace containing the `sigma_obs` deterministic nodes,
+        or the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
     results : Mapping[str, FitResult[MiniT]]
         The dictionary of well results containing datasets with `.y` arrays.
         Normally this is `tit.result_global.results`.

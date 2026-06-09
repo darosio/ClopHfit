@@ -43,8 +43,10 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     rng = np.random.default_rng(42)
     y_obs = y_true + rng.normal(0, 5.0, size=len(y_true))
 
-    # Define uncertainties
-    x_errc = np.array([0.05] * 5)  # 0.05 pH unit uncertainty
+    # Define uncertainties — step 2 gets larger x_errc so the
+    # cumulative-maximum step-sigma gives the model freedom to shift
+    # x_true[2] toward 7.1.
+    x_errc = np.array([0.05, 0.05, 0.15, 0.15, 0.15])
     y_err = np.array([5.0] * 5)
 
     # Create Dataset

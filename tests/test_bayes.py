@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import copy
+from typing import TYPE_CHECKING
+
 import numpy as np
+import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 import pytest
+import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 
+from clophfit.fitting import bayes
 from clophfit.fitting.bayes import (
     create_parameter_priors,
     create_x_true,
@@ -18,12 +24,41 @@ from clophfit.fitting.bayes import (
 )
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
+    DataArray,
     Dataset,
     FitResult,
     MiniT,
+    MultiFitResult,
     NoiseModelParams,
     PlateNoiseModel,
 )
+from clophfit.prtecan import PlateScheme
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class _StopBayesBuildError(RuntimeError):
+    """Internal test sentinel used to stop model construction early."""
+
+
+def _noop_plot_fit(*_args: object, **_kwargs: object) -> None:
+    """Test helper replacing plot generation in unit tests."""
+
+
+def _summary_df_stub_factory(
+    summary_df: pd.DataFrame,
+) -> Callable[[xr.DataTree | MultiFitResult | pd.DataFrame], pd.DataFrame]:
+    """Return a summary stub accepted by extract/x_true helper tests."""
+
+    def stub(
+        trace_or_df: xr.DataTree | MultiFitResult | pd.DataFrame,
+    ) -> pd.DataFrame:
+        del trace_or_df
+        return summary_df
+
+    return stub
+
 
 ###############################################################################
 # Fixtures
@@ -89,6 +124,63 @@ def test_create_x_true_shape() -> None:
         assert evaluated.shape == xc.shape
 
 
+def test_create_x_true_keeps_all_steps_individually_anchored() -> None:
+    """Cumulative-addition x_true should stay close to observed anchors."""
+    pytest.importorskip("pymc")
+
+    xc = np.array([8.92, 8.31, 7.76, 7.04, 6.56, 5.98, 5.47])
+    x_errc = np.array([0.005, 0.045, 0.087, 0.026, 0.16, 0.16, 0.16])
+
+    with pm.Model():
+        create_x_true(xc, x_errc, n_xerr=1.0)
+        trace = pm.sample_prior_predictive(draws=500, var_names=["x_true"])
+
+    sampled = np.asarray(trace.prior["x_true"])
+    x_true_samples = sampled.reshape(-1, sampled.shape[-1])
+    sample_means = x_true_samples.mean(axis=0)
+
+    np.testing.assert_allclose(sample_means, xc, atol=0.25)
+    assert np.all(np.diff(x_true_samples, axis=1) <= 1e-12)
+
+
+def test_create_x_true_uses_cumulative_step_uncertainty() -> None:
+    """Later x points should accumulate uncertainty from repeated additions."""
+    pytest.importorskip("pymc")
+
+    xc = np.array([8.9, 8.3, 7.8, 7.1, 6.6, 6.0, 5.5])
+    x_errc = np.array([0.01, 0.05, 0.09, 0.11, 0.14, 0.16, 0.18])
+
+    with pm.Model():
+        create_x_true(xc, x_errc, n_xerr=1.0)
+        trace = pm.sample_prior_predictive(draws=500, var_names=["x_true"])
+
+    sampled = np.asarray(trace.prior["x_true"])
+    x_true_samples = sampled.reshape(-1, sampled.shape[-1])
+    sample_sds = x_true_samples.std(axis=0)
+
+    assert np.all(np.diff(sample_sds) >= -0.02)
+    assert sample_sds[-1] > sample_sds[1]
+
+
+def test_create_x_true_respects_minimum_step_size() -> None:
+    """Inferred x drops should not fall below the configured minimum step."""
+    pytest.importorskip("pymc")
+
+    xc = np.array([8.9, 8.3, 7.8, 7.1, 6.6, 6.0, 5.5])
+    x_errc = np.array([0.01, 0.05, 0.09, 0.11, 0.14, 0.16, 0.18])
+    min_x_step = 0.35
+
+    with pm.Model():
+        create_x_true(xc, x_errc, n_xerr=1.0, min_x_step=min_x_step)
+        trace = pm.sample_prior_predictive(draws=500, var_names=["x_true"])
+
+    sampled = np.asarray(trace.prior["x_true"])
+    x_true_samples = sampled.reshape(-1, sampled.shape[-1])
+    inferred_drops = -np.diff(x_true_samples, axis=1)
+
+    assert np.all(inferred_drops >= min_x_step - 1e-6)
+
+
 def test_create_x_true_lower_bound() -> None:
     """Test that lower_nsd parameter affects the truncation lower bound."""
     pytest.importorskip("pymc")
@@ -102,6 +194,22 @@ def test_create_x_true_lower_bound() -> None:
         result = create_x_true(xc, x_errc, n_xerr, lower_nsd=lower_nsd)
         assert hasattr(result, "eval")
         assert hasattr(result, "name")
+
+
+def test_x_true_from_trace_df_sorts_numeric_indices() -> None:
+    """x_true rows should be reconstructed in numeric, not lexicographic, order."""
+    trace_df = pd.DataFrame(
+        {
+            "mean": [0.0, 1.0, 10.0, 2.0],
+            "sd": [0.1, 0.1, 0.3, 0.2],
+        },
+        index=["x_true[0]", "x_true[1]", "x_true[10]", "x_true[2]"],
+    )
+
+    x_true = x_true_from_trace_df(trace_df)
+
+    np.testing.assert_array_equal(x_true.xc, np.array([0.0, 1.0, 2.0, 10.0]))
+    np.testing.assert_array_equal(x_true.x_errc, np.array([0.1, 0.1, 0.2, 0.3]))
 
 
 ###############################################################################
@@ -283,6 +391,460 @@ def test_bayes_module_imports() -> None:
     assert callable(x_true_from_trace_df)
 
 
+def test_process_trace_scales_per_label_ye_mags(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Per-label ye_mag posteriors should scale each dataset independently."""
+    ds = copy.deepcopy(multi_dataset)
+    for da in ds.values():
+        da.y_errc = np.ones_like(da.xc)
+
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=2.0)
+    params.add("S1_1", value=1.0)
+    params.add("S0_2", value=0.0)
+    params.add("S1_2", value=1.0)
+
+    summary_df = pd.DataFrame(
+        {
+            "mean": [7.0, 2.0, 1.0, 0.0, 1.0, 2.0, 0.5],
+            "sd": [0.1, 0.1, 0.1, 0.1, 0.1, 0.0, 0.0],
+            "hdi_3%": [6.8, 1.8, 0.8, -0.2, 0.8, 2.0, 0.5],
+            "hdi_97%": [7.2, 2.2, 1.2, 0.2, 1.2, 2.0, 0.5],
+            "r_hat": [1.0, 1.0, 1.0, 1.0, 1.0, np.nan, np.nan],
+        },
+        index=["K", "S0_1", "S1_1", "S0_2", "S1_2", "ye_mag_1", "ye_mag_2"],
+    )
+
+    monkeypatch.setattr(bayes, "_trace_summary_df", lambda _trace: summary_df)
+    monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+
+    fit_result = process_trace(xr.DataTree(), params.keys(), ds)
+
+    assert fit_result.dataset is not None
+    np.testing.assert_allclose(fit_result.dataset["1"].y_errc, np.full(3, 2.0))
+    np.testing.assert_allclose(fit_result.dataset["2"].y_errc, np.full(3, 0.5))
+
+
+def test_fit_binding_pymc_dataset_defaults_free_noise_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Raw datasets should default PyMC noise modes to free priors."""
+    captured: dict[str, str] = {}
+    noise_model = PlateNoiseModel({
+        "default": NoiseModelParams(sigma_floor=1.0),
+    })
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del shared_alpha, shared_gain
+        captured["floor"] = floor_mode
+        captured["gain"] = gain_mode
+        captured["alpha"] = alpha_mode
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            noise_model=noise_model,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"floor": "free", "gain": "free", "alpha": "free"}
+
+
+def test_fit_binding_pymc_fitresult_defaults_centered_noise_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Pre-fit results should default PyMC noise modes to centered priors."""
+    captured: dict[str, str] = {}
+    noise_model = PlateNoiseModel({
+        "default": NoiseModelParams(sigma_floor=1.0),
+    })
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del shared_alpha, shared_gain
+        captured["floor"] = floor_mode
+        captured["gain"] = gain_mode
+        captured["alpha"] = alpha_mode
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            fit_binding_glob(ph_dataset),
+            noise_model=noise_model,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
+
+
+def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-well PyMC should accept raw dataset mappings and default to free modes."""
+    captured: dict[str, str] = {}
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0),
+        "2": NoiseModelParams(sigma_floor=1.0),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del shared_alpha, shared_gain
+        captured["floor"] = floor_mode
+        captured["gain"] = gain_mode
+        captured["alpha"] = alpha_mode
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
+            scheme,
+            noise_model=noise_model,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"floor": "free", "gain": "free", "alpha": "free"}
+
+
+def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-well PyMC should keep centered defaults for pre-fit results."""
+    captured: dict[str, str] = {}
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0),
+        "2": NoiseModelParams(sigma_floor=1.0),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del shared_alpha, shared_gain
+        captured["floor"] = floor_mode
+        captured["gain"] = gain_mode
+        captured["alpha"] = alpha_mode
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            noise_model=noise_model,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
+
+
+def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Deterministic mode should pass unscaled x_errc into create_x_true."""
+    expected_x_err = np.array([0.1, 0.2, 0.3])
+    ds = copy.deepcopy(multi_dataset)
+    for da in ds.values():
+        da.x_errc = expected_x_err.copy()
+
+    captured: dict[str, np.ndarray | float] = {}
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(ds)
+
+    def fake_create_x_true(
+        xc: np.ndarray,
+        x_errc: np.ndarray,
+        n_xerr: float,
+        lower_nsd: float = 2.5,
+        min_x_step: float = 0.2,
+    ) -> np.ndarray:
+        del xc, lower_nsd, min_x_step
+        captured["x_errc"] = np.array(x_errc, copy=True)
+        captured["n_xerr"] = n_xerr
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "create_x_true", fake_create_x_true)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=3.0,
+            x_error_model="deterministic",
+        )
+
+    np.testing.assert_allclose(captured["x_errc"], expected_x_err)
+    assert captured["n_xerr"] == 3.0
+
+
+def test_fit_binding_pymc_multi_deterministic_mode_uses_shared_fixed_x_true(
+    multi_dataset: Dataset,
+) -> None:
+    """Deterministic mode should expose shared x_true, fixed when n_xerr=0."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    assert fr_init.dataset is not None
+
+    multi = bayes.fit_binding_pymc_multi(
+        {"A01": fr_init, "A02": fr_init},
+        scheme,
+        n_samples=2,
+        n_tune=1,
+        n_xerr=0.0,
+        x_error_model="deterministic",
+    )
+
+    x_true = x_true_from_trace_df(multi)
+    assert set(multi.results) == {"A01", "A02"}
+    np.testing.assert_allclose(x_true.xc, fr_init.dataset["1"].xc)
+    np.testing.assert_allclose(x_true.x_errc, np.zeros_like(fr_init.dataset["1"].xc))
+    for fr in multi.results.values():
+        assert fr.dataset is not None
+        for lbl, da in fr.dataset.items():
+            np.testing.assert_allclose(da.xc, fr_init.dataset[lbl].xc)
+            np.testing.assert_allclose(
+                da.x_errc, np.zeros_like(fr_init.dataset[lbl].xc)
+            )
+
+
+def test_extract_fit_accepts_multifitresult_deterministic() -> None:
+    """extract_fit should accept MultiFitResult and use shared x_true."""
+    trace_df = pd.DataFrame(
+        {
+            "mean": [7.0, 2.0, 1.0, 8.0, 7.0, 6.0],
+            "sd": [0.1, 0.1, 0.1, 0.0, 0.0, 0.0],
+            "hdi_3%": [6.8, 1.8, 0.8, 8.0, 7.0, 6.0],
+            "hdi_97%": [7.2, 2.2, 1.2, 8.0, 7.0, 6.0],
+            "r_hat": [1.0, 1.0, 1.0, np.nan, np.nan, np.nan],
+        },
+        index=[
+            "K_ctr_ctrl",
+            "S0_1_A01",
+            "S1_1_A01",
+            "x_true[0]",
+            "x_true[1]",
+            "x_true[2]",
+        ],
+    )
+    ds = Dataset(
+        {"1": DataArray(np.array([9.0, 8.0, 7.0]), np.array([2.1, 1.5, 1.1]))},
+        is_ph=True,
+    )
+    multi = MultiFitResult(trace=xr.DataTree(), results={})
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            bayes, "_trace_summary_df", _summary_df_stub_factory(trace_df)
+        )
+        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        fr = extract_fit("A01", "ctrl", multi, ds)
+
+    assert fr.dataset is not None
+    np.testing.assert_allclose(fr.dataset["1"].xc, np.array([8.0, 7.0, 6.0]))
+    np.testing.assert_allclose(fr.dataset["1"].x_errc, np.zeros(3))
+
+
+def test_extract_fit_accepts_multifitresult_per_well() -> None:
+    """extract_fit should prefer per-well x_per_well from MultiFitResult."""
+    # fmt: off
+    trace_df = pd.DataFrame(
+        {
+            "mean": [7.0, 2.0, 1.0, 2.2, 1.2, 9.0, 8.0, 7.0, 8.1, 7.1, 6.1, 7.9, 6.9, 5.9],
+            "sd": [0.1, 0.1, 0.1, 0.12, 0.12, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05, 0.07, 0.07, 0.07],
+            "hdi_3%": [6.8, 1.8, 0.8, 2.0, 1.0, 9.0, 8.0, 7.0, 8.0, 7.0, 6.0, 7.8, 6.8, 5.8],
+            "hdi_97%": [7.2, 2.2, 1.2, 2.4, 1.4, 9.0, 8.0, 7.0, 8.2, 7.2, 6.2, 8.0, 7.0, 6.0],
+            "r_hat": [1.0, 1.0, 1.0, 1.0, 1.0, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        },
+        index=[
+            "K_ctr_ctrl",
+            "S0_1_A01",
+            "S1_1_A01",
+            "S0_1_A02",
+            "S1_1_A02",
+            "x_true[0]",
+            "x_true[1]",
+            "x_true[2]",
+            "x_per_well[0, A01]",
+            "x_per_well[1, A01]",
+            "x_per_well[2, A01]",
+            "x_per_well[0, A02]",
+            "x_per_well[1, A02]",
+            "x_per_well[2, A02]",
+        ],
+    )
+    # fmt: on
+    ds = Dataset(
+        {"1": DataArray(np.array([9.0, 8.0, 7.0]), np.array([2.1, 1.5, 1.1]))},
+        is_ph=True,
+    )
+    multi = MultiFitResult(trace=xr.DataTree(), results={})
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            bayes, "_trace_summary_df", _summary_df_stub_factory(trace_df)
+        )
+        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        fr_a01 = extract_fit("A01", "ctrl", multi, copy.deepcopy(ds), well_key="A01")
+        fr_a02 = extract_fit("A02", "ctrl", multi, copy.deepcopy(ds), well_key="A02")
+
+    assert fr_a01.dataset is not None
+    assert fr_a02.dataset is not None
+    np.testing.assert_allclose(fr_a01.dataset["1"].xc, np.array([8.1, 7.1, 6.1]))
+    np.testing.assert_allclose(fr_a02.dataset["1"].xc, np.array([7.9, 6.9, 5.9]))
+    np.testing.assert_allclose(fr_a01.dataset["1"].x_errc, np.array([0.05, 0.05, 0.05]))
+    np.testing.assert_allclose(fr_a02.dataset["1"].x_errc, np.array([0.07, 0.07, 0.07]))
+
+
+def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit should build one trace summary for per-well reconstruction."""
+    fr_init = fit_binding_glob(multi_dataset)
+    assert fr_init.dataset is not None
+    fit_results = {"A01": fr_init, "A02": fr_init}
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    trace = xr.DataTree()
+    per_well_calls = {"count": 0}
+
+    def fake_per_well_fit_results_from_trace(
+        trace_obj: xr.DataTree,
+        per_well_fit_results: dict[str, FitResult[MiniT]],
+        per_well_scheme: PlateScheme,
+        *,
+        x_error_model: str,
+    ) -> dict[str, FitResult[xr.DataTree]]:
+        del per_well_scheme, x_error_model
+        assert trace_obj is trace
+        assert set(per_well_fit_results) == {"A01", "A02"}
+        per_well_calls["count"] += 1
+        return {key: FitResult(mini=trace) for key in per_well_fit_results}
+
+    def fake_pm_sample(*_unused_args: object, **_unused_kwargs: object) -> xr.DataTree:
+        return trace
+
+    monkeypatch.setattr(
+        bayes,
+        "_per_well_fit_results_from_trace",
+        fake_per_well_fit_results_from_trace,
+    )
+    monkeypatch.setattr(pm, "sample", fake_pm_sample)
+    monkeypatch.setattr(
+        bayes, "_compute_sample_log_likelihood", lambda sampled: sampled
+    )
+    monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+
+    multi = bayes.fit_binding_pymc_multi(
+        fit_results,
+        scheme,
+        n_samples=2,
+        n_tune=1,
+        n_xerr=0.0,
+        x_error_model="deterministic",
+    )
+
+    assert set(multi.results) == {"A01", "A02"}
+    assert per_well_calls["count"] == 1
+
+
+def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit should forward the configured minimum x step to create_x_true."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    captured: dict[str, float] = {}
+
+    def fake_create_x_true(
+        xc: np.ndarray,
+        x_errc: np.ndarray,
+        n_xerr: float,
+        lower_nsd: float = 2.5,
+        min_x_step: float = 0.2,
+    ) -> np.ndarray:
+        del xc, x_errc, n_xerr, lower_nsd
+        captured["min_x_step"] = min_x_step
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "create_x_true", fake_create_x_true)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=1.0,
+            x_error_model="deterministic",
+            min_x_step=0.35,
+        )
+
+    assert captured["min_x_step"] == 0.35
+
+
 @pytest.mark.slow
 @pytest.mark.filterwarnings(
     "ignore:invalid value encountered in scalar divide"
@@ -398,3 +960,18 @@ def test_create_parameter_priors_minimum_sigma() -> None:
         priors = create_parameter_priors(params, n_sd=5.0)
         # Should apply minimum sigma of 1e-3
         assert "K" in priors
+
+
+def test_masked_multiwell_vectors_have_same_order() -> None:
+    """Masked model and observed arrays must flatten in the same row-major order."""
+    y_model_all = np.array([[10, 100], [20, 200], [30, 300]], dtype=float)
+
+    mask = np.array([[True, True], [True, False], [False, True]], dtype=bool)
+
+    y_obs_full = np.array([[11, 101], [21, np.nan], [np.nan, 301]], dtype=float)
+
+    mu_vec = y_model_all[mask]
+    y_obs_vec = y_obs_full[mask]
+
+    assert mu_vec.tolist() == [10, 100, 20, 300]
+    assert y_obs_vec.tolist() == [11, 101, 21, 301]

@@ -49,7 +49,12 @@ import numpy as np
 import pandas as pd
 
 from clophfit.fitting.pipeline import fgls_plate_fit
-from clophfit.fitting.data_structures import Dataset, FitResult
+from clophfit.fitting.data_structures import (
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.prtecan import Titration
 from clophfit.testing.fitter_test_utils import (
@@ -339,18 +344,21 @@ def _fit_real_curve_with_titration(
         from clophfit.fitting.bayes import fit_binding_pymc_multi, extract_fit
 
         results = fit_plate(datasets, method=combination.prefit)
-        x_error_model = "random_walk" if "xrw" in result_attr else "deterministic"
-        bg_noise = {}
-        for lbl in tit.bg_noise:
-            arr = tit.bg_noise[lbl]
-            bg_noise[str(lbl)] = float(np.nanmean(arr)) if np.any(np.isfinite(arr)) else 0.0
+        x_error_model = "per_well" if "xrw" in result_attr else "deterministic"
+        noise_model: PlateNoiseModel | None = None
+        if "noise" in result_attr:
+            noise_model = PlateNoiseModel()
+            for lbl in tit.bg_noise:
+                arr = tit.bg_noise[lbl]
+                floor = float(np.nanmean(arr)) if np.any(np.isfinite(arr)) else 0.0
+                noise_model[str(lbl)] = NoiseModelParams(sigma_floor=floor)
 
-        trace = fit_binding_pymc_multi(
+        multi_result = fit_binding_pymc_multi(
             results,
             tit.scheme,
             n_samples=tit.params.n_mcmc_samples,
             n_tune=tit.params.n_mcmc_samples // 2,
-            bg_noise=bg_noise if "noise" in result_attr else None,
+            noise_model=noise_model,
             x_error_model=x_error_model,
         )
 
@@ -359,7 +367,7 @@ def _fit_real_curve_with_titration(
             if requested_well in keys:
                 ctr = scheme_name
                 break
-        return extract_fit(requested_well, ctr, trace, datasets[requested_well])
+        return multi_result.results[requested_well]
     else:
         from clophfit.fitting.pipeline import fit_plate
         method_map = {"result_global": "lm", "result_odr": "odr", "result_mcmc": "mcmc"}

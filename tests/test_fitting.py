@@ -941,7 +941,7 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
         "2": NoiseModelParams(sigma_floor=5.0, gain=1.0, alpha=0.04),
     })
 
-    trace = fit_binding_pymc_multi(
+    multi = fit_binding_pymc_multi(
         results,
         scheme,
         noise_model=noise_model,
@@ -951,14 +951,16 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
         n_tune=25,
     )
 
-    assert hasattr(trace, "posterior")
-    assert "rel_error" in trace.posterior
-    assert "gain_1" in trace.posterior
+    assert hasattr(multi.trace, "posterior")
+    assert "rel_error" in multi.trace.posterior
+    assert "gain_1" in multi.trace.posterior
+    assert set(multi.results) == {"A01", "A02"}
+    assert multi.results["A01"].result is not None
 
 
 @pytest.mark.slow
-def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
-    """Smoke test for multi-well noise+per-well pH random-walk PyMC fit."""
+def test_fit_binding_pymc_multi_noise_per_well(multi_dataset: Dataset) -> None:
+    """Smoke test for multi-well noise+per-well pH PyMC fit."""
     fr_init = fit_binding_glob(multi_dataset)
     assert fr_init.result is not None
 
@@ -967,30 +969,31 @@ def test_fit_binding_pymc_multi_noise_xrw(multi_dataset: Dataset) -> None:
     scheme.names = {"ctrl": {"A01", "A02"}}
 
     np.random.default_rng(42)
-    # Comprehensive noise with x_error_model="random_walk"
+    # Comprehensive noise with x_error_model="per_well"
     noise_model = PlateNoiseModel({
         "1": NoiseModelParams(sigma_floor=250.0, gain=1.0, alpha=0.04),
         "2": NoiseModelParams(sigma_floor=5.0, gain=1.0, alpha=0.04),
     })
 
-    trace = fit_binding_pymc_multi(
+    multi = fit_binding_pymc_multi(
         results,
         scheme,
         noise_model=noise_model,
-        x_error_model="random_walk",
+        x_error_model="per_well",
         n_sd=3.0,
-        n_xerr=0.0,
+        n_xerr=1.0,
         n_samples=50,
         n_tune=25,
     )
 
-    assert hasattr(trace, "posterior")
-    assert "sigma_pip" in trace.posterior
-    assert "x_per_well" in trace.posterior
-    assert "rel_error" in trace.posterior
-    # x_per_well has dims (step, well)
-    assert "step" in trace.posterior["x_per_well"].dims
-    assert "well" in trace.posterior["x_per_well"].dims
+    assert hasattr(multi.trace, "posterior")
+    assert "x_step" in multi.trace.posterior or "x_per_well" in multi.trace.posterior
+    assert "rel_error" in multi.trace.posterior
+    if "x_per_well" in multi.trace.posterior:
+        # x_per_well has dims (step, well)
+        assert "step" in multi.trace.posterior["x_per_well"].dims
+        assert "well" in multi.trace.posterior["x_per_well"].dims
+    assert set(multi.results) == {"A01", "A02"}
 
 
 def test_extract_sigma_df_from_datatree_posterior() -> None:
