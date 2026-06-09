@@ -30,6 +30,7 @@ Classes:
 
 from __future__ import annotations
 
+import re
 import warnings
 from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
@@ -472,7 +473,7 @@ def plot_spectra_distributed(
 
 
 def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
-    trace: xr.DataTree,
+    trace: xr.DataTree | MultiFitResult,
     results: Mapping[str, FitResult[MiniT]] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
     annotate_wells: list[str] | None = None,
@@ -488,8 +489,9 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
 
     Parameters
     ----------
-    trace : xr.DataTree
-        The PyMC inference trace containing `sigma_obs` deterministic nodes.
+    trace : xr.DataTree | MultiFitResult
+        The PyMC inference trace containing `sigma_obs` deterministic nodes, or
+        the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
     results : Mapping[str, FitResult[MiniT]] | None, optional
         The dictionary of well results to derive fallback sigma values.
     figsize_per_label : tuple[float, float], optional
@@ -843,8 +845,49 @@ def _sigma_records_from_posterior(trace: xr.DataTree) -> list[dict[str, object]]
 
     records: list[dict[str, object]] = []
     pattern = r"sigma_obs_(?P<label>[A-Za-z0-9]+)_(?P<well>.+)"
+    dim_pattern = re.compile(r"^sigma_obs_(?P<label>[A-Za-z0-9]+)$")
+
     for name, da in trace.posterior.data_vars.items():
         var_name = str(name)
+
+        # --- dim-based sigma_obs (multi-well: sigma_obs_1 with dims step x well) ---
+        dim_match = dim_pattern.match(var_name)
+        if dim_match and "well" in da.dims:
+            label = dim_match["label"]
+            sample_dims = _sample_dims_from_posterior_var(da)
+            mean_da = da.mean(dim=sample_dims) if sample_dims else da
+            sd_da = da.std(dim=sample_dims) if sample_dims else xr.zeros_like(da)
+            lo_da, hi_da = _interval_bounds_from_var(da, sample_dims)
+            well_coord = mean_da.coords.get("well")
+            step_coord = mean_da.coords.get("step")
+            well_values = (
+                np.asarray(well_coord)
+                if well_coord is not None
+                else np.arange(mean_da.sizes.get("well", 0))
+            )
+            step_indices = (
+                np.asarray(step_coord)
+                if step_coord is not None
+                else np.arange(mean_da.sizes.get("step", 0))
+            )
+            for pos_w, well_name in enumerate(well_values.tolist()):
+                for pos_s, step_idx in enumerate(step_indices.tolist()):
+                    try:
+                        idx = int(step_idx)
+                    except (TypeError, ValueError):
+                        idx = pos_s
+                    records.append({
+                        "mean": float(mean_da.isel(well=pos_w, step=pos_s).values),
+                        "sd": float(sd_da.isel(well=pos_w, step=pos_s).values),
+                        "hdi_3%": float(lo_da.isel(well=pos_w, step=pos_s).values),
+                        "hdi_97%": float(hi_da.isel(well=pos_w, step=pos_s).values),
+                        "label": label,
+                        "well": str(well_name),
+                        "idx": idx,
+                    })
+            continue
+
+        # --- per-well named sigma_obs (single-well: sigma_obs_1_A01) ---
         match = pd.Series([var_name]).str.extract(pattern).iloc[0]
         if match.isna().any():
             continue
