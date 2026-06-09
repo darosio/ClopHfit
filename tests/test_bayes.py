@@ -975,3 +975,110 @@ def test_masked_multiwell_vectors_have_same_order() -> None:
 
     assert mu_vec.tolist() == [10, 100, 20, 300]
     assert y_obs_vec.tolist() == [11, 101, 21, 301]
+
+
+def test_extract_x_per_well_from_xarray_returns_correct_ordered_values() -> None:
+    """xarray-based extraction must return correct per-well x, ordered by step."""
+    n_chains, n_draws, n_steps, n_wells = 2, 3, 3, 2
+    x_data = np.zeros((n_chains, n_draws, n_steps, n_wells))
+    for c in range(n_chains):
+        for d in range(n_draws):
+            x_data[c, d, :, 0] = [8.9, 8.3, 7.7]  # A01, identical
+            x_data[c, d, :, 1] = [8.9, 8.4, 7.9]  # A02 base
+    x_data[0, :, :, 1] += 0.01
+    x_data[1, :, :, 1] -= 0.01
+
+    ds = xr.Dataset(
+        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        coords={
+            "chain": [0, 1],
+            "draw": [0, 1, 2],
+            "step": [0, 1, 2],
+            "well": ["A01", "A02"],
+        },
+    )
+    trace = xr.DataTree.from_dict({"posterior": ds})
+
+    nxc_a01, nx_errc_a01 = bayes._extract_x_per_well_from_xarray(trace, "A01")  # noqa: SLF001
+    nxc_a02, nx_errc_a02 = bayes._extract_x_per_well_from_xarray(trace, "A02")  # noqa: SLF001
+
+    np.testing.assert_allclose(nxc_a01, np.array([8.9, 8.3, 7.7]))
+    np.testing.assert_allclose(nxc_a02[0], 8.9, atol=1e-6)
+    np.testing.assert_allclose(nx_errc_a01, 0, atol=1e-14)
+    assert np.all(nx_errc_a02 > 1e-3)
+    np.testing.assert_allclose(nxc_a01, [8.9, 8.3, 7.7])
+
+
+def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
+    """extract_fit must read x_per_well from raw_trace, not from az.summary.
+
+    Regression test: az.summary can wrongly index multi-dim deterministics
+    (producing wrong step-0 values per well).  The raw xarray trace is the
+    ground truth, and extract_fit with raw_trace must use it.
+    """
+    # Build xarray trace with CORRECT x_per_well
+    n_chains, n_draws, n_steps, n_wells = 1, 2, 3, 2
+    x_data = np.zeros((n_chains, n_draws, n_steps, n_wells))
+    for c in range(n_chains):
+        for d in range(n_draws):
+            x_data[c, d, :, 0] = [8.9, 8.3, 7.7]
+            x_data[c, d, :, 1] = [8.9, 8.4, 7.9]
+
+    ds = xr.Dataset(
+        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        coords={
+            "chain": [0],
+            "draw": [0, 1],
+            "step": [0, 1, 2],
+            "well": ["A01", "A02"],
+        },
+    )
+    trace = xr.DataTree.from_dict({"posterior": ds})
+
+    # Build a BROKEN summary DataFrame (simulating arviz wrong index)
+    broken_df = pd.DataFrame(
+        {
+            "mean": [7.0, 2.0, 1.0, 8.0, 7.0, 6.0, 9.0, 8.0, 7.0, 8.1, 7.1, 6.1],
+            "sd": [0.1, 0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05],
+            "hdi_3%": [6.8, 1.8, 0.8, 8.0, 7.0, 6.0, 9.0, 8.0, 7.0, 8.0, 7.0, 6.0],
+            "hdi_97%": [7.2, 2.2, 1.2, 8.0, 7.0, 6.0, 9.0, 8.0, 7.0, 8.2, 7.2, 6.2],
+            "r_hat": [1.0, 1.0, 1.0, np.nan] * 3,
+        },
+        index=[
+            "K_A01",
+            "S0_1[A01]",
+            "S1_1[A01]",
+            "x_true[0]",
+            "x_true[1]",
+            "x_true[2]",
+            "x_per_well[0, A01]",
+            "x_per_well[1, A01]",
+            "x_per_well[2, A01]",
+            "x_per_well[0, A02]",
+            "x_per_well[1, A02]",
+            "x_per_well[2, A02]",
+        ],
+    )
+    # The broken summary has x_per_well[0, A01]=9, x_per_well[0, A02]=8.1 —
+    # both WRONG (should be 8.9 for step 0).
+
+    dataset = Dataset(
+        {"1": DataArray(np.array([9.0, 8.0, 7.0]), np.array([1.0] * 3))},
+        is_ph=True,
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(bayes, "_trace_summary_df", lambda _: broken_df)
+        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        fr = extract_fit(
+            "A01",
+            "",
+            broken_df,
+            copy.deepcopy(dataset),
+            well_key="A01",
+            raw_trace=trace,
+        )
+
+    assert fr.dataset is not None
+    # Must use xarray truth (8.9, 8.3, 7.7), not broken summary (9, 8, 7)
+    np.testing.assert_allclose(fr.dataset["1"].xc, np.array([8.9, 8.3, 7.7]))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import os
 import re
@@ -654,12 +655,14 @@ def process_trace(
     return FitResult(fig, _Result(rpars, residual=residuals), trace, ds)
 
 
-def extract_fit(
+def extract_fit(  # noqa: PLR0913
     key: str,
     ctr: str,
     trace_df: xr.DataTree | MultiFitResult | pd.DataFrame,
     ds: Dataset,
     well_key: str = "",
+    *,
+    raw_trace: xr.DataTree | None = None,
 ) -> FitResult[xr.DataTree]:
     """Compute individual dataset fit from a multi-well trace summary.
 
@@ -677,6 +680,10 @@ def extract_fit(
         When provided, per-well x posteriors (``x_per_well[step, well_key]``)
         are used instead of the global ``x_true``.  Pass the well identifier
         for xrw fits so each well's .dat/.png uses its own inferred pH axis.
+    raw_trace : xr.DataTree | None, optional
+        Raw multi-well PyMC trace for xarray-based x extraction, bypassing
+        potential ``az.summary`` indexing bugs.  When ``None``, falls back
+        to DataFrame-based extraction from *trace_df*.
 
     Returns
     -------
@@ -703,11 +710,14 @@ def extract_fit(
             extracted_name = str(name).replace(_ctr_param_name(ctr), "K")
             _add_param_from_summary(rpars, extracted_name, row)
     # Use per-well x (xrw model) when available; fall back to global x_true.
-    nxc, nx_errc = (
-        _extract_x_per_well_from_trace_df(trace_df, well_key)
-        if well_key
-        else (np.array([]), np.array([]))
-    )
+    # Prefer xarray-based extraction (bypasses ArviZ multi-dim indexing bug);
+    # fall back to df-based extraction for pre-computed summary DataFrames.
+    nxc = np.array([])
+    nx_errc = np.array([])
+    if well_key and raw_trace is not None:
+        nxc, nx_errc = _extract_x_per_well_from_xarray(raw_trace, well_key)
+    if nxc.size == 0:
+        nxc, nx_errc = _extract_x_per_well_from_trace_df(trace_df, well_key)
     if nxc.size == 0:
         nxc, nx_errc = _extract_x_true_from_trace_df(trace_df)
     if nxc.size > 0:
@@ -755,6 +765,39 @@ def _extract_x_true_from_trace_df(
     nxc = [row[0] for row in ordered_rows]
     nx_errc = [row[1] for row in ordered_rows]
     return np.array(nxc), np.array(nx_errc)
+
+
+def _extract_x_per_well_from_xarray(
+    trace: xr.DataTree, well_key: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract per-well x posterior from raw xarray trace, bypassing az.summary.
+
+    Parameters
+    ----------
+    trace : xr.DataTree
+        Raw multi-well PyMC trace.
+    well_key : str
+        Well identifier (e.g. ``"A01"``).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Arrays of per-well x posterior means and standard deviations.
+        Empty if ``x_per_well`` is absent.
+    """
+    if not hasattr(trace, "posterior") or "x_per_well" not in trace.posterior:
+        return np.array([]), np.array([])
+    da = trace.posterior["x_per_well"]
+    sample_dims = [d for d in da.dims if d in {"chain", "draw"}]
+    # mean/std across chains and draws for the specific well
+    well_da = da.sel(well=well_key)
+    if sample_dims:
+        nxc = well_da.mean(dim=sample_dims).to_numpy()
+        nx_errc = well_da.std(dim=sample_dims).to_numpy()
+    else:
+        nxc = well_da.to_numpy()
+        nx_errc = np.zeros_like(nxc)
+    return np.asarray(nxc), np.asarray(nx_errc)
 
 
 def _extract_x_per_well_from_trace_df(
@@ -819,6 +862,37 @@ def x_true_from_trace_df(
     return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
 
 
+def _update_dataset_yerr_from_sigma_obs(
+    trace_df: pd.DataFrame, ds: Dataset, *, well_key: str
+) -> None:
+    """Replace per-data-array ``y_errc`` with posterior ``sigma_obs`` from the trace.
+
+    When a heteroscedastic noise model is used, the posterior ``sigma_obs``
+    values are narrower and more meaningful than the raw data ``y_err`` for
+    computing weighted residuals.
+
+    Only rows matching *well_key* are applied to the per-well dataset.
+    """
+    for lbl, da in ds.items():
+        sigma_rows: dict[int, float] = {}
+        for name, row in trace_df.iterrows():
+            row_name = str(name)
+            if not row_name.startswith(f"sigma_obs_{lbl}["):
+                continue
+            inner = row_name[len(f"sigma_obs_{lbl}[") : -1]
+            parts = inner.split(", ")
+            if len(parts) == 2 and parts[1] == well_key:  # noqa: PLR2004
+                with contextlib.suppress(ValueError, KeyError):
+                    sigma_rows[int(parts[0])] = float(row["mean"])
+        if sigma_rows:
+            n_steps = len(da.yc)
+            y_errc = np.ones(n_steps, dtype=float)
+            for step_idx, sigma_val in sigma_rows.items():
+                if 0 <= step_idx < n_steps:
+                    y_errc[step_idx] = max(sigma_val, 1e-6)
+            da.y_errc = y_errc
+
+
 def _per_well_fit_results_from_trace(
     trace: xr.DataTree,
     fit_results: Mapping[str, FitResult[MiniT]],
@@ -834,12 +908,10 @@ def _per_well_fit_results_from_trace(
             continue
         ctr = next((name for name, wells in scheme.names.items() if key in wells), "")
         well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
+        ds = copy.deepcopy(fr.dataset)
+        _update_dataset_yerr_from_sigma_obs(trace_df, ds, well_key=key)
         per_well_results[key] = extract_fit(
-            key,
-            ctr,
-            trace_df,
-            copy.deepcopy(fr.dataset),
-            well_key=well_key,
+            key, ctr, trace_df, ds, well_key=well_key, raw_trace=trace
         )
         per_well_results[key].mini = trace
     return per_well_results
