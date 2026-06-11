@@ -34,6 +34,8 @@ dependencies = [
   "tqdm>=4.68.2",
   "uncertainties>=3.2.3",
   "xlrd>=2.0.2",
+  "h5netcdf>=1.8.1",
+  "h5py>=3.16.0",
 ]
 description = "Cli for fitting macromolecule pH titration or binding assays data e.g. fluorescence spectra."
 keywords = ["svd", "ClopHensor", "data fitting", "pH", "macromolecule binding"]
