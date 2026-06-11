@@ -96,7 +96,9 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             dof = max(1, n_pts - 1)
             rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
             sigma = max(rel_sigma * mu, 0.01)
-            priors["floor"][lbl] = pm.Normal(f"floor_{lbl}", mu=mu, sigma=sigma)
+            priors["floor"][lbl] = pm.TruncatedNormal(
+                f"floor_{lbl}", mu=mu, sigma=sigma, lower=0.0
+            )
 
     # 2. Gain (Poisson term)
     has_gain = any(p.gain > 0 for p in noise_model.values())
@@ -109,7 +111,9 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             elif gain_mode == "free":
                 priors["gain"] = pm.Exponential("gain", lam=1.0)
             else:  # centered
-                priors["gain"] = pm.Normal("gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1))
+                priors["gain"] = pm.TruncatedNormal(
+                    "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
+                )
         else:
             priors["gain"] = {}
             for lbl in labels:
@@ -119,8 +123,11 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 elif gain_mode == "free":
                     priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=1.0)
                 elif mu_g > 0.0:
-                    priors["gain"][lbl] = pm.Normal(
-                        f"gain_{lbl}", mu=mu_g, sigma=max(0.20 * mu_g, 0.01)
+                    priors["gain"][lbl] = pm.TruncatedNormal(
+                        f"gain_{lbl}",
+                        mu=mu_g,
+                        sigma=max(0.20 * mu_g, 0.01),
+                        lower=0.0,
                     )
                 else:
                     priors["gain"][lbl] = pt.as_tensor_variable(0.0)
