@@ -171,6 +171,71 @@ To use clophfit in your python:
 from clophfit import prenspire, prtecan, binding
 ```
 
+### Model Validation & Diagnostics (`v0.7+`)
+
+New reusable modules for comparing fitting methods and validating Bayesian
+models:
+
+```python
+from clophfit.fitting.model_validation import (
+    residuals_from_multifit,          # MultiFitResult → long DataFrame
+    residuals_from_fit_results,       # dict[str, FitResult] → long DataFrame
+    model_residual_score_table,       # all metrics in one call
+    residual_distribution_summary,    # per-label σ, MAD, tail fractions
+    residual_x_trend_summary,         # residual trend vs titration step
+    residual_lag1_autocorrelation,    # per-well lag-1 correlation
+    residual_cross_label_correlation, # cross-label residual structure
+    x_axis_sanity,                    # check x_per_well invariants
+    trace_diagnostics,                # ESS, R̂, divergences, optional LOO
+)
+
+from clophfit.fitting.ctr_validation import (
+    make_ctr_holdout_scheme,          # remove one CTR well from scheme
+    iter_ctr_holdouts,               # iterate all possible CTR holdouts
+    summarize_bayesian_ctr_holdout,   # ΔK = K_heldout − K_ctr_group
+    classical_ctr_holdout_rows,       # post-hoc CTR-LOO for classical fits
+)
+
+from clophfit.fitting.diagnostic_plots import (
+    plot_residual_overview,           # 4-panel matplotlib (no seaborn)
+)
+```
+
+**Example — Bayesian fit diagnostics:**
+
+```python
+from clophfit.fitting.model_validation import (
+    residuals_from_multifit, trace_diagnostics, x_axis_sanity,
+)
+from clophfit.fitting.models import binding_1site
+
+multi = fit_binding_pymc_multi(results, scheme, ...)
+diag = trace_diagnostics(multi.trace, compute_loo=False)
+x_check = x_axis_sanity(multi.trace)
+assert x_check.get("x_step0_max_abs_spread", 1.0) < 1e-6
+
+residuals = residuals_from_multifit(
+    multi, trace_id="my_model", binding_function=binding_1site,
+)
+# columns: trace_id, well, label, step, x, y, yhat, sigma, raw_res, std_res
+```
+
+**Example — CTR holdout validation:**
+
+```python
+from clophfit.fitting.ctr_validation import (
+    make_ctr_holdout_scheme, summarize_bayesian_ctr_holdout,
+)
+
+heldout = make_ctr_holdout_scheme(scheme, group_name="E2GFP", heldout_well="B12")
+multi_loo = fit_binding_pymc_multi(results, heldout, ...)
+summary = summarize_bayesian_ctr_holdout(
+    multi_loo.trace, trace_id="loo_E2GFP_B12",
+    ctr_group="E2GFP", heldout_well="B12", rope=0.10,
+)
+# summary["delta_k_hdi94_contains_zero"] → True if K_heldout ≈ K_group
+```
+
 ## Development
 
 Requires Python `uv`.

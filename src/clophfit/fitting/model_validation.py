@@ -37,7 +37,9 @@ def sample_stats_dataset(trace: _t.Any) -> _t.Any:
     return getattr(node, "ds", node)
 
 
-def _posterior_mean_scalar(posterior: _t.Any, var_name: str, default: float = 1.0) -> float:
+def _posterior_mean_scalar(
+    posterior: _t.Any, var_name: str, default: float = 1.0
+) -> float:
     if var_name not in posterior:
         return default
     return float(posterior[var_name].mean(("chain", "draw")).values)
@@ -51,13 +53,15 @@ def x_axis_sanity(trace: _t.Any) -> dict[str, _t.Any]:
     close to zero.
     """
     out: dict[str, _t.Any] = {}
-    try:  # noqa: PLW0717  # noqa: PLW0717
+    try:
         posterior = posterior_dataset(trace)
         if "x_per_well" not in posterior:
             return out
         x = posterior["x_per_well"]
         if "step" not in x.dims or "well" not in x.dims:
-            out["x_sanity_error"] = f"x_per_well dims are {x.dims!r}, expected step/well"
+            out["x_sanity_error"] = (
+                f"x_per_well dims are {x.dims!r}, expected step/well"
+            )
             return out
         x0 = x.isel(step=0)
         x0_ref = x0.isel(well=0)
@@ -82,14 +86,16 @@ def trace_diagnostics(
     """Collect basic MCMC and optional LOO diagnostics from a PyMC trace."""
     row: dict[str, _t.Any] = {}
 
-    try:  # noqa: PLW0717
+    try:
         ss = sample_stats_dataset(trace)
         if "diverging" in ss:
             row["n_divergences"] = int(ss["diverging"].sum().values)
         if "tree_depth" in ss:
             row["tree_depth_max"] = int(ss["tree_depth"].max().values)
         if "reached_max_treedepth" in ss:
-            row["n_reached_max_treedepth"] = int(ss["reached_max_treedepth"].sum().values)
+            row["n_reached_max_treedepth"] = int(
+                ss["reached_max_treedepth"].sum().values
+            )
         if "energy" in ss:
             energy = ss["energy"].values.ravel()
             row["energy_sd"] = float(np.nanstd(energy))
@@ -112,7 +118,7 @@ def trace_diagnostics(
             "gain",
         ]
 
-    try:  # noqa: PLW0717
+    try:
         summary = az.summary(trace, var_names=summary_var_names, filter_vars="like")
         if "r_hat" in summary:
             row["rhat_max"] = float(summary["r_hat"].max(skipna=True))
@@ -124,7 +130,7 @@ def trace_diagnostics(
         row["summary_error"] = repr(e)
 
     if compute_loo:
-        try:  # noqa: PLW0717
+        try:
             loo = az.loo(trace)
             row["elpd_loo"] = float(loo.elpd_loo)
             row["p_loo"] = float(loo.p_loo)
@@ -140,7 +146,9 @@ def trace_diagnostics(
     return row
 
 
-def _sigma_for_label_well(trace: _t.Any, lbl: _t.Any, well: str, da: _t.Any, mask: np.ndarray) -> np.ndarray:
+def _sigma_for_label_well(
+    trace: _t.Any, lbl: _t.Any, well: str, da: _t.Any, mask: np.ndarray
+) -> np.ndarray:
     posterior = posterior_dataset(trace)
 
     sigma_var = f"sigma_obs_{lbl}"
@@ -233,7 +241,9 @@ def residuals_from_multifit(
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    return df.replace([np.inf, -np.inf], np.nan).dropna(subset=["std_res", "x", "step", "label"])
+    return df.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["std_res", "x", "step", "label"]
+    )
 
 
 def residuals_from_fit_results(
@@ -289,7 +299,9 @@ def residuals_from_fit_results(
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    return df.replace([np.inf, -np.inf], np.nan).dropna(subset=["std_res", "x", "step", "label"])
+    return df.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["std_res", "x", "step", "label"]
+    )
 
 
 def mad(x: pd.Series) -> float:
@@ -300,7 +312,8 @@ def mad(x: pd.Series) -> float:
 
 def residual_distribution_summary(res_df: pd.DataFrame) -> pd.DataFrame:
     return (
-        res_df.groupby(["trace_id", "label"], observed=True)
+        res_df
+        .groupby(["trace_id", "label"], observed=True)
         .agg(
             n=("std_res", "size"),
             mean_res=("std_res", "mean"),
@@ -318,7 +331,8 @@ def residual_distribution_summary(res_df: pd.DataFrame) -> pd.DataFrame:
 
 def residual_x_trend_summary(res_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     by_step = (
-        res_df.groupby(["trace_id", "label", "step"], observed=True)
+        res_df
+        .groupby(["trace_id", "label", "step"], observed=True)
         .agg(
             x_mean=("x", "mean"),
             step_median_res=("std_res", "median"),
@@ -327,11 +341,21 @@ def residual_x_trend_summary(res_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
         .reset_index()
     )
     trend = (
-        by_step.groupby(["trace_id", "label"], observed=True)
+        by_step
+        .groupby(["trace_id", "label"], observed=True)
         .agg(
-            x_median_rms=("step_median_res", lambda x: float(np.sqrt(np.nanmean(np.asarray(x) ** 2)))),
-            x_median_maxabs=("step_median_res", lambda x: float(np.nanmax(np.abs(np.asarray(x))))),
-            x_mean_rms=("step_mean_res", lambda x: float(np.sqrt(np.nanmean(np.asarray(x) ** 2)))),
+            x_median_rms=(
+                "step_median_res",
+                lambda x: float(np.sqrt(np.nanmean(np.asarray(x) ** 2))),
+            ),
+            x_median_maxabs=(
+                "step_median_res",
+                lambda x: float(np.nanmax(np.abs(np.asarray(x)))),
+            ),
+            x_mean_rms=(
+                "step_mean_res",
+                lambda x: float(np.sqrt(np.nanmean(np.asarray(x) ** 2))),
+            ),
         )
         .reset_index()
     )
@@ -343,32 +367,40 @@ def residual_x_correlation(res_df: pd.DataFrame) -> pd.DataFrame:
     for (trace_id, label), g in res_df.groupby(["trace_id", "label"], observed=True):
         if len(g) < 4:
             continue
-        rows.append(
-            {
-                "trace_id": trace_id,
-                "label": label,
-                "pearson_res_x": g["std_res"].corr(g["x"], method="pearson"),
-                "spearman_res_x": g["std_res"].corr(g["x"], method="spearman"),
-            }
-        )
+        rows.append({
+            "trace_id": trace_id,
+            "label": label,
+            "pearson_res_x": g["std_res"].corr(g["x"], method="pearson"),
+            "spearman_res_x": g["std_res"].corr(g["x"], method="spearman"),
+        })
     return pd.DataFrame(rows)
 
 
-def residual_lag1_autocorrelation(res_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def residual_lag1_autocorrelation(
+    res_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows: list[dict[str, _t.Any]] = []
-    for (trace_id, well, label), g in res_df.groupby(["trace_id", "well", "label"], observed=True):
+    for (trace_id, well, label), g in res_df.groupby(
+        ["trace_id", "well", "label"], observed=True
+    ):
         g = g.sort_values("step")
         r = g["std_res"].to_numpy(dtype=float)
         if len(r) < 3 or np.nanstd(r[:-1]) == 0 or np.nanstd(r[1:]) == 0:
             lag1 = np.nan
         else:
             lag1 = float(np.corrcoef(r[:-1], r[1:])[0, 1])
-        rows.append({"trace_id": trace_id, "well": well, "label": label, "lag1_res_autocorr": lag1})
+        rows.append({
+            "trace_id": trace_id,
+            "well": well,
+            "label": label,
+            "lag1_res_autocorr": lag1,
+        })
     lag_df = pd.DataFrame(rows)
     if lag_df.empty:
         return lag_df, pd.DataFrame()
     summary = (
-        lag_df.groupby(["trace_id", "label"], observed=True)
+        lag_df
+        .groupby(["trace_id", "label"], observed=True)
         .agg(
             lag1_mean=("lag1_res_autocorr", "mean"),
             lag1_median=("lag1_res_autocorr", "median"),
@@ -379,9 +411,14 @@ def residual_lag1_autocorrelation(res_df: pd.DataFrame) -> tuple[pd.DataFrame, p
     return lag_df, summary
 
 
-def residual_cross_label_correlation(res_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def residual_cross_label_correlation(
+    res_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     wide = res_df.pivot_table(
-        index=["trace_id", "well", "step"], columns="label", values="std_res", aggfunc="mean"
+        index=["trace_id", "well", "step"],
+        columns="label",
+        values="std_res",
+        aggfunc="mean",
     )
     rows: list[dict[str, _t.Any]] = []
     for trace_id, sub in wide.groupby(level=0):
@@ -389,17 +426,27 @@ def residual_cross_label_correlation(res_df: pd.DataFrame) -> tuple[pd.DataFrame
         labels = list(mat.columns)
         corr = mat.corr()
         for a, b in itertools.combinations(labels, 2):
-            rows.append(
-                {"trace_id": trace_id, "label_a": str(a), "label_b": str(b), "cross_label_corr": float(np.asarray(corr.loc[a, b]).ravel()[0])}
-            )
+            rows.append({
+                "trace_id": trace_id,
+                "label_a": str(a),
+                "label_b": str(b),
+                "cross_label_corr": float(np.asarray(corr.loc[a, b]).ravel()[0]),
+            })
     corr_df = pd.DataFrame(rows)
     if corr_df.empty:
         return corr_df, pd.DataFrame()
     summary = (
-        corr_df.groupby("trace_id", observed=True)
+        corr_df
+        .groupby("trace_id", observed=True)
         .agg(
-            cross_label_corr_abs_mean=("cross_label_corr", lambda x: float(np.nanmean(np.abs(x)))),
-            cross_label_corr_abs_max=("cross_label_corr", lambda x: float(np.nanmax(np.abs(x)))),
+            cross_label_corr_abs_mean=(
+                "cross_label_corr",
+                lambda x: float(np.nanmean(np.abs(x))),
+            ),
+            cross_label_corr_abs_max=(
+                "cross_label_corr",
+                lambda x: float(np.nanmax(np.abs(x))),
+            ),
         )
         .reset_index()
     )

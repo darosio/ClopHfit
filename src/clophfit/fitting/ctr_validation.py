@@ -17,7 +17,9 @@ def ctr_param_name(group_name: str) -> str:
     return f"K_ctr_{group_name}"
 
 
-def make_ctr_holdout_scheme(scheme: _t.Any, *, group_name: str, heldout_well: str) -> _t.Any:
+def make_ctr_holdout_scheme(
+    scheme: _t.Any, *, group_name: str, heldout_well: str
+) -> _t.Any:
     """Return a PlateScheme copy with one control well removed.
 
     ``PlateScheme.names`` validates strictly as ``dict[str, set[str]]`` in
@@ -41,7 +43,9 @@ def make_ctr_holdout_scheme(scheme: _t.Any, *, group_name: str, heldout_well: st
     return new_scheme
 
 
-def iter_ctr_holdouts(scheme: _t.Any, *, min_remaining: int = 1) -> _t.Iterator[dict[str, _t.Any]]:
+def iter_ctr_holdouts(
+    scheme: _t.Any, *, min_remaining: int = 1
+) -> _t.Iterator[dict[str, _t.Any]]:
     """Yield holdout tasks from all named control groups."""
     for group_name, wells in scheme.names.items():
         group_name = str(group_name)
@@ -141,12 +145,16 @@ def summarize_bayesian_ctr_holdout(
 def summarize_ctr_loo_table(ctr_loo_df: pd.DataFrame) -> pd.DataFrame:
     """Collapse individual holdout rows into one row per model condition."""
     return (
-        ctr_loo_df.groupby("trace_id", observed=True)
+        ctr_loo_df
+        .groupby("trace_id", observed=True)
         .agg(
             ctr_loo_n=("delta_k_mean", "size"),
             ctr_loo_bias_mean=("delta_k_mean", "mean"),
             ctr_loo_mae=("delta_k_abs_mean", "mean"),
-            ctr_loo_rmse=("delta_k_mean", lambda x: float(np.sqrt(np.mean(np.asarray(x) ** 2)))),
+            ctr_loo_rmse=(
+                "delta_k_mean",
+                lambda x: float(np.sqrt(np.mean(np.asarray(x) ** 2))),
+            ),
             ctr_loo_max_abs_error=("delta_k_abs_mean", "max"),
             ctr_loo_mean_sd=("delta_k_sd", "mean"),
             ctr_loo_mean_abs_z=("z_delta_k", lambda x: float(np.nanmean(np.abs(x)))),
@@ -201,20 +209,18 @@ def classical_ctr_holdout_rows(
         se_ctr = float(np.sqrt(1.0 / weights.sum()))
         delta = float(k_h - k_ctr)
         se_delta = float(np.sqrt((se_h or 0.0) ** 2 + se_ctr**2))
-        rows.append(
-            {
-                "trace_id": trace_id,
-                "ctr_group": group,
-                "heldout_well": heldout,
-                "remaining_ctr_wells": ",".join(remaining),
-                "heldout_k": float(k_h),
-                "remaining_k": k_ctr,
-                "delta_k_mean": delta,
-                "delta_k_sd": se_delta,
-                "delta_k_abs_mean": abs(delta),
-                "p_abs_delta_k_lt_rope": float(abs(delta) < rope),
-                "rope": rope,
-                "z_delta_k": float(delta / se_delta) if se_delta > 0 else np.nan,
-            }
-        )
+        rows.append({
+            "trace_id": trace_id,
+            "ctr_group": group,
+            "heldout_well": heldout,
+            "remaining_ctr_wells": ",".join(remaining),
+            "heldout_k": float(k_h),
+            "remaining_k": k_ctr,
+            "delta_k_mean": delta,
+            "delta_k_sd": se_delta,
+            "delta_k_abs_mean": abs(delta),
+            "p_abs_delta_k_lt_rope": float(abs(delta) < rope),
+            "rope": rope,
+            "z_delta_k": float(delta / se_delta) if se_delta > 0 else np.nan,
+        })
     return pd.DataFrame(rows)

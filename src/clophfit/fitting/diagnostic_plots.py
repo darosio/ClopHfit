@@ -46,14 +46,12 @@ def _lag1_residual_correlation(
         else:
             lag1 = float(np.corrcoef(r[:-1], r[1:])[0, 1])
 
-        rows.append(
-            {
-                label_col: label,
-                well_col: well,
-                "lag1_corr": lag1,
-                "n_points": len(r),
-            }
-        )
+        rows.append({
+            label_col: label,
+            well_col: well,
+            "lag1_corr": lag1,
+            "n_points": len(r),
+        })
 
     return pd.DataFrame(rows)
 
@@ -69,8 +67,8 @@ def _normal_qq_points(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return np.array([]), np.array([])
 
     probs = (np.arange(1, n + 1) - 0.5) / n
-    nd = NormalDist()
-    theoretical = np.array([nd.inv_cdf(float(p)) for p in probs])
+    ndist = NormalDist()
+    theoretical = np.array([ndist.inv_cdf(float(p)) for p in probs])
     return theoretical, values
 
 

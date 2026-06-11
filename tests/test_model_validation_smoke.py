@@ -6,6 +6,8 @@ with the committed example plate and 20-draw PyMC smoke fits.
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 
@@ -25,7 +27,7 @@ def test_residual_score_table_smoke() -> None:
     })
     model, per_label, by_step, _lag, _cross = model_residual_score_table(df)
     assert model.loc[0, "trace_id"] == "m1"
-    assert np.isfinite(model.loc[0, "residual_x_median_rms"])
+    assert np.isfinite(cast("float", model.loc[0, "residual_x_median_rms"]))
     assert not per_label.empty
     assert not by_step.empty
 
