@@ -498,6 +498,28 @@ def create_x_true(
     return xc
 
 
+def _safe_sigma(
+    stderr: float | None,
+    n_sd: float,
+    *,
+    default: float = 0.2,
+    floor: float = 1e-3,
+    cap: float | None = None,
+) -> float:
+    """Return a safe prior *sigma* from an lmfit ``stderr`` estimate.
+
+    Handles ``None``, ``NaN``, ``inf``, and non-positive values by falling
+    back to *default*.  The result is clamped to [*floor*, *cap*].
+    """
+    if stderr is None or not np.isfinite(stderr) or stderr <= 0:
+        sigma = default
+    else:
+        sigma = max(stderr * n_sd, floor)
+    if cap is not None:
+        sigma = min(sigma, cap)
+    return float(sigma)
+
+
 def create_parameter_priors(
     params: Parameters,
     n_sd: float,
@@ -532,7 +554,7 @@ def create_parameter_priors(
 
     for name, p in params.items():
         # Use specified default sigma if stderr is not available
-        sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else default_sigma
+        sigma = _safe_sigma(p.stderr, n_sd, default=default_sigma)
         # Skip creating a separate K prior if it belongs to a control group
         if ctr_name and name == "K":
             continue
@@ -1087,24 +1109,35 @@ def fit_binding_pymc(  # noqa: PLR0913
 def weighted_stats(
     values: Mapping[str, Sequence[float | None]],
     stderr: Mapping[str, Sequence[float | None]],
+    *,
+    min_stderr: float = 1e-3,
 ) -> dict[str, tuple[float, float]]:
-    """Weighted mean and stderr for control priors."""
+    """Weighted mean and stderr for control priors.
+
+    Filters out ``NaN``, ``inf``, and non-positive stderr, and floors
+    stderr at *min_stderr* to avoid infinite weights.
+    """
     results: dict[str, tuple[float, float]] = {}
     for sample in values:
-        pairs = [
-            (v, s)
-            for v, s in zip(values[sample], stderr[sample], strict=True)
-            if v is not None and s is not None
-        ]
+        pairs = []
+        for v, s in zip(values[sample], stderr[sample], strict=True):
+            if v is None or s is None:
+                continue
+            if not (np.isfinite(v) and np.isfinite(s)):
+                continue
+            s_val = min_stderr if s <= 0 else float(s)
+            pairs.append((float(v), s_val))
+
         if not pairs:
-            msg = f"No valid (value, stderr) pairs for sample '{sample}'"
+            msg = f"No valid finite (value, stderr) pairs for {sample!r}"
             raise ValueError(msg)
-        x, se = zip(*pairs, strict=True)
-        x_arr = np.array(x, dtype=float)
-        se_arr = np.array(se, dtype=float)
-        weighted_mean = np.average(x_arr, weights=1 / se_arr**2)
-        weighted_stderr = np.sqrt(1 / np.sum(1 / se_arr**2))
-        results[sample] = (weighted_mean, weighted_stderr)
+
+        x, se = map(np.asarray, zip(*pairs, strict=True))
+        w = 1.0 / se**2
+        results[sample] = (
+            float(np.average(x, weights=w)),
+            float(np.sqrt(1.0 / w.sum())),
+        )
     return results
 
 
@@ -1291,7 +1324,9 @@ def _well_k_init_from_results(
                 well_k[well] = (ph_mid, fallback_sigma)
             # else: leave absent → _build_ctr_k_params uses group mean fallback
         else:
-            sigma = min(max(p.stderr * n_sd, 0.2), fallback_sigma)
+            sigma = _safe_sigma(
+                p.stderr, n_sd, default=0.2, floor=0.2, cap=fallback_sigma
+            )
             well_k[well] = (p.value, sigma)
     return well_k
 
@@ -1593,7 +1628,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 if k_well is None:
                     # It's an UNK well, create its K prior
                     p = r.result.params["K"]
-                    sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
+                    sigma = _safe_sigma(p.stderr, n_sd)
                     k_well = pm.Normal(f"K_{key}", mu=p.value, sigma=sigma)
             elif ctr_name:
                 k_well = k_params[ctr_name]
@@ -1619,9 +1654,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 p_s0 = r.result.params[f"S0_{lbl}"]
                 p_s1 = r.result.params[f"S1_{lbl}"]
                 mu_s0.append(p_s0.value)
-                sig_s0.append(max(p_s0.stderr * n_sd, 1e-3) if p_s0.stderr else 1e-3)
+                sig_s0.append(_safe_sigma(p_s0.stderr, n_sd))
                 mu_s1.append(p_s1.value)
-                sig_s1.append(max(p_s1.stderr * n_sd, 1e-3) if p_s1.stderr else 1e-3)
+                sig_s1.append(_safe_sigma(p_s1.stderr, n_sd))
             s0_vars[lbl] = pm.Normal(
                 f"S0_{lbl}", mu=np.array(mu_s0), sigma=np.array(sig_s0), dims="well"
             )

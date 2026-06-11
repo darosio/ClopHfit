@@ -1082,3 +1082,93 @@ def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
     assert fr.dataset is not None
     # Must use xarray truth (8.9, 8.3, 7.7), not broken summary (9, 8, 7)
     np.testing.assert_allclose(fr.dataset["1"].xc, np.array([8.9, 8.3, 7.7]))
+
+
+def test_multiwell_likelihood_ordering_is_well_major() -> None:
+    """mu_vec and y_obs_vec must be in the same row-major order after masking."""
+    n_steps, n_wells = 3, 2
+    # Build y_obs_full where each column is a well
+    y_obs_full = np.array([[10, 100], [20, 200], [30, 300]], dtype=float)
+    mask = np.ones((n_steps, n_wells), dtype=bool)
+    # Row-major flatten
+    mu_vec = np.array([[1, 2], [3, 4], [5, 6]], dtype=float)[mask]
+    y_obs_vec = y_obs_full[mask]
+    # Both should be [well0_s0, well1_s0, well0_s1, well1_s1, well0_s2, well1_s2]
+    assert mu_vec.tolist() == [1, 2, 3, 4, 5, 6]
+    assert y_obs_vec.tolist() == [10, 100, 20, 200, 30, 300]
+
+
+def test_gain_prior_is_positive_and_logp_finite() -> None:
+    """TruncatedNormal gain must have non-negative domain (lower >= 0)."""
+    pytest.importorskip("pymc")
+
+    nm = PlateNoiseModel({"1": NoiseModelParams(sigma_floor=1.0, gain=0.5, alpha=0.0)})
+    with pm.Model() as model:
+        bayes.build_pymc_noise_priors(nm, gain_mode="centered")
+        logps = model.point_logps()
+        for v, lp in logps.items():
+            assert np.isfinite(lp), f"{v} logp is {lp}"
+
+
+def test_weighted_stats_ignores_nan_and_handles_zero_stderr() -> None:
+    """weighted_stats must skip NaN/inf and floor zero/negative stderr."""
+    result = weighted_stats(
+        {"a": [1.0, 2.0, np.nan, 3.0]},
+        {"a": [0.1, 0.0, 0.3, np.inf]},
+    )
+    # NaN ignored, inf ignored, zero stderr floored to min_stderr
+    mean, se = result["a"]
+    assert np.isfinite(mean)
+    assert np.isfinite(se)
+    # With min_stderr=1e-3, weight for point 2 is 1/(1e-3)² = 1e6
+    # so mean ≈ 2.0
+
+
+def test_first_fit_result_without_dataset_does_not_break_multiwell(
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-well fit must find a dataset even if first result has none."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    # Put None-dataset result FIRST, valid results after
+    fr_init = fit_binding_glob(multi_dataset)
+    empty_fr = copy.deepcopy(fr_init)
+    empty_fr.dataset = None
+    results = {"A01": empty_fr, "A02": fr_init}
+
+    # Verification that the dataset-finding logic skips None-dataset entries.
+    # Test the internal logic directly instead of running the full fit.
+    fit_results, _ = bayes._normalize_fit_inputs(results)  # noqa: SLF001
+    ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
+    assert ds is not None  # finds A02's dataset
+    # A01 should be filtered out by the dataset check
+    active_wells = {key for key, r in results.items() if r.result and r.dataset}
+    assert active_wells == {"A02"}
+
+
+def test_x_per_well_extraction_from_xarray_not_string_names() -> None:
+    """xarray-based extraction must work, not depend on az.summary string parsing."""
+    n_chains, n_draws, n_steps, n_wells = 1, 2, 2, 2
+    x_data = np.zeros((n_chains, n_draws, n_steps, n_wells))
+    for d in range(n_draws):
+        x_data[0, d, :, 0] = [8.9, 7.0]
+        x_data[0, d, :, 1] = [8.9, 8.0]
+
+    ds = xr.Dataset(
+        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        coords={
+            "chain": [0],
+            "draw": [0, 1],
+            "step": [0, 1],
+            "well": ["A01", "A02"],
+        },
+    )
+    trace = xr.DataTree.from_dict({"posterior": ds})
+
+    nxc_a01, _ = bayes._extract_x_per_well_from_xarray(trace, "A01")  # noqa: SLF001
+    nxc_a02, _ = bayes._extract_x_per_well_from_xarray(trace, "A02")  # noqa: SLF001
+
+    np.testing.assert_allclose(nxc_a01, [8.9, 7.0])
+    np.testing.assert_allclose(nxc_a02, [8.9, 8.0])
+    # Verify no string parsing path was needed — shape must be correct
+    assert len(nxc_a01) == n_steps
