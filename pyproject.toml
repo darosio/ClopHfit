@@ -293,6 +293,29 @@ max-complexity = 12
   "S101",
   "PLR6301", # Method could be function/static - pytest relies on self
 ]
+"src/clophfit/fitting/model_validation.py" = [
+  "ANN401", # typing.Any for generic trace/dataset handling
+  "BLE001", # Robustness wrappers catch broad exceptions
+  "C901", # trace_diagnostics is intentionally comprehensive
+  "D103", # Docstrings on aggregation helpers (names are self-documenting)
+  "PD011", # xarray .values convention in scientific code
+  "PLR0912", # Branch complexity in trace_diagnostics
+  "PLR2004", # Domain-specific thresholds (2σ, 3σ, Pareto-k 0.7, etc.)
+  "PLW2901", # Loop var reassignment (sort_values in-place pattern)
+]
+"src/clophfit/fitting/ctr_validation.py" = [
+  "ANN401", # typing.Any for generic scheme/trace handling
+  "D402", # Iterator docstring yields convention
+  "DOC402", # Yields section in docstring
+  "PD011", # xarray .values convention
+  "PLW2901", # Loop var reassignment (str coercion pattern)
+]
+"src/clophfit/fitting/diagnostic_plots.py" = [
+  "PLR0913", # plot_residual_overview has many keyword options
+  "PLR0915", # plot_residual_overview has many statements (4-panel plot)
+  "PLR2004", # Domain-specific thresholds (min 3 points for correlation)
+  "PLW2901", # Loop var reassignment (sort_values in-place pattern)
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
