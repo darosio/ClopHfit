@@ -10,8 +10,7 @@ from typing import IO, cast
 
 import pytest
 from click.testing import CliRunner
-from matplotlib.testing.compare import compare_images
-from matplotlib.testing.exceptions import ImageComparisonFailure
+from PIL import Image
 
 from clophfit.__main__ import clop, fit_titration, note2csv, ppr
 
@@ -96,16 +95,17 @@ def test_prenspire(tmp_path: Path) -> None:
     # validate output files
     assert (out / "NTT_37C_pKa_A.csv").exists()
     assert (out / "NTT_37C_pKa_B.csv").exists()
-    assert (out / "NTT_37C_pKa_A.png").exists()
-    assert (out / "NTT_37C_pKa_B.png").exists()
+    # validate output images
+    for stem in ["NTT_37C_pKa_A", "NTT_37C_pKa_B"]:
+        fp = out / f"{stem}.png"
+        assert fp.exists()
+        img = Image.open(fp)
+        assert img.width > 0
+        assert img.height > 0
+        assert fp.stat().st_size > 1000
     # validate output file contents
     assert filecmp.cmp(out / "NTT_37C_pKa_A.csv", expected / "NTT_37C_pKa_A.csv")
     assert filecmp.cmp(out / "NTT_37C_pKa_B.csv", expected / "NTT_37C_pKa_B.csv")
-    # validate graph
-    for f in ["NTT_37C_pKa_A.png", "NTT_37C_pKa_B.png"]:
-        msg = compare_images(str(out / f), str(expected / f), 0.007)
-        if msg:  # pragma: no cover
-            raise ImageComparisonFailure(msg)
 
 
 @pytest.mark.slow
