@@ -107,14 +107,32 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
 
     r = np.asarray(fr.result.residual, dtype=float)
     pts: list[ResidualPoint] = []
+    masked_total = sum(len(da.y) for da in fr.dataset.values())
+    raw_total = sum(len(da.yc) for da in fr.dataset.values())
+    residuals_are_raw = len(r) == raw_total and len(r) != masked_total
 
     start = 0
     for lbl, da in fr.dataset.items():
-        n = len(da.y)  # masked length
-        rw = r[start : start + n]
-        rr = rw * da.y_err  # undo weighting: raw = weighted * y_err
-        xs = da.x
-        raw_is = np.flatnonzero(da.mask)
+        mask = np.asarray(da.mask, dtype=bool)
+        if residuals_are_raw:
+            n_raw = len(da.yc)
+            rw_full = r[start : start + n_raw]
+            rw = rw_full[mask]
+            y_err = da.y_err
+            xs = da.xc[mask]
+            ys = da.yc[mask]
+            raw_is = np.flatnonzero(mask)
+            start += n_raw
+        else:
+            n = len(da.y)  # masked length
+            rw = r[start : start + n]
+            y_err = da.y_err
+            xs = da.x
+            ys = da.y
+            raw_is = np.flatnonzero(mask)
+            start += n
+
+        rr = rw * y_err  # undo weighting: raw = weighted * y_err
 
         pts.extend(
             ResidualPoint(
@@ -123,12 +141,11 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
                 resid_weighted=float(rw[i]),
                 resid_raw=float(rr[i]),
                 raw_i=int(raw_is[i]),
-                y_err=float(da.y_err[i]),
-                predicted=float(da.y[i]) - float(rr[i]),
+                y_err=float(y_err[i]),
+                predicted=float(ys[i]) - float(rr[i]),
             )
-            for i in range(n)
+            for i in range(len(rw))
         )
-        start += n
 
     if start != len(r):
         msg = f"Residual length mismatch: consumed {start}, residual has {len(r)}"

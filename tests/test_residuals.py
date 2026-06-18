@@ -173,6 +173,24 @@ class TestExtractResidualPoints:
         indices = [p.raw_i for p in points]
         assert indices == list(range(5))
 
+    def test_raw_length_residuals_skip_masked_points(self) -> None:
+        """Raw-length backend residual vectors are filtered by DataArray.mask."""
+        x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
+        y = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
+        y_err = np.ones_like(y) * 10.0
+        da = DataArray(xc=x, yc=y, y_errc=y_err)
+        da.mask = np.array([True, False, True, True, True])
+        dataset = Dataset({"1": da}, is_ph=True)
+        fr = fit_binding_glob(dataset)
+        assert fr.result is not None
+        fr.result.residual = np.array([1.0, 99.0, 3.0, 4.0, 5.0])
+
+        points = extract_residual_points(fr)
+
+        assert [p.raw_i for p in points] == [0, 2, 3, 4]
+        assert [p.resid_weighted for p in points] == [1.0, 3.0, 4.0, 5.0]
+        assert 99.0 not in [p.resid_weighted for p in points]
+
 
 ###############################################################################
 # Tests for residual_dataframe

@@ -1193,7 +1193,9 @@ class TestYerrExtraction:
         params[f"S0_{lbl}"].stderr = 1.0
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
-        fr = FitResult(None, type("Result", (), {"params": params})(), None, ph_dataset)
+        fr: FitResult[MiniT] = FitResult(
+            None, type("Result", (), {"params": params})(), None, ph_dataset
+        )
 
         results = {"A01": fr}
         scheme = PlateScheme()
@@ -1212,7 +1214,9 @@ class TestYerrExtraction:
             floor_mode="centered",
         )
 
-        returned_y_errc = multi.results["A01"].dataset[lbl].y_errc
+        returned_dataset = multi.results["A01"].dataset
+        assert returned_dataset is not None
+        returned_y_errc = returned_dataset[lbl].y_errc
 
         # Ground truth: posterior mean of sigma_obs_{lbl} extracted
         # DIRECTLY from xarray, bypassing az.summary string parsing.
@@ -1246,7 +1250,9 @@ class TestYerrExtraction:
         params[f"S0_{lbl}"].stderr = 1.0
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
-        fr = FitResult(None, type("Result", (), {"params": params})(), None, ph_dataset)
+        fr: FitResult[MiniT] = FitResult(
+            None, type("Result", (), {"params": params})(), None, ph_dataset
+        )
 
         results = {"A01": fr}
         scheme = PlateScheme()
@@ -1261,7 +1267,9 @@ class TestYerrExtraction:
             n_xerr=0.0,
         )
 
-        returned_y_errc = multi.results["A01"].dataset[lbl].y_errc
+        returned_dataset = multi.results["A01"].dataset
+        assert returned_dataset is not None
+        returned_y_errc = returned_dataset[lbl].y_errc
 
         # Ground truth: original y_errc * ye_mag posterior, from xarray
         posterior = multi.trace.posterior
