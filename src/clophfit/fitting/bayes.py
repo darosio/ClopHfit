@@ -1468,6 +1468,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
     learn_ye_mags: bool = False,
+    shared_ye_mags: bool = False,
     min_x_step: float = 0.2,
 ) -> MultiFitResult:
     """Multi-well PyMC with shared K per control group and per-label noise.
@@ -1550,6 +1551,10 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     learn_ye_mags : bool
         If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
         when a full *noise_model* is provided.
+    shared_ye_mags : bool
+        If ``True``, use a single shared ``ye_mag`` variable for all labels
+        instead of per-label ``ye_mag_{lbl}``.  Only used when *learn_ye_mags*
+        is ``True``.  Default ``False``.
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
@@ -1786,12 +1791,22 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 alpha_mode=alpha_mode,
             )
             if learn_ye_mags:
-                ye_mags = {
-                    lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels
-                }
+                if shared_ye_mags:
+                    ye_mag_shared = pm.HalfNormal("ye_mag", sigma=5.0)
+                    ye_mags = dict.fromkeys(labels, ye_mag_shared)
+                else:
+                    ye_mags = {
+                        lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=5.0) for lbl in labels
+                    }
         else:
             noise_priors = {}
-            ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
+            if learn_ye_mags and shared_ye_mags:
+                ye_mag_shared = pm.LogNormal("ye_mag", sigma=1.0)
+                ye_mags = dict.fromkeys(labels, ye_mag_shared)
+            else:
+                ye_mags = {
+                    lbl: pm.LogNormal(f"ye_mag_{lbl}", sigma=1.5) for lbl in labels
+                }
 
         # Likelihoods
         first_ds = next(iter(fit_results.values())).dataset
