@@ -666,15 +666,14 @@ def process_trace(
         for da in ds.values():
             da.xc = nxc  # Update x_true values in the dataset
             da.x_errc = nx_errc  # Posterior already incorporates n_xerr prior scaling
-    # Scale y_errc if present. Newer models use per-label ye_mag_{lbl}; older
-    # traces may still carry a single global ye_mag.
-    global_mag = _summary_mean_or_none(rdf, "ye_mag")
-    for lbl, da in ds.items():
-        mag = _summary_mean_or_none(rdf, f"ye_mag_{lbl}")
-        if mag is None:
-            mag = global_mag
-        if mag is not None:
-            da.y_errc *= mag
+    # Update y_errc from sigma_obs or scale by ye_mag — use xarray
+    # directly to avoid az.summary rounding and fragile string parsing.
+    # Fall back to az.summary for callers with legacy/empty traces.
+    updated = _extract_sigma_obs_from_xarray(trace, ds)
+    if not updated:
+        updated = _scale_yerr_by_ye_mag_from_xarray(trace, ds)
+    if not updated:
+        _update_dataset_yerr_from_sigma_obs(rdf, ds)
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
@@ -684,7 +683,7 @@ def process_trace(
     return FitResult(fig, _Result(rpars, residual=residuals), trace, ds)
 
 
-def extract_fit(  # noqa: PLR0913
+def extract_fit(  # noqa: PLR0913, C901, PLR0912
     key: str,
     ctr: str,
     trace_df: xr.DataTree | MultiFitResult | pd.DataFrame,
@@ -753,6 +752,15 @@ def extract_fit(  # noqa: PLR0913
         for da in ds.values():
             da.xc = nxc
             da.x_errc = nx_errc
+    # Update y_errc from sigma_obs or scale by ye_mag.
+    # Prefer xarray extraction (no rounding, no fragile string parsing);
+    # fall back to az.summary DataFrame for callers without a raw trace.
+    if raw_trace is not None:
+        updated = _extract_sigma_obs_from_xarray(raw_trace, ds, well_key=key)
+        if not updated:
+            _scale_yerr_by_ye_mag_from_xarray(raw_trace, ds)
+    else:
+        _update_dataset_yerr_from_sigma_obs(trace_df, ds, well_key=key)
     # Create figure
     fig = figure.Figure()
     ax = fig.add_subplot(111)
@@ -891,28 +899,124 @@ def x_true_from_trace_df(
     return DataArray(xc=nxc, yc=np.ones_like(nxc), x_errc=nx_errc)
 
 
-def _update_dataset_yerr_from_sigma_obs(
-    trace_df: pd.DataFrame, ds: Dataset, *, well_key: str
+def _extract_sigma_obs_from_xarray(
+    trace: xr.DataTree, ds: Dataset, *, well_key: str | None = None
+) -> bool:
+    """Extract ``sigma_obs`` posterior means from xarray, update *ds* in-place.
+
+    Bypasses :func:`az.summary` to avoid rounding errors and fragile
+    string-parsing of coordinate labels.  Modeled on
+    :func:`_extract_x_per_well_from_xarray`.
+
+    Parameters
+    ----------
+    trace : xr.DataTree
+        Raw PyMC trace with posterior samples.
+    ds : Dataset
+        Dataset whose ``y_errc`` arrays will be updated in-place.
+    well_key : str | None
+        Well coordinate value to select.  ``None`` for single-well traces
+        that lack a ``well`` dimension.
+
+    Returns
+    -------
+    bool
+        ``True`` if any label's ``y_errc`` was updated.
+    """
+    if not hasattr(trace, "posterior"):
+        return False
+    posterior = trace.posterior
+    any_updated = False
+    for lbl, da in ds.items():
+        var_name = f"sigma_obs_{lbl}"
+        if var_name not in posterior:
+            continue
+        var_da = posterior[var_name]
+        sample_dims = [d for d in var_da.dims if d in {"chain", "draw"}]
+        if "well" in var_da.dims:
+            if well_key is None:
+                continue
+            var_da = var_da.sel(well=well_key)
+        if sample_dims:
+            sigma_means = np.asarray(var_da.mean(dim=sample_dims).to_numpy())
+        else:
+            sigma_means = np.asarray(var_da.to_numpy())
+        sigma_means = np.maximum(sigma_means.ravel(), 1e-6)
+        n_steps = len(da.yc)
+        if len(sigma_means) != n_steps:
+            continue
+        da.y_errc = sigma_means[:n_steps]
+        any_updated = True
+    return any_updated
+
+
+def _scale_yerr_by_ye_mag_from_xarray(trace: xr.DataTree, ds: Dataset) -> bool:
+    """Scale *ds* ``y_errc`` by posterior ``ye_mag`` from xarray.
+
+    Parameters
+    ----------
+    trace : xr.DataTree
+        Raw PyMC trace with posterior samples.
+    ds : Dataset
+        Dataset whose ``y_errc`` arrays will be scaled in-place.
+
+    Returns
+    -------
+    bool
+        ``True`` if any label's ``y_errc`` was scaled.
+    """
+    if not hasattr(trace, "posterior"):
+        return False
+    posterior = trace.posterior
+    sample_dims = ["chain", "draw"]
+    any_scaled = False
+    for lbl, da in ds.items():
+        per_label = f"ye_mag_{lbl}"
+        if per_label in posterior:
+            mag = float(posterior[per_label].mean(dim=sample_dims).values)
+        elif "ye_mag" in posterior:
+            mag = float(posterior["ye_mag"].mean(dim=sample_dims).values)
+        else:
+            continue
+        if da.y_errc.size == 0:
+            da.y_errc = np.ones_like(da.yc)
+        da.y_errc *= mag
+        any_scaled = True
+    return any_scaled
+
+
+def _update_dataset_yerr_from_sigma_obs(  # noqa: C901, PLR0912
+    trace_df: pd.DataFrame, ds: Dataset, *, well_key: str | None = None
 ) -> None:
     """Replace per-data-array ``y_errc`` with posterior ``sigma_obs`` from the trace.
 
     When a heteroscedastic noise model is used, the posterior ``sigma_obs``
     values are narrower and more meaningful than the raw data ``y_err`` for
-    computing weighted residuals.
+    computing weighted residuals.  If ``sigma_obs`` is not present, scales the
+    original ``y_errc`` by the posterior mean of ``ye_mag_{lbl}`` or ``ye_mag``.
 
     Only rows matching *well_key* are applied to the per-well dataset.
     """
     for lbl, da in ds.items():
         sigma_rows: dict[int, float] = {}
+        prefix_with_bracket = f"sigma_obs_{lbl}["
         for name, row in trace_df.iterrows():
             row_name = str(name)
-            if not row_name.startswith(f"sigma_obs_{lbl}["):
+            if not row_name.startswith(prefix_with_bracket):
                 continue
-            inner = row_name[len(f"sigma_obs_{lbl}[") : -1]
-            parts = inner.split(", ")
-            if len(parts) == 2 and parts[1] == well_key:  # noqa: PLR2004
+            # Extract indices from sigma_obs_lbl[idx1, idx2, ...]
+            inner = row_name[len(prefix_with_bracket) : -1]
+            parts = [p.strip() for p in inner.split(",")]
+            if len(parts) == 2 and well_key is not None:  # noqa: PLR2004
+                # Multi-well case: expected parts [step, well]
+                if parts[1] == well_key:
+                    with contextlib.suppress(ValueError, KeyError):
+                        sigma_rows[int(parts[0])] = float(row["mean"])
+            elif len(parts) == 1:
+                # Single-well case: expected parts [step]
                 with contextlib.suppress(ValueError, KeyError):
                     sigma_rows[int(parts[0])] = float(row["mean"])
+
         if sigma_rows:
             n_steps = len(da.yc)
             y_errc = np.ones(n_steps, dtype=float)
@@ -920,6 +1024,15 @@ def _update_dataset_yerr_from_sigma_obs(
                 if 0 <= step_idx < n_steps:
                     y_errc[step_idx] = max(sigma_val, 1e-6)
             da.y_errc = y_errc
+        else:
+            # Fallback to ye_mag scaling
+            mag = _summary_mean_or_none(trace_df, f"ye_mag_{lbl}")
+            if mag is None:
+                mag = _summary_mean_or_none(trace_df, "ye_mag")
+            if mag is not None:
+                if da.y_errc.size == 0:
+                    da.y_errc = np.ones_like(da.yc)
+                da.y_errc *= mag
 
 
 def _per_well_fit_results_from_trace(
@@ -938,7 +1051,6 @@ def _per_well_fit_results_from_trace(
         ctr = next((name for name, wells in scheme.names.items() if key in wells), "")
         well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
         ds = copy.deepcopy(fr.dataset)
-        _update_dataset_yerr_from_sigma_obs(trace_df, ds, well_key=key)
         per_well_results[key] = extract_fit(
             key, ctr, trace_df, ds, well_key=well_key, raw_trace=trace
         )

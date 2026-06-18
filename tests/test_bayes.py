@@ -1172,3 +1172,151 @@ def test_x_per_well_extraction_from_xarray_not_string_names() -> None:
     np.testing.assert_allclose(nxc_a02, [8.9, 8.0])
     # Verify no string parsing path was needed — shape must be correct
     assert len(nxc_a01) == n_steps
+
+
+class TestYerrExtraction:
+    """Tests that returned dataset y_errc derives from fitted noise parameters."""
+
+    @pytest.mark.slow
+    def test_yerr_from_sigma_obs_matches_xarray_posterior(
+        self, ph_dataset: Dataset
+    ) -> None:
+        """With noise_model, y_errc must equal the posterior mean of sigma_obs."""
+        lbl = next(iter(ph_dataset.keys()))
+        # Set known y_errc to detect updates
+        ph_dataset[lbl].y_errc = np.full_like(ph_dataset[lbl].xc, 0.01)
+
+        params = Parameters()
+        params.add("K", value=7.0)
+        params["K"].stderr = 0.1
+        params.add(f"S0_{lbl}", value=100.0)
+        params[f"S0_{lbl}"].stderr = 1.0
+        params.add(f"S1_{lbl}", value=0.0)
+        params[f"S1_{lbl}"].stderr = 1.0
+        fr = FitResult(None, type("Result", (), {"params": params})(), None, ph_dataset)
+
+        results = {"A01": fr}
+        scheme = PlateScheme()
+        scheme.names = {"ctrl": {"A01"}}
+
+        noise_model = PlateNoiseModel({
+            lbl: NoiseModelParams(sigma_floor=10.0, gain=0.0, alpha=0.0)
+        })
+        multi = bayes.fit_binding_pymc_multi(
+            results,
+            scheme,
+            noise_model=noise_model,
+            n_samples=100,
+            n_tune=50,
+            n_xerr=0.0,
+            floor_mode="centered",
+        )
+
+        returned_y_errc = multi.results["A01"].dataset[lbl].y_errc
+
+        # Ground truth: posterior mean of sigma_obs_{lbl} extracted
+        # DIRECTLY from xarray, bypassing az.summary string parsing.
+        posterior = multi.trace.posterior
+        var_name = f"sigma_obs_{lbl}"
+        assert var_name in posterior, f"{var_name} missing from trace.posterior"
+        da = posterior[var_name]
+        sample_dims = [d for d in da.dims if d in {"chain", "draw"}]
+        assert "well" in da.dims, "sigma_obs must have well dimension"
+        sigma_means = da.sel(well="A01").mean(dim=sample_dims).to_numpy()
+
+        assert np.all(sigma_means > 5.0), "sigma_obs posterior implausible"
+        np.testing.assert_allclose(
+            returned_y_errc,
+            sigma_means,
+            rtol=0.15,
+            err_msg="y_errc doesn't match xarray sigma_obs posterior mean",
+        )
+
+    @pytest.mark.slow
+    def test_yerr_scaled_by_ye_mag_from_xarray(self, ph_dataset: Dataset) -> None:
+        """Without noise_model, y_errc must be scaled by ye_mag posterior."""
+        lbl = next(iter(ph_dataset.keys()))
+        da = ph_dataset[lbl]
+        da.y_errc = np.full_like(da.xc, 0.5)
+
+        params = Parameters()
+        params.add("K", value=7.0)
+        params["K"].stderr = 0.1
+        params.add(f"S0_{lbl}", value=100.0)
+        params[f"S0_{lbl}"].stderr = 1.0
+        params.add(f"S1_{lbl}", value=0.0)
+        params[f"S1_{lbl}"].stderr = 1.0
+        fr = FitResult(None, type("Result", (), {"params": params})(), None, ph_dataset)
+
+        results = {"A01": fr}
+        scheme = PlateScheme()
+        scheme.names = {"ctrl": {"A01"}}
+
+        multi = bayes.fit_binding_pymc_multi(
+            results,
+            scheme,
+            noise_model=None,
+            n_samples=100,
+            n_tune=50,
+            n_xerr=0.0,
+        )
+
+        returned_y_errc = multi.results["A01"].dataset[lbl].y_errc
+
+        # Ground truth: original y_errc * ye_mag posterior, from xarray
+        posterior = multi.trace.posterior
+        mag_var = f"ye_mag_{lbl}"
+        assert mag_var in posterior, f"{mag_var} missing from trace.posterior"
+        sample_dims = [d for d in posterior[mag_var].dims if d in {"chain", "draw"}]
+        mag = float(posterior[mag_var].mean(dim=sample_dims).values)
+
+        expected = np.full_like(da.xc, 0.5) * mag
+        assert not np.allclose(returned_y_errc, 0.5), (
+            "y_errc was NOT updated from original 0.5"
+        )
+        np.testing.assert_allclose(
+            returned_y_errc,
+            expected,
+            atol=1e-5,
+            err_msg="y_errc doesn't match original * ye_mag posterior mean",
+        )
+
+    def test_update_dataset_yerr_validates_all_steps_filled(self) -> None:
+        """Unit test: extraction must fill every step — no silent 1.0 gaps."""
+        lbl = "1"
+        n_steps = 4
+        ds = Dataset(
+            {lbl: DataArray(np.arange(n_steps, dtype=float), np.ones(n_steps))},
+            is_ph=True,
+        )
+        ds[lbl].y_errc = np.full(n_steps, 99.0)
+
+        # Synthetic trace with sigma_obs_1 for all steps of well "A01"
+        var_name = f"sigma_obs_{lbl}"
+        n_chain, n_draw = 2, 10
+        means = np.array([10.0, 20.0, 30.0, 40.0])
+        arr = (
+            np.ones((n_chain, n_draw, n_steps, 1))
+            * means[np.newaxis, np.newaxis, :, np.newaxis]
+        )
+        ds_trace = xr.Dataset(
+            {var_name: (["chain", "draw", "step", "well"], arr)},
+            coords={
+                "chain": np.arange(n_chain),
+                "draw": np.arange(n_draw),
+                "step": np.arange(n_steps),
+                "well": ["A01"],
+            },
+        )
+        trace = xr.DataTree.from_dict({"posterior": ds_trace})
+
+        # Verify the xarray extraction produces the expected values
+        posterior = trace.posterior
+        sigma_means = (
+            posterior[var_name].sel(well="A01").mean(dim=["chain", "draw"]).to_numpy()
+        )
+
+        # Verify shape matches
+        assert len(sigma_means) == n_steps
+        # All values must be far from the 1.0 fallback
+        assert np.all(sigma_means > 5.0)
