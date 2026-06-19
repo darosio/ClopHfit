@@ -171,6 +171,27 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     return priors
 
 
+def _active_noise_model(
+    noise_model: PlateNoiseModel, labels: Sequence[str]
+) -> PlateNoiseModel:
+    """Return noise parameters only for labels present in the fitted dataset."""
+    active = PlateNoiseModel()
+    missing: list[str] = []
+    for lbl in labels:
+        if lbl in noise_model:
+            active[lbl] = noise_model[lbl]
+        elif "default" in noise_model:
+            active[lbl] = noise_model["default"]
+        else:
+            missing.append(lbl)
+    if missing:
+        available = ", ".join(map(str, noise_model.keys()))
+        needed = ", ".join(missing)
+        msg = f"Noise model is missing fitted label(s) {needed}. Available: {available}"
+        raise KeyError(msg)
+    return active
+
+
 def get_pymc_variance(
     mu: pm.math.TensorVariable,
     label: str,
@@ -1162,8 +1183,9 @@ def fit_binding_pymc(  # noqa: PLR0913
                     f"y_likelihood_{lbl}", y_model, da, sigma, robust=robust
                 )
         else:
+            active_noise_model = _active_noise_model(noise_model, labels)
             noise_priors = build_pymc_noise_priors(
-                noise_model,
+                active_noise_model,
                 floor_mode=floor_mode,
                 gain_mode=gain_mode,
                 alpha_mode=alpha_mode,
@@ -1181,7 +1203,9 @@ def fit_binding_pymc(  # noqa: PLR0913
                     pars[f"S1_{lbl}"],
                     is_ph=ds.is_ph,
                 )
-                noise_var = get_pymc_variance(y_model, lbl, noise_model, noise_priors)
+                noise_var = get_pymc_variance(
+                    y_model, lbl, active_noise_model, noise_priors
+                )
                 sigma = pm_math.sqrt(noise_var)
                 if learn_ye_mags:
                     sigma = ye_mags[lbl] * sigma
@@ -1782,8 +1806,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             )
 
         if noise_model is not None:
+            active_noise_model = _active_noise_model(noise_model, labels)
             noise_priors = build_pymc_noise_priors(
-                noise_model,
+                active_noise_model,
                 shared_alpha=shared_alpha,
                 shared_gain=shared_gain,
                 floor_mode=floor_mode,
@@ -1829,7 +1854,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             if noise_model is not None:
                 # Heteroscedastic noise model
                 noise_var = get_pymc_variance(
-                    y_model_all, lbl, noise_model, noise_priors
+                    y_model_all, lbl, active_noise_model, noise_priors
                 )
                 sigma_obs_all = pm_math.sqrt(noise_var)
                 if learn_ye_mags:

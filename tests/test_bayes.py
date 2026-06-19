@@ -593,6 +593,49 @@ def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
     assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
 
 
+def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Noise priors should not be created for labels absent from the fit."""
+    ds2 = Dataset({"2": copy.deepcopy(multi_dataset["2"])}, is_ph=True)
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=10.0, gain=1.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=0.25, alpha=0.02),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(ds2)
+    captured: dict[str, list[str]] = {}
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del floor_mode, gain_mode, alpha_mode, shared_alpha, shared_gain
+        captured["labels"] = list(_noise_model.keys())
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            noise_model=noise_model,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"labels": ["2"]}
+
+
 def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,

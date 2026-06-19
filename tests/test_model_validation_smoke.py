@@ -10,9 +10,21 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+import xarray as xr
+from lmfit import Parameters  # type: ignore[import-untyped]
 
 from clophfit.fitting.ctr_validation import iter_ctr_holdouts, make_ctr_holdout_scheme
-from clophfit.fitting.model_validation import model_residual_score_table
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    MultiFitResult,
+)
+from clophfit.fitting.model_validation import (
+    model_residual_score_table,
+    residuals_from_multifit,
+)
+from clophfit.fitting.models import binding_1site
 
 
 def test_residual_score_table_smoke() -> None:
@@ -55,3 +67,35 @@ def test_ctr_holdout_scheme_uses_sets() -> None:
     assert s2.names == {"ctrl": {"A02", "A03"}}
     tasks = list(iter_ctr_holdouts(s, min_remaining=1))
     assert len(tasks) == 3
+
+
+def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
+    """Reconstructed PyMC datasets already store the sigma used by likelihood."""
+    posterior = xr.Dataset(
+        data_vars={"ye_mag_1": (("chain", "draw"), np.array([[5.0, 5.0]]))},
+        coords={"chain": [0], "draw": [0, 1]},
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    ds = Dataset(
+        {
+            "1": DataArray(
+                np.array([6.0, 7.0]),
+                np.array([90.0, 150.0]),
+                y_errc=np.array([10.0, 20.0]),
+            )
+        },
+        is_ph=True,
+    )
+    fr = FitResult(
+        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+    )
+    multi = MultiFitResult(trace=trace, results={"A01": fr})
+
+    residuals = residuals_from_multifit(multi, "trace", binding_1site)
+
+    np.testing.assert_allclose(residuals["sigma"].to_numpy(), np.array([10.0, 20.0]))

@@ -166,16 +166,14 @@ def _sigma_for_label_well(
             sigma = sigma[mask]
         return np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
 
-    ye_var = f"ye_mag_{lbl}"
-    ye_mag = _posterior_mean_scalar(posterior, ye_var, default=1.0)
-
     if hasattr(da, "y_err") and np.asarray(da.y_err).size == int(mask.sum()):
-        base = np.asarray(da.y_err, dtype=float)
+        sigma = np.asarray(da.y_err, dtype=float)
     elif hasattr(da, "y_errc") and np.asarray(da.y_errc).size == mask.size:
-        base = np.asarray(da.y_errc, dtype=float)[mask]
+        sigma = np.asarray(da.y_errc, dtype=float)[mask]
     else:
-        base = np.ones(int(mask.sum()), dtype=float)
-    sigma = ye_mag * base
+        ye_var = f"ye_mag_{lbl}"
+        ye_mag = _posterior_mean_scalar(posterior, ye_var, default=1.0)
+        sigma = ye_mag * np.ones(int(mask.sum()), dtype=float)
     return np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
 
 
