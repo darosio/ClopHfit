@@ -16,7 +16,7 @@ jobs:
   update-template:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -45,17 +45,11 @@ jobs:
             fi
           fi
 
-      - name: Debug token presence
-        run: |
-          if [ -z "$GH_TOKEN" ]; then echo "TOKEN IS EMPTY"; else echo "token present (${#GH_TOKEN} chars)"; fi
-        env:
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS }}
-
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         env:
-          # GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS }} # remove the || fallback
+          # PAT_WORKFLOWS is needed when Cruft changes workflow files; github.token is a fallback for ordinary updates.
+          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
