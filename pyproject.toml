@@ -70,8 +70,8 @@ dev = [
   "git-cliff>=2.13.1",
   "mdformat>=1.0.0",
   "mdformat-gfm>=1.0.0",
-  "pylsp-mypy>=0.7.1",
-  "ruff>=0.15.16",
+  "pylsp-mypy>=0.7.3",
+  "ruff>=0.15.18",
   "python-lsp-ruff>=2.3.1",
   "cruft>=2.16.0",
 ]
