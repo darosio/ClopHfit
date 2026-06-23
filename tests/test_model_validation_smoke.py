@@ -13,7 +13,12 @@ import pandas as pd
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 
-from clophfit.fitting.ctr_validation import iter_ctr_holdouts, make_ctr_holdout_scheme
+from clophfit.fitting.ctr_validation import (
+    iter_ctr_holdouts,
+    make_ctr_holdout_scheme,
+    summarize_bayesian_ctr_holdout,
+    weighted_mean_reference,
+)
 from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
@@ -21,6 +26,7 @@ from clophfit.fitting.data_structures import (
     MultiFitResult,
 )
 from clophfit.fitting.model_validation import (
+    merge_log_likelihoods,
     model_residual_score_table,
     residuals_from_multifit,
 )
@@ -67,6 +73,67 @@ def test_ctr_holdout_scheme_uses_sets() -> None:
     assert s2.names == {"ctrl": {"A02", "A03"}}
     tasks = list(iter_ctr_holdouts(s, min_remaining=1))
     assert len(tasks) == 3
+
+
+def test_merge_log_likelihoods_builds_single_obs_variable() -> None:
+    """Multiple pointwise log-likelihood arrays should become one obs variable."""
+    posterior = xr.Dataset(
+        data_vars={"K": (("chain", "draw"), np.array([[1.0, 1.1]]))},
+        coords={"chain": [0], "draw": [0, 1]},
+    )
+    log_likelihood = xr.Dataset(
+        data_vars={
+            "obs_a": (("chain", "draw", "obs_a_dim"), np.zeros((1, 2, 3))),
+            "obs_b": (("chain", "draw", "obs_b_dim"), np.ones((1, 2, 2))),
+        },
+        coords={"chain": [0], "draw": [0, 1]},
+    )
+    trace = xr.DataTree.from_dict({
+        "posterior": posterior,
+        "log_likelihood": log_likelihood,
+    })
+
+    merged = merge_log_likelihoods(trace)
+
+    assert list(merged.log_likelihood.data_vars) == ["obs"]
+    assert merged.log_likelihood["obs"].sizes["obs_id"] == 5
+
+
+def test_weighted_mean_reference_prefers_precise_controls() -> None:
+    """Weighted CTR references should favor precise remaining controls."""
+    reference, weights = weighted_mean_reference([
+        np.array([1.0, 1.0, 1.0, 1.0]),
+        np.array([0.0, 2.0, 0.0, 2.0]),
+    ])
+
+    assert weights[0] > weights[1]
+    assert reference.shape == (4,)
+
+
+def test_summarize_bayesian_ctr_holdout_weighted_mean_reference() -> None:
+    """Free-CTR Bayesian holdouts compare to remaining free-control Ks."""
+    posterior = xr.Dataset(
+        data_vars={
+            "K_B12": (("chain", "draw"), np.array([[1.0, 1.1, 0.9, 1.0]])),
+            "K_E2GFP_C01": (("chain", "draw"), np.array([[1.0, 1.0, 1.0, 1.0]])),
+            "K_E2GFP_F12": (("chain", "draw"), np.array([[0.9, 1.1, 1.0, 1.0]])),
+        },
+        coords={"chain": [0], "draw": [0, 1, 2, 3]},
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+
+    row = summarize_bayesian_ctr_holdout(
+        trace,
+        trace_id="free-model",
+        ctr_group="E2GFP",
+        heldout_well="B12",
+        remaining_ctr_wells=["C01", "F12"],
+        reference_mode="weighted_mean",
+    )
+
+    assert row["ctr_reference_mode"] == "weighted_mean"
+    assert row["ctr_reference_n"] == 2
+    assert row["delta_k_abs_mean"] < 0.1
 
 
 def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:

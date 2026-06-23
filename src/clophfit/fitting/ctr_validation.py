@@ -17,6 +17,11 @@ def ctr_param_name(group_name: str) -> str:
     return f"K_ctr_{group_name}"
 
 
+def free_ctr_param_name(group_name: str, well: str) -> str:
+    """Return the free-control K parameter name used by Bayesian multi-fit."""
+    return f"K_{group_name}_{well}"
+
+
 def make_ctr_holdout_scheme(
     scheme: _t.Any, *, group_name: str, heldout_well: str
 ) -> _t.Any:
@@ -63,18 +68,25 @@ def iter_ctr_holdouts(
 
 
 def widen_heldout_k_prior(
-    results: dict[str, _t.Any],
+    results: _t.Any,
     heldout_well: str,
     *,
     n_sd: float,
     prior_sigma: float = 0.6,
-) -> dict[str, _t.Any]:
+) -> _t.Any:
     """Return a deepcopy with the heldout well's K prior widened.
 
     ``fit_binding_pymc_multi`` uses ``p.stderr * n_sd`` as the prior sigma for
     unknown wells.  Increasing ``stderr`` avoids a control-LOO posterior that is
     dominated by a tiny preliminary-fit uncertainty.
     """
+    try:
+        fr = results[heldout_well]
+    except (KeyError, TypeError, AttributeError):
+        return results
+    if not hasattr(fr, "result"):
+        return results
+
     out = copy.deepcopy(results)
     fr = out[heldout_well]
     if fr.result is None or "K" not in fr.result.params:
@@ -86,31 +98,82 @@ def widen_heldout_k_prior(
 
 
 def _hdi_array(x: np.ndarray, hdi_prob: float) -> tuple[float, float]:
-    h = az.hdi(np.asarray(x, dtype=float), hdi_prob=hdi_prob)
+    h = az.hdi(np.asarray(x, dtype=float), prob=hdi_prob)
     return float(h[0]), float(h[1])
 
 
-def summarize_bayesian_ctr_holdout(
+def weighted_mean_reference(arrays: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """Return an inverse-variance weighted posterior reference per draw."""
+    flat = [np.asarray(arr, dtype=float).ravel() for arr in arrays]
+    if not flat:
+        msg = "No arrays provided for weighted reference."
+        raise ValueError(msg)
+    variances = np.array([np.nanvar(arr, ddof=1) for arr in flat], dtype=float)
+    exact = np.isfinite(variances) & (variances == 0)
+    if exact.any():
+        weights = exact.astype(float)
+    else:
+        weights = np.divide(
+            1.0,
+            variances,
+            out=np.full_like(variances, np.nan, dtype=float),
+            where=np.isfinite(variances) & (variances > 0),
+        )
+        if not np.isfinite(weights).any() or float(np.nansum(weights)) <= 0:
+            weights = np.ones(len(flat), dtype=float)
+    weights /= float(np.nansum(weights))
+    stacked = np.vstack(flat)
+    return np.nansum(stacked * weights[:, None], axis=0), weights
+
+
+def summarize_bayesian_ctr_holdout(  # noqa: PLR0913
     trace: _t.Any,
     *,
     trace_id: str,
     ctr_group: str,
     heldout_well: str,
+    remaining_ctr_wells: list[str] | None = None,
+    reference_mode: str = "shared",
     rope: float = 0.10,
 ) -> dict[str, _t.Any]:
-    """Summarize posterior ``ΔK = K_heldout - K_ctr_group``."""
+    """Summarize posterior CTR holdout ``ΔK``.
+
+    ``reference_mode="shared"`` compares heldout K to ``K_ctr_{group}``.
+    ``reference_mode="weighted_mean"`` compares it to the inverse-variance
+    weighted posterior mean of the remaining free-control K variables.
+    """
     posterior = posterior_dataset(trace)
     heldout_var = f"K_{heldout_well}"
-    ctr_var = ctr_param_name(ctr_group)
 
     if heldout_var not in posterior:
         msg = f"Missing heldout variable {heldout_var!r}"
         raise KeyError(msg)
-    if ctr_var not in posterior:
-        msg = f"Missing control variable {ctr_var!r}"
-        raise KeyError(msg)
 
-    diff = (posterior[heldout_var] - posterior[ctr_var]).values.ravel()
+    if reference_mode == "shared":
+        reference_vars = [ctr_param_name(ctr_group)]
+        if reference_vars[0] not in posterior:
+            msg = f"Missing control variable {reference_vars[0]!r}"
+            raise KeyError(msg)
+        reference = posterior[reference_vars[0]].values.ravel()
+        reference_weights = np.array([1.0])
+    elif reference_mode == "weighted_mean":
+        if remaining_ctr_wells is None:
+            msg = "remaining_ctr_wells is required for weighted_mean reference."
+            raise ValueError(msg)
+        reference_vars = [
+            free_ctr_param_name(ctr_group, well) for well in remaining_ctr_wells
+        ]
+        missing = [var for var in reference_vars if var not in posterior]
+        if missing:
+            msg = f"Missing free-control variables {missing!r}"
+            raise KeyError(msg)
+        reference_arrays = [posterior[var].values for var in reference_vars]
+        reference, reference_weights = weighted_mean_reference(reference_arrays)
+    else:
+        msg = f"Unsupported CTR-LOO reference mode: {reference_mode!r}"
+        raise ValueError(msg)
+
+    diff = posterior[heldout_var].values.ravel() - reference
     diff = diff[np.isfinite(diff)]
     if diff.size == 0:
         msg = "No finite posterior ΔK draws."
@@ -126,7 +189,10 @@ def summarize_bayesian_ctr_holdout(
         "ctr_group": ctr_group,
         "heldout_well": heldout_well,
         "heldout_var": heldout_var,
-        "ctr_var": ctr_var,
+        "ctr_reference_mode": reference_mode,
+        "ctr_reference_vars": ",".join(reference_vars),
+        "ctr_reference_weights": ",".join(f"{w:.6g}" for w in reference_weights),
+        "ctr_reference_n": len(reference_vars),
         "delta_k_mean": mean_diff,
         "delta_k_sd": sd_diff,
         "delta_k_abs_mean": abs(mean_diff),

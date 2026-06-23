@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import itertools
 import typing as _t
+import warnings
 
 import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 ArrayLike = _t.Any
 
@@ -119,31 +121,94 @@ def trace_diagnostics(
         ]
 
     try:
-        summary = az.summary(trace, var_names=summary_var_names, filter_vars="like")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            summary = az.summary(trace, var_names=summary_var_names, filter_vars="like")
         if "r_hat" in summary:
             row["rhat_max"] = float(summary["r_hat"].max(skipna=True))
         if "ess_bulk" in summary:
             row["ess_bulk_min"] = float(summary["ess_bulk"].min(skipna=True))
         if "ess_tail" in summary:
             row["ess_tail_min"] = float(summary["ess_tail"].min(skipna=True))
+        _add_warnings(row, "summary", caught)
     except Exception as e:
         row["summary_error"] = repr(e)
 
     if compute_loo:
         try:
-            loo = az.loo(trace)
-            row["elpd_loo"] = float(loo.elpd_loo)
-            row["p_loo"] = float(loo.p_loo)
-            row["loo_se"] = float(loo.se)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                loo = az.loo(merge_log_likelihoods(trace), var_name="obs")
+            row["elpd_loo"] = _loo_value(loo, "elpd_loo", "elpd")
+            row["p_loo"] = _loo_value(loo, "p_loo", "p")
+            row["loo_se"] = _loo_value(loo, "se", "elpd_loo_se", "elpd_se")
             if hasattr(loo, "pareto_k"):
                 pk = np.asarray(loo.pareto_k).ravel()
                 row["pareto_k_max"] = float(np.nanmax(pk))
                 row["pareto_k_frac_gt_0p7"] = float(np.nanmean(pk > 0.7))
+            _add_warnings(row, "loo", caught)
         except Exception as e:
             row["loo_error"] = repr(e)
 
     row.update(x_axis_sanity(trace))
     return row
+
+
+def _add_warnings(
+    row: dict[str, _t.Any], prefix: str, caught: list[warnings.WarningMessage]
+) -> None:
+    if not caught:
+        return
+    messages = [str(w.message) for w in caught]
+    row[f"{prefix}_warning_count"] = len(messages)
+    row[f"{prefix}_warnings"] = " | ".join(dict.fromkeys(messages))
+
+
+def _loo_value(loo: _t.Any, *names: str) -> float:
+    lookup_errors: list[str] = []
+    for name in names:
+        if hasattr(loo, name):
+            return float(getattr(loo, name))
+        try:
+            return float(loo[name])
+        except Exception as e:
+            lookup_errors.append(f"{name}: {e!r}")
+    msg = (
+        f"LOO result has none of {names!r}; available fields: {dir(loo)!r}; "
+        f"lookup errors: {lookup_errors!r}"
+    )
+    raise AttributeError(msg)
+
+
+def merge_log_likelihoods(trace: _t.Any) -> _t.Any:
+    """Merge multiple pointwise log-likelihood variables for ArviZ LOO/compare."""
+    if not hasattr(trace, "log_likelihood"):
+        return trace
+    ll = trace.log_likelihood
+    data_vars = getattr(ll, "data_vars", {})
+    if len(data_vars) <= 1 and "obs" in data_vars:
+        return trace
+
+    data_list = []
+    current_idx = 0
+    for var_name in data_vars:
+        data = ll[var_name]
+        last_dim = data.dims[-1]
+        n_obs = data.sizes[last_dim]
+        data = data.rename({last_dim: "obs_id"})
+        data = data.assign_coords(obs_id=np.arange(current_idx, current_idx + n_obs))
+        data_list.append(data)
+        current_idx += n_obs
+    if not data_list:
+        return trace
+
+    groups = {
+        "posterior": posterior_dataset(trace),
+        "log_likelihood": xr.Dataset({"obs": xr.concat(data_list, dim="obs_id")}),
+    }
+    if hasattr(trace, "observed_data"):
+        groups["observed_data"] = trace.observed_data
+    return xr.DataTree.from_dict(groups)
 
 
 def _sigma_for_label_well(
