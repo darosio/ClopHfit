@@ -7,6 +7,7 @@ manuscript-specific paths, file formats, or plate names.
 
 from __future__ import annotations
 
+import copy
 import itertools
 import typing as _t
 import warnings
@@ -15,8 +16,175 @@ import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy import stats as sp_stats
 
 ArrayLike = _t.Any
+
+STUDENT_T_NU = 3.0
+
+
+def residual_normal_scores(
+    likelihood_residual: ArrayLike,
+    *,
+    robust: bool = False,
+    student_t_nu: float = STUDENT_T_NU,
+) -> np.ndarray:
+    """Map likelihood-scale residuals onto a Normal diagnostic scale.
+
+    For Normal likelihoods this is the identity.  For Student-t likelihoods,
+    ``(y - mu) / sigma`` follows a t distribution, so Normal QQ plots and
+    ``abs(residual) > 2`` style diagnostics should use the probability integral
+    transform to an equivalent standard-Normal score.
+    """
+    r = np.asarray(likelihood_residual, dtype=float)
+    if not robust:
+        return r
+
+    probs = sp_stats.t.cdf(r, df=student_t_nu)
+    probs = np.clip(probs, np.finfo(float).eps, 1.0 - np.finfo(float).eps)
+    return np.asarray(sp_stats.norm.ppf(probs), dtype=float)
+
+
+def robust_residual_outlier_mask(
+    likelihood_residual: ArrayLike,
+    *,
+    threshold: float = 3.0,
+    robust: bool = False,
+    student_t_nu: float = STUDENT_T_NU,
+) -> np.ndarray:
+    """Flag observations by calibrated Normal-score residual magnitude."""
+    z = residual_normal_scores(
+        likelihood_residual, robust=robust, student_t_nu=student_t_nu
+    )
+    return np.asarray(np.isfinite(z) & (np.abs(z) > threshold), dtype=bool)
+
+
+def excess_tail_outlier_mask(  # noqa: PLR0913
+    likelihood_residual: ArrayLike,
+    *,
+    threshold: float = 3.0,
+    allowed_tail_fraction: float = 0.01,
+    min_allowed_tail_count: int = 1,
+    robust: bool = False,
+    student_t_nu: float = STUDENT_T_NU,
+) -> np.ndarray:
+    """Mask only residual outliers beyond an allowed tail fraction.
+
+    The residuals are first mapped to the calibrated Normal diagnostic scale.
+    Observations with ``abs(z) <= threshold`` are never removed.  If more than
+    ``allowed_tail_fraction`` of finite observations exceed the threshold, only
+    the largest excess observations are marked for removal.
+    """
+    z = residual_normal_scores(
+        likelihood_residual, robust=robust, student_t_nu=student_t_nu
+    )
+    z = np.asarray(z, dtype=float)
+    remove = np.zeros(z.shape, dtype=bool)
+    finite = np.isfinite(z)
+    n_finite = int(finite.sum())
+    if n_finite == 0:
+        return remove
+
+    candidate_idx = np.flatnonzero(finite & (np.abs(z) > threshold))
+    allowed = max(
+        int(min_allowed_tail_count), int(np.floor(allowed_tail_fraction * n_finite))
+    )
+    n_remove = max(0, int(candidate_idx.size) - allowed)
+    if n_remove == 0:
+        return remove
+
+    order = np.argsort(np.abs(z[candidate_idx]))[::-1]
+    remove[candidate_idx[order[:n_remove]]] = True
+    return remove
+
+
+def mark_excess_residual_outliers(  # noqa: PLR0913
+    residuals: pd.DataFrame,
+    *,
+    residual_col: str = "std_res",
+    group_cols: tuple[str, ...] = ("trace_id", "label"),
+    threshold: float = 3.0,
+    allowed_tail_fraction: float = 0.01,
+    min_allowed_tail_count: int = 1,
+    exclude_col: str = "exclude_residual_outlier",
+) -> pd.DataFrame:
+    """Annotate residual rows to remove only excess calibrated tail outliers."""
+    out = residuals.copy()
+    out[exclude_col] = False
+    out["residual_outlier_score"] = np.nan
+
+    actual_group_cols = [col for col in group_cols if col in out.columns]
+    grouped: _t.Iterable[tuple[object, pd.DataFrame]]
+    if actual_group_cols:
+        grouped = out.groupby(actual_group_cols, observed=True, sort=False)
+    else:
+        grouped = [(None, out)]
+
+    for _key, group in grouped:
+        values = group[residual_col].to_numpy(dtype=float)
+        remove = excess_tail_outlier_mask(
+            values,
+            threshold=threshold,
+            allowed_tail_fraction=allowed_tail_fraction,
+            min_allowed_tail_count=min_allowed_tail_count,
+        )
+        out.loc[group.index, "residual_outlier_score"] = np.abs(values)
+        out.loc[group.index[remove], exclude_col] = True
+
+    return out
+
+
+def masked_datasets_from_residual_outliers(
+    results: _t.Mapping[str, _t.Any],
+    residuals: pd.DataFrame,
+    *,
+    exclude_col: str = "exclude_residual_outlier",
+    min_keep: int = 3,
+) -> dict[str, _t.Any]:
+    """Return datasets with residual rows marked by *exclude_col* masked out.
+
+    This is intended for the second pass of a sensitivity analysis: fit once,
+    compute residuals, annotate excess-tail outliers, mask those rows, then refit.
+    """
+    masked: dict[str, _t.Any] = {}
+    for well, fr in results.items():
+        if getattr(fr, "dataset", None) is not None:
+            masked[str(well)] = copy.deepcopy(fr.dataset)
+
+    if not masked or exclude_col not in residuals.columns:
+        return masked
+
+    drop_rows = residuals[residuals[exclude_col].astype(bool)].copy()
+    if drop_rows.empty:
+        return masked
+
+    if "residual_outlier_score" not in drop_rows.columns:
+        drop_rows["residual_outlier_score"] = np.abs(
+            drop_rows.get("std_res", pd.Series(np.nan, index=drop_rows.index))
+        )
+    drop_rows = drop_rows.sort_values("residual_outlier_score", ascending=False)
+
+    for row in drop_rows.itertuples(index=False):
+        well = str(row.well)
+        label = str(row.label)
+        if well not in masked or label not in masked[well]:
+            continue
+
+        da = masked[well][label]
+        if int(np.sum(da.mask)) <= min_keep:
+            continue
+
+        raw_i = getattr(row, "raw_i", None)
+        if raw_i is None or pd.isna(raw_i):
+            raw_i = getattr(row, "step", None)
+        if raw_i is None or pd.isna(raw_i):
+            continue
+
+        idx = int(raw_i)
+        if 0 <= idx < len(da.mask):
+            da.mask[idx] = False
+
+    return masked
 
 
 def posterior_dataset(trace: _t.Any) -> _t.Any:
@@ -242,14 +410,22 @@ def _sigma_for_label_well(
     return np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
 
 
-def residuals_from_multifit(
+def residuals_from_multifit(  # noqa: PLR0913
     multi: _t.Any,
     trace_id: str,
     binding_function: _t.Callable[..., ArrayLike],
     *,
     include_fit_params: bool = False,
+    robust: bool = False,
+    student_t_nu: float = STUDENT_T_NU,
+    outlier_threshold: float = 3.0,
 ) -> pd.DataFrame:
-    """Build a long standardized-residual table from a MultiFitResult."""
+    """Build a long calibrated-residual table from a MultiFitResult.
+
+    ``likelihood_res`` is always ``(observed - predicted) / sigma``.  For
+    Student-t robust fits, ``std_res`` is the equivalent standard-Normal score
+    from the t CDF, suitable for Normal QQ plots and z-style outlier flags.
+    """
     rows: list[dict[str, _t.Any]] = []
 
     for well, fr in multi.results.items():
@@ -280,7 +456,16 @@ def residuals_from_multifit(
                 is_ph=ds.is_ph,
             )
             sigma = _sigma_for_label_well(multi.trace, lbl, str(well), da, mask)
-            std_res = (y - that) / sigma
+            likelihood_res = (y - that) / sigma
+            std_res = residual_normal_scores(
+                likelihood_res, robust=robust, student_t_nu=student_t_nu
+            )
+            outlier = robust_residual_outlier_mask(
+                likelihood_res,
+                threshold=outlier_threshold,
+                robust=robust,
+                student_t_nu=student_t_nu,
+            )
 
             for j in range(len(y)):
                 row = {
@@ -293,7 +478,12 @@ def residuals_from_multifit(
                     "that": float(that[j]),
                     "sigma": float(sigma[j]),
                     "raw_res": float(y[j] - that[j]),
+                    "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
+                    "residual_likelihood": "student_t" if robust else "normal",
+                    "student_t_nu": float(student_t_nu) if robust else np.nan,
+                    "is_residual_outlier": bool(outlier[j]),
+                    "outlier_threshold": float(outlier_threshold),
                 }
                 if include_fit_params:
                     row["K"] = float(pars["K"].value)
@@ -309,14 +499,17 @@ def residuals_from_multifit(
     )
 
 
-def residuals_from_fit_results(
+def residuals_from_fit_results(  # noqa: PLR0913
     results: dict[str, _t.Any],
     trace_id: str,
     binding_function: _t.Callable[..., ArrayLike],
     *,
     include_fit_params: bool = False,
+    robust: bool = False,
+    student_t_nu: float = STUDENT_T_NU,
+    outlier_threshold: float = 3.0,
 ) -> pd.DataFrame:
-    """Build a long residual table from classical per-well FitResult objects."""
+    """Build a long calibrated residual table from classical FitResult objects."""
     rows: list[dict[str, _t.Any]] = []
     for well, fr in results.items():
         if fr.dataset is None or fr.result is None:
@@ -340,7 +533,16 @@ def residuals_from_fit_results(
             else:
                 sigma = np.ones_like(y, dtype=float)
             sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
-            std_res = (y - that) / sigma
+            likelihood_res = (y - that) / sigma
+            std_res = residual_normal_scores(
+                likelihood_res, robust=robust, student_t_nu=student_t_nu
+            )
+            outlier = robust_residual_outlier_mask(
+                likelihood_res,
+                threshold=outlier_threshold,
+                robust=robust,
+                student_t_nu=student_t_nu,
+            )
             for j in range(len(y)):
                 row = {
                     "trace_id": trace_id,
@@ -352,7 +554,12 @@ def residuals_from_fit_results(
                     "that": float(that[j]),
                     "sigma": float(sigma[j]),
                     "raw_res": float(y[j] - that[j]),
+                    "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
+                    "residual_likelihood": "student_t" if robust else "normal",
+                    "student_t_nu": float(student_t_nu) if robust else np.nan,
+                    "is_residual_outlier": bool(outlier[j]),
+                    "outlier_threshold": float(outlier_threshold),
                 }
                 if include_fit_params:
                     row["K"] = float(pars["K"].value)
@@ -387,6 +594,15 @@ def residual_distribution_summary(res_df: pd.DataFrame) -> pd.DataFrame:
             q95=("std_res", lambda x: float(np.nanquantile(x, 0.95))),
             frac_abs_gt2=("std_res", lambda x: float(np.mean(np.abs(x) > 2))),
             frac_abs_gt3=("std_res", lambda x: float(np.mean(np.abs(x) > 3))),
+            residual_outlier_frac=(
+                "is_residual_outlier",
+                lambda x: float(np.mean(x)) if len(x) else np.nan,
+            )
+            if "is_residual_outlier" in res_df.columns
+            else (
+                "std_res",
+                lambda x: float(np.mean(np.abs(x) > 3)),
+            ),
         )
         .reset_index()
     )
@@ -538,6 +754,7 @@ def model_residual_score_table(
         "residual_sd_mean": ("sd_res", "mean"),
         "residual_frac_abs_gt2": ("frac_abs_gt2", "mean"),
         "residual_frac_abs_gt3": ("frac_abs_gt3", "mean"),
+        "residual_outlier_frac": ("residual_outlier_frac", "mean"),
         "residual_x_median_rms": ("x_median_rms", "mean"),
         "residual_x_median_maxabs": ("x_median_maxabs", "max"),
     }
