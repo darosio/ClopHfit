@@ -50,7 +50,7 @@ gpu = [
   "blackjax>=1.5",
   "jax[cuda12]>=0.10.2",
   "numpyro>=0.21.0",
-  "nutpie>=0.16.10",
+  "nutpie>=0.16.11",
 ]
 docs = [
   "graphviz>=0.21",
