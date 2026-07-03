@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from clophfit.clophfit_types import ArrayF
+from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc_residual_refit
 from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.pipeline import fit_plate
@@ -98,6 +99,45 @@ def run_pre_fit_detection(titration: Titration, subfolder: Path) -> None:
         )
 
 
+def fit_single_mcmc(
+    titration: Titration,
+    datasets: dict[str, typing.Any],
+    outfit: Path,
+) -> TitrationResults | None:
+    """Run optional per-well single PyMC fits for export."""
+    if titration.params.mcmc == "single":
+        mcmc_fits = {
+            key: fit_binding_pymc(
+                ds,
+                n_samples=titration.params.n_mcmc_samples,
+                nuts_sampler=titration.params.nuts_sampler,
+            )
+            for key, ds in datasets.items()
+        }
+        return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
+
+    if titration.params.mcmc != "single-refit":
+        return None
+
+    mcmc_fits = {}
+    residual_rows = []
+    for key, ds in datasets.items():
+        refit = fit_binding_pymc_residual_refit(
+            ds,
+            bg_noise=titration.bg_noise,
+            n_samples=titration.params.n_mcmc_samples,
+            nuts_sampler=titration.params.nuts_sampler,
+        )
+        mcmc_fits[key] = refit.final
+        if not refit.residuals.empty:
+            residual_rows.append(refit.residuals.assign(well=key))
+    if residual_rows:
+        pd.concat(residual_rows, ignore_index=True).to_csv(
+            outfit / "single_refit_initial_residual_outliers.csv", index=False
+        )
+    return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
+
+
 def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> None:
     """Export all fitted parameters, plots, and data files."""
     outfit = subfolder / "fit"
@@ -144,6 +184,10 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
     )
     odr_res = TitrationResults(titration.scheme, titration.fit_keys, odr_fits)
     export_list.append(odr_res)
+
+    mcmc_res = fit_single_mcmc(titration, datasets, outfit)
+    if mcmc_res is not None:
+        export_list.append(mcmc_res)
 
     for i, results in enumerate(export_list):
         png_dir = outfit / f"lb{i}"
