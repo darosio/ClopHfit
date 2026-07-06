@@ -16,10 +16,13 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 
 from clophfit.fitting import residuals as residuals_module
 from clophfit.fitting.ctr_validation import (
+    classical_ctr_holdout_rows,
     iter_ctr_holdouts,
     make_ctr_holdout_scheme,
     summarize_bayesian_ctr_holdout,
+    summarize_ctr_loo_table,
     weighted_mean_reference,
+    widen_heldout_k_prior,
 )
 from clophfit.fitting.data_structures import (
     DataArray,
@@ -41,9 +44,12 @@ from clophfit.fitting.model_validation import (
     pareto_k_summary,
     pareto_k_table,
     residual_normal_scores,
+    residuals_from_fit_results,
     residuals_from_multifit,
     robust_residual_outlier_mask,
+    trace_diagnostics,
     trace_parameter_summary,
+    x_axis_sanity,
 )
 from clophfit.fitting.models import binding_1site
 
@@ -160,6 +166,61 @@ def test_residual_diagnostics_relative_well_scaled_and_trace_summary() -> None:
     assert a01_l1["label_noise_scale_mean"] == 1.0
     assert a01_l1["well_noise_sd_mean"] == pytest.approx(0.3)
     assert a01_l1["well_noise_scale_mean"] == 11.0
+
+
+def test_residual_comparison_from_fit_results_and_value_switch() -> None:
+    """Comparison factory should build diagnostics, summaries, and fit parameters."""
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0, 8.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, -1.0])
+    ds = Dataset({"1": DataArray(x, y, y_errc=np.ones_like(y))}, is_ph=True)
+    fr: FitResult[Any] = FitResult(
+        result=type("Result", (), {"params": params})(), dataset=ds
+    )
+
+    comparison = ResidualComparison.from_fit_results(
+        {"A01": fr},
+        "classical",
+        binding_1site,
+        fit_df=pd.DataFrame({"well": ["A01"], "K": [7.0], "sK": [0.1]}),
+        ctrl_wells={"A01"},
+    )
+    rel = comparison.with_value("rel_res")
+
+    assert comparison.parameters.empty
+    assert comparison.well.loc[0, "role"] == "ctr"
+    assert "K" in comparison.diagnostics.residuals.columns
+    assert rel.diagnostics.value_col == "rel_res"
+    assert "rel_sd" in rel.well.columns
+
+
+def test_residual_diagnostics_scaling_and_plot_guards() -> None:
+    """Scaling helpers should handle zero-variance groups and plot preconditions."""
+    df = pd.DataFrame({
+        "trace_id": ["m1"] * 8,
+        "well": ["A01"] * 4 + ["A02"] * 4,
+        "label": ["1"] * 8,
+        "step": [0, 1, 2, 3] * 2,
+        "x": [6.0, 7.0, 8.0, 9.0] * 2,
+        "y": [1.0] * 8,
+        "that": [1.0] * 8,
+        "sigma": [1.0] * 8,
+        "std_res": [0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 2.0],
+    })
+
+    diag = ResidualDiagnostics(df)
+    label_scaled = diag.label_scaled()
+    well_scaled = diag.well_scaled(min_count=5)
+
+    assert "std_res_label_scaled" in label_scaled.residuals.columns
+    assert well_scaled.residuals["std_res_well_scaled"].isna().all()
+    with pytest.raises(ValueError, match="annotate"):
+        diag.plot_role()
+    with pytest.raises(ValueError, match="annotate"):
+        diag.plot_col()
 
 
 def test_student_t_residuals_use_normal_scores() -> None:
@@ -452,6 +513,26 @@ def test_weighted_mean_reference_prefers_precise_controls() -> None:
     assert reference.shape == (4,)
 
 
+def test_weighted_mean_reference_edge_cases() -> None:
+    """CTR weighted references handle exact and invalid variances explicitly."""
+    exact_reference, exact_weights = weighted_mean_reference([
+        np.array([2.0, 2.0, 2.0]),
+        np.array([0.0, 1.0, 2.0]),
+    ])
+    fallback_reference, fallback_weights = weighted_mean_reference([
+        np.array([np.nan, np.nan]),
+        np.array([np.nan, np.nan]),
+    ])
+
+    with pytest.raises(ValueError, match="No arrays"):
+        weighted_mean_reference([])
+    np.testing.assert_allclose(exact_reference, np.array([2.0, 2.0, 2.0]))
+    np.testing.assert_allclose(exact_weights, np.array([1.0, 0.0]))
+    np.testing.assert_allclose(fallback_weights, np.array([0.5, 0.5]))
+    np.testing.assert_allclose(fallback_reference, np.array([0.0, 0.0]))
+    assert fallback_reference.shape == (2,)
+
+
 def test_summarize_bayesian_ctr_holdout_weighted_mean_reference() -> None:
     """Free-CTR Bayesian holdouts compare to remaining free-control Ks."""
     posterior = xr.Dataset(
@@ -476,6 +557,93 @@ def test_summarize_bayesian_ctr_holdout_weighted_mean_reference() -> None:
     assert row["ctr_reference_mode"] == "weighted_mean"
     assert row["ctr_reference_n"] == 2
     assert row["delta_k_abs_mean"] < 0.1
+
+
+def test_summarize_bayesian_ctr_holdout_shared_and_errors() -> None:
+    """Bayesian CTR holdout summaries should validate required posterior variables."""
+    posterior = xr.Dataset(
+        data_vars={
+            "K_A01": (("chain", "draw"), np.array([[7.0, 7.1, 6.9, 7.0]])),
+            "K_ctr_ctrl": (("chain", "draw"), np.array([[7.0, 7.0, 7.0, 7.0]])),
+        },
+        coords={"chain": [0], "draw": [0, 1, 2, 3]},
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+
+    row = summarize_bayesian_ctr_holdout(
+        trace,
+        trace_id="shared-model",
+        ctr_group="ctrl",
+        heldout_well="A01",
+        reference_mode="shared",
+    )
+
+    assert row["ctr_reference_vars"] == "K_ctr_ctrl"
+    assert row["delta_k_hdi94_contains_zero"] is True
+    with pytest.raises(ValueError, match="remaining_ctr_wells"):
+        summarize_bayesian_ctr_holdout(
+            trace,
+            trace_id="bad",
+            ctr_group="ctrl",
+            heldout_well="A01",
+            reference_mode="weighted_mean",
+        )
+    with pytest.raises(ValueError, match="Unsupported"):
+        summarize_bayesian_ctr_holdout(
+            trace,
+            trace_id="bad",
+            ctr_group="ctrl",
+            heldout_well="A01",
+            reference_mode="median",
+        )
+    with pytest.raises(KeyError, match="Missing heldout"):
+        summarize_bayesian_ctr_holdout(
+            trace,
+            trace_id="bad",
+            ctr_group="ctrl",
+            heldout_well="B01",
+        )
+
+
+def test_ctr_summary_classical_rows_and_prior_widening() -> None:
+    """Classical and preliminary-fit CTR helpers should preserve uncertainty logic."""
+
+    class Scheme:
+        def __init__(self) -> None:
+            self.names = {"ctrl": {"A01", "A02", "A03"}}
+
+    def fit_result(k: float, stderr: float | None) -> FitResult[Any]:
+        params = Parameters()
+        params.add("K", value=k)
+        params["K"].stderr = stderr
+        return FitResult(result=type("Result", (), {"params": params})())
+
+    results = {
+        "A01": fit_result(7.0, 0.05),
+        "A02": fit_result(7.2, 0.10),
+        "A03": fit_result(6.8, 0.20),
+    }
+
+    widened = widen_heldout_k_prior(results, "A01", n_sd=2.0, prior_sigma=0.6)
+    rows = classical_ctr_holdout_rows(results, Scheme(), trace_id="lm", rope=0.3)
+    summary = summarize_ctr_loo_table(
+        pd.DataFrame({
+            "trace_id": ["lm", "lm"],
+            "delta_k_mean": [0.1, -0.2],
+            "delta_k_abs_mean": [0.1, 0.2],
+            "delta_k_sd": [0.05, 0.10],
+            "z_delta_k": [2.0, -2.0],
+            "delta_k_hdi89_contains_zero": [True, False],
+            "delta_k_hdi94_contains_zero": [True, True],
+            "p_abs_delta_k_lt_rope": [1.0, 0.0],
+        })
+    )
+
+    assert widened["A01"].result.params["K"].stderr == pytest.approx(0.3)
+    assert set(rows["heldout_well"]) == {"A01", "A02", "A03"}
+    assert rows.loc[rows["heldout_well"] == "A01", "z_delta_k"].notna().all()
+    assert summary.loc[0, "ctr_loo_n"] == 2
+    assert summary.loc[0, "ctr_loo_rmse"] == pytest.approx(np.sqrt(0.025))
 
 
 def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
@@ -610,3 +778,99 @@ def test_residuals_from_multifit_empty_result_keeps_schema() -> None:
 
     assert residuals.empty
     assert list(residuals.columns) == RESIDUAL_TABLE_COLUMNS
+
+
+def test_residuals_from_fit_results_robust_params_and_drop_invalid_sigma() -> None:
+    """Classical residual tables should expose optional params and drop bad sigma rows."""
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0, 8.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, 1.0])
+    ds = Dataset(
+        {"1": DataArray(x, y, y_errc=np.array([1.0, 0.0, 2.0]))},
+        is_ph=True,
+    )
+    fr: FitResult[Any] = FitResult(
+        result=type("Result", (), {"params": params})(), dataset=ds
+    )
+
+    residuals = residuals_from_fit_results(
+        {"A01": fr},
+        "robust",
+        binding_1site,
+        include_fit_params=True,
+        robust=True,
+        student_t_nu=3.0,
+        outlier_threshold=0.5,
+    )
+
+    assert len(residuals) == 2
+    assert residuals["residual_likelihood"].eq("student_t").all()
+    assert {"K", "S0_1", "S1_1"}.issubset(residuals.columns)
+    assert residuals["is_residual_outlier"].any()
+
+
+def test_trace_diagnostics_collects_stats_loo_and_x_sanity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trace diagnostics should combine sample stats, summary, LOO, and x-axis checks."""
+    posterior = xr.Dataset(
+        data_vars={
+            "K": (("chain", "draw"), np.array([[7.0, 7.1]])),
+            "x_per_well": (
+                ("chain", "draw", "step", "well"),
+                np.array([[[[8.0, 8.0], [7.0, 7.1]], [[8.1, 8.1], [7.2, 7.3]]]]),
+            ),
+        },
+        coords={"chain": [0], "draw": [0, 1], "step": [0, 1], "well": ["A01", "A02"]},
+    )
+    sample_stats = xr.Dataset(
+        data_vars={
+            "diverging": (("chain", "draw"), np.array([[False, True]])),
+            "tree_depth": (("chain", "draw"), np.array([[3, 5]])),
+            "reached_max_treedepth": (("chain", "draw"), np.array([[False, True]])),
+            "energy": (("chain", "draw"), np.array([[1.0, 3.0]])),
+        },
+        coords={"chain": [0], "draw": [0, 1]},
+    )
+    log_likelihood = xr.Dataset(
+        data_vars={"obs": (("chain", "draw", "obs_id"), np.zeros((1, 2, 2)))},
+        coords={"chain": [0], "draw": [0, 1], "obs_id": [0, 1]},
+    )
+    trace = xr.DataTree.from_dict({
+        "posterior": posterior,
+        "sample_stats": sample_stats,
+        "log_likelihood": log_likelihood,
+    })
+
+    class FakeLoo:
+        elpd_loo = -1.0
+        p_loo = 0.5
+        se = 0.25
+        pareto_k = np.array([0.2, 0.8])
+
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.az.summary",
+        lambda *_args, **_kwargs: pd.DataFrame({
+            "r_hat": [1.01],
+            "ess_bulk": [100.0],
+            "ess_tail": [80.0],
+        }),
+    )
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.az.loo",
+        lambda *_args, **_kwargs: FakeLoo(),
+    )
+
+    row = trace_diagnostics(trace, compute_loo=True)
+    sanity = x_axis_sanity(trace)
+
+    assert row["n_divergences"] == 1
+    assert row["tree_depth_max"] == 5
+    assert row["rhat_max"] == 1.01
+    assert row["elpd_loo"] == -1.0
+    assert row["pareto_k_frac_gt_0p7"] == 0.5
+    assert row["x_first_well"] == "A01"
+    assert sanity["x_step0_max_abs_spread"] == pytest.approx(0.0)
