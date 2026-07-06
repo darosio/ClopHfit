@@ -23,6 +23,25 @@ ArrayLike = _t.Any
 
 STUDENT_T_NU = 3.0
 
+RESIDUAL_TABLE_COLUMNS = [
+    "trace_id",
+    "well",
+    "label",
+    "step",
+    "x",
+    "y",
+    "that",
+    "sigma",
+    "raw_res",
+    "likelihood_res",
+    "std_res",
+    "p_outlier_per_point",
+    "residual_likelihood",
+    "student_t_nu",
+    "is_residual_outlier",
+    "outlier_threshold",
+]
+
 
 @dataclass
 class ResidualDiagnostics:
@@ -534,8 +553,11 @@ def masked_datasets_from_residual_outliers(
     """
     masked: dict[str, _t.Any] = {}
     for well, fr in results.items():
-        if getattr(fr, "dataset", None) is not None:
-            masked[str(well)] = copy.deepcopy(fr.dataset)
+        dataset = getattr(fr, "dataset", None)
+        if dataset is not None:
+            masked[str(well)] = copy.deepcopy(dataset)
+        elif hasattr(fr, "items"):
+            masked[str(well)] = copy.deepcopy(fr)
 
     if not masked or exclude_col not in residuals.columns:
         return masked
@@ -571,6 +593,64 @@ def masked_datasets_from_residual_outliers(
             da.mask[idx] = False
 
     return masked
+
+
+def mark_outlier_probability_outliers(
+    residuals: _t.Any,
+    *,
+    probability_col: str = "p_outlier_per_point",
+    threshold: float = 0.9,
+    exclude_col: str = "exclude_outlier_probability",
+) -> pd.DataFrame:
+    """Annotate residual rows whose posterior outlier probability exceeds a threshold."""
+    if not isinstance(residuals, pd.DataFrame):
+        msg = (
+            "residuals must be a pandas DataFrame, such as the output of "
+            "residuals_from_multifit() or residuals_from_fit_results(); got "
+            f"{type(residuals).__name__}"
+        )
+        raise TypeError(msg)
+    out = residuals.copy()
+    probability_values = (
+        out[probability_col]
+        if probability_col in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    probabilities = pd.to_numeric(probability_values, errors="coerce")
+    out[exclude_col] = probabilities > threshold
+    out["residual_outlier_score"] = probabilities
+    return out
+
+
+def masked_datasets_from_outlier_probabilities(
+    results: _t.Mapping[str, _t.Any],
+    residuals: _t.Any,
+    *,
+    probability_col: str = "p_outlier_per_point",
+    threshold: float = 0.9,
+    min_keep: int = 3,
+) -> dict[str, _t.Any]:
+    """Return datasets with high posterior outlier-probability rows masked out."""
+    if not isinstance(residuals, pd.DataFrame):
+        msg = (
+            "residuals must be a pandas DataFrame, such as the output of "
+            "residuals_from_multifit() or residuals_from_fit_results(); got "
+            f"{type(residuals).__name__}"
+        )
+        raise TypeError(msg)
+    exclude_col = "exclude_outlier_probability"
+    marked = mark_outlier_probability_outliers(
+        residuals,
+        probability_col=probability_col,
+        threshold=threshold,
+        exclude_col=exclude_col,
+    )
+    return masked_datasets_from_residual_outliers(
+        results,
+        marked,
+        exclude_col=exclude_col,
+        min_keep=min_keep,
+    )
 
 
 def posterior_dataset(trace: _t.Any) -> _t.Any:
@@ -1064,6 +1144,57 @@ def _sigma_for_label_well(
     return np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
 
 
+def _outlier_probability_for_label_well(
+    trace: _t.Any,
+    lbl: _t.Any,
+    well: str,
+    mask: np.ndarray,
+    results: _t.Mapping[str, _t.Any],
+) -> np.ndarray:
+    posterior = posterior_dataset(trace)
+    prob_var = f"outlier_probability_{lbl}"
+    n_active = int(mask.sum())
+    missing = np.full(n_active, np.nan, dtype=float)
+    if prob_var not in posterior:
+        return missing
+
+    arr = posterior[prob_var]
+    sample_dims = [dim for dim in ("chain", "draw") if dim in arr.dims]
+    if sample_dims:
+        arr = arr.mean(dim=sample_dims)
+
+    if "well" in arr.dims:
+        try:
+            well_arr = arr.sel(well=well)
+        except Exception:
+            well_arr = arr
+        probs = np.asarray(well_arr, dtype=float)
+        if probs.shape == mask.shape:
+            return _t.cast("np.ndarray", probs[mask])
+        if probs.size == n_active:
+            return _t.cast("np.ndarray", probs.ravel())
+
+    probs = np.asarray(arr, dtype=float).ravel()
+    if probs.size == n_active:
+        return _t.cast("np.ndarray", probs)
+
+    obs_rows = _observation_rows_for_likelihood(f"y_likelihood_{lbl}", results)
+    if probs.size != len(obs_rows):
+        return missing
+
+    by_position: dict[tuple[str, int], float] = {}
+    for row, prob in zip(obs_rows, probs, strict=True):
+        step_value = row.get("step")
+        if step_value is None:
+            continue
+        by_position[str(row.get("well")), int(step_value)] = float(prob)
+    step = np.flatnonzero(mask)
+    return np.asarray(
+        [by_position.get((str(well), int(step_j)), np.nan) for step_j in step],
+        dtype=float,
+    )
+
+
 def residuals_from_multifit(  # noqa: PLR0913
     multi: _t.Any,
     trace_id: str,
@@ -1075,6 +1206,11 @@ def residuals_from_multifit(  # noqa: PLR0913
     outlier_threshold: float = 3.0,
 ) -> pd.DataFrame:
     """Build a long calibrated-residual table from a MultiFitResult.
+
+    The returned table has one row per active observation and always includes
+    trace, well, label, step, observed, predicted, sigma, raw residual,
+    likelihood-scaled residual, Normal-score residual, likelihood family, and
+    residual-outlier metadata columns.
 
     ``likelihood_res`` is always ``(observed - predicted) / sigma``.  For
     Student-t robust fits, ``std_res`` is the equivalent standard-Normal score
@@ -1110,6 +1246,9 @@ def residuals_from_multifit(  # noqa: PLR0913
                 is_ph=ds.is_ph,
             )
             sigma = _sigma_for_label_well(multi.trace, lbl, str(well), da, mask)
+            p_outlier = _outlier_probability_for_label_well(
+                multi.trace, lbl, str(well), mask, multi.results
+            )
             likelihood_res = (y - that) / sigma
             std_res = residual_normal_scores(
                 likelihood_res, robust=robust, student_t_nu=student_t_nu
@@ -1134,6 +1273,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "raw_res": float(y[j] - that[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
+                    "p_outlier_per_point": float(p_outlier[j]),
                     "residual_likelihood": "student_t" if robust else "normal",
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),
@@ -1147,10 +1287,13 @@ def residuals_from_multifit(  # noqa: PLR0913
 
     df = pd.DataFrame(rows)
     if df.empty:
-        return df
-    return df.replace([np.inf, -np.inf], np.nan).dropna(
+        return pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(
         subset=["std_res", "x", "step", "label"]
     )
+    leading_cols = [col for col in RESIDUAL_TABLE_COLUMNS if col in df.columns]
+    extra_cols = [col for col in df.columns if col not in leading_cols]
+    return df.loc[:, [*leading_cols, *extra_cols]]
 
 
 def residuals_from_fit_results(  # noqa: PLR0913

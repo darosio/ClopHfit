@@ -604,6 +604,38 @@ def test_fit_binding_pymc_robust_can_infer_student_t_nu(
     assert captured["nu_name"] == "student_t_nu"
 
 
+def test_fit_binding_pymc_robust_can_use_mixture_likelihood(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Single-fit robust PyMC can use a marginalized contamination mixture."""
+    captured: dict[str, object] = {}
+
+    def fake_mixture(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["has_weights"] = "w" in kwargs
+        captured["has_components"] = "comp_dists" in kwargs
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {
+        "name": "y_likelihood_default",
+        "has_weights": True,
+        "has_components": True,
+    }
+
+
 def test_fit_binding_pymc_robust_rejects_nonpositive_student_t_nu(
     ph_dataset: Dataset,
 ) -> None:
@@ -845,6 +877,8 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     assert calls[1]["robust"] is False
     assert calls[0]["well_noise_scale"] is True
     assert calls[1]["well_noise_scale"] is True
+    assert calls[0]["shared_well_noise_scale"] is False
+    assert calls[1]["shared_well_noise_scale"] is False
     assert calls[0]["label_noise_scale_sigma"] == 0.3
     assert calls[0]["well_noise_sd_sigma"] == 0.3
     assert calls[0]["n_xerr"] == 1.0
@@ -857,6 +891,52 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     assert calls[1]["input_masks"]["A01"] == [True, False, True]
     assert result.masked_datasets["A01"]["1"].mask.tolist() == [True, False, True]
     assert result.masked_datasets["A02"]["2"].mask.tolist() == [True, True, True]
+
+
+def test_fit_binding_pymc_multi_residual_refit_can_share_well_noise_scale(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi residual refit should pass shared well-noise scaling to both passes."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01"}}
+    inputs = {
+        "A01": copy.deepcopy(multi_dataset),
+        "A02": copy.deepcopy(multi_dataset),
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_fit_binding_pymc_multi(
+        fit_inputs: dict[str, Dataset | FitResult[MiniT]],
+        _scheme: PlateScheme,
+        **kwargs: object,
+    ) -> MultiFitResult:
+        calls.append(kwargs)
+        fit_results: dict[str, FitResult[MiniT]] = {}
+        for well, item in fit_inputs.items():
+            fit_results[well] = (
+                item if isinstance(item, FitResult) else fit_binding_glob(item)
+            )
+        return MultiFitResult(trace=xr.DataTree(), results=fit_results)
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc_multi", fake_fit_binding_pymc_multi)
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.residuals_from_multifit",
+        lambda *_args, **_kwargs: pd.DataFrame({"std_res": []}),
+    )
+
+    bayes.fit_binding_pymc_multi_residual_refit(
+        inputs,
+        scheme,
+        n_samples=10,
+        n_tune=5,
+        n_xerr=0.0,
+        shared_well_noise_scale=True,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["shared_well_noise_scale"] is True
+    assert calls[1]["shared_well_noise_scale"] is True
 
 
 def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
@@ -1040,6 +1120,56 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
     assert captured == {"per_well": expected_per_well}
 
 
+def test_fit_binding_pymc_multi_can_share_well_noise_scale_between_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Shared well-noise scaling should build one well vector for all labels."""
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    created_lognormals: list[str] = []
+    created_halfnormals: list[str] = []
+
+    original_lognormal = pm.LogNormal
+    original_halfnormal = pm.HalfNormal
+
+    def fake_lognormal(name: str, **kwargs: object) -> object:
+        created_lognormals.append(name)
+        if name == "well_noise_scale":
+            assert kwargs["dims"] == "well"
+            raise _StopBayesBuildError
+        return original_lognormal(name, **kwargs)
+
+    def fake_halfnormal(name: str, **kwargs: object) -> object:
+        created_halfnormals.append(name)
+        return original_halfnormal(name, **kwargs)
+
+    monkeypatch.setattr(pm, "LogNormal", fake_lognormal)
+    monkeypatch.setattr(pm, "HalfNormal", fake_halfnormal)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            noise_model=noise_model,
+            well_noise_scale=True,
+            shared_well_noise_scale=True,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert "label_noise_scale" in created_lognormals
+    assert "well_noise_sd" in created_halfnormals
+    assert "well_noise_scale_1" not in created_lognormals
+    assert "well_noise_scale_2" not in created_lognormals
+
+
 def test_fit_binding_pymc_multi_robust_can_infer_student_t_nu(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,
@@ -1071,6 +1201,43 @@ def test_fit_binding_pymc_multi_robust_can_infer_student_t_nu(
 
     assert captured["name"] == "y_likelihood_1"
     assert captured["nu_name"] == "student_t_nu"
+
+
+def test_fit_binding_pymc_multi_robust_can_use_mixture_likelihood(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit robust PyMC can use a marginalized contamination mixture."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    captured: dict[str, object] = {}
+
+    def fake_mixture(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["has_weights"] = "w" in kwargs
+        captured["has_components"] = "comp_dists" in kwargs
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+    assert captured == {
+        "name": "y_likelihood_1",
+        "has_weights": True,
+        "has_components": True,
+    }
 
 
 def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(

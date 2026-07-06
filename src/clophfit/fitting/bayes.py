@@ -46,6 +46,7 @@ if typing.TYPE_CHECKING:
 
 
 NoiseParamMode = Literal["fixed", "free", "centered"]
+RobustLikelihood = Literal["student_t", "mixture"]
 
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
 
@@ -790,14 +791,94 @@ def _add_y_likelihood(  # noqa: PLR0913
     *,
     robust: bool = False,
     student_t_nu: typing.Any = 3.0,  # noqa: ANN401  # float | TensorVariable
+    robust_likelihood: RobustLikelihood = "student_t",
+    pi_outlier: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
+    outlier_inflate: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
 ) -> None:
-    """Add a Normal or StudentT likelihood for one label."""
-    if robust:
+    """Add a Normal, StudentT, or contamination-mixture likelihood for one label."""
+    mu = y_model[da.mask]
+    if robust and robust_likelihood == "mixture":
+        if pi_outlier is None or outlier_inflate is None:
+            msg = "Mixture likelihood requires pi_outlier and outlier_inflate."
+            raise ValueError(msg)
+        _add_mixture_likelihood(
+            name,
+            mu,
+            sigma,
+            da.y,
+            pi_outlier=pi_outlier,
+            outlier_inflate=outlier_inflate,
+        )
+    elif robust:
         pm.StudentT(
-            name, nu=student_t_nu, mu=y_model[da.mask], sigma=sigma, observed=da.y
+            name,
+            nu=student_t_nu,
+            mu=mu,
+            sigma=sigma,
+            observed=da.y,
         )
     else:
-        pm.Normal(name, mu=y_model[da.mask], sigma=sigma, observed=da.y)
+        pm.Normal(name, mu=mu, sigma=sigma, observed=da.y)
+
+
+def _add_mixture_likelihood(  # noqa: PLR0913
+    name: str,
+    mu: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+    sigma_normal: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
+    observed: np.ndarray,
+    *,
+    pi_outlier: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+    outlier_inflate: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+) -> None:
+    """Add a marginalized normal/outlier contamination mixture likelihood."""
+    sigma_outlier = sigma_normal * (1.0 + outlier_inflate)
+    w = pi_outlier * pt.ones_like(mu)  # type: ignore[no-untyped-call]
+    weights = pt.stack([1.0 - w, w], axis=-1)
+    comp_dists = [
+        pm.Normal.dist(mu=mu, sigma=sigma_normal),
+        pm.Normal.dist(mu=mu, sigma=sigma_outlier),
+    ]
+    pm.Mixture(name, w=weights, comp_dists=comp_dists, observed=observed)
+
+    normal_logp = pm.logp(comp_dists[0], observed)
+    outlier_logp = pm.logp(comp_dists[1], observed)
+    log_p_normal = pt.log1p(-pi_outlier) + normal_logp
+    log_p_outlier = pt.log(pi_outlier) + outlier_logp
+    pm.Deterministic(
+        name.replace("y_likelihood", "outlier_probability"),
+        pm_math.exp(
+            log_p_outlier - pt.logaddexp(log_p_normal, log_p_outlier)  # type: ignore[no-untyped-call]
+        ),
+    )
+
+
+def _validate_robust_likelihood(robust_likelihood: RobustLikelihood) -> None:
+    """Validate the robust likelihood selector."""
+    if robust_likelihood not in typing.get_args(RobustLikelihood):
+        msg = "robust_likelihood must be 'student_t' or 'mixture'."
+        raise ValueError(msg)
+
+
+def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float:
+    """Return a valid prior mean for the outlier fraction."""
+    contamination_frac = float(contamination_frac_prior)
+    if not 0.0 < contamination_frac < 1.0:
+        msg = "contamination_frac_prior must be between 0 and 1."
+        raise ValueError(msg)
+    return contamination_frac
+
+
+def _build_outlier_priors(
+    labels: Sequence[str], contamination_frac_prior: float
+) -> tuple[dict[str, typing.Any], typing.Any]:
+    """Build per-label outlier fractions and a shared scale inflation prior."""
+    contamination_frac = _validate_contamination_frac_prior(contamination_frac_prior)
+    beta = (1.0 / contamination_frac) - 1.0
+    pi_outliers = {
+        lbl: pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta) for lbl in labels
+    }
+    outlier_inflate = pm.HalfNormal("outlier_inflate", sigma=5.0)
+    return pi_outliers, outlier_inflate
 
 
 def _student_t_nu_value(student_t_nu: float | None) -> typing.Any:  # noqa: ANN401
@@ -1321,7 +1402,7 @@ def _per_well_fit_results_from_trace(
     return per_well_results
 
 
-def fit_binding_pymc(  # noqa: PLR0913
+def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
@@ -1335,7 +1416,9 @@ def fit_binding_pymc(  # noqa: PLR0913
     shared_alpha: bool = True,
     shared_gain: bool = False,
     robust: bool = False,
+    robust_likelihood: RobustLikelihood = "student_t",
     student_t_nu: float | None = 3.0,
+    contamination_frac_prior: float = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
@@ -1381,10 +1464,17 @@ def fit_binding_pymc(  # noqa: PLR0913
         If ``True``, use one ``gain`` variable for all labels when
         *noise_model* is provided.
     robust : bool
-        If ``True``, use StudentT likelihood (nu=3) for robust regression.
+        If ``True``, use the selected robust likelihood for regression.
+    robust_likelihood : RobustLikelihood
+        Robust likelihood used when *robust* is ``True``. ``"student_t"``
+        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
+        normal/outlier mixture with per-label outlier probabilities.
     student_t_nu : float | None
         Student-t degrees of freedom when *robust* is ``True``. Positive values
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
+    contamination_frac_prior : float
+        Prior mean for each per-label outlier fraction when
+        ``robust_likelihood="mixture"``. Must be between 0 and 1.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
@@ -1418,6 +1508,9 @@ def fit_binding_pymc(  # noqa: PLR0913
     FitResult[xr.DataTree]
         Bayesian fitting results.
     """
+    _validate_robust_likelihood(robust_likelihood)
+    if robust and robust_likelihood == "mixture":
+        _validate_contamination_frac_prior(contamination_frac_prior)
     fr, prefer_centered = _normalize_fit_input(ds_or_fr)
 
     if fr.result is None or fr.dataset is None:
@@ -1436,7 +1529,17 @@ def fit_binding_pymc(  # noqa: PLR0913
     with pm.Model():
         pars = create_parameter_priors(params, n_sd)
         x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
-        robust_nu = _student_t_nu_value(student_t_nu) if robust else 3.0
+        robust_nu = (
+            _student_t_nu_value(student_t_nu)
+            if robust and robust_likelihood == "student_t"
+            else 3.0
+        )
+        if robust and robust_likelihood == "mixture":
+            pi_outliers, outlier_inflate = _build_outlier_priors(
+                labels, contamination_frac_prior
+            )
+        else:
+            pi_outliers, outlier_inflate = {}, None
 
         if noise_model is None:
             ye_mags = _build_ye_mag_priors(
@@ -1462,6 +1565,9 @@ def fit_binding_pymc(  # noqa: PLR0913
                     sigma,
                     robust=robust,
                     student_t_nu=robust_nu,
+                    robust_likelihood=robust_likelihood,
+                    pi_outlier=pi_outliers.get(lbl),
+                    outlier_inflate=outlier_inflate,
                 )
         else:
             active_noise_model = _active_noise_model(noise_model, labels)
@@ -1504,6 +1610,9 @@ def fit_binding_pymc(  # noqa: PLR0913
                     sigma_det[da.mask],
                     robust=robust,
                     student_t_nu=robust_nu,
+                    robust_likelihood=robust_likelihood,
+                    pi_outlier=pi_outliers.get(lbl),
+                    outlier_inflate=outlier_inflate,
                 )
 
         # Inference
@@ -1522,8 +1631,11 @@ def fit_binding_pymc(  # noqa: PLR0913
         trace = pm.sample(n_samples, **sample_kwargs)
         trace = _compute_sample_log_likelihood(trace)
     p_names = list(params.keys())
-    if robust and student_t_nu is None:
+    if robust and robust_likelihood == "student_t" and student_t_nu is None:
         p_names.append("student_t_nu")
+    if robust and robust_likelihood == "mixture":
+        p_names.extend([f"pi_outlier_{lbl}" for lbl in labels])
+        p_names.append("outlier_inflate")
     return process_trace(trace, p_names, ds)
 
 
@@ -1702,6 +1814,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0
     min_allowed_tail_count: int = 0,
     min_keep: int = 3,
     well_noise_scale: bool = True,
+    shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
     well_noise_sd_sigma: float = 0.3,
     well_noise_scale_sigma: float | None = None,
@@ -1793,6 +1906,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0
         ctr_free_k=ctr_free_k,
         robust=True,
         well_noise_scale=well_noise_scale,
+        shared_well_noise_scale=shared_well_noise_scale,
         label_noise_scale_sigma=label_noise_scale_sigma,
         well_noise_sd_sigma=well_noise_sd_sigma,
         min_x_step=min_x_step,
@@ -1846,6 +1960,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0
         ctr_free_k=ctr_free_k,
         robust=False,
         well_noise_scale=well_noise_scale,
+        shared_well_noise_scale=shared_well_noise_scale,
         label_noise_scale_sigma=label_noise_scale_sigma,
         well_noise_sd_sigma=well_noise_sd_sigma,
         min_x_step=min_x_step,
@@ -2146,7 +2261,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     robust: bool = False,
+    robust_likelihood: RobustLikelihood = "student_t",
     student_t_nu: float | None = 3.0,
+    contamination_frac_prior: float = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
@@ -2157,6 +2274,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ye_mag_mu: float | Mapping[str, float] = 0.0,
     ye_mag_sigma: float | Mapping[str, float] = 1.5,
     well_noise_scale: bool = False,
+    shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
     well_noise_sd_sigma: float = 0.3,
     well_noise_scale_sigma: float | None = None,
@@ -2227,11 +2345,17 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         If True, generates posterior predictive samples and adds them to the
         returned InferenceData object. Needed for `plot_ppc_well`.
     robust : bool
-        If True, use StudentT likelihood (nu=3) for robust regression instead
-        of Normal.
+        If True, use the selected robust likelihood instead of Normal.
+    robust_likelihood : RobustLikelihood
+        Robust likelihood used when *robust* is ``True``. ``"student_t"``
+        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
+        normal/outlier mixture with per-label outlier probabilities.
     student_t_nu : float | None
         Student-t degrees of freedom when *robust* is ``True``. Positive values
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
+    contamination_frac_prior : float
+        Prior mean for each per-label outlier fraction when
+        ``robust_likelihood="mixture"``. Must be between 0 and 1.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` when every input is already a ``FitResult`` and to
@@ -2269,6 +2393,10 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         LogNormal factor ``well_noise_scale_{lbl}`` with dims ``well``.  This is
         useful for robust multi-well screening, where a global label-level noise
         model otherwise turns real well-to-well variance into apparent outliers.
+    shared_well_noise_scale : bool
+        If ``True`` and *well_noise_scale* is enabled, use one shared
+        ``well_noise_scale`` vector with dims ``well`` for all labels instead
+        of per-label ``well_noise_scale_{lbl}`` vectors.
     label_noise_scale_sigma : float
         Log-scale prior sigma for label-level residual scale
         ``label_noise_scale_{lbl}``, centered at one.
@@ -2291,6 +2419,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ValueError
         If no valid dataset is found in results.
     """
+    _validate_robust_likelihood(robust_likelihood)
+    if robust and robust_likelihood == "mixture":
+        _validate_contamination_frac_prior(contamination_frac_prior)
     fit_results, prefer_centered = _normalize_fit_inputs(results)
     ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     if ds is None:
@@ -2344,7 +2475,17 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     }
 
     with pm.Model(coords=coords):
-        robust_nu = _student_t_nu_value(student_t_nu) if robust else 3.0
+        robust_nu = (
+            _student_t_nu_value(student_t_nu)
+            if robust and robust_likelihood == "student_t"
+            else 3.0
+        )
+        if robust and robust_likelihood == "mixture":
+            pi_outliers, outlier_inflate = _build_outlier_priors(
+                labels, contamination_frac_prior
+            )
+        else:
+            pi_outliers, outlier_inflate = {}, None
 
         if x_error_model == "hierarchical_per_well" and n_xerr > 0:
             if not np.all(np.diff(xc) < 0):
@@ -2562,22 +2703,39 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             label_scale_sigma = max(float(label_noise_scale_sigma), 1e-6)
             well_sd_sigma = max(float(well_noise_sd_sigma), 1e-6)
             well_noise_scales = {}
-            for lbl in labels:
-                label_noise_scale = pm.LogNormal(
-                    f"label_noise_scale_{lbl}",
+            if shared_well_noise_scale:
+                shared_label_noise_scale = pm.LogNormal(
+                    "label_noise_scale",
                     mu=0.0,
                     sigma=label_scale_sigma,
                 )
-                well_noise_sd = pm.HalfNormal(
-                    f"well_noise_sd_{lbl}",
-                    sigma=well_sd_sigma,
+                shared_well_noise_sd = pm.HalfNormal(
+                    "well_noise_sd", sigma=well_sd_sigma
                 )
-                well_noise_scales[lbl] = pm.LogNormal(
-                    f"well_noise_scale_{lbl}",
-                    mu=pm_math.log(label_noise_scale),
-                    sigma=well_noise_sd,
+                shared_scale = pm.LogNormal(
+                    "well_noise_scale",
+                    mu=pm_math.log(shared_label_noise_scale),
+                    sigma=shared_well_noise_sd,
                     dims="well",
                 )
+                well_noise_scales = dict.fromkeys(labels, shared_scale)
+            else:
+                for lbl in labels:
+                    label_noise_scale = pm.LogNormal(
+                        f"label_noise_scale_{lbl}",
+                        mu=0.0,
+                        sigma=label_scale_sigma,
+                    )
+                    well_noise_sd = pm.HalfNormal(
+                        f"well_noise_sd_{lbl}",
+                        sigma=well_sd_sigma,
+                    )
+                    well_noise_scales[lbl] = pm.LogNormal(
+                        f"well_noise_scale_{lbl}",
+                        mu=pm_math.log(label_noise_scale),
+                        sigma=well_noise_sd,
+                        dims="well",
+                    )
         else:
             well_noise_scales = {}
 
@@ -2624,7 +2782,16 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 )
                 sigma_vec = sigma_obs_all_det[mask_lbl]
 
-            if robust:
+            if robust and robust_likelihood == "mixture":
+                _add_mixture_likelihood(
+                    f"y_likelihood_{lbl}",
+                    mu_vec,
+                    sigma_vec,
+                    y_obs_vec,
+                    pi_outlier=pi_outliers[lbl],
+                    outlier_inflate=outlier_inflate,
+                )
+            elif robust:
                 pm.StudentT(
                     f"y_likelihood_{lbl}",
                     nu=robust_nu,

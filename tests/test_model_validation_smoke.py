@@ -14,6 +14,7 @@ import pytest
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 
+from clophfit.fitting import residuals as residuals_module
 from clophfit.fitting.ctr_validation import (
     iter_ctr_holdouts,
     make_ctr_holdout_scheme,
@@ -27,10 +28,13 @@ from clophfit.fitting.data_structures import (
     MultiFitResult,
 )
 from clophfit.fitting.model_validation import (
+    RESIDUAL_TABLE_COLUMNS,
     ResidualComparison,
     ResidualDiagnostics,
     excess_tail_outlier_mask,
     mark_excess_residual_outliers,
+    mark_outlier_probability_outliers,
+    masked_datasets_from_outlier_probabilities,
     masked_datasets_from_residual_outliers,
     merge_log_likelihoods,
     model_residual_score_table,
@@ -261,6 +265,44 @@ def test_masked_datasets_from_residual_outliers_masks_marked_rows() -> None:
     assert np.all(ds["1"].mask)
 
 
+def test_masked_datasets_from_outlier_probabilities_accepts_ds_dict() -> None:
+    """Posterior outlier probabilities should mask matching raw ds_dict rows."""
+    ds = Dataset(
+        {
+            "1": DataArray(
+                np.array([6.0, 7.0, 8.0, 9.0]),
+                np.array([10.0, 11.0, 12.0, 13.0]),
+            )
+        },
+        is_ph=True,
+    )
+    residuals = pd.DataFrame({
+        "well": ["A01", "A01"],
+        "label": ["1", "1"],
+        "step": [1, 2],
+        "p_outlier_per_point": [0.9, 0.95],
+    })
+
+    masked = masked_datasets_from_outlier_probabilities({"A01": ds}, residuals)
+    marked = mark_outlier_probability_outliers(residuals)
+
+    assert marked["exclude_outlier_probability"].to_list() == [False, True]
+    assert np.array_equal(masked["A01"]["1"].mask, np.array([True, True, False, True]))
+    assert np.all(ds["1"].mask)
+
+
+def test_outlier_probability_helpers_reject_residuals_module() -> None:
+    """A shadowed residuals import should fail with a clear DataFrame hint."""
+    with pytest.raises(TypeError, match="residuals must be a pandas DataFrame"):
+        mark_outlier_probability_outliers(cast("pd.DataFrame", residuals_module))
+
+    with pytest.raises(TypeError, match="residuals must be a pandas DataFrame"):
+        masked_datasets_from_outlier_probabilities(
+            {},
+            cast("pd.DataFrame", residuals_module),
+        )
+
+
 def test_ctr_holdout_scheme_uses_sets() -> None:
     """CTR holdout must preserve dict[str, set[str]] types on PlateScheme.names."""
 
@@ -448,11 +490,13 @@ def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
     params.add("K", value=7.0)
     params.add("S0_1", value=100.0)
     params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True)
     ds = Dataset(
         {
             "1": DataArray(
-                np.array([6.0, 7.0]),
-                np.array([90.0, 150.0]),
+                x,
+                y,
                 y_errc=np.array([10.0, 20.0]),
             )
         },
@@ -468,3 +512,101 @@ def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
     np.testing.assert_allclose(residuals["sigma"].to_numpy(), np.array([10.0, 20.0]))
     assert "likelihood_res" in residuals.columns
     assert "is_residual_outlier" in residuals.columns
+
+
+def test_residuals_from_multifit_returns_convenient_schema() -> None:
+    """MultiFit residuals should expose notebook-friendly residual metadata."""
+    trace = xr.DataTree.from_dict({"posterior": xr.Dataset()})
+
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True)
+    ds = Dataset(
+        {
+            "1": DataArray(
+                x,
+                y,
+                y_errc=np.array([10.0, 20.0]),
+            )
+        },
+        is_ph=True,
+    )
+    fr = FitResult(
+        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+    )
+    multi = MultiFitResult(trace=trace, results={"A01": fr})
+
+    residuals = residuals_from_multifit(multi, "trace", binding_1site)
+
+    assert list(residuals.columns) == RESIDUAL_TABLE_COLUMNS
+    assert residuals.loc[0, "trace_id"] == "trace"
+    assert residuals.loc[0, "well"] == "A01"
+    assert residuals.loc[0, "label"] == "1"
+    assert residuals.loc[0, "step"] == 0
+    assert residuals.loc[0, "residual_likelihood"] == "normal"
+    assert bool(residuals["p_outlier_per_point"].isna().iloc[0])
+    assert not bool(residuals.loc[0, "is_residual_outlier"])
+
+
+def test_residuals_from_multifit_maps_outlier_probability_by_point() -> None:
+    """Mixture outlier probabilities should align with well/step residual rows."""
+    posterior = xr.Dataset(
+        data_vars={
+            "outlier_probability_1": (
+                ("chain", "draw", "obs"),
+                np.array([[[0.1, 0.2, 0.3, 0.4]]]),
+            )
+        },
+        coords={"chain": [0], "draw": [0], "obs": [0, 1, 2, 3]},
+    )
+    trace = xr.DataTree.from_dict({"posterior": posterior})
+
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True)
+
+    def fit_result() -> FitResult[xr.DataTree]:
+        ds = Dataset(
+            {"1": DataArray(x, y, y_errc=np.array([10.0, 20.0]))},
+            is_ph=True,
+        )
+        return FitResult(
+            result=type("Result", (), {"params": params})(),
+            mini=trace,
+            dataset=ds,
+        )
+
+    multi = MultiFitResult(
+        trace=trace,
+        results={"A01": fit_result(), "A02": fit_result()},
+    )
+
+    residuals = residuals_from_multifit(multi, "trace", binding_1site)
+
+    assert residuals[["well", "step"]].to_dict("records") == [
+        {"well": "A01", "step": 0},
+        {"well": "A01", "step": 1},
+        {"well": "A02", "step": 0},
+        {"well": "A02", "step": 1},
+    ]
+    np.testing.assert_allclose(
+        residuals["p_outlier_per_point"].to_numpy(),
+        np.array([0.1, 0.3, 0.2, 0.4]),
+    )
+
+
+def test_residuals_from_multifit_empty_result_keeps_schema() -> None:
+    """Empty MultiFit residuals should still be easy to concatenate/display."""
+    trace = xr.DataTree.from_dict({"posterior": xr.Dataset()})
+    multi = MultiFitResult(trace=trace, results={})
+
+    residuals = residuals_from_multifit(multi, "trace", binding_1site)
+
+    assert residuals.empty
+    assert list(residuals.columns) == RESIDUAL_TABLE_COLUMNS
