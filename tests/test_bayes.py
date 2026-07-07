@@ -636,6 +636,24 @@ def test_fit_binding_pymc_robust_can_use_mixture_likelihood(
     }
 
 
+@pytest.mark.parametrize("contamination_frac_prior", [0.0005, 0.999])
+def test_fit_binding_pymc_mixture_rejects_unsafe_contamination_prior(
+    ph_dataset: Dataset,
+    contamination_frac_prior: float,
+) -> None:
+    """Mixture likelihood should reject numerically unsafe contamination priors."""
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=contamination_frac_prior,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
 def test_fit_binding_pymc_robust_rejects_nonpositive_student_t_nu(
     ph_dataset: Dataset,
 ) -> None:
@@ -1238,6 +1256,56 @@ def test_fit_binding_pymc_multi_robust_can_use_mixture_likelihood(
         "has_weights": True,
         "has_components": True,
     }
+
+
+def test_fit_binding_pymc_multi_mixture_accepts_contamination_prior_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """The largest safe contamination prior should still be accepted."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    def fake_mixture(*_args: object, **_kwargs: object) -> None:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=0.5,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+
+def test_fit_binding_pymc_multi_mixture_rejects_high_contamination_prior(
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit mixture likelihood should reject priors concentrated near one."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=0.999,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
 
 
 def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(

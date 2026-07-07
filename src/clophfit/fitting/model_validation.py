@@ -602,7 +602,31 @@ def mark_outlier_probability_outliers(
     threshold: float = 0.9,
     exclude_col: str = "exclude_outlier_probability",
 ) -> pd.DataFrame:
-    """Annotate residual rows whose posterior outlier probability exceeds a threshold."""
+    """Annotate rows with high posterior outlier probability.
+
+    Parameters
+    ----------
+    residuals : _t.Any
+        Residual table, usually returned by :func:`residuals_from_multifit` or
+        :func:`residuals_from_fit_results`.
+    probability_col : str, optional
+        Column containing per-point posterior outlier probabilities.
+    threshold : float, optional
+        Probability cutoff above which a row is marked as an outlier.
+    exclude_col : str, optional
+        Boolean output column used to mark rows for exclusion.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``residuals`` with ``exclude_col`` and
+        ``residual_outlier_score`` columns added.
+
+    Raises
+    ------
+    TypeError
+        If ``residuals`` is not a pandas DataFrame.
+    """
     if not isinstance(residuals, pd.DataFrame):
         msg = (
             "residuals must be a pandas DataFrame, such as the output of "
@@ -630,7 +654,32 @@ def masked_datasets_from_outlier_probabilities(
     threshold: float = 0.9,
     min_keep: int = 3,
 ) -> dict[str, _t.Any]:
-    """Return datasets with high posterior outlier-probability rows masked out."""
+    """Mask datasets using posterior outlier probabilities.
+
+    Parameters
+    ----------
+    results : _t.Mapping[str, _t.Any]
+        Mapping from well identifiers to datasets or fit-result-like objects
+        containing datasets.
+    residuals : _t.Any
+        Residual table with pointwise posterior outlier probabilities.
+    probability_col : str, optional
+        Column containing per-point posterior outlier probabilities.
+    threshold : float, optional
+        Probability cutoff above which a row is masked.
+    min_keep : int, optional
+        Minimum number of unmasked points retained per label.
+
+    Returns
+    -------
+    dict[str, _t.Any]
+        Deep-copied datasets with high-probability outlier rows masked.
+
+    Raises
+    ------
+    TypeError
+        If ``residuals`` is not a pandas DataFrame.
+    """
     if not isinstance(residuals, pd.DataFrame):
         msg = (
             "residuals must be a pandas DataFrame, such as the output of "
@@ -674,7 +723,22 @@ def sample_stats_dataset(trace: _t.Any) -> _t.Any:
 
 
 def trace_parameter_summary(results: _t.Mapping[str, _t.Any]) -> pd.DataFrame:
-    """Summarize scalar per-label PyMC noise parameters directly from traces."""
+    """Summarize scalar per-label PyMC noise parameters from traces.
+
+    Parameters
+    ----------
+    results : _t.Mapping[str, _t.Any]
+        Mapping from well identifiers to fit-result-like objects with ``mini``
+        or ``trace`` attributes and optional datasets.
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide table indexed by well and label with posterior means and standard
+        deviations for recognized scalar noise parameters. An empty table with
+        ``well`` and ``label`` columns is returned when no recognized trace
+        parameters are available.
+    """
     rows: list[dict[str, _t.Any]] = []
     for well, fit in results.items():
         trace = getattr(fit, "mini", None)
@@ -962,7 +1026,21 @@ def pareto_k_table(
 
 
 def pareto_k_summary(pareto_k: pd.DataFrame) -> pd.DataFrame:
-    """Summarize pointwise Pareto-k diagnostics by label and well."""
+    """Summarize pointwise Pareto-k diagnostics.
+
+    Parameters
+    ----------
+    pareto_k : pd.DataFrame
+        Pointwise Pareto-k table, usually returned by
+        :func:`pointwise_pareto_k`.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary table grouped by label and well when those columns are present,
+        otherwise grouped by likelihood variable. The table includes count,
+        maximum, mean, and warning fraction. Empty input returns an empty table.
+    """
     if pareto_k.empty:
         return pd.DataFrame()
     group_cols = [col for col in ("label", "well") if col in pareto_k.columns]

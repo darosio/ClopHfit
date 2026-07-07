@@ -50,6 +50,8 @@ NoiseParamMode = Literal["fixed", "free", "centered"]
 RobustLikelihood = Literal["student_t", "mixture"]
 
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
+_MIN_CONTAMINATION_FRAC_PRIOR = 1e-3
+_MAX_CONTAMINATION_FRAC_PRIOR = 0.5
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -863,8 +865,16 @@ def _validate_robust_likelihood(robust_likelihood: RobustLikelihood) -> None:
 def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float:
     """Return a valid prior mean for the outlier fraction."""
     contamination_frac = float(contamination_frac_prior)
-    if not 0.0 < contamination_frac < 1.0:
-        msg = "contamination_frac_prior must be between 0 and 1."
+    if not (
+        _MIN_CONTAMINATION_FRAC_PRIOR
+        <= contamination_frac
+        <= _MAX_CONTAMINATION_FRAC_PRIOR
+    ):
+        msg = (
+            "contamination_frac_prior must be between "
+            f"{_MIN_CONTAMINATION_FRAC_PRIOR:g} and "
+            f"{_MAX_CONTAMINATION_FRAC_PRIOR:g}."
+        )
         raise ValueError(msg)
     return contamination_frac
 
@@ -1475,7 +1485,7 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
     contamination_frac_prior : float
         Prior mean for each per-label outlier fraction when
-        ``robust_likelihood="mixture"``. Must be between 0 and 1.
+        ``robust_likelihood="mixture"``. Must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
@@ -1669,6 +1679,57 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
     LogNormal ``ye_mag`` priors. ``noise_strategy="proportional"`` uses a
     floor-plus-proportional noise model with free label-specific alpha in both
     passes and no ``ye_mag`` multiplier.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Single-well multi-label titration dataset.
+    noise_strategy : Literal["ye_mag", "proportional"]
+        Noise model used during the robust screening pass and final refit.
+    bg_noise : Mapping[str, float] | float, optional
+        Background-noise hints used to initialize the screening noise model.
+    bg_noise_scale : float, optional
+        Multiplicative scale for ``ye_mag`` initialization when using the
+        ``"ye_mag"`` strategy.
+    bg_noise_log_sigma : float, optional
+        Log-scale prior sigma for screening ``ye_mag`` parameters.
+    proportional_alpha : float, optional
+        Initial proportional-noise alpha for the ``"proportional"`` strategy.
+    noise_model : PlateNoiseModel | None, optional
+        Explicit proportional noise model. If supplied, it overrides
+        ``bg_noise`` for the proportional strategy.
+    n_sd : float
+        Prior-width multiplier forwarded to :func:`fit_binding_pymc`.
+    n_xerr : float
+        X-error multiplier forwarded to :func:`fit_binding_pymc`.
+    n_samples : int
+        Number of posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend forwarded to :func:`fit_binding_pymc`.
+    n_tune : int | None
+        Number of tuning draws. If ``None``, the backend default is used.
+    target_accept : float | None
+        NUTS target acceptance probability.
+    max_treedepth : int | None
+        Maximum NUTS tree depth.
+    shared_ye_mags : bool, optional
+        Use one shared ``ye_mag`` parameter for all labels in the ``"ye_mag"``
+        screening pass.
+    outlier_threshold : float, optional
+        Calibrated residual threshold used to flag candidate outlier points.
+    allowed_tail_fraction : float, optional
+        Fraction of tail points allowed before residual rows are masked.
+    min_allowed_tail_count : int, optional
+        Minimum number of tail points allowed before masking.
+    min_keep : int, optional
+        Minimum number of unmasked observations retained per label.
+    min_x_step : float, optional
+        Minimum latent-x spacing forwarded to :func:`fit_binding_pymc`.
+
+    Returns
+    -------
+    PymcResidualRefitResult
+        Initial robust fit, residual table, masked dataset, and final refit.
     """
     use_proportional = noise_strategy == "proportional"
     if use_proportional:
@@ -1822,6 +1883,78 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
     noise model and a per-label/per-well LogNormal scale in the robust screening
     fit.  This lets the first pass distinguish isolated point outliers from
     whole wells whose variance is genuinely larger.
+
+    Parameters
+    ----------
+    results : Mapping[str, Dataset | FitResult[MiniT]]
+        Per-well datasets or prefit results used as inputs to the screening
+        pass.
+    scheme : PlateScheme
+        Plate scheme describing control/sample grouping for the multi-well fit.
+    noise_strategy : Literal["proportional", "ye_mag"]
+        Noise model used during screening and final refit.
+    bg_noise : Mapping[str, float] | float, optional
+        Background-noise hints used when constructing a proportional noise
+        model.
+    proportional_alpha : float, optional
+        Initial proportional-noise alpha when ``noise_model`` is not provided.
+    noise_model : PlateNoiseModel | None, optional
+        Explicit noise model for proportional-noise fits.
+    n_sd : float
+        Prior-width multiplier forwarded to :func:`fit_binding_pymc_multi`.
+    n_xerr : float
+        X-error multiplier forwarded to :func:`fit_binding_pymc_multi`.
+    n_samples : int
+        Number of posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend forwarded to :func:`fit_binding_pymc_multi`.
+    n_tune : int | None
+        Number of tuning draws. If ``None``, the backend default is used.
+    target_accept : float | None
+        NUTS target acceptance probability.
+    max_treedepth : int | None
+        Maximum NUTS tree depth.
+    x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
+        Latent-x error model forwarded to :func:`fit_binding_pymc_multi`.
+    acid_drop_between_sigma : float, optional
+        Between-well acid-drop prior scale.
+    ctr_free_k : bool, optional
+        Allow control wells to have free K values in the multi-well model.
+    shared_ye_mags : bool, optional
+        Use shared ``ye_mag`` scaling in the ``"ye_mag"`` strategy.
+    outlier_threshold : float, optional
+        Calibrated residual threshold used to flag candidate outlier points.
+    allowed_tail_fraction : float, optional
+        Fraction of tail points allowed before residual rows are masked.
+    min_allowed_tail_count : int, optional
+        Minimum number of tail points allowed before masking.
+    min_keep : int, optional
+        Minimum number of unmasked observations retained per label.
+    well_noise_scale : bool
+        Enable per-well noise scaling.
+    shared_well_noise_scale : bool
+        Share the well-noise scale across wells.
+    label_noise_scale_sigma : float
+        Prior scale for label noise terms.
+    well_noise_sd_sigma : float
+        Prior scale for well noise terms.
+    well_noise_scale_sigma : float | None, optional
+        Backward-compatible alias for ``well_noise_sd_sigma``.
+    final_n_xerr : float | None, optional
+        Override ``n_xerr`` for the final refit.
+    min_x_step : float, optional
+        Minimum latent-x spacing forwarded to :func:`fit_binding_pymc_multi`.
+
+    Returns
+    -------
+    PymcMultiResidualRefitResult
+        Initial robust multi-well fit, residual table, masked datasets, and
+        final refit.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset is present in ``results``.
     """
     labels: list[str] = []
     for item in results.values():
@@ -2293,7 +2426,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
     contamination_frac_prior : float
         Prior mean for each per-label outlier fraction when
-        ``robust_likelihood="mixture"``. Must be between 0 and 1.
+        ``robust_likelihood="mixture"``. Must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` when every input is already a ``FitResult`` and to
@@ -2402,7 +2535,6 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         for key in fit_results
         if fit_results[key].result and fit_results[key].dataset
     ]
-    {key: i for i, key in enumerate(wells_list)}
     n_wells = len(wells_list)
     n_steps = len(xc)
 

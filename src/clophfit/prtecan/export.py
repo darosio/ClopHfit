@@ -104,7 +104,25 @@ def fit_single_mcmc(
     datasets: dict[str, typing.Any],
     outfit: Path,
 ) -> TitrationResults | None:
-    """Run optional per-well single PyMC fits for export."""
+    """Run optional per-well single PyMC fits for export.
+
+    Parameters
+    ----------
+    titration : Titration
+        Titration object containing the plate scheme, fit keys, background
+        noise, and MCMC configuration.
+    datasets : dict[str, typing.Any]
+        Mapping from well identifiers to datasets to fit.
+    outfit : Path
+        Output directory used for residual-refit diagnostic CSV files.
+
+    Returns
+    -------
+    TitrationResults | None
+        Per-well PyMC fit results when ``titration.params.mcmc`` is
+        ``"single"`` or ``"single-refit"``. Returns ``None`` when single-well
+        MCMC export is disabled.
+    """
     if titration.params.mcmc == "single":
         mcmc_fits = {
             key: fit_binding_pymc(
