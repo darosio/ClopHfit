@@ -1788,7 +1788,7 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
     return PymcResidualRefitResult(initial, residuals, masked, final)
 
 
-def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
     results: Mapping[str, Dataset | FitResult[MiniT]],
     scheme: PlateScheme,
     *,
@@ -1848,21 +1848,11 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0
 
     if noise_strategy == "proportional":
         if noise_model is None:
-            proportional_noise_model = PlateNoiseModel()
-            for label in labels:
-                floor = (
-                    bg_noise.get(str(label), bg_noise.get(label, 1.0))
-                    if isinstance(bg_noise, MappingABC)
-                    else bg_noise
-                )
-                floor = float(floor)
-                if not np.isfinite(floor) or floor <= 0.0:
-                    floor = 1.0
-                proportional_noise_model[str(label)] = NoiseModelParams(
-                    sigma_floor=floor,
-                    gain=0.0,
-                    alpha=proportional_alpha,
-                )
+            proportional_noise_model = _plate_noise_from_bg(
+                bg_noise,
+                labels,
+                alpha=proportional_alpha,
+            )
         else:
             proportional_noise_model = noise_model
         initial_inputs: Mapping[str, Dataset | FitResult[MiniT]] = results
