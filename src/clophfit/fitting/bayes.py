@@ -1969,47 +1969,6 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913, PLR0
     return PymcMultiResidualRefitResult(initial, residuals, masked, final)
 
 
-def _labels_from_fit_inputs(
-    results: Mapping[str, Dataset | FitResult[MiniT]],
-) -> list[str]:
-    for item in results.values():
-        ds = item.dataset if isinstance(item, FitResult) else item
-        if ds is not None:
-            return [str(label) for label in ds]
-    msg = "No valid dataset found in results."
-    raise ValueError(msg)
-
-
-def _fit_inputs_with_unit_yerr(
-    results: Mapping[str, Dataset | FitResult[MiniT]],
-) -> dict[str, Dataset | FitResult[MiniT]]:
-    unit_inputs: dict[str, Dataset | FitResult[MiniT]] = {}
-    for key, item in results.items():
-        if isinstance(item, FitResult):
-            copied = copy.deepcopy(item)
-            if copied.dataset is not None:
-                copied.dataset = dataset_with_unit_yerr(copied.dataset)
-            unit_inputs[str(key)] = copied
-        else:
-            unit_inputs[str(key)] = dataset_with_unit_yerr(item)
-    return unit_inputs
-
-
-def _seed_multi_refit_inputs(
-    initial: MultiFitResult,
-    masked: Mapping[str, Dataset],
-) -> dict[str, FitResult[xr.DataTree]]:
-    seeded: dict[str, FitResult[xr.DataTree]] = {}
-    for well, fit in initial.results.items():
-        copied = copy.deepcopy(fit)
-        if well in masked:
-            copied.dataset = masked[well]
-        elif copied.dataset is not None:
-            copied.dataset = copy.deepcopy(copied.dataset)
-        seeded[str(well)] = copied
-    return seeded
-
-
 # ------------------------------------------------------------------
 # Helper: weighted statistics
 # ------------------------------------------------------------------
