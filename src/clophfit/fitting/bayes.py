@@ -23,6 +23,7 @@ from pymc import math as pm_math
 from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
 
+from clophfit.fitting import model_validation
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
@@ -1669,12 +1670,6 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
     floor-plus-proportional noise model with free label-specific alpha in both
     passes and no ``ye_mag`` multiplier.
     """
-    from clophfit.fitting.model_validation import (  # noqa: PLC0415
-        mark_excess_residual_outliers,
-        masked_datasets_from_residual_outliers,
-        residuals_from_fit_results,
-    )
-
     use_proportional = noise_strategy == "proportional"
     if use_proportional:
         proportional_noise_model = noise_model or _plate_noise_from_bg(
@@ -1726,14 +1721,14 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
             ye_mag_sigma=bg_noise_log_sigma,
             min_x_step=min_x_step,
         )
-    residuals = residuals_from_fit_results(
+    residuals = model_validation.residuals_from_fit_results(
         {"single": initial},
         "pymc_robust_unweighted",
         binding_1site,
         robust=True,
         outlier_threshold=outlier_threshold,
     )
-    residuals = mark_excess_residual_outliers(
+    residuals = model_validation.mark_excess_residual_outliers(
         residuals,
         threshold=outlier_threshold,
         allowed_tail_fraction=allowed_tail_fraction,
@@ -1741,7 +1736,7 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
     )
     mask_source = initial.dataset if initial.dataset is not None else ds
     holder = FitResult[xr.DataTree](dataset=copy.deepcopy(mask_source))
-    masked = masked_datasets_from_residual_outliers(
+    masked = model_validation.masked_datasets_from_residual_outliers(
         {"single": holder},
         residuals,
         min_keep=min_keep,
@@ -1828,12 +1823,6 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
     fit.  This lets the first pass distinguish isolated point outliers from
     whole wells whose variance is genuinely larger.
     """
-    from clophfit.fitting.model_validation import (  # noqa: PLC0415
-        mark_excess_residual_outliers,
-        masked_datasets_from_residual_outliers,
-        residuals_from_multifit,
-    )
-
     labels: list[str] = []
     for item in results.values():
         ds = item.dataset if isinstance(item, FitResult) else item
@@ -1902,14 +1891,14 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         min_x_step=min_x_step,
         **typing.cast("typing.Any", common_noise_kwargs),
     )
-    residuals = residuals_from_multifit(
+    residuals = model_validation.residuals_from_multifit(
         initial,
         "pymc_multi_robust",
         binding_1site,
         robust=True,
         outlier_threshold=outlier_threshold,
     )
-    residuals = mark_excess_residual_outliers(
+    residuals = model_validation.mark_excess_residual_outliers(
         residuals,
         threshold=outlier_threshold,
         allowed_tail_fraction=allowed_tail_fraction,
@@ -1922,7 +1911,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         else:
             dataset = copy.deepcopy(item)
         initial_holders[str(well)] = FitResult(dataset=dataset)
-    masked = masked_datasets_from_residual_outliers(
+    masked = model_validation.masked_datasets_from_residual_outliers(
         initial_holders,
         residuals,
         min_keep=min_keep,
