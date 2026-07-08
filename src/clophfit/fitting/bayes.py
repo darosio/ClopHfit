@@ -495,8 +495,15 @@ def _normalize_fit_input(  # noqa: PLR0913
     return copy.deepcopy(ds_or_fr), True
 
 
-def _normalize_fit_inputs(
+def _normalize_fit_inputs(  # noqa: PLR0913
     results: Mapping[str, Dataset | FitResult[MiniT]],
+    *,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> tuple[dict[str, FitResult[MiniT]], bool]:
     """Normalize multi-well PyMC inputs to copied preliminary fit results.
 
@@ -504,17 +511,50 @@ def _normalize_fit_inputs(
     ----------
     results : Mapping[str, Dataset | FitResult[MiniT]]
         Per-well raw datasets or pre-fit results.
+    init_strategy : InitStrategy
+        ``"lmfit"`` fits each raw dataset with LMFit; ``"data_priors"`` seeds
+        each well directly from its data via
+        :func:`_fit_result_from_data_priors`, skipping LMFit entirely (any
+        supplied pre-fit result is ignored in favour of its dataset).
+    data_prior_edge_points : int
+        Edge-window size forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_signal_sigma_scale : float
+        Signal-prior sigma scale forwarded to
+        :func:`_fit_result_from_data_priors`.
+    data_prior_k_prior : DataKPrior
+        K prior family forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_bounds : tuple[float, float] | None
+        K bounds forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_sigma : float
+        K prior sigma forwarded to :func:`_fit_result_from_data_priors`.
 
     Returns
     -------
     tuple[dict[str, FitResult[MiniT]], bool]
-        Normalized per-well fit results and whether every input item was already
-        a ``FitResult``.
+        Normalized per-well fit results and whether the centered-noise defaults
+        should be preferred (every input already a ``FitResult`` and not using
+        the data-prior strategy).
     """
     normalized: dict[str, FitResult[MiniT]] = {}
     all_prefit = True
     for key, value in results.items():
-        if isinstance(value, Dataset):
+        if init_strategy == "data_priors":
+            ds = value.dataset if isinstance(value, FitResult) else value
+            if ds is None:
+                continue
+            normalized[key] = typing.cast(
+                "FitResult[MiniT]",
+                _fit_result_from_data_priors(
+                    ds,
+                    edge_points=data_prior_edge_points,
+                    signal_sigma_scale=data_prior_signal_sigma_scale,
+                    k_prior=data_prior_k_prior,
+                    k_bounds=data_prior_k_bounds,
+                    k_sigma=data_prior_k_sigma,
+                ),
+            )
+            all_prefit = False
+        elif isinstance(value, Dataset):
             normalized[key] = fit_binding_glob(value)
             all_prefit = False
         else:
@@ -2636,6 +2676,12 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     well_noise_sd_sigma: float = 0.3,
     well_noise_scale_sigma: float | None = None,
     min_x_step: float = 0.2,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> MultiFitResult:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -2766,6 +2812,28 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
+    init_strategy : InitStrategy
+        ``"lmfit"`` keeps the historical behavior: each raw ``Dataset`` is first
+        fitted with LMFit and per-well priors are centered on that result.
+        ``"data_priors"`` skips LMFit and seeds each well directly from its
+        observed titration endpoints and midpoint (any supplied pre-fit result
+        is ignored in favour of its dataset).
+    data_prior_edge_points : int
+        Number of active points averaged at each titration edge to initialize
+        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
+    data_prior_signal_sigma_scale : float
+        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
+        signal range when ``init_strategy="data_priors"``.
+    data_prior_k_prior : DataKPrior
+        K seed family for ``init_strategy="data_priors"``. ``"midpoint_truncnorm"``
+        seeds K at the observed half-signal x; ``"uniform"`` seeds it at the
+        bound midpoint. The multi model always centers a Normal K prior on the
+        resulting seed.
+    data_prior_k_bounds : tuple[float, float] | None
+        Lower and upper K bounds for the data-derived seed. ``None`` (default)
+        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)`` otherwise.
+    data_prior_k_sigma : float
+        K seed sigma for data-derived priors, scaled by ``n_sd`` in the model.
 
     Returns
     -------
@@ -2780,7 +2848,15 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     _validate_robust_likelihood(robust_likelihood)
     if robust and robust_likelihood == "mixture":
         _validate_contamination_frac_prior_spec(contamination_frac_prior)
-    fit_results, prefer_centered = _normalize_fit_inputs(results)
+    fit_results, prefer_centered = _normalize_fit_inputs(
+        results,
+        init_strategy=init_strategy,
+        data_prior_edge_points=data_prior_edge_points,
+        data_prior_signal_sigma_scale=data_prior_signal_sigma_scale,
+        data_prior_k_prior=data_prior_k_prior,
+        data_prior_k_bounds=data_prior_k_bounds,
+        data_prior_k_sigma=data_prior_k_sigma,
+    )
     ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     if ds is None:
         msg = "No valid dataset found in results."

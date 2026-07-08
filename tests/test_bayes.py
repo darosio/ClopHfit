@@ -373,6 +373,114 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
         )
 
 
+@pytest.mark.parametrize(
+    ("k_bounds", "is_ph", "expected"),
+    [
+        (None, True, (4.5, 9.0)),
+        (None, False, (1e-6, 1e6)),
+        ((float("nan"), 9.0), True, (4.5, 9.0)),
+        ((5.0, 5.0), False, (1e-6, 1e6)),  # lo == hi is invalid
+        ((9.0, 4.5), True, (4.5, 9.0)),  # reversed order is sorted
+        ((1.0, 50.0), False, (1.0, 50.0)),  # valid explicit bounds respected
+    ],
+)
+def test_resolve_data_prior_k_bounds(
+    k_bounds: tuple[float, float] | None,
+    is_ph: bool,  # noqa: FBT001
+    expected: tuple[float, float],
+) -> None:
+    """K-bound resolution should fall back per is_ph and validate the range."""
+    lo, hi = bayes._resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)  # noqa: SLF001
+    assert lo == pytest.approx(expected[0])
+    assert hi == pytest.approx(expected[1])
+
+
+def test_normalize_fit_inputs_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-well normalization should seed from data without calling LMFit."""
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
+        init_strategy="data_priors",
+    )
+
+    assert prefer_centered is False
+    assert set(normalized) == {"A01", "A02"}
+    for fr in normalized.values():
+        assert fr.result is not None
+        params = fr.result.params
+        assert {"S0_1", "S1_1", "S0_2", "S1_2", "K"} <= set(params)
+        # pH default bounds applied because k_bounds was omitted.
+        assert params["K"].min == pytest.approx(4.5)
+        assert params["K"].max == pytest.approx(9.0)
+
+
+def test_normalize_fit_inputs_data_priors_ignores_prefit_result(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """A supplied FitResult should be re-seeded from its dataset, not reused."""
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    prefit = fit_binding_glob(multi_dataset)
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": prefit},
+        init_strategy="data_priors",
+        data_prior_edge_points=1,
+    )
+
+    assert prefer_centered is False
+    fr = normalized["A01"]
+    assert fr.result is not None
+    # For pH data, S0 is the high-pH plateau (last x); a single-point edge
+    # window makes this the raw endpoint rather than the LMFit optimum.
+    da = multi_dataset["1"]
+    assert fr.result.params["S0_1"].value == pytest.approx(float(da.yc[-1]))
+
+
+def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """The multi data-prior strategy should reach sampling without LMFit."""
+    pytest.importorskip("pymc")
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(pm, "sample", stop_sample)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
+            scheme,
+            init_strategy="data_priors",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
 def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None:
     """Test that n_sd parameter scales the prior width."""
     pytest.importorskip("pymc")
