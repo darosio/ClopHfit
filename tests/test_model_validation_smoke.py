@@ -874,3 +874,69 @@ def test_trace_diagnostics_collects_stats_loo_and_x_sanity(
     assert row["pareto_k_frac_gt_0p7"] == 0.5
     assert row["x_first_well"] == "A01"
     assert sanity["x_step0_max_abs_spread"] == pytest.approx(0.0)
+
+
+@pytest.fixture
+def annotated_diagnostics() -> ResidualDiagnostics:
+    """Build a small annotated ResidualDiagnostics for plot smoke tests."""
+    df = pd.DataFrame({
+        "trace_id": ["m1"] * 8,
+        "well": ["A01", "A02", "B01", "B02"] * 2,
+        "label": ["1", "1", "2", "2"] * 2,
+        "step": [0, 0, 0, 0, 1, 1, 1, 1],
+        "x": [8.9, 8.9, 8.9, 8.9, 8.2, 8.2, 8.2, 8.2],
+        "y": [1.0, 1.1, 2.0, 2.1, 1.2, 1.3, 2.2, 2.3],
+        "that": [1.0, 1.2, 1.9, 2.0, 1.1, 1.4, 2.1, 2.2],
+        "sigma": [1.0] * 8,
+        "std_res": [0.1, -0.2, 0.3, -0.4, 0.2, -0.1, 0.4, -0.3],
+    })
+    return ResidualDiagnostics(df).annotate(ctrl_wells={"A01"})
+
+
+def test_residual_diagnostics_plots_smoke(
+    annotated_diagnostics: ResidualDiagnostics,
+) -> None:
+    """Plotting helpers should build figures without a display backend."""
+    import matplotlib as mpl  # noqa: PLC0415
+
+    mpl.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+
+    diag = annotated_diagnostics.label_scaled()
+    for figure in (
+        diag.plot_hist_qq(),
+        diag.plot_step(),
+        diag.plot_role(),
+        diag.plot_col(),
+        diag.plot_well_summary(),
+    ):
+        assert figure is not None
+    plt.close("all")
+
+
+def test_residual_diagnostics_plot_role_requires_annotation() -> None:
+    """plot_role should refuse to run before role annotation."""
+    df = pd.DataFrame({
+        "trace_id": ["m1", "m1"],
+        "well": ["A01", "A02"],
+        "label": ["1", "1"],
+        "step": [0, 1],
+        "x": [8.9, 8.2],
+        "std_res": [0.1, -0.2],
+    })
+    with pytest.raises(ValueError, match="annotate"):
+        ResidualDiagnostics(df).plot_role()
+
+
+def test_residual_diagnostics_plot_col_requires_annotation() -> None:
+    """plot_col should refuse to run before column annotation."""
+    df = pd.DataFrame({
+        "trace_id": ["m1", "m1"],
+        "well": ["A01", "A02"],
+        "label": ["1", "1"],
+        "step": [0, 1],
+        "x": [8.9, 8.2],
+        "std_res": [0.1, -0.2],
+    })
+    with pytest.raises(ValueError, match="annotate"):
+        ResidualDiagnostics(df).plot_col()

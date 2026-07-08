@@ -481,6 +481,199 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
         )
 
 
+def test_edge_helpers_handle_empty_input() -> None:
+    """Edge-window helpers should degrade gracefully on empty arrays."""
+    empty = np.array([], dtype=float)
+    assert bayes._edge_mean(empty, start=True, n_points=2) == 0.0  # noqa: SLF001
+    assert bayes._edge_signal_priors(  # noqa: SLF001
+        empty, empty, is_ph=True, edge_points=2
+    ) == (0.0, 0.0)
+    assert (
+        bayes._midpoint_x_for_prior(  # noqa: SLF001
+            empty, empty, high_edge=1.0, low_edge=0.0, bounds=(4.5, 9.0)
+        )
+        is None
+    )
+
+
+def test_edge_mean_falls_back_to_full_window_mean() -> None:
+    """A fully-NaN edge window should fall back to the finite full-array mean."""
+    values = np.array([np.nan, 2.0, 4.0])
+    # start window of 1 point is NaN -> nanmean over all finite values (3.0).
+    assert bayes._edge_mean(values, start=True, n_points=1) == pytest.approx(3.0)  # noqa: SLF001
+
+
+def test_fit_result_from_data_priors_all_masked_label() -> None:
+    """A label with no active points should still yield finite seed params."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([np.nan, np.nan, np.nan]))
+    ds = Dataset({"default": da}, is_ph=True)
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ds,
+        edge_points=2,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+    assert fr.result is not None
+    params = fr.result.params
+    assert params["S0_default"].value == 0.0
+    assert params["S1_default"].value == 0.0
+    # No midpoint could be estimated -> K seeded at the bound midpoint.
+    assert params["K"].value == pytest.approx(6.75)
+
+
+def test_fit_result_from_data_priors_constant_signal() -> None:
+    """A flat titration (zero signal range) should use a positive fallback sigma."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([2.0, 2.0, 2.0]))
+    ds = Dataset({"default": da}, is_ph=True)
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ds,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+    assert fr.result is not None
+    # y_range == 0 -> sigma from max(|s0|, |s1|, 1.0) * scale.
+    assert fr.result.params["S0_default"].stderr == pytest.approx(1.0)
+
+
+def test_normalize_fit_input_data_priors_without_dataset() -> None:
+    """Single-well data-prior normalization returns empty on a dataset-less input."""
+    fr, prefit = bayes._normalize_fit_input(  # noqa: SLF001
+        FitResult(), init_strategy="data_priors"
+    )
+    assert prefit is False
+    assert fr.result is None
+
+
+def test_normalize_fit_inputs_data_priors_skips_dataset_less_wells() -> None:
+    """Multi-well data-prior normalization drops wells that carry no dataset."""
+    normalized, _prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": FitResult()}, init_strategy="data_priors"
+    )
+    assert normalized == {}
+
+
+@pytest.mark.parametrize(
+    ("bg_noise", "expected_floor"),
+    [
+        (2.5, 2.5),
+        (-1.0, 1.0),  # non-positive floor falls back to 1.0
+        (float("nan"), 1.0),  # non-finite floor falls back to 1.0
+        ({"1": 3.0}, 3.0),  # mapping hit
+        ({"2": 3.0}, 1.0),  # mapping miss -> default 1.0
+    ],
+)
+def test_plate_noise_from_bg_floor_resolution(
+    bg_noise: float | dict[str, float], expected_floor: float
+) -> None:
+    """Background-noise floors should validate and fall back per label."""
+    model = bayes._plate_noise_from_bg(bg_noise, ["1"], alpha=0.1)  # noqa: SLF001
+    assert model["1"].sigma_floor == pytest.approx(expected_floor)
+    assert model["1"].gain == 0.0
+    assert model["1"].alpha == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    ("value", "label", "expected"),
+    [
+        (2.0, "1", 2.0),
+        (float("nan"), "1", 0.0),
+        ({"1": 3.0}, "1", 3.0),
+        ({"1": 2.0, "2": 4.0}, "3", 3.0),  # missing label -> finite mean
+        ({"1": float("nan")}, "2", 0.0),  # no finite values -> 0.0
+    ],
+)
+def test_ye_mag_value(
+    value: float | dict[str, float], label: str, expected: float
+) -> None:
+    """ye_mag prior values should be finite with scalar/mapping fallbacks."""
+    assert bayes._ye_mag_value(value, label) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (2.0, 2.0),
+        (float("nan"), 0.0),
+        ({"1": 2.0, "2": 4.0}, 3.0),
+        ({}, 0.0),
+    ],
+)
+def test_shared_ye_mag_value(value: float | dict[str, float], expected: float) -> None:
+    """Shared ye_mag values should collapse mappings to a finite mean."""
+    assert bayes._shared_ye_mag_value(value) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("sigma", "label", "expected"),
+    [
+        (2.0, "1", 2.0),
+        (-1.0, "1", 1e-6),  # non-positive -> floor
+        ({"1": 2.0}, "1", 2.0),
+        ({"1": -1.0}, "2", 1e-6),  # no positive values -> floor
+    ],
+)
+def test_ye_mag_sigma(
+    sigma: float | dict[str, float], label: str, expected: float
+) -> None:
+    """ye_mag sigmas should be strictly positive with per-label fallbacks."""
+    assert bayes._ye_mag_sigma(sigma, label) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("sigma", "expected"),
+    [
+        (2.0, 2.0),
+        (-1.0, 1e-6),
+        ({"1": 2.0, "2": 4.0}, 3.0),
+        ({"1": -1.0}, 1e-6),
+    ],
+)
+def test_shared_ye_mag_sigma(sigma: float | dict[str, float], expected: float) -> None:
+    """Shared ye_mag sigmas should stay positive across scalar/mapping inputs."""
+    assert bayes._shared_ye_mag_sigma(sigma) == pytest.approx(expected)  # noqa: SLF001
+
+
+def test_validate_robust_likelihood_rejects_unknown() -> None:
+    """An unrecognized robust-likelihood selector should raise ValueError."""
+    with pytest.raises(ValueError, match=r"student_t.*mixture"):
+        bayes._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # noqa: SLF001
+
+
+def test_add_y_likelihood_mixture_requires_outlier_priors() -> None:
+    """Mixture likelihood without outlier priors should raise a clear error."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([1.0, 2.0, 3.0]))
+    with pytest.raises(ValueError, match="pi_outlier and outlier_inflate"):
+        bayes._add_y_likelihood(  # noqa: SLF001
+            "y_likelihood_1",
+            np.zeros(3),
+            da,
+            1.0,
+            robust=True,
+            robust_likelihood="mixture",
+            pi_outlier=None,
+            outlier_inflate=None,
+        )
+
+
+def test_scale_and_log_scaled_ye_mag_helpers() -> None:
+    """ye_mag scaling helpers should guard the scale and log-transform medians."""
+    assert bayes._scale_ye_mag_sigma(2.0, 3.0) == pytest.approx(6.0)  # noqa: SLF001
+    # Non-positive scale is coerced to 1.0.
+    assert bayes._scale_ye_mag_sigma(2.0, -1.0) == pytest.approx(2.0)  # noqa: SLF001
+    scaled = bayes._scale_ye_mag_sigma({"1": 2.0}, 3.0)  # noqa: SLF001
+    assert isinstance(scaled, dict)
+    assert scaled["1"] == pytest.approx(6.0)
+    assert bayes._log_scaled_ye_mag_mu(1.0, 1.0) == pytest.approx(0.0)  # noqa: SLF001
+    log_map = bayes._log_scaled_ye_mag_mu({"1": 1.0}, 1.0)  # noqa: SLF001
+    assert isinstance(log_map, dict)
+    assert log_map["1"] == pytest.approx(0.0)
+
+
 def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None:
     """Test that n_sd parameter scales the prior width."""
     pytest.importorskip("pymc")
