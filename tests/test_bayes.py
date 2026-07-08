@@ -273,6 +273,106 @@ def test_create_parameter_priors_skip_shared_k(lmfit_params: Parameters) -> None
         assert "S1_1_A01" in priors
 
 
+def test_data_prior_seed_uses_ph_extremes_and_midpoint(ph_dataset: Dataset) -> None:
+    """Data-prior initialization should infer pH edge signals without LMFit."""
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+
+    assert fr.result is not None
+    params = fr.result.params
+    assert params["S0_default"].value == pytest.approx(ph_dataset["default"].yc[-1])
+    assert params["S1_default"].value == pytest.approx(ph_dataset["default"].yc[0])
+    assert params["K"].value == pytest.approx(7.0)
+    assert params["K"].min == pytest.approx(4.5)
+    assert params["K"].max == pytest.approx(9.0)
+
+
+def test_data_prior_default_k_bounds_respect_is_ph(
+    ph_dataset: Dataset, cl_dataset: Dataset
+) -> None:
+    """Omitted k_bounds should resolve from is_ph, not a fixed pH range."""
+    ph_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=None,
+        k_sigma=1.5,
+    )
+    assert ph_fr.result is not None
+    assert ph_fr.result.params["K"].min == pytest.approx(4.5)
+    assert ph_fr.result.params["K"].max == pytest.approx(9.0)
+
+    cl_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        cl_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=None,
+        k_sigma=1.5,
+    )
+    assert cl_fr.result is not None
+    assert cl_fr.result.params["K"].min == pytest.approx(1e-6)
+    assert cl_fr.result.params["K"].max == pytest.approx(1e6)
+
+
+def test_create_data_parameter_priors_can_use_uniform_k(ph_dataset: Dataset) -> None:
+    """Direct data priors should support a bounded flat K prior."""
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=2,
+        signal_sigma_scale=0.5,
+        k_prior="uniform",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+
+    assert fr.result is not None
+    with pm.Model():
+        priors = bayes.create_data_parameter_priors(
+            fr.result.params,
+            k_prior="uniform",
+            k_bounds=(4.5, 9.0),
+        )
+
+    assert "K" in priors
+    assert "S0_default" in priors
+    assert "S1_default" in priors
+
+
+def test_fit_binding_pymc_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """The data-prior strategy should not run the LMFit prefit."""
+    pytest.importorskip("pymc")
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(pm, "sample", stop_sample)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            init_strategy="data_priors",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
 def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None:
     """Test that n_sd parameter scales the prior width."""
     pytest.importorskip("pymc")
@@ -634,6 +734,39 @@ def test_fit_binding_pymc_robust_can_use_mixture_likelihood(
         "has_weights": True,
         "has_components": True,
     }
+
+
+def test_fit_binding_pymc_mixture_accepts_label_specific_contamination_prior(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Single-fit mixture priors can encode label-specific outlier rates."""
+    captured: dict[str, float] = {}
+
+    def fake_beta(name: str, *, alpha: float, beta: float) -> float:
+        del alpha
+        captured[name] = beta
+        return 0.1
+
+    def fake_mixture(*_args: object, **_kwargs: object) -> None:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Beta", fake_beta)
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            multi_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1.0 / 63.0},
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured["pi_outlier_1"] == pytest.approx(6.0)
+    assert captured["pi_outlier_2"] == pytest.approx(62.0)
 
 
 @pytest.mark.parametrize("contamination_frac_prior", [0.0005, 0.999])
@@ -1308,6 +1441,28 @@ def test_fit_binding_pymc_multi_mixture_rejects_high_contamination_prior(
         )
 
 
+def test_fit_binding_pymc_multi_mixture_rejects_unsafe_label_specific_prior(
+    multi_dataset: Dataset,
+) -> None:
+    """Label-specific mixture priors must satisfy the same practical bounds."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+
 def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,
@@ -1530,8 +1685,9 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
         per_well_scheme: PlateScheme,
         *,
         x_error_model: str,
+        global_p_names: object = (),
     ) -> dict[str, FitResult[xr.DataTree]]:
-        del per_well_scheme, x_error_model
+        del per_well_scheme, x_error_model, global_p_names
         assert trace_obj is trace
         assert set(per_well_fit_results) == {"A01", "A02"}
         per_well_calls["count"] += 1

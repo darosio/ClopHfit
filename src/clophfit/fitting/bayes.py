@@ -7,7 +7,7 @@ import copy
 import os
 import re
 import typing
-from collections.abc import Mapping as MappingABC
+from collections.abc import Mapping, Mapping as MappingABC
 from dataclasses import dataclass
 from typing import Literal
 
@@ -40,7 +40,7 @@ from .data_structures import (
 )
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prtecan import PlateScheme
@@ -48,6 +48,8 @@ if typing.TYPE_CHECKING:
 
 NoiseParamMode = Literal["fixed", "free", "centered"]
 RobustLikelihood = Literal["student_t", "mixture"]
+InitStrategy = Literal["lmfit", "data_priors"]
+DataKPrior = Literal["midpoint_truncnorm", "uniform"]
 
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
 _MIN_CONTAMINATION_FRAC_PRIOR = 1e-3
@@ -303,8 +305,144 @@ def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
     )
 
 
-def _normalize_fit_input(
+def _active_xy_for_prior(da: DataArray) -> tuple[np.ndarray, np.ndarray]:
+    """Return active x/y arrays for data-derived prior construction."""
+    mask = np.asarray(da.mask, dtype=bool)
+    x_source = da.xc if np.asarray(da.xc).size == mask.size else da.x
+    y_source = da.yc if np.asarray(da.yc).size == mask.size else da.y
+    x = np.asarray(x_source, dtype=float)
+    y = np.asarray(y_source, dtype=float)
+    if x.size == mask.size:
+        x = x[mask]
+    if y.size == mask.size:
+        y = y[mask]
+    finite = np.isfinite(x) & np.isfinite(y)
+    return x[finite], y[finite]
+
+
+def _edge_mean(values: np.ndarray, *, start: bool, n_points: int) -> float:
+    """Return a finite mean from the first or last active edge window."""
+    if values.size == 0:
+        return 0.0
+    n = max(1, min(int(n_points), values.size))
+    window = values[:n] if start else values[-n:]
+    out = float(np.nanmean(window))
+    return out if np.isfinite(out) else float(np.nanmean(values))
+
+
+def _edge_signal_priors(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    is_ph: bool,
+    edge_points: int,
+) -> tuple[float, float]:
+    """Estimate S0/S1 from x-ordered edge windows."""
+    if y.size == 0:
+        return 0.0, 0.0
+    order = np.argsort(x) if x.size == y.size else np.arange(y.size)
+    y_sorted = y[order]
+    low_x_signal = _edge_mean(y_sorted, start=True, n_points=edge_points)
+    high_x_signal = _edge_mean(y_sorted, start=False, n_points=edge_points)
+    if is_ph:
+        return high_x_signal, low_x_signal
+    return low_x_signal, high_x_signal
+
+
+def _midpoint_x_for_prior(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    high_edge: float,
+    low_edge: float,
+    bounds: tuple[float, float],
+) -> float | None:
+    """Estimate half-transition x from the point closest to the edge midpoint."""
+    if x.size == 0 or y.size == 0:
+        return None
+    target = 0.5 * (high_edge + low_edge)
+    idx = int(np.nanargmin(np.abs(y - target)))
+    guess = float(x[idx])
+    lo, hi = sorted(map(float, bounds))
+    if not np.isfinite(guess):
+        return None
+    return float(np.clip(guess, lo, hi))
+
+
+def _resolve_data_prior_k_bounds(
+    k_bounds: tuple[float, float] | None, *, is_ph: bool
+) -> tuple[float, float]:
+    """Return valid K bounds, falling back to an ``is_ph``-appropriate range."""
+    default = (4.5, 9.0) if is_ph else (1e-6, 1e6)
+    if k_bounds is None:
+        return default
+    lo, hi = sorted(map(float, k_bounds))
+    if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+        return default
+    return lo, hi
+
+
+def _fit_result_from_data_priors(  # noqa: PLR0913
+    ds: Dataset,
+    *,
+    edge_points: int,
+    signal_sigma_scale: float,
+    k_prior: DataKPrior,
+    k_bounds: tuple[float, float] | None,
+    k_sigma: float,
+) -> FitResult[xr.DataTree]:
+    """Create an lmfit-like seed result using only data-derived priors."""
+    params = Parameters()
+    lo, hi = _resolve_data_prior_k_bounds(k_bounds, is_ph=ds.is_ph)
+
+    k_guesses: list[float] = []
+    signal_scale = max(float(signal_sigma_scale), 1e-6)
+    for lbl, da in ds.items():
+        x, y = _active_xy_for_prior(da)
+        if y.size == 0:
+            s0 = 0.0
+            s1 = 0.0
+            y_range = 1.0
+        else:
+            s0, s1 = _edge_signal_priors(x, y, is_ph=ds.is_ph, edge_points=edge_points)
+            y_range = float(np.nanmax(y) - np.nanmin(y))
+            if not np.isfinite(y_range) or y_range <= 0.0:
+                y_range = max(abs(s0), abs(s1), 1.0)
+        sigma = max(signal_scale * y_range, 1e-6)
+        params.add(f"S0_{lbl}", value=float(s0))
+        params[f"S0_{lbl}"].stderr = sigma
+        params.add(f"S1_{lbl}", value=float(s1))
+        params[f"S1_{lbl}"].stderr = sigma
+        midpoint = _midpoint_x_for_prior(
+            x,
+            y,
+            high_edge=float(s0),
+            low_edge=float(s1),
+            bounds=(lo, hi),
+        )
+        if midpoint is not None:
+            k_guesses.append(midpoint)
+
+    if k_prior == "uniform":
+        k_value = 0.5 * (lo + hi)
+    elif k_guesses:
+        k_value = float(np.nanmedian(k_guesses))
+    else:
+        k_value = 0.5 * (lo + hi)
+    params.add("K", value=float(np.clip(k_value, lo, hi)), min=lo, max=hi)
+    params["K"].stderr = max(float(k_sigma), 1e-6)
+    return FitResult(result=_Result(params), dataset=copy.deepcopy(ds))
+
+
+def _normalize_fit_input(  # noqa: PLR0913
     ds_or_fr: Dataset | FitResult[MiniT],
+    *,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> tuple[FitResult[MiniT], bool]:
     """Normalize PyMC input to a copied preliminary fit result.
 
@@ -313,6 +451,20 @@ def _normalize_fit_input(
     ds_or_fr : Dataset | FitResult[MiniT]
         Either a raw dataset or a pre-fit result used to seed the Bayesian
         model.
+    init_strategy : InitStrategy
+        ``"lmfit"`` fits ``ds_or_fr`` with LMFit first; ``"data_priors"``
+        derives a seed directly from the data instead.
+    data_prior_edge_points : int
+        Edge-window size forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_signal_sigma_scale : float
+        Signal-prior sigma scale forwarded to
+        :func:`_fit_result_from_data_priors`.
+    data_prior_k_prior : DataKPrior
+        K prior family forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_bounds : tuple[float, float] | None
+        K bounds forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_sigma : float
+        K prior sigma forwarded to :func:`_fit_result_from_data_priors`.
 
     Returns
     -------
@@ -320,6 +472,24 @@ def _normalize_fit_input(
         The normalized fit result and whether the caller explicitly supplied a
         pre-fit ``FitResult``.
     """
+    if init_strategy == "data_priors":
+        ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        if ds is None:
+            return FitResult(), False
+        return (
+            typing.cast(
+                "FitResult[MiniT]",
+                _fit_result_from_data_priors(
+                    ds,
+                    edge_points=data_prior_edge_points,
+                    signal_sigma_scale=data_prior_signal_sigma_scale,
+                    k_prior=data_prior_k_prior,
+                    k_bounds=data_prior_k_bounds,
+                    k_sigma=data_prior_k_sigma,
+                ),
+            ),
+            False,
+        )
     if isinstance(ds_or_fr, Dataset):
         return fit_binding_glob(ds_or_fr), False
     return copy.deepcopy(ds_or_fr), True
@@ -754,6 +924,34 @@ def create_parameter_priors(
     return priors
 
 
+def create_data_parameter_priors(
+    params: Parameters,
+    *,
+    k_prior: DataKPrior = "midpoint_truncnorm",
+    k_bounds: tuple[float, float] | None = None,
+    is_ph: bool = False,
+) -> dict[str, pm.Distribution]:
+    """Create PyMC priors from data-derived parameter estimates."""
+    priors: dict[str, pm.Distribution] = {}
+    lo, hi = _resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)
+    for name, p in params.items():
+        if name == "K":
+            if k_prior == "uniform":
+                priors[name] = pm.Uniform(name, lower=lo, upper=hi)
+            else:
+                priors[name] = pm.TruncatedNormal(
+                    name,
+                    mu=float(np.clip(p.value, lo, hi)),
+                    sigma=_safe_sigma(p.stderr, 1.0, default=1.5),
+                    lower=lo,
+                    upper=hi,
+                )
+            continue
+        sigma = _safe_sigma(p.stderr, 1.0, default=1.0)
+        priors[name] = pm.Normal(name, mu=p.value, sigma=sigma)
+    return priors
+
+
 # NOTE: If model recompilation becomes a bottleneck, consider pm.MutableData.
 
 
@@ -862,6 +1060,9 @@ def _validate_robust_likelihood(robust_likelihood: RobustLikelihood) -> None:
         raise ValueError(msg)
 
 
+ContaminationFracPrior = float | Mapping[str, float]
+
+
 def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float:
     """Return a valid prior mean for the outlier fraction."""
     contamination_frac = float(contamination_frac_prior)
@@ -879,15 +1080,39 @@ def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float
     return contamination_frac
 
 
+def _validate_contamination_frac_prior_spec(
+    contamination_frac_prior: ContaminationFracPrior,
+) -> None:
+    if isinstance(contamination_frac_prior, MappingABC):
+        for value in contamination_frac_prior.values():
+            _validate_contamination_frac_prior(value)
+    else:
+        _validate_contamination_frac_prior(contamination_frac_prior)
+
+
 def _build_outlier_priors(
-    labels: Sequence[str], contamination_frac_prior: float
+    labels: Sequence[str], contamination_frac_prior: ContaminationFracPrior
 ) -> tuple[dict[str, typing.Any], typing.Any]:
     """Build per-label outlier fractions and a shared scale inflation prior."""
-    contamination_frac = _validate_contamination_frac_prior(contamination_frac_prior)
-    beta = (1.0 / contamination_frac) - 1.0
-    pi_outliers = {
-        lbl: pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta) for lbl in labels
-    }
+    if isinstance(contamination_frac_prior, MappingABC):
+        values = {
+            str(label): _validate_contamination_frac_prior(value)
+            for label, value in contamination_frac_prior.items()
+        }
+        fallback = float(np.nanmedian(list(values.values()))) if values else 0.15
+        pi_outliers = {}
+        for lbl in labels:
+            contamination_frac = values.get(str(lbl), fallback)
+            beta = (1.0 / contamination_frac) - 1.0
+            pi_outliers[lbl] = pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta)
+    else:
+        contamination_frac = _validate_contamination_frac_prior(
+            contamination_frac_prior
+        )
+        beta = (1.0 / contamination_frac) - 1.0
+        pi_outliers = {
+            lbl: pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta) for lbl in labels
+        }
     outlier_inflate = pm.HalfNormal("outlier_inflate", sigma=5.0)
     return pi_outliers, outlier_inflate
 
@@ -1036,6 +1261,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     well_key: str = "",
     *,
     raw_trace: xr.DataTree | None = None,
+    global_p_names: typing.Iterable[str] = (),
 ) -> FitResult[xr.DataTree]:
     """Compute individual dataset fit from a multi-well trace summary.
 
@@ -1057,6 +1283,10 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
         Raw multi-well PyMC trace for xarray-based x extraction, bypassing
         potential ``az.summary`` indexing bugs.  When ``None``, falls back
         to DataFrame-based extraction from *trace_df*.
+    global_p_names : typing.Iterable[str], optional
+        Names of model-wide (non-per-well) parameters, such as
+        ``student_t_nu`` or per-label outlier terms, to copy verbatim from
+        *trace_df* into the per-well result.
 
     Returns
     -------
@@ -1082,6 +1312,10 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
         for name, row in rdf.iterrows():
             extracted_name = str(name).replace(_ctr_param_name(ctr), "K")
             _add_param_from_summary(rpars, extracted_name, row)
+    for gp_name in global_p_names:
+        rdf = trace_df[trace_df.index == gp_name]
+        for _, row in rdf.iterrows():
+            _add_param_from_summary(rpars, str(gp_name), row)
     # Use per-well x (xrw model) when available; fall back to global x_true.
     # Prefer xarray-based extraction (bypasses ArviZ multi-dim indexing bug);
     # fall back to df-based extraction for pre-computed summary DataFrames.
@@ -1396,6 +1630,7 @@ def _per_well_fit_results_from_trace(
     scheme: PlateScheme,
     *,
     x_error_model: Literal["deterministic", "per_well", "hierarchical_per_well"],
+    global_p_names: typing.Iterable[str] = (),
 ) -> dict[str, FitResult[xr.DataTree]]:
     """Reconstruct per-well fit results from a shared multi-well trace."""
     trace_df = _trace_summary_df(trace)
@@ -1407,7 +1642,13 @@ def _per_well_fit_results_from_trace(
         well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
         ds = copy.deepcopy(fr.dataset)
         per_well_results[key] = extract_fit(
-            key, ctr, trace_df, ds, well_key=well_key, raw_trace=trace
+            key,
+            ctr,
+            trace_df,
+            ds,
+            well_key=well_key,
+            raw_trace=trace,
+            global_p_names=global_p_names,
         )
         per_well_results[key].mini = trace
     return per_well_results
@@ -1429,7 +1670,7 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     robust: bool = False,
     robust_likelihood: RobustLikelihood = "student_t",
     student_t_nu: float | None = 3.0,
-    contamination_frac_prior: float = 0.15,
+    contamination_frac_prior: ContaminationFracPrior = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
@@ -1439,6 +1680,12 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     ye_mag_mu: float | Mapping[str, float] = 0.0,
     ye_mag_sigma: float | Mapping[str, float] = 1.5,
     min_x_step: float = 0.2,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -1483,9 +1730,10 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     student_t_nu : float | None
         Student-t degrees of freedom when *robust* is ``True``. Positive values
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
-    contamination_frac_prior : float
-        Prior mean for each per-label outlier fraction when
-        ``robust_likelihood="mixture"``. Must be between 0.001 and 0.5.
+    contamination_frac_prior : ContaminationFracPrior
+        Prior mean for per-label outlier fractions when
+        ``robust_likelihood="mixture"``. A mapping supplies label-specific
+        means. Each value must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
@@ -1513,6 +1761,27 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
+    init_strategy : InitStrategy
+        ``"lmfit"`` keeps the historical behavior: raw ``Dataset`` input is
+        first fitted with LMFit and PyMC priors are centered on that result.
+        ``"data_priors"`` skips LMFit and derives weak priors directly from
+        the observed titration endpoints and midpoint.
+    data_prior_edge_points : int
+        Number of active points averaged at each titration edge to initialize
+        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
+    data_prior_signal_sigma_scale : float
+        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
+        signal range when ``init_strategy="data_priors"``.
+    data_prior_k_prior : DataKPrior
+        K prior family for ``init_strategy="data_priors"``. Use
+        ``"midpoint_truncnorm"`` for a truncated Normal centered at the observed
+        half-signal pH, or ``"uniform"`` for a flat prior.
+    data_prior_k_bounds : tuple[float, float] | None
+        Lower and upper K bounds for data-derived priors. ``None`` (default)
+        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)``
+        otherwise.
+    data_prior_k_sigma : float
+        Truncated-Normal K prior sigma for data-derived priors.
 
     Returns
     -------
@@ -1521,8 +1790,16 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     """
     _validate_robust_likelihood(robust_likelihood)
     if robust and robust_likelihood == "mixture":
-        _validate_contamination_frac_prior(contamination_frac_prior)
-    fr, prefer_centered = _normalize_fit_input(ds_or_fr)
+        _validate_contamination_frac_prior_spec(contamination_frac_prior)
+    fr, prefer_centered = _normalize_fit_input(
+        ds_or_fr,
+        init_strategy=init_strategy,
+        data_prior_edge_points=data_prior_edge_points,
+        data_prior_signal_sigma_scale=data_prior_signal_sigma_scale,
+        data_prior_k_prior=data_prior_k_prior,
+        data_prior_k_bounds=data_prior_k_bounds,
+        data_prior_k_sigma=data_prior_k_sigma,
+    )
 
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -1538,7 +1815,16 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
         alpha_mode=alpha_mode,
     )
     with pm.Model():
-        pars = create_parameter_priors(params, n_sd)
+        pars = (
+            create_data_parameter_priors(
+                params,
+                k_prior=data_prior_k_prior,
+                k_bounds=data_prior_k_bounds,
+                is_ph=ds.is_ph,
+            )
+            if init_strategy == "data_priors"
+            else create_parameter_priors(params, n_sd)
+        )
         x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
         robust_nu = (
             _student_t_nu_value(student_t_nu)
@@ -2334,7 +2620,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     robust: bool = False,
     robust_likelihood: RobustLikelihood = "student_t",
     student_t_nu: float | None = 3.0,
-    contamination_frac_prior: float = 0.15,
+    contamination_frac_prior: ContaminationFracPrior = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
@@ -2424,9 +2710,10 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     student_t_nu : float | None
         Student-t degrees of freedom when *robust* is ``True``. Positive values
         are fixed; ``None`` infers ``student_t_nu`` with support above 2.
-    contamination_frac_prior : float
-        Prior mean for each per-label outlier fraction when
-        ``robust_likelihood="mixture"``. Must be between 0.001 and 0.5.
+    contamination_frac_prior : ContaminationFracPrior
+        Prior mean for per-label outlier fractions when
+        ``robust_likelihood="mixture"``. A mapping supplies label-specific
+        means. Each value must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` when every input is already a ``FitResult`` and to
@@ -2492,7 +2779,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     """
     _validate_robust_likelihood(robust_likelihood)
     if robust and robust_likelihood == "mixture":
-        _validate_contamination_frac_prior(contamination_frac_prior)
+        _validate_contamination_frac_prior_spec(contamination_frac_prior)
     fit_results, prefer_centered = _normalize_fit_inputs(results)
     ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     if ds is None:
@@ -2897,6 +3184,13 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
         trace = _compute_sample_log_likelihood(trace)
 
+    global_names: list[str] = []
+    if robust and robust_likelihood == "student_t" and student_t_nu is None:
+        global_names.append("student_t_nu")
+    if robust and robust_likelihood == "mixture":
+        global_names.extend(f"pi_outlier_{lbl}" for lbl in labels)
+        global_names.append("outlier_inflate")
+
     return MultiFitResult(
         trace=trace,
         results=_per_well_fit_results_from_trace(
@@ -2904,5 +3198,6 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             fit_results,
             scheme,
             x_error_model=x_error_model,
+            global_p_names=global_names,
         ),
     )
