@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ from clophfit.fitting.data_structures import (
     NoiseModelParams,
     PlateNoiseModel,
 )
+from clophfit.fitting.models import binding_1site
 from clophfit.prtecan import PlateScheme
 
 if TYPE_CHECKING:
@@ -272,6 +273,407 @@ def test_create_parameter_priors_skip_shared_k(lmfit_params: Parameters) -> None
         assert "S1_1_A01" in priors
 
 
+def test_data_prior_seed_uses_ph_extremes_and_midpoint(ph_dataset: Dataset) -> None:
+    """Data-prior initialization should infer pH edge signals without LMFit."""
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+
+    assert fr.result is not None
+    params = fr.result.params
+    assert params["S0_default"].value == pytest.approx(ph_dataset["default"].yc[-1])
+    assert params["S1_default"].value == pytest.approx(ph_dataset["default"].yc[0])
+    assert params["K"].value == pytest.approx(7.0)
+    assert params["K"].min == pytest.approx(4.5)
+    assert params["K"].max == pytest.approx(9.0)
+
+
+def test_data_prior_default_k_bounds_respect_is_ph(
+    ph_dataset: Dataset, cl_dataset: Dataset
+) -> None:
+    """Omitted k_bounds should resolve from is_ph, not a fixed pH range."""
+    ph_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=None,
+        k_sigma=1.5,
+    )
+    assert ph_fr.result is not None
+    assert ph_fr.result.params["K"].min == pytest.approx(4.5)
+    assert ph_fr.result.params["K"].max == pytest.approx(9.0)
+
+    cl_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        cl_dataset,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=None,
+        k_sigma=1.5,
+    )
+    assert cl_fr.result is not None
+    assert cl_fr.result.params["K"].min == pytest.approx(1e-6)
+    assert cl_fr.result.params["K"].max == pytest.approx(1e6)
+
+
+def test_create_data_parameter_priors_can_use_uniform_k(ph_dataset: Dataset) -> None:
+    """Direct data priors should support a bounded flat K prior."""
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ph_dataset,
+        edge_points=2,
+        signal_sigma_scale=0.5,
+        k_prior="uniform",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+
+    assert fr.result is not None
+    with pm.Model():
+        priors = bayes.create_data_parameter_priors(
+            fr.result.params,
+            k_prior="uniform",
+            k_bounds=(4.5, 9.0),
+        )
+
+    assert "K" in priors
+    assert "S0_default" in priors
+    assert "S1_default" in priors
+
+
+def test_fit_binding_pymc_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """The data-prior strategy should not run the LMFit prefit."""
+    pytest.importorskip("pymc")
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(pm, "sample", stop_sample)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            init_strategy="data_priors",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
+@pytest.mark.parametrize(
+    ("k_bounds", "is_ph", "expected"),
+    [
+        (None, True, (4.5, 9.0)),
+        (None, False, (1e-6, 1e6)),
+        ((float("nan"), 9.0), True, (4.5, 9.0)),
+        ((5.0, 5.0), False, (1e-6, 1e6)),  # lo == hi is invalid
+        ((9.0, 4.5), True, (4.5, 9.0)),  # reversed order is sorted
+        ((1.0, 50.0), False, (1.0, 50.0)),  # valid explicit bounds respected
+    ],
+)
+def test_resolve_data_prior_k_bounds(
+    k_bounds: tuple[float, float] | None,
+    is_ph: bool,  # noqa: FBT001
+    expected: tuple[float, float],
+) -> None:
+    """K-bound resolution should fall back per is_ph and validate the range."""
+    lo, hi = bayes._resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)  # noqa: SLF001
+    assert lo == pytest.approx(expected[0])
+    assert hi == pytest.approx(expected[1])
+
+
+def test_normalize_fit_inputs_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-well normalization should seed from data without calling LMFit."""
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
+        init_strategy="data_priors",
+    )
+
+    assert prefer_centered is False
+    assert set(normalized) == {"A01", "A02"}
+    for fr in normalized.values():
+        assert fr.result is not None
+        params = fr.result.params
+        assert {"S0_1", "S1_1", "S0_2", "S1_2", "K"} <= set(params)
+        # pH default bounds applied because k_bounds was omitted.
+        assert params["K"].min == pytest.approx(4.5)
+        assert params["K"].max == pytest.approx(9.0)
+
+
+def test_normalize_fit_inputs_data_priors_ignores_prefit_result(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """A supplied FitResult should be re-seeded from its dataset, not reused."""
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    prefit = fit_binding_glob(multi_dataset)
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": prefit},
+        init_strategy="data_priors",
+        data_prior_edge_points=1,
+    )
+
+    assert prefer_centered is False
+    fr = normalized["A01"]
+    assert fr.result is not None
+    # For pH data, S0 is the high-pH plateau (last x); a single-point edge
+    # window makes this the raw endpoint rather than the LMFit optimum.
+    da = multi_dataset["1"]
+    assert fr.result.params["S0_1"].value == pytest.approx(float(da.yc[-1]))
+
+
+def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """The multi data-prior strategy should reach sampling without LMFit."""
+    pytest.importorskip("pymc")
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+        msg = "fit_binding_glob should not be called"
+        raise AssertionError(msg)
+
+    def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(pm, "sample", stop_sample)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
+            scheme,
+            init_strategy="data_priors",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
+def test_edge_helpers_handle_empty_input() -> None:
+    """Edge-window helpers should degrade gracefully on empty arrays."""
+    empty = np.array([], dtype=float)
+    assert bayes._edge_mean(empty, start=True, n_points=2) == 0.0  # noqa: SLF001
+    assert bayes._edge_signal_priors(  # noqa: SLF001
+        empty, empty, is_ph=True, edge_points=2
+    ) == (0.0, 0.0)
+    assert (
+        bayes._midpoint_x_for_prior(  # noqa: SLF001
+            empty, empty, high_edge=1.0, low_edge=0.0, bounds=(4.5, 9.0)
+        )
+        is None
+    )
+
+
+def test_edge_mean_falls_back_to_full_window_mean() -> None:
+    """A fully-NaN edge window should fall back to the finite full-array mean."""
+    values = np.array([np.nan, 2.0, 4.0])
+    # start window of 1 point is NaN -> nanmean over all finite values (3.0).
+    assert bayes._edge_mean(values, start=True, n_points=1) == pytest.approx(3.0)  # noqa: SLF001
+
+
+def test_fit_result_from_data_priors_all_masked_label() -> None:
+    """A label with no active points should still yield finite seed params."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([np.nan, np.nan, np.nan]))
+    ds = Dataset({"default": da}, is_ph=True)
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ds,
+        edge_points=2,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+    assert fr.result is not None
+    params = fr.result.params
+    assert params["S0_default"].value == 0.0
+    assert params["S1_default"].value == 0.0
+    # No midpoint could be estimated -> K seeded at the bound midpoint.
+    assert params["K"].value == pytest.approx(6.75)
+
+
+def test_fit_result_from_data_priors_constant_signal() -> None:
+    """A flat titration (zero signal range) should use a positive fallback sigma."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([2.0, 2.0, 2.0]))
+    ds = Dataset({"default": da}, is_ph=True)
+    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+        ds,
+        edge_points=1,
+        signal_sigma_scale=0.5,
+        k_prior="midpoint_truncnorm",
+        k_bounds=(4.5, 9.0),
+        k_sigma=1.5,
+    )
+    assert fr.result is not None
+    # y_range == 0 -> sigma from max(|s0|, |s1|, 1.0) * scale.
+    assert fr.result.params["S0_default"].stderr == pytest.approx(1.0)
+
+
+def test_normalize_fit_input_data_priors_without_dataset() -> None:
+    """Single-well data-prior normalization returns empty on a dataset-less input."""
+    fr, prefit = bayes._normalize_fit_input(  # noqa: SLF001
+        FitResult(), init_strategy="data_priors"
+    )
+    assert prefit is False
+    assert fr.result is None
+
+
+def test_normalize_fit_inputs_data_priors_skips_dataset_less_wells() -> None:
+    """Multi-well data-prior normalization drops wells that carry no dataset."""
+    normalized, _prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+        {"A01": FitResult()}, init_strategy="data_priors"
+    )
+    assert normalized == {}
+
+
+@pytest.mark.parametrize(
+    ("bg_noise", "expected_floor"),
+    [
+        (2.5, 2.5),
+        (-1.0, 1.0),  # non-positive floor falls back to 1.0
+        (float("nan"), 1.0),  # non-finite floor falls back to 1.0
+        ({"1": 3.0}, 3.0),  # mapping hit
+        ({"2": 3.0}, 1.0),  # mapping miss -> default 1.0
+    ],
+)
+def test_plate_noise_from_bg_floor_resolution(
+    bg_noise: float | dict[str, float], expected_floor: float
+) -> None:
+    """Background-noise floors should validate and fall back per label."""
+    model = bayes._plate_noise_from_bg(bg_noise, ["1"], alpha=0.1)  # noqa: SLF001
+    assert model["1"].sigma_floor == pytest.approx(expected_floor)
+    assert model["1"].gain == 0.0
+    assert model["1"].alpha == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    ("value", "label", "expected"),
+    [
+        (2.0, "1", 2.0),
+        (float("nan"), "1", 0.0),
+        ({"1": 3.0}, "1", 3.0),
+        ({"1": 2.0, "2": 4.0}, "3", 3.0),  # missing label -> finite mean
+        ({"1": float("nan")}, "2", 0.0),  # no finite values -> 0.0
+    ],
+)
+def test_ye_mag_value(
+    value: float | dict[str, float], label: str, expected: float
+) -> None:
+    """ye_mag prior values should be finite with scalar/mapping fallbacks."""
+    assert bayes._ye_mag_value(value, label) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (2.0, 2.0),
+        (float("nan"), 0.0),
+        ({"1": 2.0, "2": 4.0}, 3.0),
+        ({}, 0.0),
+    ],
+)
+def test_shared_ye_mag_value(value: float | dict[str, float], expected: float) -> None:
+    """Shared ye_mag values should collapse mappings to a finite mean."""
+    assert bayes._shared_ye_mag_value(value) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("sigma", "label", "expected"),
+    [
+        (2.0, "1", 2.0),
+        (-1.0, "1", 1e-6),  # non-positive -> floor
+        ({"1": 2.0}, "1", 2.0),
+        ({"1": -1.0}, "2", 1e-6),  # no positive values -> floor
+    ],
+)
+def test_ye_mag_sigma(
+    sigma: float | dict[str, float], label: str, expected: float
+) -> None:
+    """ye_mag sigmas should be strictly positive with per-label fallbacks."""
+    assert bayes._ye_mag_sigma(sigma, label) == pytest.approx(expected)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("sigma", "expected"),
+    [
+        (2.0, 2.0),
+        (-1.0, 1e-6),
+        ({"1": 2.0, "2": 4.0}, 3.0),
+        ({"1": -1.0}, 1e-6),
+    ],
+)
+def test_shared_ye_mag_sigma(sigma: float | dict[str, float], expected: float) -> None:
+    """Shared ye_mag sigmas should stay positive across scalar/mapping inputs."""
+    assert bayes._shared_ye_mag_sigma(sigma) == pytest.approx(expected)  # noqa: SLF001
+
+
+def test_validate_robust_likelihood_rejects_unknown() -> None:
+    """An unrecognized robust-likelihood selector should raise ValueError."""
+    with pytest.raises(ValueError, match=r"student_t.*mixture"):
+        bayes._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # noqa: SLF001
+
+
+def test_add_y_likelihood_mixture_requires_outlier_priors() -> None:
+    """Mixture likelihood without outlier priors should raise a clear error."""
+    da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([1.0, 2.0, 3.0]))
+    with pytest.raises(ValueError, match="pi_outlier and outlier_inflate"):
+        bayes._add_y_likelihood(  # noqa: SLF001
+            "y_likelihood_1",
+            np.zeros(3),
+            da,
+            1.0,
+            robust=True,
+            robust_likelihood="mixture",
+            pi_outlier=None,
+            outlier_inflate=None,
+        )
+
+
+def test_scale_and_log_scaled_ye_mag_helpers() -> None:
+    """ye_mag scaling helpers should guard the scale and log-transform medians."""
+    assert bayes._scale_ye_mag_sigma(2.0, 3.0) == pytest.approx(6.0)  # noqa: SLF001
+    # Non-positive scale is coerced to 1.0.
+    assert bayes._scale_ye_mag_sigma(2.0, -1.0) == pytest.approx(2.0)  # noqa: SLF001
+    scaled = bayes._scale_ye_mag_sigma({"1": 2.0}, 3.0)  # noqa: SLF001
+    assert isinstance(scaled, dict)
+    assert scaled["1"] == pytest.approx(6.0)
+    assert bayes._log_scaled_ye_mag_mu(1.0, 1.0) == pytest.approx(0.0)  # noqa: SLF001
+    log_map = bayes._log_scaled_ye_mag_mu({"1": 1.0}, 1.0)  # noqa: SLF001
+    assert isinstance(log_map, dict)
+    assert log_map["1"] == pytest.approx(0.0)
+
+
 def test_create_parameter_priors_sigma_scaling(lmfit_params: Parameters) -> None:
     """Test that n_sd parameter scales the prior width."""
     pytest.importorskip("pymc")
@@ -506,6 +908,489 @@ def test_fit_binding_pymc_fitresult_defaults_centered_noise_modes(
     assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
 
 
+def test_fit_binding_pymc_passes_shared_noise_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Single-dataset PyMC should expose the same shared noise knobs as multi."""
+    captured: dict[str, bool] = {}
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, alpha=0.01, gain=0.1),
+        "2": NoiseModelParams(sigma_floor=1.0, alpha=0.02, gain=0.2),
+    })
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        floor_mode: str = "centered",
+        gain_mode: str = "centered",
+        alpha_mode: str = "centered",
+        shared_alpha: bool = False,
+        shared_gain: bool = False,
+    ) -> dict[str, object]:
+        del floor_mode, gain_mode, alpha_mode
+        captured["shared_alpha"] = shared_alpha
+        captured["shared_gain"] = shared_gain
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            multi_dataset,
+            noise_model=noise_model,
+            shared_alpha=False,
+            shared_gain=True,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"shared_alpha": False, "shared_gain": True}
+
+
+def test_fit_binding_pymc_robust_uses_fixed_student_t_nu(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Single-fit robust PyMC should preserve fixed Student-t nu by default."""
+    captured: dict[str, object] = {}
+
+    def fake_student_t(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["nu"] = kwargs["nu"]
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "StudentT", fake_student_t)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            student_t_nu=7.5,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured["name"] == "y_likelihood_default"
+    assert captured["nu"] == 7.5
+
+
+def test_fit_binding_pymc_robust_can_infer_student_t_nu(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Passing None should infer one shared Student-t nu parameter."""
+    captured: dict[str, object] = {}
+
+    def fake_student_t(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["nu_name"] = getattr(kwargs["nu"], "name", None)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "StudentT", fake_student_t)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            student_t_nu=None,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured["name"] == "y_likelihood_default"
+    assert captured["nu_name"] == "student_t_nu"
+
+
+def test_fit_binding_pymc_robust_can_use_mixture_likelihood(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Single-fit robust PyMC can use a marginalized contamination mixture."""
+    captured: dict[str, object] = {}
+
+    def fake_mixture(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["has_weights"] = "w" in kwargs
+        captured["has_components"] = "comp_dists" in kwargs
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {
+        "name": "y_likelihood_default",
+        "has_weights": True,
+        "has_components": True,
+    }
+
+
+def test_fit_binding_pymc_mixture_accepts_label_specific_contamination_prior(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Single-fit mixture priors can encode label-specific outlier rates."""
+    captured: dict[str, float] = {}
+
+    def fake_beta(name: str, *, alpha: float, beta: float) -> float:
+        del alpha
+        captured[name] = beta
+        return 0.1
+
+    def fake_mixture(*_args: object, **_kwargs: object) -> None:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Beta", fake_beta)
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            multi_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1.0 / 63.0},
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured["pi_outlier_1"] == pytest.approx(6.0)
+    assert captured["pi_outlier_2"] == pytest.approx(62.0)
+
+
+@pytest.mark.parametrize("contamination_frac_prior", [0.0005, 0.999])
+def test_fit_binding_pymc_mixture_rejects_unsafe_contamination_prior(
+    ph_dataset: Dataset,
+    contamination_frac_prior: float,
+) -> None:
+    """Mixture likelihood should reject numerically unsafe contamination priors."""
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=contamination_frac_prior,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
+def test_fit_binding_pymc_robust_rejects_nonpositive_student_t_nu(
+    ph_dataset: Dataset,
+) -> None:
+    """Nonpositive numeric Student-t nu values should be rejected."""
+    with pytest.raises(ValueError, match="student_t_nu must be positive"):
+        fit_binding_pymc(
+            ph_dataset,
+            robust=True,
+            student_t_nu=0.0,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+
+def test_fit_binding_pymc_residual_refit_uses_requested_two_pass_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Residual refit workflow should run robust unit-yerr then normal masked refit."""
+    ph_dataset["default"].y_err = np.full_like(ph_dataset["default"].yc, 2.0)
+    calls: list[dict[str, Any]] = []
+
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult[MiniT], **kwargs: object
+    ) -> FitResult[MiniT]:
+        ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        assert ds is not None
+        calls.append({
+            "input_is_fit_result": isinstance(ds_or_fr, FitResult),
+            "y_errc": ds["default"].y_errc.copy(),
+            **kwargs,
+        })
+        fr = fit_binding_glob(ds)
+        if not isinstance(ds_or_fr, FitResult) and fr.dataset is not None:
+            fr.dataset["default"].y_err = np.full_like(ds["default"].yc, 7.0)
+        return fr
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
+
+    result = bayes.fit_binding_pymc_residual_refit(
+        ph_dataset,
+        bg_noise={"default": 0.3},
+        n_samples=10,
+        n_tune=5,
+        n_xerr=0.0,
+    )
+
+    assert result.final.result is not None
+    assert len(calls) == 2
+    assert calls[0]["input_is_fit_result"] is False
+    assert calls[1]["input_is_fit_result"] is True
+    np.testing.assert_allclose(
+        calls[0]["y_errc"], np.ones_like(ph_dataset["default"].yc)
+    )
+    np.testing.assert_allclose(
+        calls[1]["y_errc"], np.full_like(ph_dataset["default"].yc, 7.0)
+    )
+    assert calls[0]["robust"] is True
+    assert calls[0]["ye_mag_prior"] == "lognormal"
+    assert calls[0]["ye_mag_mu"] == {"default": pytest.approx(np.log(1.08))}
+    assert calls[0]["ye_mag_sigma"] == 0.5
+    assert calls[1]["robust"] is False
+    assert calls[1]["ye_mag_prior"] == "lognormal"
+    assert calls[1]["ye_mag_mu"] == 0.0
+    assert calls[1]["ye_mag_sigma"] == 0.25
+
+
+def test_fit_binding_pymc_residual_refit_masks_one_outlier_per_label_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """The refit workflow should not allow one tail residual per label by default."""
+    calls: list[Dataset] = []
+
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult[MiniT], **_kwargs: object
+    ) -> FitResult[MiniT]:
+        ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        assert ds is not None
+        calls.append(ds.copy())
+        if isinstance(ds_or_fr, FitResult):
+            return ds_or_fr
+        return fit_binding_glob(ds)
+
+    def fake_residuals_from_fit_results(
+        *_args: object, **_kwargs: object
+    ) -> pd.DataFrame:
+        return pd.DataFrame({
+            "trace_id": ["pymc_robust_unweighted"] * 6,
+            "well": ["single"] * 6,
+            "label": ["1", "1", "1", "2", "2", "2"],
+            "step": [0, 1, 2, 0, 1, 2],
+            "x": [6.0, 7.0, 8.0, 6.0, 7.0, 8.0],
+            "std_res": [0.0, 0.0, 4.0, 0.0, -4.0, 0.0],
+        })
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.residuals_from_fit_results",
+        fake_residuals_from_fit_results,
+    )
+
+    result = bayes.fit_binding_pymc_residual_refit(
+        multi_dataset,
+        bg_noise={"1": 0.3, "2": 0.3},
+        n_samples=10,
+        n_tune=5,
+        n_xerr=0.0,
+        min_keep=2,
+    )
+
+    assert result.masked_dataset["1"].mask.tolist() == [True, True, False]
+    assert result.masked_dataset["2"].mask.tolist() == [True, False, True]
+    assert calls[1]["1"].mask.tolist() == [True, True, False]
+    assert calls[1]["2"].mask.tolist() == [True, False, True]
+
+
+def test_fit_binding_pymc_residual_refit_proportional_noise_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """Proportional residual refit should use a noise model instead of ye_mag."""
+    ph_dataset["default"].y_err = np.full_like(ph_dataset["default"].yc, 2.0)
+    calls: list[dict[str, Any]] = []
+
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult[MiniT], **kwargs: object
+    ) -> FitResult[MiniT]:
+        ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        assert ds is not None
+        calls.append({
+            "input_is_fit_result": isinstance(ds_or_fr, FitResult),
+            "y_errc": ds["default"].y_errc.copy(),
+            **kwargs,
+        })
+        fr = fit_binding_glob(ds)
+        if isinstance(ds_or_fr, FitResult):
+            return ds_or_fr
+        return fr
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
+
+    result = bayes.fit_binding_pymc_residual_refit(
+        ph_dataset,
+        noise_strategy="proportional",
+        bg_noise={"default": 0.3},
+        proportional_alpha=0.07,
+        n_samples=10,
+        n_tune=5,
+        n_xerr=0.0,
+    )
+
+    assert result.final.result is not None
+    assert len(calls) == 2
+    np.testing.assert_allclose(
+        calls[0]["y_errc"], np.full_like(ph_dataset["default"].yc, 2.0)
+    )
+    for call in calls:
+        assert call["noise_model"]["default"].sigma_floor == 0.3
+        assert call["noise_model"]["default"].alpha == 0.07
+        assert call["floor_mode"] == "centered"
+        assert call["gain_mode"] == "fixed"
+        assert call["alpha_mode"] == "free"
+        assert call["learn_ye_mags"] is False
+        assert "ye_mag_prior" not in call
+
+
+def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi residual refit should use per-well variance in both PyMC passes."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01"}}
+    inputs = {
+        "A01": copy.deepcopy(multi_dataset),
+        "A02": copy.deepcopy(multi_dataset),
+    }
+    calls: list[dict[str, Any]] = []
+
+    def input_label1_mask(value: Dataset | FitResult[MiniT]) -> list[bool]:
+        dataset = value.dataset if isinstance(value, FitResult) else value
+        assert dataset is not None
+        return [bool(v) for v in dataset["1"].mask.copy().tolist()]
+
+    def fake_fit_binding_pymc_multi(
+        fit_inputs: dict[str, Dataset | FitResult[MiniT]],
+        _scheme: PlateScheme,
+        **kwargs: object,
+    ) -> MultiFitResult:
+        calls.append({
+            "input_types": {
+                key: type(value).__name__ for key, value in fit_inputs.items()
+            },
+            "input_masks": {
+                key: input_label1_mask(value) for key, value in fit_inputs.items()
+            },
+            **kwargs,
+        })
+        fit_results: dict[str, FitResult[MiniT]] = {}
+        for well, item in fit_inputs.items():
+            if isinstance(item, FitResult):
+                fit_results[well] = item
+            else:
+                fit_results[well] = fit_binding_glob(item)
+        return MultiFitResult(trace=xr.DataTree(), results=fit_results)
+
+    def fake_residuals_from_multifit(*_args: object, **_kwargs: object) -> pd.DataFrame:
+        return pd.DataFrame({
+            "trace_id": ["pymc_multi_robust"] * 2,
+            "well": ["A01", "A02"],
+            "label": ["1", "2"],
+            "raw_i": [1, 2],
+            "step": [1, 2],
+            "x": [7.0, 8.0],
+            "std_res": [4.0, 0.0],
+        })
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc_multi", fake_fit_binding_pymc_multi)
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.residuals_from_multifit",
+        fake_residuals_from_multifit,
+    )
+
+    result = bayes.fit_binding_pymc_multi_residual_refit(
+        inputs,
+        scheme,
+        bg_noise={"1": 0.3, "2": 0.4},
+        proportional_alpha=0.07,
+        n_samples=10,
+        n_tune=5,
+        n_xerr=1.0,
+        min_keep=2,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["robust"] is True
+    assert calls[1]["robust"] is False
+    assert calls[0]["well_noise_scale"] is True
+    assert calls[1]["well_noise_scale"] is True
+    assert calls[0]["shared_well_noise_scale"] is False
+    assert calls[1]["shared_well_noise_scale"] is False
+    assert calls[0]["label_noise_scale_sigma"] == 0.3
+    assert calls[0]["well_noise_sd_sigma"] == 0.3
+    assert calls[0]["n_xerr"] == 1.0
+    assert calls[1]["n_xerr"] == 1.0
+    assert calls[0]["noise_model"]["1"].sigma_floor == 0.3
+    assert calls[0]["noise_model"]["2"].alpha == 0.07
+    assert calls[0]["shared_alpha"] is False
+    assert calls[0]["alpha_mode"] == "free"
+    assert calls[1]["input_types"] == {"A01": "FitResult", "A02": "FitResult"}
+    assert calls[1]["input_masks"]["A01"] == [True, False, True]
+    assert result.masked_datasets["A01"]["1"].mask.tolist() == [True, False, True]
+    assert result.masked_datasets["A02"]["2"].mask.tolist() == [True, True, True]
+
+
+def test_fit_binding_pymc_multi_residual_refit_can_share_well_noise_scale(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi residual refit should pass shared well-noise scaling to both passes."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01"}}
+    inputs = {
+        "A01": copy.deepcopy(multi_dataset),
+        "A02": copy.deepcopy(multi_dataset),
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_fit_binding_pymc_multi(
+        fit_inputs: dict[str, Dataset | FitResult[MiniT]],
+        _scheme: PlateScheme,
+        **kwargs: object,
+    ) -> MultiFitResult:
+        calls.append(kwargs)
+        fit_results: dict[str, FitResult[MiniT]] = {}
+        for well, item in fit_inputs.items():
+            fit_results[well] = (
+                item if isinstance(item, FitResult) else fit_binding_glob(item)
+            )
+        return MultiFitResult(trace=xr.DataTree(), results=fit_results)
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc_multi", fake_fit_binding_pymc_multi)
+    monkeypatch.setattr(
+        "clophfit.fitting.model_validation.residuals_from_multifit",
+        lambda *_args, **_kwargs: pd.DataFrame({"std_res": []}),
+    )
+
+    bayes.fit_binding_pymc_multi_residual_refit(
+        inputs,
+        scheme,
+        n_samples=10,
+        n_tune=5,
+        n_xerr=0.0,
+        shared_well_noise_scale=True,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["shared_well_noise_scale"] is True
+    assert calls[1]["shared_well_noise_scale"] is True
+
+
 def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,
@@ -636,6 +1521,249 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
     assert captured == {"labels": ["2"]}
 
 
+@pytest.mark.parametrize(
+    ("per_well_ye_mags", "expected_per_well"),
+    [(None, True), (False, False), (True, True)],
+)
+def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_model(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+    per_well_ye_mags: bool | None,  # noqa: FBT001
+    expected_per_well: bool,  # noqa: FBT001
+) -> None:
+    """Multi noise-model fits should add per-well ye_mag scales by default."""
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    captured: dict[str, bool] = {}
+
+    def fake_build_multi_ye_mag_priors(
+        _labels: list[str],
+        *,
+        per_well: bool = False,
+        shared_ye_mags: bool = False,
+        prior: str = "lognormal",
+        mu: float | dict[str, float] = 0.0,
+        sigma: float | dict[str, float] = 1.5,
+    ) -> dict[str, object]:
+        del _labels, shared_ye_mags, prior, mu, sigma
+        captured["per_well"] = per_well
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(
+        bayes, "_build_multi_ye_mag_priors", fake_build_multi_ye_mag_priors
+    )
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            noise_model=noise_model,
+            learn_ye_mags=True,
+            per_well_ye_mags=per_well_ye_mags,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert captured == {"per_well": expected_per_well}
+
+
+def test_fit_binding_pymc_multi_can_share_well_noise_scale_between_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Shared well-noise scaling should build one well vector for all labels."""
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, alpha=0.02),
+    })
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    created_lognormals: list[str] = []
+    created_halfnormals: list[str] = []
+
+    original_lognormal = pm.LogNormal
+    original_halfnormal = pm.HalfNormal
+
+    def fake_lognormal(name: str, **kwargs: object) -> object:
+        created_lognormals.append(name)
+        if name == "well_noise_scale":
+            assert kwargs["dims"] == "well"
+            raise _StopBayesBuildError
+        return original_lognormal(name, **kwargs)
+
+    def fake_halfnormal(name: str, **kwargs: object) -> object:
+        created_halfnormals.append(name)
+        return original_halfnormal(name, **kwargs)
+
+    monkeypatch.setattr(pm, "LogNormal", fake_lognormal)
+    monkeypatch.setattr(pm, "HalfNormal", fake_halfnormal)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            noise_model=noise_model,
+            well_noise_scale=True,
+            shared_well_noise_scale=True,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+        )
+
+    assert "label_noise_scale" in created_lognormals
+    assert "well_noise_sd" in created_halfnormals
+    assert "well_noise_scale_1" not in created_lognormals
+    assert "well_noise_scale_2" not in created_lognormals
+
+
+def test_fit_binding_pymc_multi_robust_can_infer_student_t_nu(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit robust PyMC should infer one shared Student-t nu parameter."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    captured: dict[str, object] = {}
+
+    def fake_student_t(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["nu_name"] = getattr(kwargs["nu"], "name", None)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "StudentT", fake_student_t)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            student_t_nu=None,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+    assert captured["name"] == "y_likelihood_1"
+    assert captured["nu_name"] == "student_t_nu"
+
+
+def test_fit_binding_pymc_multi_robust_can_use_mixture_likelihood(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit robust PyMC can use a marginalized contamination mixture."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    captured: dict[str, object] = {}
+
+    def fake_mixture(name: str, **kwargs: object) -> None:
+        captured["name"] = name
+        captured["has_weights"] = "w" in kwargs
+        captured["has_components"] = "comp_dists" in kwargs
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+    assert captured == {
+        "name": "y_likelihood_1",
+        "has_weights": True,
+        "has_components": True,
+    }
+
+
+def test_fit_binding_pymc_multi_mixture_accepts_contamination_prior_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """The largest safe contamination prior should still be accepted."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    def fake_mixture(*_args: object, **_kwargs: object) -> None:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "Mixture", fake_mixture)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=0.5,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+
+def test_fit_binding_pymc_multi_mixture_rejects_high_contamination_prior(
+    multi_dataset: Dataset,
+) -> None:
+    """Multi-fit mixture likelihood should reject priors concentrated near one."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior=0.999,
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+
+def test_fit_binding_pymc_multi_mixture_rejects_unsafe_label_specific_prior(
+    multi_dataset: Dataset,
+) -> None:
+    """Label-specific mixture priors must satisfy the same practical bounds."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            robust=True,
+            robust_likelihood="mixture",
+            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
+            n_samples=2,
+            n_tune=1,
+            n_xerr=0.0,
+            x_error_model="deterministic",
+        )
+
+
 def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,
@@ -708,6 +1836,47 @@ def test_fit_binding_pymc_multi_deterministic_mode_uses_shared_fixed_x_true(
             np.testing.assert_allclose(
                 da.x_errc, np.zeros_like(fr_init.dataset[lbl].xc)
             )
+
+
+def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """Per-well x modes with n_xerr=0 should reuse each well's fixed x values."""
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01"}}
+    ds_a = copy.deepcopy(multi_dataset)
+    ds_b = copy.deepcopy(multi_dataset)
+    for da in ds_b.values():
+        da.xc += 0.1
+
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0),
+        "2": NoiseModelParams(sigma_floor=1.0),
+    })
+
+    def fail_create_x_true(*_args: object, **_kwargs: object) -> object:
+        msg = "fixed per-well x path should not call create_x_true"
+        raise AssertionError(msg)
+
+    def stop_build_pymc_noise_priors(
+        *_args: object, **_kwargs: object
+    ) -> dict[str, object]:
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "create_x_true", fail_create_x_true)
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", stop_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": ds_a, "A02": ds_b},
+            scheme,
+            noise_model=noise_model,
+            x_error_model="hierarchical_per_well",
+            n_xerr=0.0,
+            n_samples=2,
+            n_tune=1,
+        )
 
 
 def test_extract_fit_accepts_multifitresult_deterministic() -> None:
@@ -817,8 +1986,9 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
         per_well_scheme: PlateScheme,
         *,
         x_error_model: str,
+        global_p_names: object = (),
     ) -> dict[str, FitResult[xr.DataTree]]:
-        del per_well_scheme, x_error_model
+        del per_well_scheme, x_error_model, global_p_names
         assert trace_obj is trace
         assert set(per_well_fit_results) == {"A01", "A02"}
         per_well_calls["count"] += 1
@@ -886,6 +2056,105 @@ def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
         )
 
     assert captured["min_x_step"] == 0.35
+
+
+@pytest.mark.slow
+@pytest.mark.filterwarnings("ignore:invalid value encountered in scalar divide")
+def test_single_and_multi_pymc_none_noise_model_estimate_similar_ye_mags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single and multi PyMC should agree on per-well ye_mag for the same well."""
+    pytest.importorskip("pymc")
+    x = np.linspace(5.2, 8.8, 10)
+    noise = np.array([
+        0.035,
+        -0.025,
+        0.015,
+        -0.03,
+        0.02,
+        0.025,
+        -0.015,
+        0.03,
+        -0.02,
+        0.01,
+    ])
+
+    def make_dataset(noise_scale: float, offset: float = 0.0) -> Dataset:
+        return Dataset(
+            {
+                "1": DataArray(
+                    x,
+                    binding_1site(x, 7.0, 2.0, 1.0, is_ph=True)
+                    + noise_scale * noise
+                    + offset,
+                    y_errc=np.full_like(x, 0.02),
+                ),
+                "2": DataArray(
+                    x,
+                    binding_1site(x, 7.0, 0.0, 1.0, is_ph=True)
+                    - 0.8 * noise_scale * noise
+                    + 0.3 * offset,
+                    y_errc=np.full_like(x, 0.02),
+                ),
+            },
+            is_ph=True,
+        )
+
+    ds_dict = {
+        "A01": make_dataset(1.0),
+        "A02": make_dataset(0.55, 0.003),
+        "A03": make_dataset(1.45, -0.004),
+    }
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02", "A03"}}
+    original_sample = pm.sample
+
+    def seeded_sample(*args: object, **kwargs: object) -> xr.DataTree:
+        kwargs.setdefault("random_seed", 123)
+        kwargs.setdefault("progressbar", False)
+        return cast("xr.DataTree", original_sample(*args, **kwargs))
+
+    def posterior_mean(trace: xr.DataTree, name: str) -> float:
+        var = trace.posterior[name]
+        if "well" in var.dims:
+            var = var.sel(well="A01")
+        sample_dims = [dim for dim in var.dims if dim in {"chain", "draw"}]
+        return float(var.mean(dim=sample_dims).to_numpy())
+
+    monkeypatch.setattr(pm, "sample", seeded_sample)
+
+    for shared_ye_mags in (False, True):
+        single = fit_binding_pymc(
+            fit_binding_glob(copy.deepcopy(ds_dict["A01"])),
+            n_samples=150,
+            n_tune=150,
+            n_xerr=0.0,
+            noise_model=None,
+            shared_ye_mags=shared_ye_mags,
+        )
+        multi = bayes.fit_binding_pymc_multi(
+            copy.deepcopy(ds_dict),
+            scheme,
+            n_samples=150,
+            n_tune=150,
+            n_xerr=0.0,
+            noise_model=None,
+            shared_ye_mags=shared_ye_mags,
+            per_well_ye_mags=True,
+            x_error_model="deterministic",
+        )
+
+        assert single.mini is not None
+        if shared_ye_mags:
+            assert posterior_mean(single.mini, "ye_mag") == pytest.approx(
+                posterior_mean(multi.trace, "ye_mag"), abs=0.35
+            )
+        else:
+            for lbl in ("1", "2"):
+                var_name = f"ye_mag_{lbl}"
+                assert posterior_mean(single.mini, var_name) == pytest.approx(
+                    posterior_mean(multi.trace, var_name), abs=0.35
+                )
 
 
 @pytest.mark.slow

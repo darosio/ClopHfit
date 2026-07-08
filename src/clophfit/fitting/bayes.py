@@ -7,6 +7,8 @@ import copy
 import os
 import re
 import typing
+from collections.abc import Mapping, Mapping as MappingABC
+from dataclasses import dataclass
 from typing import Literal
 
 import arviz as az  # type: ignore[import-untyped]
@@ -21,6 +23,7 @@ from pymc import math as pm_math
 from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
 
+from clophfit.fitting import model_validation
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
@@ -31,20 +34,26 @@ from .data_structures import (
     FitResult,
     MiniT,
     MultiFitResult,
+    NoiseModelParams,
     PlateNoiseModel,
     _Result,
 )
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prtecan import PlateScheme
 
 
 NoiseParamMode = Literal["fixed", "free", "centered"]
+RobustLikelihood = Literal["student_t", "mixture"]
+InitStrategy = Literal["lmfit", "data_priors"]
+DataKPrior = Literal["midpoint_truncnorm", "uniform"]
 
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
+_MIN_CONTAMINATION_FRAC_PRIOR = 1e-3
+_MAX_CONTAMINATION_FRAC_PRIOR = 0.5
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -244,6 +253,8 @@ def get_pymc_variance(
 __all__ = [
     "fit_binding_pymc",
     "fit_binding_pymc_multi",
+    "fit_binding_pymc_multi_residual_refit",
+    "fit_binding_pymc_residual_refit",
     "process_trace",
 ]
 
@@ -294,8 +305,144 @@ def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
     )
 
 
-def _normalize_fit_input(
+def _active_xy_for_prior(da: DataArray) -> tuple[np.ndarray, np.ndarray]:
+    """Return active x/y arrays for data-derived prior construction."""
+    mask = np.asarray(da.mask, dtype=bool)
+    x_source = da.xc if np.asarray(da.xc).size == mask.size else da.x
+    y_source = da.yc if np.asarray(da.yc).size == mask.size else da.y
+    x = np.asarray(x_source, dtype=float)
+    y = np.asarray(y_source, dtype=float)
+    if x.size == mask.size:
+        x = x[mask]
+    if y.size == mask.size:
+        y = y[mask]
+    finite = np.isfinite(x) & np.isfinite(y)
+    return x[finite], y[finite]
+
+
+def _edge_mean(values: np.ndarray, *, start: bool, n_points: int) -> float:
+    """Return a finite mean from the first or last active edge window."""
+    if values.size == 0:
+        return 0.0
+    n = max(1, min(int(n_points), values.size))
+    window = values[:n] if start else values[-n:]
+    out = float(np.nanmean(window))
+    return out if np.isfinite(out) else float(np.nanmean(values))
+
+
+def _edge_signal_priors(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    is_ph: bool,
+    edge_points: int,
+) -> tuple[float, float]:
+    """Estimate S0/S1 from x-ordered edge windows."""
+    if y.size == 0:
+        return 0.0, 0.0
+    order = np.argsort(x) if x.size == y.size else np.arange(y.size)
+    y_sorted = y[order]
+    low_x_signal = _edge_mean(y_sorted, start=True, n_points=edge_points)
+    high_x_signal = _edge_mean(y_sorted, start=False, n_points=edge_points)
+    if is_ph:
+        return high_x_signal, low_x_signal
+    return low_x_signal, high_x_signal
+
+
+def _midpoint_x_for_prior(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    high_edge: float,
+    low_edge: float,
+    bounds: tuple[float, float],
+) -> float | None:
+    """Estimate half-transition x from the point closest to the edge midpoint."""
+    if x.size == 0 or y.size == 0:
+        return None
+    target = 0.5 * (high_edge + low_edge)
+    idx = int(np.nanargmin(np.abs(y - target)))
+    guess = float(x[idx])
+    lo, hi = sorted(map(float, bounds))
+    if not np.isfinite(guess):
+        return None
+    return float(np.clip(guess, lo, hi))
+
+
+def _resolve_data_prior_k_bounds(
+    k_bounds: tuple[float, float] | None, *, is_ph: bool
+) -> tuple[float, float]:
+    """Return valid K bounds, falling back to an ``is_ph``-appropriate range."""
+    default = (4.5, 9.0) if is_ph else (1e-6, 1e6)
+    if k_bounds is None:
+        return default
+    lo, hi = sorted(map(float, k_bounds))
+    if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+        return default
+    return lo, hi
+
+
+def _fit_result_from_data_priors(  # noqa: PLR0913
+    ds: Dataset,
+    *,
+    edge_points: int,
+    signal_sigma_scale: float,
+    k_prior: DataKPrior,
+    k_bounds: tuple[float, float] | None,
+    k_sigma: float,
+) -> FitResult[xr.DataTree]:
+    """Create an lmfit-like seed result using only data-derived priors."""
+    params = Parameters()
+    lo, hi = _resolve_data_prior_k_bounds(k_bounds, is_ph=ds.is_ph)
+
+    k_guesses: list[float] = []
+    signal_scale = max(float(signal_sigma_scale), 1e-6)
+    for lbl, da in ds.items():
+        x, y = _active_xy_for_prior(da)
+        if y.size == 0:
+            s0 = 0.0
+            s1 = 0.0
+            y_range = 1.0
+        else:
+            s0, s1 = _edge_signal_priors(x, y, is_ph=ds.is_ph, edge_points=edge_points)
+            y_range = float(np.nanmax(y) - np.nanmin(y))
+            if not np.isfinite(y_range) or y_range <= 0.0:
+                y_range = max(abs(s0), abs(s1), 1.0)
+        sigma = max(signal_scale * y_range, 1e-6)
+        params.add(f"S0_{lbl}", value=float(s0))
+        params[f"S0_{lbl}"].stderr = sigma
+        params.add(f"S1_{lbl}", value=float(s1))
+        params[f"S1_{lbl}"].stderr = sigma
+        midpoint = _midpoint_x_for_prior(
+            x,
+            y,
+            high_edge=float(s0),
+            low_edge=float(s1),
+            bounds=(lo, hi),
+        )
+        if midpoint is not None:
+            k_guesses.append(midpoint)
+
+    if k_prior == "uniform":
+        k_value = 0.5 * (lo + hi)
+    elif k_guesses:
+        k_value = float(np.nanmedian(k_guesses))
+    else:
+        k_value = 0.5 * (lo + hi)
+    params.add("K", value=float(np.clip(k_value, lo, hi)), min=lo, max=hi)
+    params["K"].stderr = max(float(k_sigma), 1e-6)
+    return FitResult(result=_Result(params), dataset=copy.deepcopy(ds))
+
+
+def _normalize_fit_input(  # noqa: PLR0913
     ds_or_fr: Dataset | FitResult[MiniT],
+    *,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> tuple[FitResult[MiniT], bool]:
     """Normalize PyMC input to a copied preliminary fit result.
 
@@ -304,6 +451,20 @@ def _normalize_fit_input(
     ds_or_fr : Dataset | FitResult[MiniT]
         Either a raw dataset or a pre-fit result used to seed the Bayesian
         model.
+    init_strategy : InitStrategy
+        ``"lmfit"`` fits ``ds_or_fr`` with LMFit first; ``"data_priors"``
+        derives a seed directly from the data instead.
+    data_prior_edge_points : int
+        Edge-window size forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_signal_sigma_scale : float
+        Signal-prior sigma scale forwarded to
+        :func:`_fit_result_from_data_priors`.
+    data_prior_k_prior : DataKPrior
+        K prior family forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_bounds : tuple[float, float] | None
+        K bounds forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_sigma : float
+        K prior sigma forwarded to :func:`_fit_result_from_data_priors`.
 
     Returns
     -------
@@ -311,13 +472,38 @@ def _normalize_fit_input(
         The normalized fit result and whether the caller explicitly supplied a
         pre-fit ``FitResult``.
     """
+    if init_strategy == "data_priors":
+        ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        if ds is None:
+            return FitResult(), False
+        return (
+            typing.cast(
+                "FitResult[MiniT]",
+                _fit_result_from_data_priors(
+                    ds,
+                    edge_points=data_prior_edge_points,
+                    signal_sigma_scale=data_prior_signal_sigma_scale,
+                    k_prior=data_prior_k_prior,
+                    k_bounds=data_prior_k_bounds,
+                    k_sigma=data_prior_k_sigma,
+                ),
+            ),
+            False,
+        )
     if isinstance(ds_or_fr, Dataset):
         return fit_binding_glob(ds_or_fr), False
     return copy.deepcopy(ds_or_fr), True
 
 
-def _normalize_fit_inputs(
+def _normalize_fit_inputs(  # noqa: PLR0913
     results: Mapping[str, Dataset | FitResult[MiniT]],
+    *,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> tuple[dict[str, FitResult[MiniT]], bool]:
     """Normalize multi-well PyMC inputs to copied preliminary fit results.
 
@@ -325,17 +511,50 @@ def _normalize_fit_inputs(
     ----------
     results : Mapping[str, Dataset | FitResult[MiniT]]
         Per-well raw datasets or pre-fit results.
+    init_strategy : InitStrategy
+        ``"lmfit"`` fits each raw dataset with LMFit; ``"data_priors"`` seeds
+        each well directly from its data via
+        :func:`_fit_result_from_data_priors`, skipping LMFit entirely (any
+        supplied pre-fit result is ignored in favour of its dataset).
+    data_prior_edge_points : int
+        Edge-window size forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_signal_sigma_scale : float
+        Signal-prior sigma scale forwarded to
+        :func:`_fit_result_from_data_priors`.
+    data_prior_k_prior : DataKPrior
+        K prior family forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_bounds : tuple[float, float] | None
+        K bounds forwarded to :func:`_fit_result_from_data_priors`.
+    data_prior_k_sigma : float
+        K prior sigma forwarded to :func:`_fit_result_from_data_priors`.
 
     Returns
     -------
     tuple[dict[str, FitResult[MiniT]], bool]
-        Normalized per-well fit results and whether every input item was already
-        a ``FitResult``.
+        Normalized per-well fit results and whether the centered-noise defaults
+        should be preferred (every input already a ``FitResult`` and not using
+        the data-prior strategy).
     """
     normalized: dict[str, FitResult[MiniT]] = {}
     all_prefit = True
     for key, value in results.items():
-        if isinstance(value, Dataset):
+        if init_strategy == "data_priors":
+            ds = value.dataset if isinstance(value, FitResult) else value
+            if ds is None:
+                continue
+            normalized[key] = typing.cast(
+                "FitResult[MiniT]",
+                _fit_result_from_data_priors(
+                    ds,
+                    edge_points=data_prior_edge_points,
+                    signal_sigma_scale=data_prior_signal_sigma_scale,
+                    k_prior=data_prior_k_prior,
+                    k_bounds=data_prior_k_bounds,
+                    k_sigma=data_prior_k_sigma,
+                ),
+            )
+            all_prefit = False
+        elif isinstance(value, Dataset):
             normalized[key] = fit_binding_glob(value)
             all_prefit = False
         else:
@@ -357,6 +576,165 @@ def _resolve_noise_modes(
         gain_mode or default_mode,
         alpha_mode or default_mode,
     )
+
+
+def _build_ye_mag_priors(
+    labels: Sequence[str],
+    *,
+    shared_ye_mags: bool = False,
+    prior: Literal["halfnormal", "lognormal"] = "lognormal",
+    mu: float | Mapping[str, float] = 0.0,
+    sigma: float | Mapping[str, float] = 1.5,
+) -> dict[str, typing.Any]:
+    """Build label-indexed observation-error scale priors."""
+    if shared_ye_mags:
+        shared_sigma = _shared_ye_mag_sigma(sigma)
+        if prior == "halfnormal":
+            ye_mag = pm.HalfNormal("ye_mag", sigma=shared_sigma)
+        else:
+            ye_mag = pm.LogNormal(
+                "ye_mag", mu=_shared_ye_mag_value(mu), sigma=shared_sigma
+            )
+        return dict.fromkeys(labels, ye_mag)
+
+    if prior == "halfnormal":
+        return {
+            lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=_ye_mag_sigma(sigma, lbl))
+            for lbl in labels
+        }
+    return {
+        lbl: pm.LogNormal(
+            f"ye_mag_{lbl}",
+            mu=_ye_mag_value(mu, lbl),
+            sigma=_ye_mag_sigma(sigma, lbl),
+        )
+        for lbl in labels
+    }
+
+
+def _build_multi_ye_mag_priors(  # noqa: PLR0913
+    labels: Sequence[str],
+    *,
+    per_well: bool = False,
+    shared_ye_mags: bool = False,
+    prior: Literal["halfnormal", "lognormal"] = "lognormal",
+    mu: float | Mapping[str, float] = 0.0,
+    sigma: float | Mapping[str, float] = 1.5,
+) -> dict[str, typing.Any]:
+    """Build label-indexed ye_mag priors for multi-well models."""
+    if not per_well:
+        return _build_ye_mag_priors(
+            labels,
+            shared_ye_mags=shared_ye_mags,
+            prior=prior,
+            mu=mu,
+            sigma=sigma,
+        )
+    if shared_ye_mags:
+        shared_sigma = _shared_ye_mag_sigma(sigma)
+        if prior == "halfnormal":
+            ye_mag = pm.HalfNormal("ye_mag", sigma=shared_sigma, dims="well")
+        else:
+            ye_mag = pm.LogNormal(
+                "ye_mag",
+                mu=_shared_ye_mag_value(mu),
+                sigma=shared_sigma,
+                dims="well",
+            )
+        return dict.fromkeys(labels, ye_mag)
+    if prior == "halfnormal":
+        return {
+            lbl: pm.HalfNormal(
+                f"ye_mag_{lbl}", sigma=_ye_mag_sigma(sigma, lbl), dims="well"
+            )
+            for lbl in labels
+        }
+    return {
+        lbl: pm.LogNormal(
+            f"ye_mag_{lbl}",
+            mu=_ye_mag_value(mu, lbl),
+            sigma=_ye_mag_sigma(sigma, lbl),
+            dims="well",
+        )
+        for lbl in labels
+    }
+
+
+def _ye_mag_value(value: float | Mapping[str, float], label: str) -> float:
+    """Return a finite ye_mag prior value for *label*."""
+    if isinstance(value, MappingABC):
+        values = np.asarray(list(value.values()), dtype=float)
+        values = values[np.isfinite(values)]
+        fallback = float(np.nanmean(values)) if values.size else 0.0
+        raw = value.get(label, value.get(str(label), fallback))
+    else:
+        raw = value
+    out = float(raw)
+    return out if np.isfinite(out) else 0.0
+
+
+def _shared_ye_mag_value(value: float | Mapping[str, float]) -> float:
+    """Return a finite shared ye_mag prior value from a scalar or mapping."""
+    if not isinstance(value, MappingABC):
+        out = float(value)
+        return out if np.isfinite(out) else 0.0
+    values = np.asarray(list(value.values()), dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return 0.0
+    return float(np.nanmean(values))
+
+
+def _ye_mag_sigma(sigma: float | Mapping[str, float], label: str) -> float:
+    """Return a finite positive ye_mag prior sigma for *label*."""
+    if isinstance(sigma, MappingABC):
+        values = np.asarray(list(sigma.values()), dtype=float)
+        values = values[np.isfinite(values) & (values > 0.0)]
+        fallback = float(np.nanmean(values)) if values.size else 1e-6
+        raw = sigma.get(label, sigma.get(str(label), fallback))
+    else:
+        raw = sigma
+    value = float(raw)
+    if not np.isfinite(value) or value <= 0.0:
+        return 1e-6
+    return value
+
+
+def _shared_ye_mag_sigma(sigma: float | Mapping[str, float]) -> float:
+    """Return a finite positive shared sigma from a scalar or label mapping."""
+    if not isinstance(sigma, MappingABC):
+        value = float(sigma)
+        return value if np.isfinite(value) and value > 0.0 else 1e-6
+    values = np.asarray(list(sigma.values()), dtype=float)
+    values = values[np.isfinite(values) & (values > 0.0)]
+    if values.size == 0:
+        return 1e-6
+    return float(np.nanmean(values))
+
+
+def _scale_ye_mag_sigma(
+    sigma: float | Mapping[str, float], scale: float
+) -> float | dict[str, float]:
+    """Scale scalar or label-indexed ye_mag sigma hints."""
+    scale = float(scale)
+    if not np.isfinite(scale) or scale <= 0.0:
+        scale = 1.0
+    if isinstance(sigma, MappingABC):
+        return {str(label): float(value) * scale for label, value in sigma.items()}
+    return float(sigma) * scale
+
+
+def _log_scaled_ye_mag_mu(
+    median: float | Mapping[str, float], scale: float
+) -> float | dict[str, float]:
+    """Return log-median values for a scaled LogNormal ye_mag prior."""
+    scaled = _scale_ye_mag_sigma(median, scale)
+    if isinstance(scaled, dict):
+        return {
+            label: float(np.log(max(float(value), 1e-6)))
+            for label, value in scaled.items()
+        }
+    return float(np.log(max(float(scaled), 1e-6)))
 
 
 def _masked_obs_err_matrices(
@@ -586,6 +964,34 @@ def create_parameter_priors(
     return priors
 
 
+def create_data_parameter_priors(
+    params: Parameters,
+    *,
+    k_prior: DataKPrior = "midpoint_truncnorm",
+    k_bounds: tuple[float, float] | None = None,
+    is_ph: bool = False,
+) -> dict[str, pm.Distribution]:
+    """Create PyMC priors from data-derived parameter estimates."""
+    priors: dict[str, pm.Distribution] = {}
+    lo, hi = _resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)
+    for name, p in params.items():
+        if name == "K":
+            if k_prior == "uniform":
+                priors[name] = pm.Uniform(name, lower=lo, upper=hi)
+            else:
+                priors[name] = pm.TruncatedNormal(
+                    name,
+                    mu=float(np.clip(p.value, lo, hi)),
+                    sigma=_safe_sigma(p.stderr, 1.0, default=1.5),
+                    lower=lo,
+                    upper=hi,
+                )
+            continue
+        sigma = _safe_sigma(p.stderr, 1.0, default=1.0)
+        priors[name] = pm.Normal(name, mu=p.value, sigma=sigma)
+    return priors
+
+
 # NOTE: If model recompilation becomes a bottleneck, consider pm.MutableData.
 
 
@@ -618,19 +1024,148 @@ def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> Non
     rpars[name].init_value = row.get("r_hat", np.nan)
 
 
-def _add_y_likelihood(
+def _add_y_likelihood(  # noqa: PLR0913
     name: str,
     y_model: typing.Any,  # noqa: ANN401  # pt.TensorVariable (no stubs)
     da: DataArray,
     sigma: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
     *,
     robust: bool = False,
+    student_t_nu: typing.Any = 3.0,  # noqa: ANN401  # float | TensorVariable
+    robust_likelihood: RobustLikelihood = "student_t",
+    pi_outlier: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
+    outlier_inflate: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
 ) -> None:
-    """Add a Normal or StudentT likelihood for one label."""
-    if robust:
-        pm.StudentT(name, nu=3.0, mu=y_model[da.mask], sigma=sigma, observed=da.y)
+    """Add a Normal, StudentT, or contamination-mixture likelihood for one label."""
+    mu = y_model[da.mask]
+    if robust and robust_likelihood == "mixture":
+        if pi_outlier is None or outlier_inflate is None:
+            msg = "Mixture likelihood requires pi_outlier and outlier_inflate."
+            raise ValueError(msg)
+        _add_mixture_likelihood(
+            name,
+            mu,
+            sigma,
+            da.y,
+            pi_outlier=pi_outlier,
+            outlier_inflate=outlier_inflate,
+        )
+    elif robust:
+        pm.StudentT(
+            name,
+            nu=student_t_nu,
+            mu=mu,
+            sigma=sigma,
+            observed=da.y,
+        )
     else:
-        pm.Normal(name, mu=y_model[da.mask], sigma=sigma, observed=da.y)
+        pm.Normal(name, mu=mu, sigma=sigma, observed=da.y)
+
+
+def _add_mixture_likelihood(  # noqa: PLR0913
+    name: str,
+    mu: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+    sigma_normal: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
+    observed: np.ndarray,
+    *,
+    pi_outlier: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+    outlier_inflate: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+) -> None:
+    """Add a marginalized normal/outlier contamination mixture likelihood."""
+    sigma_outlier = sigma_normal * (1.0 + outlier_inflate)
+    w = pi_outlier * pt.ones_like(mu)  # type: ignore[no-untyped-call]
+    weights = pt.stack([1.0 - w, w], axis=-1)
+    comp_dists = [
+        pm.Normal.dist(mu=mu, sigma=sigma_normal),
+        pm.Normal.dist(mu=mu, sigma=sigma_outlier),
+    ]
+    pm.Mixture(name, w=weights, comp_dists=comp_dists, observed=observed)
+
+    normal_logp = pm.logp(comp_dists[0], observed)
+    outlier_logp = pm.logp(comp_dists[1], observed)
+    log_p_normal = pt.log1p(-pi_outlier) + normal_logp
+    log_p_outlier = pt.log(pi_outlier) + outlier_logp
+    pm.Deterministic(
+        name.replace("y_likelihood", "outlier_probability"),
+        pm_math.exp(
+            log_p_outlier - pt.logaddexp(log_p_normal, log_p_outlier)  # type: ignore[no-untyped-call]
+        ),
+    )
+
+
+def _validate_robust_likelihood(robust_likelihood: RobustLikelihood) -> None:
+    """Validate the robust likelihood selector."""
+    if robust_likelihood not in typing.get_args(RobustLikelihood):
+        msg = "robust_likelihood must be 'student_t' or 'mixture'."
+        raise ValueError(msg)
+
+
+ContaminationFracPrior = float | Mapping[str, float]
+
+
+def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float:
+    """Return a valid prior mean for the outlier fraction."""
+    contamination_frac = float(contamination_frac_prior)
+    if not (
+        _MIN_CONTAMINATION_FRAC_PRIOR
+        <= contamination_frac
+        <= _MAX_CONTAMINATION_FRAC_PRIOR
+    ):
+        msg = (
+            "contamination_frac_prior must be between "
+            f"{_MIN_CONTAMINATION_FRAC_PRIOR:g} and "
+            f"{_MAX_CONTAMINATION_FRAC_PRIOR:g}."
+        )
+        raise ValueError(msg)
+    return contamination_frac
+
+
+def _validate_contamination_frac_prior_spec(
+    contamination_frac_prior: ContaminationFracPrior,
+) -> None:
+    if isinstance(contamination_frac_prior, MappingABC):
+        for value in contamination_frac_prior.values():
+            _validate_contamination_frac_prior(value)
+    else:
+        _validate_contamination_frac_prior(contamination_frac_prior)
+
+
+def _build_outlier_priors(
+    labels: Sequence[str], contamination_frac_prior: ContaminationFracPrior
+) -> tuple[dict[str, typing.Any], typing.Any]:
+    """Build per-label outlier fractions and a shared scale inflation prior."""
+    if isinstance(contamination_frac_prior, MappingABC):
+        values = {
+            str(label): _validate_contamination_frac_prior(value)
+            for label, value in contamination_frac_prior.items()
+        }
+        fallback = float(np.nanmedian(list(values.values()))) if values else 0.15
+        pi_outliers = {}
+        for lbl in labels:
+            contamination_frac = values.get(str(lbl), fallback)
+            beta = (1.0 / contamination_frac) - 1.0
+            pi_outliers[lbl] = pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta)
+    else:
+        contamination_frac = _validate_contamination_frac_prior(
+            contamination_frac_prior
+        )
+        beta = (1.0 / contamination_frac) - 1.0
+        pi_outliers = {
+            lbl: pm.Beta(f"pi_outlier_{lbl}", alpha=1.0, beta=beta) for lbl in labels
+        }
+    outlier_inflate = pm.HalfNormal("outlier_inflate", sigma=5.0)
+    return pi_outliers, outlier_inflate
+
+
+def _student_t_nu_value(student_t_nu: float | None) -> typing.Any:  # noqa: ANN401
+    """Return a fixed or inferred Student-t degrees-of-freedom value."""
+    if student_t_nu is not None:
+        if student_t_nu <= 0:
+            msg = "student_t_nu must be positive, or None to infer it."
+            raise ValueError(msg)
+        return float(student_t_nu)
+    nu_minus_two = pm.Exponential("student_t_nu_minus_two", lam=1 / 30)
+    return pm.Deterministic("student_t_nu", nu_minus_two + 2.0)
 
 
 def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
@@ -653,8 +1188,61 @@ def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
     return np.concatenate(residuals_list)
 
 
+@dataclass
+class PymcResidualRefitResult:
+    """Results from the robust residual-screening PyMC refit workflow."""
+
+    initial: FitResult[xr.DataTree]
+    residuals: pd.DataFrame
+    masked_dataset: Dataset
+    final: FitResult[xr.DataTree]
+
+
+@dataclass
+class PymcMultiResidualRefitResult:
+    """Results from the multi-well robust residual-screening PyMC refit workflow."""
+
+    initial: MultiFitResult
+    residuals: pd.DataFrame
+    masked_datasets: dict[str, Dataset]
+    final: MultiFitResult
+
+
+def dataset_with_unit_yerr(ds: Dataset) -> Dataset:
+    """Return a deep-copied dataset with all observation errors set to one."""
+    unit_ds = copy.deepcopy(ds)
+    for da in unit_ds.values():
+        da.y_err = np.ones_like(da.yc, dtype=float)
+    return unit_ds
+
+
+def _plate_noise_from_bg(
+    bg_noise: Mapping[str, float] | float,
+    labels: typing.Iterable[str],
+    *,
+    alpha: float,
+) -> PlateNoiseModel:
+    """Build a floor-plus-proportional noise model from bg-noise hints."""
+    model = PlateNoiseModel()
+    for label in labels:
+        floor = (
+            bg_noise.get(str(label), bg_noise.get(label, 1.0))
+            if isinstance(bg_noise, MappingABC)
+            else bg_noise
+        )
+        floor = float(floor)
+        if not np.isfinite(floor) or floor <= 0.0:
+            floor = 1.0
+        model[str(label)] = NoiseModelParams(
+            sigma_floor=floor,
+            gain=0.0,
+            alpha=alpha,
+        )
+    return model
+
+
 def process_trace(
-    trace: xr.DataTree, p_names: typing.KeysView[str], ds: Dataset
+    trace: xr.DataTree, p_names: typing.Iterable[str], ds: Dataset
 ) -> FitResult[xr.DataTree]:
     """Process the trace to extract parameter estimates and update datasets.
 
@@ -662,7 +1250,7 @@ def process_trace(
     ----------
     trace : xr.DataTree
         The posterior samples from PyMC sampling.
-    p_names: typing.KeysView[str]
+    p_names: typing.Iterable[str]
         Parameter names.
     ds : Dataset
         The dataset containing titration data.
@@ -677,9 +1265,10 @@ def process_trace(
     """
     # Extract summary statistics for parameters
     rdf = _trace_summary_df(trace)
+    p_names_set = set(p_names)
     rpars = Parameters()
     for name, row in rdf.iterrows():
-        if name in p_names:
+        if str(name) in p_names_set:
             _add_param_from_summary(rpars, str(name), row)
     # x_true and x_errc
     nxc, nx_errc = _extract_x_true_from_trace_df(rdf)
@@ -712,6 +1301,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     well_key: str = "",
     *,
     raw_trace: xr.DataTree | None = None,
+    global_p_names: typing.Iterable[str] = (),
 ) -> FitResult[xr.DataTree]:
     """Compute individual dataset fit from a multi-well trace summary.
 
@@ -733,6 +1323,10 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
         Raw multi-well PyMC trace for xarray-based x extraction, bypassing
         potential ``az.summary`` indexing bugs.  When ``None``, falls back
         to DataFrame-based extraction from *trace_df*.
+    global_p_names : typing.Iterable[str], optional
+        Names of model-wide (non-per-well) parameters, such as
+        ``student_t_nu`` or per-label outlier terms, to copy verbatim from
+        *trace_df* into the per-well result.
 
     Returns
     -------
@@ -758,6 +1352,10 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
         for name, row in rdf.iterrows():
             extracted_name = str(name).replace(_ctr_param_name(ctr), "K")
             _add_param_from_summary(rpars, extracted_name, row)
+    for gp_name in global_p_names:
+        rdf = trace_df[trace_df.index == gp_name]
+        for _, row in rdf.iterrows():
+            _add_param_from_summary(rpars, str(gp_name), row)
     # Use per-well x (xrw model) when available; fall back to global x_true.
     # Prefer xarray-based extraction (bypasses ArviZ multi-dim indexing bug);
     # fall back to df-based extraction for pre-computed summary DataFrames.
@@ -779,7 +1377,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     if raw_trace is not None:
         updated = _extract_sigma_obs_from_xarray(raw_trace, ds, well_key=key)
         if not updated:
-            _scale_yerr_by_ye_mag_from_xarray(raw_trace, ds)
+            _scale_yerr_by_ye_mag_from_xarray(raw_trace, ds, well_key=key)
     else:
         _update_dataset_yerr_from_sigma_obs(trace_df, ds, well_key=key)
     # Create figure
@@ -971,7 +1569,9 @@ def _extract_sigma_obs_from_xarray(
     return any_updated
 
 
-def _scale_yerr_by_ye_mag_from_xarray(trace: xr.DataTree, ds: Dataset) -> bool:
+def _scale_yerr_by_ye_mag_from_xarray(
+    trace: xr.DataTree, ds: Dataset, *, well_key: str | None = None
+) -> bool:
     """Scale *ds* ``y_errc`` by posterior ``ye_mag`` from xarray.
 
     Parameters
@@ -980,6 +1580,9 @@ def _scale_yerr_by_ye_mag_from_xarray(trace: xr.DataTree, ds: Dataset) -> bool:
         Raw PyMC trace with posterior samples.
     ds : Dataset
         Dataset whose ``y_errc`` arrays will be scaled in-place.
+    well_key : str | None
+        Well coordinate to select when ``ye_mag`` variables have a ``well``
+        dimension.
 
     Returns
     -------
@@ -994,11 +1597,16 @@ def _scale_yerr_by_ye_mag_from_xarray(trace: xr.DataTree, ds: Dataset) -> bool:
     for lbl, da in ds.items():
         per_label = f"ye_mag_{lbl}"
         if per_label in posterior:
-            mag = float(posterior[per_label].mean(dim=sample_dims).values)
+            mag_da = posterior[per_label]
         elif "ye_mag" in posterior:
-            mag = float(posterior["ye_mag"].mean(dim=sample_dims).values)
+            mag_da = posterior["ye_mag"]
         else:
             continue
+        if "well" in mag_da.dims:
+            if well_key is None:
+                continue
+            mag_da = mag_da.sel(well=well_key)
+        mag = float(mag_da.mean(dim=sample_dims).values)
         if da.y_errc.size == 0:
             da.y_errc = np.ones_like(da.yc)
         da.y_errc *= mag
@@ -1062,6 +1670,7 @@ def _per_well_fit_results_from_trace(
     scheme: PlateScheme,
     *,
     x_error_model: Literal["deterministic", "per_well", "hierarchical_per_well"],
+    global_p_names: typing.Iterable[str] = (),
 ) -> dict[str, FitResult[xr.DataTree]]:
     """Reconstruct per-well fit results from a shared multi-well trace."""
     trace_df = _trace_summary_df(trace)
@@ -1073,13 +1682,19 @@ def _per_well_fit_results_from_trace(
         well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
         ds = copy.deepcopy(fr.dataset)
         per_well_results[key] = extract_fit(
-            key, ctr, trace_df, ds, well_key=well_key, raw_trace=trace
+            key,
+            ctr,
+            trace_df,
+            ds,
+            well_key=well_key,
+            raw_trace=trace,
+            global_p_names=global_p_names,
         )
         per_well_results[key].mini = trace
     return per_well_results
 
 
-def fit_binding_pymc(  # noqa: PLR0913
+def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     ds_or_fr: Dataset | FitResult[MiniT],
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
@@ -1090,12 +1705,27 @@ def fit_binding_pymc(  # noqa: PLR0913
     target_accept: float | None = None,
     max_treedepth: int | None = None,
     noise_model: PlateNoiseModel | None = None,
+    shared_alpha: bool = True,
+    shared_gain: bool = False,
     robust: bool = False,
+    robust_likelihood: RobustLikelihood = "student_t",
+    student_t_nu: float | None = 3.0,
+    contamination_frac_prior: ContaminationFracPrior = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
     learn_ye_mags: bool = False,
+    shared_ye_mags: bool = False,
+    ye_mag_prior: Literal["halfnormal", "lognormal"] = "lognormal",
+    ye_mag_mu: float | Mapping[str, float] = 0.0,
+    ye_mag_sigma: float | Mapping[str, float] = 1.5,
     min_x_step: float = 0.2,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -1122,11 +1752,28 @@ def fit_binding_pymc(  # noqa: PLR0913
         default is used.
     noise_model : PlateNoiseModel | None
         Noise model specification.  ``None`` (default) uses a simple per-label
-        ``ye_mag_{lbl}`` HalfNormal to scale the existing ``y_err``.  Pass a
+        ``ye_mag_{lbl}`` LogNormal to scale the existing ``y_err``.  Pass a
         ``PlateNoiseModel`` to infer per-label floor, gain, and alpha
         from the full heteroscedastic noise model.
+    shared_alpha : bool
+        If ``True`` (default), use one ``rel_error`` variable for all labels
+        when *noise_model* is provided.
+    shared_gain : bool
+        If ``True``, use one ``gain`` variable for all labels when
+        *noise_model* is provided.
     robust : bool
-        If ``True``, use StudentT likelihood (nu=3) for robust regression.
+        If ``True``, use the selected robust likelihood for regression.
+    robust_likelihood : RobustLikelihood
+        Robust likelihood used when *robust* is ``True``. ``"student_t"``
+        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
+        normal/outlier mixture with per-label outlier probabilities.
+    student_t_nu : float | None
+        Student-t degrees of freedom when *robust* is ``True``. Positive values
+        are fixed; ``None`` infers ``student_t_nu`` with support above 2.
+    contamination_frac_prior : ContaminationFracPrior
+        Prior mean for per-label outlier fractions when
+        ``robust_likelihood="mixture"``. A mapping supplies label-specific
+        means. Each value must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
@@ -1140,16 +1787,59 @@ def fit_binding_pymc(  # noqa: PLR0913
     learn_ye_mags : bool
         If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
         when a full *noise_model* is provided.
+    shared_ye_mags : bool
+        If ``True``, use one shared ``ye_mag`` variable for all labels instead
+        of per-label ``ye_mag_{lbl}``.
+    ye_mag_prior : Literal["halfnormal", "lognormal"]
+        Prior family for ``ye_mag`` variables when *noise_model* is ``None``.
+    ye_mag_mu : float | Mapping[str, float]
+        LogNormal location parameter for ``ye_mag`` variables when
+        *noise_model* is ``None``. Ignored for HalfNormal priors.
+    ye_mag_sigma : float | Mapping[str, float]
+        Prior sigma for ``ye_mag`` variables when *noise_model* is ``None``.
+        A mapping supplies label-specific sigmas.
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
+    init_strategy : InitStrategy
+        ``"lmfit"`` keeps the historical behavior: raw ``Dataset`` input is
+        first fitted with LMFit and PyMC priors are centered on that result.
+        ``"data_priors"`` skips LMFit and derives weak priors directly from
+        the observed titration endpoints and midpoint.
+    data_prior_edge_points : int
+        Number of active points averaged at each titration edge to initialize
+        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
+    data_prior_signal_sigma_scale : float
+        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
+        signal range when ``init_strategy="data_priors"``.
+    data_prior_k_prior : DataKPrior
+        K prior family for ``init_strategy="data_priors"``. Use
+        ``"midpoint_truncnorm"`` for a truncated Normal centered at the observed
+        half-signal pH, or ``"uniform"`` for a flat prior.
+    data_prior_k_bounds : tuple[float, float] | None
+        Lower and upper K bounds for data-derived priors. ``None`` (default)
+        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)``
+        otherwise.
+    data_prior_k_sigma : float
+        Truncated-Normal K prior sigma for data-derived priors.
 
     Returns
     -------
     FitResult[xr.DataTree]
         Bayesian fitting results.
     """
-    fr, prefer_centered = _normalize_fit_input(ds_or_fr)
+    _validate_robust_likelihood(robust_likelihood)
+    if robust and robust_likelihood == "mixture":
+        _validate_contamination_frac_prior_spec(contamination_frac_prior)
+    fr, prefer_centered = _normalize_fit_input(
+        ds_or_fr,
+        init_strategy=init_strategy,
+        data_prior_edge_points=data_prior_edge_points,
+        data_prior_signal_sigma_scale=data_prior_signal_sigma_scale,
+        data_prior_k_prior=data_prior_k_prior,
+        data_prior_k_bounds=data_prior_k_bounds,
+        data_prior_k_sigma=data_prior_k_sigma,
+    )
 
     if fr.result is None or fr.dataset is None:
         return FitResult()
@@ -1165,11 +1855,37 @@ def fit_binding_pymc(  # noqa: PLR0913
         alpha_mode=alpha_mode,
     )
     with pm.Model():
-        pars = create_parameter_priors(params, n_sd)
+        pars = (
+            create_data_parameter_priors(
+                params,
+                k_prior=data_prior_k_prior,
+                k_bounds=data_prior_k_bounds,
+                is_ph=ds.is_ph,
+            )
+            if init_strategy == "data_priors"
+            else create_parameter_priors(params, n_sd)
+        )
         x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
+        robust_nu = (
+            _student_t_nu_value(student_t_nu)
+            if robust and robust_likelihood == "student_t"
+            else 3.0
+        )
+        if robust and robust_likelihood == "mixture":
+            pi_outliers, outlier_inflate = _build_outlier_priors(
+                labels, contamination_frac_prior
+            )
+        else:
+            pi_outliers, outlier_inflate = {}, None
 
         if noise_model is None:
-            ye_mags = {lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels}
+            ye_mags = _build_ye_mag_priors(
+                labels,
+                shared_ye_mags=shared_ye_mags,
+                prior=ye_mag_prior,
+                mu=ye_mag_mu,
+                sigma=ye_mag_sigma,
+            )
             for lbl, da in ds.items():
                 y_model = binding_1site(
                     x_true,
@@ -1180,20 +1896,33 @@ def fit_binding_pymc(  # noqa: PLR0913
                 )
                 sigma = ye_mags[lbl] * da.y_err
                 _add_y_likelihood(
-                    f"y_likelihood_{lbl}", y_model, da, sigma, robust=robust
+                    f"y_likelihood_{lbl}",
+                    y_model,
+                    da,
+                    sigma,
+                    robust=robust,
+                    student_t_nu=robust_nu,
+                    robust_likelihood=robust_likelihood,
+                    pi_outlier=pi_outliers.get(lbl),
+                    outlier_inflate=outlier_inflate,
                 )
         else:
             active_noise_model = _active_noise_model(noise_model, labels)
             noise_priors = build_pymc_noise_priors(
                 active_noise_model,
+                shared_alpha=shared_alpha,
+                shared_gain=shared_gain,
                 floor_mode=floor_mode,
                 gain_mode=gain_mode,
                 alpha_mode=alpha_mode,
             )
             if learn_ye_mags:
-                ye_mags = {
-                    lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=1.0) for lbl in labels
-                }
+                ye_mags = _build_ye_mag_priors(
+                    labels,
+                    shared_ye_mags=shared_ye_mags,
+                    prior="halfnormal",
+                    sigma=5.0,
+                )
 
             for lbl, da in ds.items():
                 y_model = binding_1site(
@@ -1217,6 +1946,10 @@ def fit_binding_pymc(  # noqa: PLR0913
                     da,
                     sigma_det[da.mask],
                     robust=robust,
+                    student_t_nu=robust_nu,
+                    robust_likelihood=robust_likelihood,
+                    pi_outlier=pi_outliers.get(lbl),
+                    outlier_inflate=outlier_inflate,
                 )
 
         # Inference
@@ -1234,7 +1967,444 @@ def fit_binding_pymc(  # noqa: PLR0913
             sample_kwargs["max_treedepth"] = max_treedepth
         trace = pm.sample(n_samples, **sample_kwargs)
         trace = _compute_sample_log_likelihood(trace)
-    return process_trace(trace, params.keys(), ds)
+    p_names = list(params.keys())
+    if robust and robust_likelihood == "student_t" and student_t_nu is None:
+        p_names.append("student_t_nu")
+    if robust and robust_likelihood == "mixture":
+        p_names.extend([f"pi_outlier_{lbl}" for lbl in labels])
+        p_names.append("outlier_inflate")
+    return process_trace(trace, p_names, ds)
+
+
+def fit_binding_pymc_residual_refit(  # noqa: PLR0913
+    ds: Dataset,
+    *,
+    noise_strategy: Literal["ye_mag", "proportional"] = "ye_mag",
+    bg_noise: Mapping[str, float] | float = 1.0,
+    bg_noise_scale: float = 3.6,
+    bg_noise_log_sigma: float = 0.5,
+    proportional_alpha: float = 0.05,
+    noise_model: PlateNoiseModel | None = None,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+    nuts_sampler: str = "default",
+    n_tune: int | None = None,
+    target_accept: float | None = None,
+    max_treedepth: int | None = None,
+    shared_ye_mags: bool = False,
+    outlier_threshold: float = 3.0,
+    allowed_tail_fraction: float = 0.0,
+    min_allowed_tail_count: int = 0,
+    min_keep: int = 3,
+    min_x_step: float = 0.2,
+) -> PymcResidualRefitResult:
+    """Run robust PyMC, mask residual outliers, then refit.
+
+    ``noise_strategy="ye_mag"`` uses the legacy unweighted first pass with
+    LogNormal ``ye_mag`` priors. ``noise_strategy="proportional"`` uses a
+    floor-plus-proportional noise model with free label-specific alpha in both
+    passes and no ``ye_mag`` multiplier.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Single-well multi-label titration dataset.
+    noise_strategy : Literal["ye_mag", "proportional"]
+        Noise model used during the robust screening pass and final refit.
+    bg_noise : Mapping[str, float] | float, optional
+        Background-noise hints used to initialize the screening noise model.
+    bg_noise_scale : float, optional
+        Multiplicative scale for ``ye_mag`` initialization when using the
+        ``"ye_mag"`` strategy.
+    bg_noise_log_sigma : float, optional
+        Log-scale prior sigma for screening ``ye_mag`` parameters.
+    proportional_alpha : float, optional
+        Initial proportional-noise alpha for the ``"proportional"`` strategy.
+    noise_model : PlateNoiseModel | None, optional
+        Explicit proportional noise model. If supplied, it overrides
+        ``bg_noise`` for the proportional strategy.
+    n_sd : float
+        Prior-width multiplier forwarded to :func:`fit_binding_pymc`.
+    n_xerr : float
+        X-error multiplier forwarded to :func:`fit_binding_pymc`.
+    n_samples : int
+        Number of posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend forwarded to :func:`fit_binding_pymc`.
+    n_tune : int | None
+        Number of tuning draws. If ``None``, the backend default is used.
+    target_accept : float | None
+        NUTS target acceptance probability.
+    max_treedepth : int | None
+        Maximum NUTS tree depth.
+    shared_ye_mags : bool, optional
+        Use one shared ``ye_mag`` parameter for all labels in the ``"ye_mag"``
+        screening pass.
+    outlier_threshold : float, optional
+        Calibrated residual threshold used to flag candidate outlier points.
+    allowed_tail_fraction : float, optional
+        Fraction of tail points allowed before residual rows are masked.
+    min_allowed_tail_count : int, optional
+        Minimum number of tail points allowed before masking.
+    min_keep : int, optional
+        Minimum number of unmasked observations retained per label.
+    min_x_step : float, optional
+        Minimum latent-x spacing forwarded to :func:`fit_binding_pymc`.
+
+    Returns
+    -------
+    PymcResidualRefitResult
+        Initial robust fit, residual table, masked dataset, and final refit.
+    """
+    use_proportional = noise_strategy == "proportional"
+    if use_proportional:
+        proportional_noise_model = noise_model or _plate_noise_from_bg(
+            bg_noise, ds.keys(), alpha=proportional_alpha
+        )
+        initial = fit_binding_pymc(
+            ds,
+            n_sd=n_sd,
+            n_xerr=n_xerr,
+            n_samples=n_samples,
+            nuts_sampler=nuts_sampler,
+            n_tune=n_tune,
+            target_accept=target_accept,
+            max_treedepth=max_treedepth,
+            robust=True,
+            noise_model=proportional_noise_model,
+            floor_mode="centered",
+            gain_mode="fixed",
+            alpha_mode="free",
+            shared_alpha=False,
+            shared_gain=False,
+            learn_ye_mags=False,
+            min_x_step=min_x_step,
+        )
+    else:
+        bg_noise_scale = float(bg_noise_scale)
+        if not np.isfinite(bg_noise_scale) or bg_noise_scale <= 0.0:
+            bg_noise_scale = 1.0
+        if isinstance(bg_noise, MappingABC):
+            first_ye_mag_mu: float | dict[str, float] = {
+                str(label): float(np.log(max(float(value) * bg_noise_scale, 1e-6)))
+                for label, value in bg_noise.items()
+            }
+        else:
+            first_ye_mag_mu = float(np.log(max(float(bg_noise) * bg_noise_scale, 1e-6)))
+        initial = fit_binding_pymc(
+            dataset_with_unit_yerr(ds),
+            n_sd=n_sd,
+            n_xerr=n_xerr,
+            n_samples=n_samples,
+            nuts_sampler=nuts_sampler,
+            n_tune=n_tune,
+            target_accept=target_accept,
+            max_treedepth=max_treedepth,
+            robust=True,
+            shared_ye_mags=shared_ye_mags,
+            ye_mag_prior="lognormal",
+            ye_mag_mu=first_ye_mag_mu,
+            ye_mag_sigma=bg_noise_log_sigma,
+            min_x_step=min_x_step,
+        )
+    residuals = model_validation.residuals_from_fit_results(
+        {"single": initial},
+        "pymc_robust_unweighted",
+        binding_1site,
+        robust=True,
+        outlier_threshold=outlier_threshold,
+    )
+    residuals = model_validation.mark_excess_residual_outliers(
+        residuals,
+        threshold=outlier_threshold,
+        allowed_tail_fraction=allowed_tail_fraction,
+        min_allowed_tail_count=min_allowed_tail_count,
+    )
+    mask_source = initial.dataset if initial.dataset is not None else ds
+    holder = FitResult[xr.DataTree](dataset=copy.deepcopy(mask_source))
+    masked = model_validation.masked_datasets_from_residual_outliers(
+        {"single": holder},
+        residuals,
+        min_keep=min_keep,
+    ).get("single", copy.deepcopy(mask_source))
+    seeded_final_input = copy.deepcopy(initial)
+    seeded_final_input.dataset = masked
+    if use_proportional:
+        final = fit_binding_pymc(
+            seeded_final_input,
+            n_sd=n_sd,
+            n_xerr=n_xerr,
+            n_samples=n_samples,
+            nuts_sampler=nuts_sampler,
+            n_tune=n_tune,
+            target_accept=target_accept,
+            max_treedepth=max_treedepth,
+            robust=False,
+            noise_model=proportional_noise_model,
+            floor_mode="centered",
+            gain_mode="fixed",
+            alpha_mode="free",
+            shared_alpha=False,
+            shared_gain=False,
+            learn_ye_mags=False,
+            min_x_step=min_x_step,
+        )
+    else:
+        final = fit_binding_pymc(
+            seeded_final_input,
+            n_sd=n_sd,
+            n_xerr=n_xerr,
+            n_samples=n_samples,
+            nuts_sampler=nuts_sampler,
+            n_tune=n_tune,
+            target_accept=target_accept,
+            max_treedepth=max_treedepth,
+            robust=False,
+            shared_ye_mags=shared_ye_mags,
+            ye_mag_prior="lognormal",
+            ye_mag_mu=0.0,
+            ye_mag_sigma=0.25,
+            min_x_step=min_x_step,
+        )
+    return PymcResidualRefitResult(initial, residuals, masked, final)
+
+
+def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
+    results: Mapping[str, Dataset | FitResult[MiniT]],
+    scheme: PlateScheme,
+    *,
+    noise_strategy: Literal["proportional", "ye_mag"] = "proportional",
+    bg_noise: Mapping[str, float] | float = 1.0,
+    proportional_alpha: float = 0.05,
+    noise_model: PlateNoiseModel | None = None,
+    n_sd: float = 10.0,
+    n_xerr: float = 1.0,
+    n_samples: int = 2000,
+    nuts_sampler: str = "default",
+    n_tune: int | None = None,
+    target_accept: float | None = None,
+    max_treedepth: int | None = None,
+    x_error_model: Literal[
+        "deterministic", "per_well", "hierarchical_per_well"
+    ] = "deterministic",
+    acid_drop_between_sigma: float = 0.005,
+    ctr_free_k: bool = False,
+    shared_ye_mags: bool = False,
+    outlier_threshold: float = 3.0,
+    allowed_tail_fraction: float = 0.0,
+    min_allowed_tail_count: int = 0,
+    min_keep: int = 3,
+    well_noise_scale: bool = True,
+    shared_well_noise_scale: bool = False,
+    label_noise_scale_sigma: float = 0.3,
+    well_noise_sd_sigma: float = 0.3,
+    well_noise_scale_sigma: float | None = None,
+    final_n_xerr: float | None = None,
+    min_x_step: float = 0.2,
+) -> PymcMultiResidualRefitResult:
+    """Run robust multi-well PyMC, mask residual outliers, then refit.
+
+    The default ``noise_strategy="proportional"`` uses a floor-plus-proportional
+    noise model and a per-label/per-well LogNormal scale in the robust screening
+    fit.  This lets the first pass distinguish isolated point outliers from
+    whole wells whose variance is genuinely larger.
+
+    Parameters
+    ----------
+    results : Mapping[str, Dataset | FitResult[MiniT]]
+        Per-well datasets or prefit results used as inputs to the screening
+        pass.
+    scheme : PlateScheme
+        Plate scheme describing control/sample grouping for the multi-well fit.
+    noise_strategy : Literal["proportional", "ye_mag"]
+        Noise model used during screening and final refit.
+    bg_noise : Mapping[str, float] | float, optional
+        Background-noise hints used when constructing a proportional noise
+        model.
+    proportional_alpha : float, optional
+        Initial proportional-noise alpha when ``noise_model`` is not provided.
+    noise_model : PlateNoiseModel | None, optional
+        Explicit noise model for proportional-noise fits.
+    n_sd : float
+        Prior-width multiplier forwarded to :func:`fit_binding_pymc_multi`.
+    n_xerr : float
+        X-error multiplier forwarded to :func:`fit_binding_pymc_multi`.
+    n_samples : int
+        Number of posterior samples per chain.
+    nuts_sampler : str
+        NUTS sampler backend forwarded to :func:`fit_binding_pymc_multi`.
+    n_tune : int | None
+        Number of tuning draws. If ``None``, the backend default is used.
+    target_accept : float | None
+        NUTS target acceptance probability.
+    max_treedepth : int | None
+        Maximum NUTS tree depth.
+    x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
+        Latent-x error model forwarded to :func:`fit_binding_pymc_multi`.
+    acid_drop_between_sigma : float, optional
+        Between-well acid-drop prior scale.
+    ctr_free_k : bool, optional
+        Allow control wells to have free K values in the multi-well model.
+    shared_ye_mags : bool, optional
+        Use shared ``ye_mag`` scaling in the ``"ye_mag"`` strategy.
+    outlier_threshold : float, optional
+        Calibrated residual threshold used to flag candidate outlier points.
+    allowed_tail_fraction : float, optional
+        Fraction of tail points allowed before residual rows are masked.
+    min_allowed_tail_count : int, optional
+        Minimum number of tail points allowed before masking.
+    min_keep : int, optional
+        Minimum number of unmasked observations retained per label.
+    well_noise_scale : bool
+        Enable per-well noise scaling.
+    shared_well_noise_scale : bool
+        Share the well-noise scale across wells.
+    label_noise_scale_sigma : float
+        Prior scale for label noise terms.
+    well_noise_sd_sigma : float
+        Prior scale for well noise terms.
+    well_noise_scale_sigma : float | None, optional
+        Backward-compatible alias for ``well_noise_sd_sigma``.
+    final_n_xerr : float | None, optional
+        Override ``n_xerr`` for the final refit.
+    min_x_step : float, optional
+        Minimum latent-x spacing forwarded to :func:`fit_binding_pymc_multi`.
+
+    Returns
+    -------
+    PymcMultiResidualRefitResult
+        Initial robust multi-well fit, residual table, masked datasets, and
+        final refit.
+
+    Raises
+    ------
+    ValueError
+        If no valid dataset is present in ``results``.
+    """
+    labels: list[str] = []
+    for item in results.values():
+        ds = item.dataset if isinstance(item, FitResult) else item
+        if ds is not None:
+            labels = [str(label) for label in ds]
+            break
+    if not labels:
+        msg = "No valid dataset found in results."
+        raise ValueError(msg)
+    if well_noise_scale_sigma is not None:
+        well_noise_sd_sigma = well_noise_scale_sigma
+
+    if noise_strategy == "proportional":
+        if noise_model is None:
+            proportional_noise_model = _plate_noise_from_bg(
+                bg_noise,
+                labels,
+                alpha=proportional_alpha,
+            )
+        else:
+            proportional_noise_model = noise_model
+        initial_inputs: Mapping[str, Dataset | FitResult[MiniT]] = results
+        common_noise_kwargs: dict[str, object] = {
+            "noise_model": proportional_noise_model,
+            "floor_mode": "centered",
+            "gain_mode": "fixed",
+            "alpha_mode": "free",
+            "shared_alpha": False,
+            "shared_gain": False,
+            "learn_ye_mags": False,
+        }
+    else:
+        unit_inputs: dict[str, Dataset | FitResult[MiniT]] = {}
+        for key, item in results.items():
+            if isinstance(item, FitResult):
+                copied = copy.deepcopy(item)
+                if copied.dataset is not None:
+                    copied.dataset = dataset_with_unit_yerr(copied.dataset)
+                unit_inputs[str(key)] = copied
+            else:
+                unit_inputs[str(key)] = dataset_with_unit_yerr(item)
+        initial_inputs = unit_inputs
+        common_noise_kwargs = {
+            "noise_model": None,
+            "shared_ye_mags": shared_ye_mags,
+        }
+
+    initial = fit_binding_pymc_multi(
+        initial_inputs,
+        scheme,
+        n_sd=n_sd,
+        n_xerr=n_xerr,
+        n_samples=n_samples,
+        nuts_sampler=nuts_sampler,
+        n_tune=n_tune,
+        target_accept=target_accept,
+        max_treedepth=max_treedepth,
+        x_error_model=x_error_model,
+        acid_drop_between_sigma=acid_drop_between_sigma,
+        ctr_free_k=ctr_free_k,
+        robust=True,
+        well_noise_scale=well_noise_scale,
+        shared_well_noise_scale=shared_well_noise_scale,
+        label_noise_scale_sigma=label_noise_scale_sigma,
+        well_noise_sd_sigma=well_noise_sd_sigma,
+        min_x_step=min_x_step,
+        **typing.cast("typing.Any", common_noise_kwargs),
+    )
+    residuals = model_validation.residuals_from_multifit(
+        initial,
+        "pymc_multi_robust",
+        binding_1site,
+        robust=True,
+        outlier_threshold=outlier_threshold,
+    )
+    residuals = model_validation.mark_excess_residual_outliers(
+        residuals,
+        threshold=outlier_threshold,
+        allowed_tail_fraction=allowed_tail_fraction,
+        min_allowed_tail_count=min_allowed_tail_count,
+    )
+    initial_holders: dict[str, FitResult[xr.DataTree]] = {}
+    for well, item in initial_inputs.items():
+        if isinstance(item, FitResult):
+            dataset = copy.deepcopy(item.dataset) if item.dataset is not None else None
+        else:
+            dataset = copy.deepcopy(item)
+        initial_holders[str(well)] = FitResult(dataset=dataset)
+    masked = model_validation.masked_datasets_from_residual_outliers(
+        initial_holders,
+        residuals,
+        min_keep=min_keep,
+    )
+    final_inputs: dict[str, FitResult[xr.DataTree]] = {}
+    for well, fit in initial.results.items():
+        copied = copy.deepcopy(fit)
+        if str(well) in masked:
+            copied.dataset = masked[str(well)]
+        elif str(well) in initial_holders:
+            copied.dataset = copy.deepcopy(initial_holders[str(well)].dataset)
+        final_inputs[str(well)] = copied
+    final = fit_binding_pymc_multi(
+        final_inputs,
+        scheme,
+        n_sd=n_sd / 2,
+        n_xerr=n_xerr if final_n_xerr is None else final_n_xerr,
+        n_samples=n_samples,
+        nuts_sampler=nuts_sampler,
+        n_tune=n_tune,
+        target_accept=target_accept,
+        max_treedepth=max_treedepth,
+        x_error_model=x_error_model,
+        acid_drop_between_sigma=acid_drop_between_sigma,
+        ctr_free_k=ctr_free_k,
+        robust=False,
+        well_noise_scale=well_noise_scale,
+        shared_well_noise_scale=shared_well_noise_scale,
+        label_noise_scale_sigma=label_noise_scale_sigma,
+        well_noise_sd_sigma=well_noise_sd_sigma,
+        min_x_step=min_x_step,
+        **typing.cast("typing.Any", common_noise_kwargs),
+    )
+    return PymcMultiResidualRefitResult(initial, residuals, masked, final)
 
 
 # ------------------------------------------------------------------
@@ -1488,12 +2658,30 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     robust: bool = False,
+    robust_likelihood: RobustLikelihood = "student_t",
+    student_t_nu: float | None = 3.0,
+    contamination_frac_prior: ContaminationFracPrior = 0.15,
     floor_mode: NoiseParamMode | None = None,
     gain_mode: NoiseParamMode | None = None,
     alpha_mode: NoiseParamMode | None = None,
     learn_ye_mags: bool = False,
     shared_ye_mags: bool = False,
+    per_well_ye_mags: bool | None = None,
+    ye_mag_prior: Literal["halfnormal", "lognormal"] = "lognormal",
+    ye_mag_mu: float | Mapping[str, float] = 0.0,
+    ye_mag_sigma: float | Mapping[str, float] = 1.5,
+    well_noise_scale: bool = False,
+    shared_well_noise_scale: bool = False,
+    label_noise_scale_sigma: float = 0.3,
+    well_noise_sd_sigma: float = 0.3,
+    well_noise_scale_sigma: float | None = None,
     min_x_step: float = 0.2,
+    init_strategy: InitStrategy = "lmfit",
+    data_prior_edge_points: int = 2,
+    data_prior_signal_sigma_scale: float = 0.5,
+    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
+    data_prior_k_bounds: tuple[float, float] | None = None,
+    data_prior_k_sigma: float = 1.5,
 ) -> MultiFitResult:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -1560,8 +2748,18 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         If True, generates posterior predictive samples and adds them to the
         returned InferenceData object. Needed for `plot_ppc_well`.
     robust : bool
-        If True, use StudentT likelihood (nu=3) for robust regression instead
-        of Normal.
+        If True, use the selected robust likelihood instead of Normal.
+    robust_likelihood : RobustLikelihood
+        Robust likelihood used when *robust* is ``True``. ``"student_t"``
+        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
+        normal/outlier mixture with per-label outlier probabilities.
+    student_t_nu : float | None
+        Student-t degrees of freedom when *robust* is ``True``. Positive values
+        are fixed; ``None`` infers ``student_t_nu`` with support above 2.
+    contamination_frac_prior : ContaminationFracPrior
+        Prior mean for per-label outlier fractions when
+        ``robust_likelihood="mixture"``. A mapping supplies label-specific
+        means. Each value must be between 0.001 and 0.5.
     floor_mode : NoiseParamMode | None
         How to treat the floor parameter.  ``None`` (default) resolves to
         ``"centered"`` when every input is already a ``FitResult`` and to
@@ -1577,11 +2775,65 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         when a full *noise_model* is provided.
     shared_ye_mags : bool
         If ``True``, use a single shared ``ye_mag`` variable for all labels
-        instead of per-label ``ye_mag_{lbl}``.  Only used when *learn_ye_mags*
-        is ``True``.  Default ``False``.
+        instead of per-label ``ye_mag_{lbl}`` when ``ye_mag`` priors are used.
+        Default ``False``.
+    per_well_ye_mags : bool | None
+        If ``True``, infer ``ye_mag`` variables with a ``well`` dimension.
+        With ``shared_ye_mags=False`` this creates ``ye_mag_{lbl}[well]``.
+        With ``shared_ye_mags=True`` this creates one ``ye_mag[well]`` shared
+        by labels within each well. ``None`` (default) uses per-well
+        ``ye_mag`` when ``learn_ye_mags=True`` with a noise model, and scalar
+        ``ye_mag`` otherwise.
+    ye_mag_prior : Literal["halfnormal", "lognormal"]
+        Prior family for ``ye_mag`` variables when *noise_model* is ``None``.
+    ye_mag_mu : float | Mapping[str, float]
+        LogNormal location parameter for ``ye_mag`` variables when
+        *noise_model* is ``None``. Ignored for HalfNormal priors.
+    ye_mag_sigma : float | Mapping[str, float]
+        Prior sigma for ``ye_mag`` variables when *noise_model* is ``None``.
+        A mapping supplies label-specific sigmas.
+    well_noise_scale : bool
+        If ``True``, multiply each label's observation scale by a per-well
+        LogNormal factor ``well_noise_scale_{lbl}`` with dims ``well``.  This is
+        useful for robust multi-well screening, where a global label-level noise
+        model otherwise turns real well-to-well variance into apparent outliers.
+    shared_well_noise_scale : bool
+        If ``True`` and *well_noise_scale* is enabled, use one shared
+        ``well_noise_scale`` vector with dims ``well`` for all labels instead
+        of per-label ``well_noise_scale_{lbl}`` vectors.
+    label_noise_scale_sigma : float
+        Log-scale prior sigma for label-level residual scale
+        ``label_noise_scale_{lbl}``, centered at one.
+    well_noise_sd_sigma : float
+        HalfNormal prior sigma for the between-well log-scale spread
+        ``well_noise_sd_{lbl}``.
+    well_noise_scale_sigma : float | None
+        Backwards-compatible alias for *well_noise_sd_sigma*.
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
+    init_strategy : InitStrategy
+        ``"lmfit"`` keeps the historical behavior: each raw ``Dataset`` is first
+        fitted with LMFit and per-well priors are centered on that result.
+        ``"data_priors"`` skips LMFit and seeds each well directly from its
+        observed titration endpoints and midpoint (any supplied pre-fit result
+        is ignored in favour of its dataset).
+    data_prior_edge_points : int
+        Number of active points averaged at each titration edge to initialize
+        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
+    data_prior_signal_sigma_scale : float
+        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
+        signal range when ``init_strategy="data_priors"``.
+    data_prior_k_prior : DataKPrior
+        K seed family for ``init_strategy="data_priors"``. ``"midpoint_truncnorm"``
+        seeds K at the observed half-signal x; ``"uniform"`` seeds it at the
+        bound midpoint. The multi model always centers a Normal K prior on the
+        resulting seed.
+    data_prior_k_bounds : tuple[float, float] | None
+        Lower and upper K bounds for the data-derived seed. ``None`` (default)
+        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)`` otherwise.
+    data_prior_k_sigma : float
+        K seed sigma for data-derived priors, scaled by ``n_sd`` in the model.
 
     Returns
     -------
@@ -1593,7 +2845,18 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ValueError
         If no valid dataset is found in results.
     """
-    fit_results, prefer_centered = _normalize_fit_inputs(results)
+    _validate_robust_likelihood(robust_likelihood)
+    if robust and robust_likelihood == "mixture":
+        _validate_contamination_frac_prior_spec(contamination_frac_prior)
+    fit_results, prefer_centered = _normalize_fit_inputs(
+        results,
+        init_strategy=init_strategy,
+        data_prior_edge_points=data_prior_edge_points,
+        data_prior_signal_sigma_scale=data_prior_signal_sigma_scale,
+        data_prior_k_prior=data_prior_k_prior,
+        data_prior_k_bounds=data_prior_k_bounds,
+        data_prior_k_sigma=data_prior_k_sigma,
+    )
     ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     if ds is None:
         msg = "No valid dataset found in results."
@@ -1601,6 +2864,13 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     labels = list(ds.keys())
+    if well_noise_scale_sigma is not None:
+        well_noise_sd_sigma = well_noise_scale_sigma
+    use_per_well_ye_mags = (
+        learn_ye_mags
+        if noise_model is not None and per_well_ye_mags is None
+        else bool(per_well_ye_mags)
+    )
     floor_mode, gain_mode, alpha_mode = _resolve_noise_modes(
         prefer_centered=prefer_centered,
         floor_mode=floor_mode,
@@ -1628,7 +2898,6 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         for key in fit_results
         if fit_results[key].result and fit_results[key].dataset
     ]
-    {key: i for i, key in enumerate(wells_list)}
     n_wells = len(wells_list)
     n_steps = len(xc)
 
@@ -1639,6 +2908,18 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     }
 
     with pm.Model(coords=coords):
+        robust_nu = (
+            _student_t_nu_value(student_t_nu)
+            if robust and robust_likelihood == "student_t"
+            else 3.0
+        )
+        if robust and robust_likelihood == "mixture":
+            pi_outliers, outlier_inflate = _build_outlier_priors(
+                labels, contamination_frac_prior
+            )
+        else:
+            pi_outliers, outlier_inflate = {}, None
+
         if x_error_model == "hierarchical_per_well" and n_xerr > 0:
             if not np.all(np.diff(xc) < 0):
                 msg = (
@@ -1735,6 +3016,24 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 dims=("step", "well"),
             )
 
+        elif x_error_model in {"per_well", "hierarchical_per_well"}:
+            x_matrix = np.empty((n_steps, n_wells), dtype=float)
+            for w_idx, key in enumerate(wells_list):
+                well_ds = fit_results[key].dataset
+                if well_ds is None:
+                    msg = f"Dataset for well {key} is missing."
+                    raise ValueError(msg)
+                well_x = next(iter(well_ds.values())).xc
+                if len(well_x) != n_steps:
+                    msg = f"Dataset for well {key} has inconsistent x length."
+                    raise ValueError(msg)
+                x_matrix[:, w_idx] = np.asarray(well_x, dtype=float)
+            x_w_all = pm.Deterministic(
+                "x_per_well",
+                as_tensor_variable(x_matrix),
+                dims=("step", "well"),
+            )
+
         else:
             x_true: typing.Any = create_x_true(
                 xc,
@@ -1816,22 +3115,62 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 alpha_mode=alpha_mode,
             )
             if learn_ye_mags:
-                if shared_ye_mags:
-                    ye_mag_shared = pm.HalfNormal("ye_mag", sigma=5.0)
-                    ye_mags = dict.fromkeys(labels, ye_mag_shared)
-                else:
-                    ye_mags = {
-                        lbl: pm.HalfNormal(f"ye_mag_{lbl}", sigma=5.0) for lbl in labels
-                    }
+                ye_mags = _build_multi_ye_mag_priors(
+                    labels,
+                    per_well=use_per_well_ye_mags,
+                    shared_ye_mags=shared_ye_mags,
+                    prior="halfnormal",
+                    sigma=5.0,
+                )
         else:
             noise_priors = {}
-            if learn_ye_mags and shared_ye_mags:
-                ye_mag_shared = pm.LogNormal("ye_mag", sigma=1.0)
-                ye_mags = dict.fromkeys(labels, ye_mag_shared)
+            ye_mags = _build_multi_ye_mag_priors(
+                labels,
+                per_well=use_per_well_ye_mags,
+                shared_ye_mags=shared_ye_mags,
+                prior=ye_mag_prior,
+                mu=ye_mag_mu,
+                sigma=ye_mag_sigma,
+            )
+        if well_noise_scale:
+            label_scale_sigma = max(float(label_noise_scale_sigma), 1e-6)
+            well_sd_sigma = max(float(well_noise_sd_sigma), 1e-6)
+            well_noise_scales = {}
+            if shared_well_noise_scale:
+                shared_label_noise_scale = pm.LogNormal(
+                    "label_noise_scale",
+                    mu=0.0,
+                    sigma=label_scale_sigma,
+                )
+                shared_well_noise_sd = pm.HalfNormal(
+                    "well_noise_sd", sigma=well_sd_sigma
+                )
+                shared_scale = pm.LogNormal(
+                    "well_noise_scale",
+                    mu=pm_math.log(shared_label_noise_scale),
+                    sigma=shared_well_noise_sd,
+                    dims="well",
+                )
+                well_noise_scales = dict.fromkeys(labels, shared_scale)
             else:
-                ye_mags = {
-                    lbl: pm.LogNormal(f"ye_mag_{lbl}", sigma=1.5) for lbl in labels
-                }
+                for lbl in labels:
+                    label_noise_scale = pm.LogNormal(
+                        f"label_noise_scale_{lbl}",
+                        mu=0.0,
+                        sigma=label_scale_sigma,
+                    )
+                    well_noise_sd = pm.HalfNormal(
+                        f"well_noise_sd_{lbl}",
+                        sigma=well_sd_sigma,
+                    )
+                    well_noise_scales[lbl] = pm.LogNormal(
+                        f"well_noise_scale_{lbl}",
+                        mu=pm_math.log(label_noise_scale),
+                        sigma=well_noise_sd,
+                        dims="well",
+                    )
+        else:
+            well_noise_scales = {}
 
         # Likelihoods
         first_ds = next(iter(fit_results.values())).dataset
@@ -1849,7 +3188,6 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             )
             mu_vec = y_model_all[mask_lbl]
             y_obs_vec = y_obs_full[mask_lbl]
-            y_err_vec = y_err_full[mask_lbl]
 
             if noise_model is not None:
                 # Heteroscedastic noise model
@@ -1859,6 +3197,8 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 sigma_obs_all = pm_math.sqrt(noise_var)
                 if learn_ye_mags:
                     sigma_obs_all = ye_mags[lbl] * sigma_obs_all
+                if well_noise_scale:
+                    sigma_obs_all *= well_noise_scales[lbl][None, :]
 
                 sigma_obs_all_det = pm.Deterministic(
                     f"sigma_obs_{lbl}", sigma_obs_all, dims=("step", "well")
@@ -1866,12 +3206,28 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 sigma_vec = sigma_obs_all_det[mask_lbl]
             else:
                 # Homoscedastic (scaled) noise model
-                sigma_vec = ye_mags[lbl] * y_err_vec
+                y_err_all = np.where(np.isfinite(y_err_full), y_err_full, 1.0)
+                sigma_all = ye_mags[lbl] * y_err_all
+                if well_noise_scale:
+                    sigma_all *= well_noise_scales[lbl][None, :]
+                sigma_obs_all_det = pm.Deterministic(
+                    f"sigma_obs_{lbl}", sigma_all, dims=("step", "well")
+                )
+                sigma_vec = sigma_obs_all_det[mask_lbl]
 
-            if robust:
+            if robust and robust_likelihood == "mixture":
+                _add_mixture_likelihood(
+                    f"y_likelihood_{lbl}",
+                    mu_vec,
+                    sigma_vec,
+                    y_obs_vec,
+                    pi_outlier=pi_outliers[lbl],
+                    outlier_inflate=outlier_inflate,
+                )
+            elif robust:
                 pm.StudentT(
                     f"y_likelihood_{lbl}",
-                    nu=3.0,
+                    nu=robust_nu,
                     mu=mu_vec,
                     sigma=sigma_vec,
                     observed=y_obs_vec,
@@ -1904,6 +3260,13 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
 
         trace = _compute_sample_log_likelihood(trace)
 
+    global_names: list[str] = []
+    if robust and robust_likelihood == "student_t" and student_t_nu is None:
+        global_names.append("student_t_nu")
+    if robust and robust_likelihood == "mixture":
+        global_names.extend(f"pi_outlier_{lbl}" for lbl in labels)
+        global_names.append("outlier_inflate")
+
     return MultiFitResult(
         trace=trace,
         results=_per_well_fit_results_from_trace(
@@ -1911,5 +3274,6 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
             fit_results,
             scheme,
             x_error_model=x_error_model,
+            global_p_names=global_names,
         ),
     )

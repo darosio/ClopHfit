@@ -270,6 +270,22 @@ def _coverage_interval(
     return lower, upper, bool(lower <= true <= upper)
 
 
+def _data_residuals(fr: FitResult[MiniT]) -> np.ndarray | None:
+    """Return residuals corresponding to observations, excluding objective-only terms."""
+    if fr.result is None:
+        return None
+    residuals = getattr(fr.result, "residual", None)
+    if residuals is None:
+        return None
+    data_residuals = np.asarray(residuals, dtype=float)
+    params = getattr(fr.result, "params", {})
+    if "nu" in params and fr.dataset is not None:
+        n_obs = sum(len(da.y) for da in fr.dataset.values())
+        if data_residuals.size == n_obs + 1:
+            return data_residuals[:n_obs]
+    return data_residuals
+
+
 def run_benchmark(
     n_repeats: int,
     noise_levels: List[float],
@@ -335,10 +351,7 @@ def run_benchmark(
                         fr.figure.savefig(plots_dir / plot_filename)
                         plt.close(fr.figure)
 
-                    residuals = None
-                    if fr.result is not None:
-                        residuals = getattr(fr.result, "residual", None)
-
+                    residuals = _data_residuals(fr)
                     residuals_stats: dict[str, float] = {}
                     if residuals is not None:
                         residuals_stats = evaluate_residuals(residuals)
@@ -726,6 +739,11 @@ def plot_hist_kde_gaussian(x: Sequence[float], **kwargs) -> None:
 @click.option("--outliers/--no-outliers", default=False, help="Include outliers.")
 @click.option("--output-dir", default="benchmarks", help="Output directory.")
 @click.option(
+    "--methods",
+    default=None,
+    help="Comma-separated fitter names to run. Defaults to all registered fitters.",
+)
+@click.option(
     "--seed",
     type=click.INT,
     default=None,
@@ -738,6 +756,7 @@ def cli(
     labels: int,
     outliers: bool,
     output_dir: str,
+    methods: str | None,
     seed: int | None,
 ) -> None:
     """Run flexible benchmark."""
@@ -750,6 +769,14 @@ def cli(
     noises = [float(x.strip()) for x in noise_levels.split(",") if x.strip()]
 
     fitters_dict = build_fitters(include_odr=True)
+    if methods is not None:
+        selected = [name.strip() for name in methods.split(",") if name.strip()]
+        unknown = sorted(set(selected) - set(fitters_dict))
+        if unknown:
+            available = ", ".join(sorted(fitters_dict))
+            msg = f"Unknown fitter(s): {', '.join(unknown)}. Available: {available}"
+            raise click.BadParameter(msg, param_hint="--methods")
+        fitters_dict = {name: fitters_dict[name] for name in selected}
 
     # Run benchmark
     df, df_residuals = run_benchmark(

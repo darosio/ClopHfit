@@ -22,7 +22,12 @@ from clophfit.fitting.residuals import (
     OUTLIER_RATE_THRESHOLD,
     OUTLIER_THRESHOLD_2SIGMA,
     ResidualPoint,
+    analyze_label_bias,
     collect_multi_residuals,
+    compute_correlation_matrices,
+    compute_residual_covariance,
+    detect_adjacent_correlation,
+    estimate_x_shift_statistics,
     extract_residual_points,
     residual_dataframe,
     residual_statistics,
@@ -339,6 +344,67 @@ class TestResidualStatistics:
         df = pd.DataFrame(data)
         stats = residual_statistics(df)
         assert stats.loc["1", "outlier_rate"] == 0.2  # 2/10
+
+
+class TestResidualDiagnosticsHelpers:
+    """Test dataframe-level residual diagnostic helpers."""
+
+    def test_covariance_correlation_bias_and_shift_helpers(self) -> None:
+        """Helpers should summarize residual structure by label, well, and x."""
+        df = pd.DataFrame({
+            "well": ["A01", "A01", "A01", "A01", "A02", "A02", "A02", "A02"] * 2,
+            "label": ["1"] * 8 + ["2"] * 8,
+            "x": [6.0, 7.0, 8.0, 9.0, 6.0, 7.0, 8.0, 9.0] * 2,
+            "resid_weighted": [
+                -1.0,
+                0.0,
+                1.0,
+                0.0,
+                -2.0,
+                0.0,
+                2.0,
+                0.0,
+                1.0,
+                0.5,
+                0.0,
+                0.5,
+                2.0,
+                1.0,
+                0.0,
+                1.0,
+            ],
+        })
+
+        cov = compute_residual_covariance(df)
+        corr = compute_correlation_matrices(cov)
+        bias_summary, label_bias = analyze_label_bias(df, n_bins=2)
+        lag_rows, lag_by_label = detect_adjacent_correlation(df)
+        shift = estimate_x_shift_statistics(df, {})
+
+        assert set(cov) == {"1", "2"}
+        assert cov["1"].shape == (4, 4)
+        assert corr["1"].loc[6.0].loc[6.0] == pytest.approx(1.0)
+        assert set(bias_summary.index.get_level_values("label")) == {"1", "2"}
+        assert len(bias_summary) == 4
+        assert label_bias.loc["2", "negative_bias_frac"] == 0.0
+        assert len(lag_rows) == 4
+        assert set(lag_by_label) == {"1", "2"}
+        assert set(shift["well"]) == {"A01", "A02"}
+        assert shift["trend_strength"].notna().all()
+
+    def test_detect_adjacent_correlation_skips_nan_correlations(self) -> None:
+        """Constant residual series should not enter lag-correlation summaries."""
+        df = pd.DataFrame({
+            "well": ["A01", "A01", "A01"],
+            "label": ["1", "1", "1"],
+            "x": [6.0, 7.0, 8.0],
+            "resid_weighted": [1.0, 1.0, 1.0],
+        })
+
+        rows, by_label = detect_adjacent_correlation(df)
+
+        assert rows.empty
+        assert by_label == {}
 
 
 ###############################################################################

@@ -11,6 +11,7 @@ import copy
 import itertools
 import typing as _t
 import warnings
+from dataclasses import dataclass
 
 import arviz as az  # type: ignore[import-untyped]
 import numpy as np
@@ -21,6 +22,410 @@ from scipy import stats as sp_stats
 ArrayLike = _t.Any
 
 STUDENT_T_NU = 3.0
+
+RESIDUAL_TABLE_COLUMNS = [
+    "trace_id",
+    "well",
+    "label",
+    "step",
+    "x",
+    "y",
+    "that",
+    "sigma",
+    "raw_res",
+    "likelihood_res",
+    "std_res",
+    "p_outlier_per_point",
+    "residual_likelihood",
+    "student_t_nu",
+    "is_residual_outlier",
+    "outlier_threshold",
+]
+
+
+@dataclass
+class ResidualDiagnostics:
+    """Convenience wrapper for repeated residual diagnostics."""
+
+    residuals: pd.DataFrame
+    value_col: str = "std_res"
+
+    def __post_init__(self) -> None:
+        """Copy the input residual table so chained helpers never mutate callers."""
+        self.residuals = self.residuals.copy()
+
+    @classmethod
+    def from_fit_results(
+        cls,
+        results: dict[str, _t.Any],
+        trace_id: str,
+        binding_function: _t.Callable[..., ArrayLike],
+        *,
+        robust: bool = False,
+        value_col: str = "std_res",
+    ) -> ResidualDiagnostics:
+        """Create diagnostics from a mapping of well IDs to FitResult objects."""
+        return cls(
+            residuals_from_fit_results(
+                results,
+                trace_id,
+                binding_function,
+                robust=robust,
+            ),
+            value_col=value_col,
+        )
+
+    def annotate(
+        self,
+        *,
+        fit_df: pd.DataFrame | None = None,
+        ctrl_wells: _t.Iterable[str] = (),
+        extra_ctrl_wells: _t.Iterable[str] = (),
+    ) -> ResidualDiagnostics:
+        """Return diagnostics annotated with fit parameters, role, row, and column."""
+        df = self.residuals.copy()
+        df["row"] = df["well"].astype(str).str[0]
+        df["col"] = pd.to_numeric(df["well"].astype(str).str[1:], errors="coerce")
+        ctrl = set(map(str, ctrl_wells)) | set(map(str, extra_ctrl_wells))
+        df["role"] = np.where(df["well"].astype(str).isin(ctrl), "ctr", "sample")
+        if fit_df is not None:
+            fit_cols = [c for c in ["well", "K", "sK"] if c in fit_df.columns]
+            if "well" not in fit_cols and fit_df.index.name == "well":
+                fit_df = fit_df.reset_index()
+                fit_cols = [c for c in ["well", "K", "sK"] if c in fit_df.columns]
+            if "well" in fit_cols:
+                df = df.drop(columns=[c for c in fit_cols if c != "well" and c in df])
+                df = df.merge(
+                    fit_df[fit_cols], on="well", how="left", validate="many_to_one"
+                )
+        return type(self)(df, value_col=self.value_col)
+
+    def step_centered(self, *, column: str | None = None) -> ResidualDiagnostics:
+        """Return diagnostics with residuals centered within label and step."""
+        column = column or self.value_col
+        df = self.residuals.copy()
+        centered_col = f"{column}_step_centered"
+        df[centered_col] = df[column] - df.groupby(["label", "step"], observed=True)[
+            column
+        ].transform("mean")
+        return type(self)(df, value_col=centered_col)
+
+    def label_scaled(self, *, column: str | None = None) -> ResidualDiagnostics:
+        """Return diagnostics with residuals divided by label-wise standard deviation."""
+        column = column or self.value_col
+        df = self.residuals.copy()
+        scaled_col = f"{column}_label_scaled"
+        scale = df.groupby("label", observed=True)[column].transform("std")
+        df[scaled_col] = df[column] / scale.replace(0.0, np.nan)
+        return type(self)(df, value_col=scaled_col)
+
+    def with_relative_residuals(
+        self,
+        *,
+        denominator: str = "that",
+        raw_col: str = "raw_res",
+        eps: float = 1e-12,
+    ) -> ResidualDiagnostics:
+        """Return diagnostics with raw and relative residual columns added."""
+        df = self.residuals.copy()
+        if raw_col not in df:
+            df[raw_col] = df["y"] - df["that"]
+        denom = df[denominator].abs().clip(lower=eps)
+        df["rel_res"] = df[raw_col] / denom
+        df["abs_rel_res"] = df["rel_res"].abs()
+        return type(self)(df, value_col=self.value_col)
+
+    def well_scaled(
+        self,
+        *,
+        column: str | None = None,
+        min_count: int = 3,
+    ) -> ResidualDiagnostics:
+        """Return diagnostics with residuals divided by well-and-label SD."""
+        column = column or self.value_col
+        df = self.residuals.copy()
+        group = df.groupby(["well", "label"], observed=True)[column]
+        scale = group.transform("std")
+        count = group.transform("count")
+        scale_col = f"{column}_well_sd"
+        scaled_col = f"{column}_well_scaled"
+        df[scale_col] = scale.where(count >= min_count)
+        df[scaled_col] = df[column] / df[scale_col].replace(0.0, np.nan)
+        return type(self)(df, value_col=scaled_col)
+
+    def well_summary(self, *, column: str | None = None) -> pd.DataFrame:
+        """Summarize residual and signal behavior per well and label."""
+        column = column or self.value_col
+        df = self.residuals.copy()
+        if "raw_res" not in df and {"y", "that"}.issubset(df.columns):
+            df["raw_res"] = df["y"] - df["that"]
+        if "rel_res" not in df and {"raw_res", "that"}.issubset(df.columns):
+            denom = df["that"].abs().clip(lower=1e-12)
+            df["rel_res"] = df["raw_res"] / denom
+
+        agg: dict[str, pd.NamedAgg] = {
+            "n": pd.NamedAgg(column=column, aggfunc="count"),
+            "std_res_mean": pd.NamedAgg(column=column, aggfunc="mean"),
+            "std_res_sd": pd.NamedAgg(column=column, aggfunc="std"),
+            "y_mean": pd.NamedAgg(column="y", aggfunc="mean"),
+            "that_mean": pd.NamedAgg(column="that", aggfunc="mean"),
+            "sigma_med": pd.NamedAgg(column="sigma", aggfunc="median"),
+        }
+        if "raw_res" in df:
+            agg["raw_sd"] = pd.NamedAgg(column="raw_res", aggfunc="std")
+        if "rel_res" in df:
+            agg["rel_sd"] = pd.NamedAgg(column="rel_res", aggfunc="std")
+        if "K" in df:
+            agg["K"] = pd.NamedAgg(column="K", aggfunc="first")
+        if "role" in df:
+            agg["role"] = pd.NamedAgg(column="role", aggfunc="first")
+        if "row" in df:
+            agg["row"] = pd.NamedAgg(column="row", aggfunc="first")
+        if "col" in df:
+            agg["col"] = pd.NamedAgg(column="col", aggfunc="first")
+
+        return df.groupby(["well", "label"], observed=True).agg(**agg).reset_index()
+
+    def normality(self, *, column: str | None = None) -> pd.DataFrame:
+        """Return Shapiro, D'Agostino, and Anderson normality diagnostics."""
+        column = column or self.value_col
+        rows = [
+            {"group": f"label_{label}", **_normality_row(group[column])}
+            for label, group in self.residuals.groupby("label", observed=True)
+        ]
+        rows.append({"group": "pooled", **_normality_row(self.residuals[column])})
+        return pd.DataFrame(rows)
+
+    def step_summary(self, *, column: str | None = None) -> pd.DataFrame:
+        """Summarize residuals by label and titration step."""
+        column = column or self.value_col
+        return self.residuals.groupby(["label", "step"], observed=True)[column].agg([
+            "count",
+            "mean",
+            "std",
+            "median",
+        ])
+
+    def position_summary(self, *, column: str | None = None) -> dict[str, pd.DataFrame]:
+        """Summarize residuals by row, column, edge column, and role when present."""
+        column = column or self.value_col
+        df = self.residuals
+        out: dict[str, pd.DataFrame] = {}
+        if "row" in df:
+            out["row"] = df.groupby(["label", "row"], observed=True)[column].agg([
+                "count",
+                "mean",
+                "std",
+                "skew",
+            ])
+        if "col" in df:
+            out["col"] = df.groupby(["label", "col"], observed=True)[column].agg([
+                "count",
+                "mean",
+                "std",
+                "skew",
+            ])
+            edge = df.assign(edge_col=df["col"].isin([1, 12]))
+            out["edge_col"] = edge.groupby(["label", "edge_col"], observed=True)[
+                column
+            ].agg(["count", "mean", "std", "skew"])
+        if "role" in df:
+            out["role"] = df.groupby(["label", "role"], observed=True)[column].agg([
+                "count",
+                "mean",
+                "std",
+                "skew",
+            ])
+        return out
+
+    def tail_rows(self, n: int = 30, *, column: str | None = None) -> pd.DataFrame:
+        """Return rows with largest absolute residual values."""
+        column = column or self.value_col
+        cols = [
+            "well",
+            "label",
+            "step",
+            "x",
+            "y",
+            "that",
+            "sigma",
+            "std_res",
+            column,
+        ]
+        cols = list(dict.fromkeys(c for c in cols if c in self.residuals.columns))
+        return (
+            self.residuals
+            .assign(abs_res=self.residuals[column].abs())
+            .sort_values("abs_res", ascending=False)
+            .loc[:, cols]
+            .head(n)
+        )
+
+    def plot_hist_qq(self, *, column: str | None = None) -> _t.Any:
+        """Plot histogram and Q-Q panels by label plus pooled."""
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+        import seaborn as sns  # type: ignore[import-untyped]  # noqa: PLC0415
+
+        column = column or self.value_col
+        groups = [
+            (f"label {label}", group[column].dropna())
+            for label, group in self.residuals.groupby("label", observed=True)
+        ]
+        groups.append(("pooled", self.residuals[column].dropna()))
+        fig, axes = plt.subplots(len(groups), 2, figsize=(10, 4 * len(groups)))
+        axes_arr = np.asarray(axes).reshape(len(groups), 2)
+        for row, (name, values) in enumerate(groups):
+            sns.histplot(values, kde=True, ax=axes_arr[row, 0])
+            axes_arr[row, 0].axvline(0, color="black", lw=1)
+            axes_arr[row, 0].set_title(f"{name}: residual histogram")
+            sp_stats.probplot(values, dist="norm", plot=axes_arr[row, 1])
+            axes_arr[row, 1].set_title(f"{name}: Q-Q plot")
+        fig.tight_layout()
+        return fig
+
+    def plot_step(self, *, column: str | None = None) -> _t.Any:
+        """Plot residual distributions by label and titration step."""
+        import seaborn as sns  # noqa: PLC0415
+
+        column = column or self.value_col
+        return sns.catplot(
+            data=self.residuals,
+            x="step",
+            y=column,
+            col="label",
+            kind="box",
+            sharey=True,
+        )
+
+    def plot_role(self, *, column: str | None = None) -> _t.Any:
+        """Plot residual distributions by role, if diagnostics are annotated."""
+        import seaborn as sns  # noqa: PLC0415
+
+        if "role" not in self.residuals:
+            msg = "Call annotate(ctrl_wells=...) before plot_role()."
+            raise ValueError(msg)
+        column = column or self.value_col
+        return sns.catplot(
+            data=self.residuals,
+            x="role",
+            y=column,
+            col="label",
+            kind="box",
+            sharey=True,
+        )
+
+    def plot_col(self, *, column: str | None = None) -> _t.Any:
+        """Plot residual distributions by plate column."""
+        import seaborn as sns  # noqa: PLC0415
+
+        if "col" not in self.residuals:
+            msg = "Call annotate(...) before plot_col()."
+            raise ValueError(msg)
+        column = column or self.value_col
+        return sns.catplot(
+            data=self.residuals,
+            x="col",
+            y=column,
+            col="label",
+            kind="box",
+            sharey=True,
+        )
+
+    def plot_well_summary(
+        self,
+        *,
+        x: str = "that_mean",
+        y: str = "std_res_sd",
+        hue: str = "role",
+    ) -> _t.Any:
+        """Plot per-well residual spread against signal or fitted parameters."""
+        import seaborn as sns  # noqa: PLC0415
+
+        summary = self.well_summary()
+        kwargs: dict[str, _t.Any] = {
+            "data": summary,
+            "x": x,
+            "y": y,
+            "col": "label",
+            "kind": "scatter",
+            "facet_kws": {"sharex": False, "sharey": False},
+        }
+        if hue in summary:
+            kwargs["hue"] = hue
+        return sns.relplot(**kwargs)
+
+
+@dataclass
+class ResidualComparison:
+    """Bundle residual diagnostics, well summaries, and trace parameter summaries."""
+
+    diagnostics: ResidualDiagnostics
+    well: pd.DataFrame
+    parameters: pd.DataFrame
+
+    @classmethod
+    def from_fit_results(  # noqa: PLR0913
+        cls,
+        results: dict[str, _t.Any],
+        trace_id: str,
+        binding_function: _t.Callable[..., ArrayLike],
+        *,
+        fit_df: pd.DataFrame | None = None,
+        ctrl_wells: _t.Iterable[str] = (),
+        extra_ctrl_wells: _t.Iterable[str] = (),
+        robust: bool = False,
+        value_col: str = "std_res",
+    ) -> ResidualComparison:
+        """Create a compact residual-comparison object from fit results."""
+        diagnostics = (
+            ResidualDiagnostics
+            .from_fit_results(
+                results,
+                trace_id,
+                binding_function,
+                robust=robust,
+                value_col=value_col,
+            )
+            .annotate(
+                fit_df=fit_df,
+                ctrl_wells=ctrl_wells,
+                extra_ctrl_wells=extra_ctrl_wells,
+            )
+            .with_relative_residuals()
+        )
+        parameters = trace_parameter_summary(results)
+        well = diagnostics.well_summary()
+        if not parameters.empty:
+            well = well.merge(parameters, on=["well", "label"], how="left")
+        return cls(diagnostics=diagnostics, well=well, parameters=parameters)
+
+    def with_value(self, column: str) -> ResidualComparison:
+        """Return a copy using a different residual column as the active value."""
+        diagnostics = type(self.diagnostics)(
+            self.diagnostics.residuals, value_col=column
+        )
+        return type(self)(
+            diagnostics=diagnostics,
+            well=diagnostics.well_summary(),
+            parameters=self.parameters.copy(),
+        )
+
+
+def _normality_row(values: pd.Series) -> dict[str, float | int]:
+    """Return normality-test statistics for one residual vector."""
+    x = values.dropna().to_numpy(dtype=float)
+    row: dict[str, float | int] = {"n": int(x.size)}
+    if x.size >= 3:
+        shapiro = sp_stats.shapiro(x)
+        row["shapiro_W"] = float(shapiro.statistic)
+        row["shapiro_p"] = float(shapiro.pvalue)
+    if x.size >= 8:
+        dag = sp_stats.normaltest(x)
+        row["dagostino_K2"] = float(dag.statistic)
+        row["dagostino_p"] = float(dag.pvalue)
+    if x.size >= 5:
+        row["anderson_A2"] = float(sp_stats.anderson(x, dist="norm").statistic)
+    return row
 
 
 def residual_normal_scores(
@@ -148,8 +553,11 @@ def masked_datasets_from_residual_outliers(
     """
     masked: dict[str, _t.Any] = {}
     for well, fr in results.items():
-        if getattr(fr, "dataset", None) is not None:
-            masked[str(well)] = copy.deepcopy(fr.dataset)
+        dataset = getattr(fr, "dataset", None)
+        if dataset is not None:
+            masked[str(well)] = copy.deepcopy(dataset)
+        elif hasattr(fr, "items"):
+            masked[str(well)] = copy.deepcopy(fr)
 
     if not masked or exclude_col not in residuals.columns:
         return masked
@@ -187,6 +595,113 @@ def masked_datasets_from_residual_outliers(
     return masked
 
 
+def mark_outlier_probability_outliers(
+    residuals: _t.Any,
+    *,
+    probability_col: str = "p_outlier_per_point",
+    threshold: float = 0.9,
+    exclude_col: str = "exclude_outlier_probability",
+) -> pd.DataFrame:
+    """Annotate rows with high posterior outlier probability.
+
+    Parameters
+    ----------
+    residuals : _t.Any
+        Residual table, usually returned by :func:`residuals_from_multifit` or
+        :func:`residuals_from_fit_results`.
+    probability_col : str, optional
+        Column containing per-point posterior outlier probabilities.
+    threshold : float, optional
+        Probability cutoff above which a row is marked as an outlier.
+    exclude_col : str, optional
+        Boolean output column used to mark rows for exclusion.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of ``residuals`` with ``exclude_col`` and
+        ``residual_outlier_score`` columns added.
+
+    Raises
+    ------
+    TypeError
+        If ``residuals`` is not a pandas DataFrame.
+    """
+    if not isinstance(residuals, pd.DataFrame):
+        msg = (
+            "residuals must be a pandas DataFrame, such as the output of "
+            "residuals_from_multifit() or residuals_from_fit_results(); got "
+            f"{type(residuals).__name__}"
+        )
+        raise TypeError(msg)
+    out = residuals.copy()
+    probability_values = (
+        out[probability_col]
+        if probability_col in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    probabilities = pd.to_numeric(probability_values, errors="coerce")
+    out[exclude_col] = probabilities > threshold
+    out["residual_outlier_score"] = probabilities
+    return out
+
+
+def masked_datasets_from_outlier_probabilities(
+    results: _t.Mapping[str, _t.Any],
+    residuals: _t.Any,
+    *,
+    probability_col: str = "p_outlier_per_point",
+    threshold: float = 0.9,
+    min_keep: int = 3,
+) -> dict[str, _t.Any]:
+    """Mask datasets using posterior outlier probabilities.
+
+    Parameters
+    ----------
+    results : _t.Mapping[str, _t.Any]
+        Mapping from well identifiers to datasets or fit-result-like objects
+        containing datasets.
+    residuals : _t.Any
+        Residual table with pointwise posterior outlier probabilities.
+    probability_col : str, optional
+        Column containing per-point posterior outlier probabilities.
+    threshold : float, optional
+        Probability cutoff above which a row is masked.
+    min_keep : int, optional
+        Minimum number of unmasked points retained per label.
+
+    Returns
+    -------
+    dict[str, _t.Any]
+        Deep-copied datasets with high-probability outlier rows masked.
+
+    Raises
+    ------
+    TypeError
+        If ``residuals`` is not a pandas DataFrame.
+    """
+    if not isinstance(residuals, pd.DataFrame):
+        msg = (
+            "residuals must be a pandas DataFrame, such as the output of "
+            "residuals_from_multifit() or residuals_from_fit_results(); got "
+            f"{type(residuals).__name__}"
+        )
+        raise TypeError(msg)
+    exclude_col = "exclude_outlier_probability"
+    marked = mark_outlier_probability_outliers(
+        residuals,
+        probability_col=probability_col,
+        threshold=threshold,
+        exclude_col=exclude_col,
+    )
+    return masked_datasets_from_residual_outliers(
+        results,
+        marked,
+        exclude_col=exclude_col,
+        min_keep=min_keep,
+    )
+
+
 def posterior_dataset(trace: _t.Any) -> _t.Any:
     """Return the posterior xarray Dataset from ArviZ InferenceData or DataTree.
 
@@ -205,6 +720,117 @@ def sample_stats_dataset(trace: _t.Any) -> _t.Any:
         return trace.sample_stats
     node = trace["sample_stats"]
     return getattr(node, "ds", node)
+
+
+def trace_parameter_summary(results: _t.Mapping[str, _t.Any]) -> pd.DataFrame:
+    """Summarize scalar per-label PyMC noise parameters from traces.
+
+    Parameters
+    ----------
+    results : _t.Mapping[str, _t.Any]
+        Mapping from well identifiers to fit-result-like objects with ``mini``
+        or ``trace`` attributes and optional datasets.
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide table indexed by well and label with posterior means and standard
+        deviations for recognized scalar noise parameters. An empty table with
+        ``well`` and ``label`` columns is returned when no recognized trace
+        parameters are available.
+    """
+    rows: list[dict[str, _t.Any]] = []
+    for well, fit in results.items():
+        trace = getattr(fit, "mini", None)
+        if trace is None:
+            trace = getattr(fit, "trace", None)
+        if trace is None:
+            continue
+        posterior = _posterior_dataset_or_none(trace)
+        if posterior is None:
+            continue
+
+        labels = _fit_result_labels(fit)
+        for var_name in posterior.data_vars:
+            parsed = _parse_trace_parameter_name(str(var_name))
+            if parsed is None:
+                continue
+            parameter, label = parsed
+            target_labels = labels if label == "shared" and labels else (label,)
+            values_da = posterior[var_name]
+            if "well" in values_da.dims:
+                try:
+                    values_da = values_da.sel(well=str(well))
+                except KeyError:
+                    continue
+            values = values_da.values
+            sd = float(np.nanstd(values, ddof=1)) if values.size > 1 else 0.0
+            rows.extend(
+                {
+                    "well": str(well),
+                    "label": str(target_label),
+                    "parameter": parameter,
+                    "mean": float(np.nanmean(values)),
+                    "sd": sd,
+                }
+                for target_label in target_labels
+            )
+
+    if not rows:
+        return pd.DataFrame(columns=["well", "label"])
+
+    long = pd.DataFrame(rows)
+    wide = long.pivot_table(
+        index=["well", "label"],
+        columns="parameter",
+        values=["mean", "sd"],
+        aggfunc="first",
+    )
+    flat_columns = np.asarray(wide.columns, dtype=object)
+    names = []
+    for column in flat_columns:
+        if isinstance(column, tuple) and len(column) == 2:
+            stat, param = column
+        else:
+            stat, param = "value", column
+        names.append(f"{param!s}_{stat!s}")
+    wide.columns = names
+    return wide.reset_index()
+
+
+def _posterior_dataset_or_none(trace: _t.Any) -> _t.Any | None:
+    try:
+        return posterior_dataset(trace)
+    except Exception:
+        return None
+
+
+def _fit_result_labels(fit: _t.Any) -> tuple[str, ...]:
+    dataset = getattr(fit, "dataset", None)
+    if dataset is None:
+        return ()
+    try:
+        return tuple(str(label) for label in dataset)
+    except TypeError:
+        return ()
+
+
+def _parse_trace_parameter_name(var_name: str) -> tuple[str, str] | None:
+    prefixes = {
+        "label_noise_scale": "label_noise_scale",
+        "well_noise_scale": "well_noise_scale",
+        "well_noise_sd": "well_noise_sd",
+        "ye_mag": "ye_mag",
+        "rel_error": "rel_error",
+        "floor": "floor",
+        "gain": "gain",
+    }
+    for prefix, parameter in prefixes.items():
+        if var_name == prefix:
+            return parameter, "shared"
+        if var_name.startswith(f"{prefix}_"):
+            return parameter, var_name.removeprefix(f"{prefix}_")
+    return None
 
 
 def _posterior_mean_scalar(
@@ -322,6 +948,192 @@ def trace_diagnostics(
     return row
 
 
+def pareto_k_table(
+    multi_or_trace: _t.Any, results: _t.Mapping[str, _t.Any] | None = None
+) -> pd.DataFrame:
+    """Return pointwise PSIS-LOO Pareto-k values annotated by well, label, and step.
+
+    Parameters
+    ----------
+    multi_or_trace : _t.Any
+        A ``MultiFitResult``-like object with ``trace`` and ``results`` attributes,
+        or a raw PyMC/ArviZ trace.
+    results : _t.Mapping[str, _t.Any] | None
+        Fit results keyed by well. Required when *multi_or_trace* is a raw trace.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per likelihood observation with ``pareto_k`` and observation
+        metadata where it can be recovered from the fitted datasets.
+
+    Raises
+    ------
+    ValueError
+        If no fit-result mapping is available, if the trace lacks pointwise
+        log-likelihood data, or if ArviZ's pointwise output cannot be aligned
+        to the fitted datasets.
+    """
+    trace = getattr(multi_or_trace, "trace", multi_or_trace)
+    fit_results = (
+        results if results is not None else getattr(multi_or_trace, "results", None)
+    )
+    if fit_results is None:
+        msg = "Pass a MultiFitResult or provide results= when using a raw trace."
+        raise ValueError(msg)
+    if not hasattr(trace, "log_likelihood"):
+        msg = (
+            "Trace does not contain a log_likelihood group; "
+            "run pointwise log-likelihood first."
+        )
+        raise ValueError(msg)
+
+    rows: list[dict[str, _t.Any]] = []
+    for var_name in trace.log_likelihood.data_vars:
+        obs_rows = _observation_rows_for_likelihood(str(var_name), fit_results)
+        loo = az.loo(trace, var_name=str(var_name), pointwise=True)
+        pareto_k = np.asarray(loo.pareto_k, dtype=float).ravel()
+        if len(obs_rows) != pareto_k.size:
+            msg = (
+                f"Pareto-k length mismatch for {var_name!r}: "
+                f"{pareto_k.size} values but {len(obs_rows)} mapped observations."
+            )
+            raise ValueError(msg)
+        for obs_idx, (row, k_value) in enumerate(zip(obs_rows, pareto_k, strict=True)):
+            rows.append({
+                "log_likelihood": str(var_name),
+                "obs_index": obs_idx,
+                **row,
+                "pareto_k": float(k_value),
+                "pareto_k_warn": bool(np.isfinite(k_value) and k_value > 0.7),
+            })
+
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "log_likelihood",
+                "obs_index",
+                "well",
+                "label",
+                "step",
+                "x",
+                "y",
+                "pareto_k",
+                "pareto_k_warn",
+            ]
+        )
+    return pd.DataFrame(rows)
+
+
+def pareto_k_summary(pareto_k: pd.DataFrame) -> pd.DataFrame:
+    """Summarize pointwise Pareto-k diagnostics.
+
+    Parameters
+    ----------
+    pareto_k : pd.DataFrame
+        Pointwise Pareto-k table, usually returned by
+        :func:`pointwise_pareto_k`.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary table grouped by label and well when those columns are present,
+        otherwise grouped by likelihood variable. The table includes count,
+        maximum, mean, and warning fraction. Empty input returns an empty table.
+    """
+    if pareto_k.empty:
+        return pd.DataFrame()
+    group_cols = [col for col in ("label", "well") if col in pareto_k.columns]
+    if not group_cols:
+        group_cols = ["log_likelihood"]
+    return (
+        pareto_k
+        .groupby(group_cols, observed=True)
+        .agg(
+            n=("pareto_k", "count"),
+            pareto_k_max=("pareto_k", "max"),
+            pareto_k_mean=("pareto_k", "mean"),
+            pareto_k_frac_gt_0p7=("pareto_k_warn", "mean"),
+        )
+        .reset_index()
+    )
+
+
+def _observation_rows_for_likelihood(
+    var_name: str,
+    results: _t.Mapping[str, _t.Any],
+) -> list[dict[str, _t.Any]]:
+    """Map one likelihood variable's vectorized observations to dataset rows."""
+    label = _label_from_likelihood_name(var_name)
+    if label is None:
+        return _generic_observation_rows(var_name, results)
+
+    rows: list[dict[str, _t.Any]] = []
+    active: list[tuple[str, _t.Any, _t.Any]] = []
+    for well, fit in results.items():
+        ds = getattr(fit, "dataset", None)
+        if ds is not None and label in ds:
+            active.append((str(well), ds, ds[label]))
+    if not active:
+        return rows
+
+    n_steps = len(np.asarray(active[0][2].mask, dtype=bool))
+    for step in range(n_steps):
+        for well, ds, da in active:
+            mask = np.asarray(da.mask, dtype=bool)
+            if step >= mask.size or not bool(mask[step]):
+                continue
+            row: dict[str, _t.Any] = {
+                "well": well,
+                "label": str(label),
+                "step": int(step),
+            }
+            if hasattr(da, "xc") and np.asarray(da.xc).size == mask.size:
+                row["x"] = float(np.asarray(da.xc, dtype=float)[step])
+            elif hasattr(da, "x") and np.asarray(da.x).size:
+                compact_idx = int(mask[: step + 1].sum() - 1)
+                row["x"] = float(np.asarray(da.x, dtype=float)[compact_idx])
+            if hasattr(da, "yc") and np.asarray(da.yc).size == mask.size:
+                row["y"] = float(np.asarray(da.yc, dtype=float)[step])
+            elif hasattr(da, "y") and np.asarray(da.y).size:
+                compact_idx = int(mask[: step + 1].sum() - 1)
+                row["y"] = float(np.asarray(da.y, dtype=float)[compact_idx])
+            row["is_ph"] = bool(getattr(ds, "is_ph", False))
+            rows.append(row)
+    return rows
+
+
+def _label_from_likelihood_name(var_name: str) -> str | None:
+    prefix = "y_likelihood_"
+    if not var_name.startswith(prefix):
+        return None
+    return var_name.removeprefix(prefix)
+
+
+def _generic_observation_rows(
+    var_name: str,
+    results: _t.Mapping[str, _t.Any],
+) -> list[dict[str, _t.Any]]:
+    """Fallback mapping for nonstandard likelihood variable names."""
+    rows: list[dict[str, _t.Any]] = []
+    for well, fit in results.items():
+        ds = getattr(fit, "dataset", None)
+        if ds is None:
+            continue
+        for label, da in ds.items():
+            mask = np.asarray(da.mask, dtype=bool)
+            rows.extend(
+                {
+                    "well": str(well),
+                    "label": str(label),
+                    "step": int(step),
+                    "log_likelihood_hint": var_name,
+                }
+                for step in np.flatnonzero(mask)
+            )
+    return rows
+
+
 def _add_warnings(
     row: dict[str, _t.Any], prefix: str, caught: list[warnings.WarningMessage]
 ) -> None:
@@ -410,6 +1222,57 @@ def _sigma_for_label_well(
     return np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
 
 
+def _outlier_probability_for_label_well(
+    trace: _t.Any,
+    lbl: _t.Any,
+    well: str,
+    mask: np.ndarray,
+    results: _t.Mapping[str, _t.Any],
+) -> np.ndarray:
+    posterior = posterior_dataset(trace)
+    prob_var = f"outlier_probability_{lbl}"
+    n_active = int(mask.sum())
+    missing = np.full(n_active, np.nan, dtype=float)
+    if prob_var not in posterior:
+        return missing
+
+    arr = posterior[prob_var]
+    sample_dims = [dim for dim in ("chain", "draw") if dim in arr.dims]
+    if sample_dims:
+        arr = arr.mean(dim=sample_dims)
+
+    if "well" in arr.dims:
+        try:
+            well_arr = arr.sel(well=well)
+        except Exception:
+            well_arr = arr
+        probs = np.asarray(well_arr, dtype=float)
+        if probs.shape == mask.shape:
+            return _t.cast("np.ndarray", probs[mask])
+        if probs.size == n_active:
+            return _t.cast("np.ndarray", probs.ravel())
+
+    probs = np.asarray(arr, dtype=float).ravel()
+    if probs.size == n_active:
+        return _t.cast("np.ndarray", probs)
+
+    obs_rows = _observation_rows_for_likelihood(f"y_likelihood_{lbl}", results)
+    if probs.size != len(obs_rows):
+        return missing
+
+    by_position: dict[tuple[str, int], float] = {}
+    for row, prob in zip(obs_rows, probs, strict=True):
+        step_value = row.get("step")
+        if step_value is None:
+            continue
+        by_position[str(row.get("well")), int(step_value)] = float(prob)
+    step = np.flatnonzero(mask)
+    return np.asarray(
+        [by_position.get((str(well), int(step_j)), np.nan) for step_j in step],
+        dtype=float,
+    )
+
+
 def residuals_from_multifit(  # noqa: PLR0913
     multi: _t.Any,
     trace_id: str,
@@ -421,6 +1284,11 @@ def residuals_from_multifit(  # noqa: PLR0913
     outlier_threshold: float = 3.0,
 ) -> pd.DataFrame:
     """Build a long calibrated-residual table from a MultiFitResult.
+
+    The returned table has one row per active observation and always includes
+    trace, well, label, step, observed, predicted, sigma, raw residual,
+    likelihood-scaled residual, Normal-score residual, likelihood family, and
+    residual-outlier metadata columns.
 
     ``likelihood_res`` is always ``(observed - predicted) / sigma``.  For
     Student-t robust fits, ``std_res`` is the equivalent standard-Normal score
@@ -456,6 +1324,9 @@ def residuals_from_multifit(  # noqa: PLR0913
                 is_ph=ds.is_ph,
             )
             sigma = _sigma_for_label_well(multi.trace, lbl, str(well), da, mask)
+            p_outlier = _outlier_probability_for_label_well(
+                multi.trace, lbl, str(well), mask, multi.results
+            )
             likelihood_res = (y - that) / sigma
             std_res = residual_normal_scores(
                 likelihood_res, robust=robust, student_t_nu=student_t_nu
@@ -480,6 +1351,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "raw_res": float(y[j] - that[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
+                    "p_outlier_per_point": float(p_outlier[j]),
                     "residual_likelihood": "student_t" if robust else "normal",
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),
@@ -493,10 +1365,13 @@ def residuals_from_multifit(  # noqa: PLR0913
 
     df = pd.DataFrame(rows)
     if df.empty:
-        return df
-    return df.replace([np.inf, -np.inf], np.nan).dropna(
+        return pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(
         subset=["std_res", "x", "step", "label"]
     )
+    leading_cols = [col for col in RESIDUAL_TABLE_COLUMNS if col in df.columns]
+    extra_cols = [col for col in df.columns if col not in leading_cols]
+    return df.loc[:, [*leading_cols, *extra_cols]]
 
 
 def residuals_from_fit_results(  # noqa: PLR0913
