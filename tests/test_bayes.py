@@ -697,9 +697,12 @@ def test_free_noise_priors_scale_from_hints() -> None:
     # Hinted: Exponential mean == gain hint (0.5); HalfNormal mean == sigma*sqrt(2/pi).
     assert gain_mean == pytest.approx(0.5, abs=0.05)
     assert alpha_mean == pytest.approx(0.03 * np.sqrt(2 / np.pi), abs=0.005)
-    # No hint: fall back to the historical defaults (gain mean 1, alpha sigma 0.02).
-    assert gain0_mean == pytest.approx(1.0, abs=0.1)
-    assert alpha0_mean == pytest.approx(0.02 * np.sqrt(2 / np.pi), abs=0.005)
+    # gain=0 / alpha=0 -> tightest around-zero priors (floored at 1e-3), so each
+    # width is strictly *below* a small positive hint (monotonic in the hint).
+    assert gain0_mean == pytest.approx(1e-3, abs=5e-4)
+    assert alpha0_mean == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert gain0_mean < gain_mean
+    assert alpha0_mean < alpha_mean
 
 
 def test_centered_zero_alpha_is_prior_around_zero() -> None:
@@ -717,11 +720,12 @@ def test_centered_zero_alpha_is_prior_around_zero() -> None:
             nm, gain_mode="centered", alpha_mode="centered"
         )
         draws = pm.draw(centered["rel_error"]["1"], draws=6000, random_seed=0)
-    # Term is present, strictly non-negative, non-degenerate, centered near 0.
+    # Term is present, strictly non-negative, non-degenerate, tight around 0
+    # (HalfNormal floored at 1e-3, not the legacy 0.02).
     assert "rel_error" in centered
     assert float(draws.min()) >= 0.0
     assert float(draws.std()) > 0.0
-    assert float(draws.mean()) == pytest.approx(0.02 * np.sqrt(2 / np.pi), abs=0.005)
+    assert float(draws.mean()) == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
     with pm.Model():
         fixed = bayes.build_pymc_noise_priors(nm, gain_mode="fixed", alpha_mode="fixed")
     # "fixed" with an all-zero alpha leaves the term genuinely absent (hard 0).

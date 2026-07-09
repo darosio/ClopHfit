@@ -183,11 +183,11 @@ class NoiseConfig:
     floor_mode: NoiseParamMode | None = None
     gain_mode: NoiseParamMode | None = None
     alpha_mode: NoiseParamMode | None = None
-    shared_alpha: bool = True
+    shared_alpha: bool = False
     shared_gain: bool = False
     floor: float | Mapping[str, float] | None = None
     gain: float | Mapping[str, float] = 0.0
-    alpha: float | Mapping[str, float] = 0.0
+    alpha: float | Mapping[str, float] = 0.02
     learn_ye_mags: bool = False
     # ye_mag-multiplier fields
     shared_ye_mags: bool = False
@@ -221,11 +221,11 @@ class NoiseConfig:
         floor_mode: NoiseParamMode | None = None,
         gain_mode: NoiseParamMode | None = None,
         alpha_mode: NoiseParamMode | None = None,
-        shared_alpha: bool = True,
+        shared_alpha: bool = False,
         shared_gain: bool = False,
         floor: float | Mapping[str, float] | None = None,
         gain: float | Mapping[str, float] = 0.0,
-        alpha: float | Mapping[str, float] = 0.0,
+        alpha: float | Mapping[str, float] = 0.02,
         learn_ye_mags: bool = False,
         shared_ye_mags: bool = False,
     ) -> NoiseConfig:
@@ -234,8 +234,14 @@ class NoiseConfig:
         When *noise_model* is ``None`` the model is synthesized from the data:
         each label gets ``sigma_floor`` from *floor* (fallback: the label's
         ``y_err`` scale), plus *gain* and *alpha*. Setting ``gain_mode="free"``
-        or ``alpha_mode="free"`` activates those terms even with the default
-        ``gain=0``/``alpha=0``.
+        or ``alpha_mode="free"`` activates those terms.
+
+        The *alpha* hint is the prior scale, not a hard value: in ``"free"``
+        mode it is the ``HalfNormal`` sigma and in ``"centered"`` mode the
+        ``TruncatedNormal`` mean. It defaults to ``0.02`` (a weak 2% prior);
+        pass ``alpha=0`` for the tightest around-zero prior (floored at
+        ``1e-3``), a larger value to widen it, or ``alpha_mode="fixed"`` to
+        pin/disable the term.
         """
         return cls(
             kind="structured",

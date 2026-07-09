@@ -61,6 +61,10 @@ if typing.TYPE_CHECKING:
 
 
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
+# Numeric floor for free/centered noise-prior scales, so a 0 hint gives the
+# tightest around-zero prior (never a degenerate 0) and the prior width grows
+# monotonically with the hint.
+_MIN_NOISE_PRIOR_SCALE = 1e-3
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -121,12 +125,14 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if has_gain or gain_mode == "free":
         if shared_gain:
             gains = [p.gain for p in noise_model.values() if p.gain > 0]
-            mu_g = np.mean(gains) if gains else 1.0
+            mu_g = float(np.mean(gains)) if gains else 0.0
             if gain_mode == "fixed":
                 priors["gain"] = pt.as_tensor_variable(mu_g)
             elif gain_mode == "free":
-                # Hint sets the prior mean (Exponential mean = 1/lam).
-                priors["gain"] = pm.Exponential("gain", lam=1.0 / max(mu_g, 1e-6))
+                # Hint sets the Exponential prior mean (= 1/lam), floored so a 0
+                # hint is the tightest around-zero prior (Poisson term ~off).
+                lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
+                priors["gain"] = pm.Exponential("gain", lam=lam)
             else:  # centered
                 priors["gain"] = pm.TruncatedNormal(
                     "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
@@ -138,8 +144,8 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if gain_mode == "fixed":
                     priors["gain"][lbl] = pt.as_tensor_variable(mu_g)
                 elif gain_mode == "free":
-                    # Hint (if any) sets the Exponential prior mean; else mean 1.
-                    lam = 1.0 / mu_g if mu_g > 0.0 else 1.0
+                    # Hint sets the Exponential mean; a 0 hint -> tightest (~off).
+                    lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
                     priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=lam)
                 elif mu_g > 0.0:
                     priors["gain"][lbl] = pm.TruncatedNormal(
@@ -152,21 +158,28 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     priors["gain"][lbl] = pt.as_tensor_variable(0.0)
 
     # 3. Alpha (proportional error). "centered" and "free" always build a prior
-    # so a calibrated alpha of 0 becomes a prior *around* 0 (HalfNormal), not a
-    # hard 0; only "fixed" leaves the term truly absent when alpha is 0.
+    # so a calibrated alpha of 0 becomes a tight prior *around* 0, not a hard 0;
+    # only "fixed" leaves the term truly absent when alpha is 0. The alpha hint
+    # is the prior scale (HalfNormal sigma / TruncatedNormal mean), floored at
+    # _MIN_NOISE_PRIOR_SCALE so the width grows monotonically with the hint (the
+    # weak 0.02 default lives in NoiseConfig.alpha, not here).
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
     if has_alpha or alpha_mode in {"free", "centered"}:
         if shared_alpha:
             alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
-            mu_a = np.mean(alphas) if alphas else 0.02
+            mu_a = float(np.mean(alphas)) if alphas else 0.0
             if alpha_mode == "fixed":
                 priors["rel_error"] = pt.as_tensor_variable(mu_a)
             elif alpha_mode == "free":
-                # Hint sets the HalfNormal scale (mu_a falls back to 0.02).
-                priors["rel_error"] = pm.HalfNormal("rel_error", sigma=max(mu_a, 1e-6))
+                priors["rel_error"] = pm.HalfNormal(
+                    "rel_error", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                )
             else:  # centered
                 priors["rel_error"] = pm.TruncatedNormal(
-                    "rel_error", mu=mu_a, sigma=max(0.25 * mu_a, 0.001), lower=0.0
+                    "rel_error",
+                    mu=mu_a,
+                    sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
+                    lower=0.0,
                 )
         else:
             priors["rel_error"] = {}
@@ -175,21 +188,19 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if alpha_mode == "fixed":
                     priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
                 elif alpha_mode == "free":
-                    # Hint (if any) sets the HalfNormal scale; else 0.02.
-                    sigma_a = mu_a if mu_a > 0.0 else 0.02
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=sigma_a
+                        f"rel_error_{lbl}", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
                     )
-                elif mu_a > 0.0:
+                elif mu_a > 0.0:  # centered on a positive hint
                     priors["rel_error"][lbl] = pm.TruncatedNormal(
                         f"rel_error_{lbl}",
                         mu=mu_a,
-                        sigma=max(0.25 * mu_a, 0.001),
+                        sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
                         lower=0.0,
                     )
-                else:
+                else:  # centered on 0 -> tight prior around 0
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=0.02
+                        f"rel_error_{lbl}", sigma=_MIN_NOISE_PRIOR_SCALE
                     )
 
     return priors
