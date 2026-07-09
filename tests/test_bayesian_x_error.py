@@ -63,16 +63,22 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     fr: FitResult[_Result] = FitResult(dataset=ds, result=_Result(params))
 
     # 2. Run Bayesian Fit with x-error modeling
-    # n_xerr=1.0 enables x_true modeling
+    # n_xerr=1.0 enables x_true modeling. The x-true shift competes with the
+    # per-sample y-error scale (``ye_mag``), so the effect on x_true[2] is small
+    # (order 0.02 pH). Fix ``random_seed`` for reproducible draws, and use enough
+    # of them that the Monte-Carlo error on the posterior mean (~sd/sqrt(ESS)) is
+    # well below that shift; otherwise the boundary check below flips sign.
     fit_res = bayes.fit_binding_pymc(
-        fr, n_xerr=1.0, sampler=SamplerConfig(n_samples=500)
+        fr, n_xerr=1.0, sampler=SamplerConfig(n_samples=4000, random_seed=42)
     )
     assert fit_res.mini is not None
     assert hasattr(fit_res.mini, "posterior")
     trace = fit_res.mini
 
     # 3. Analyze Results
-    summary = az.summary(trace)
+    # Keep full float precision: ``az.summary`` rounds to 2 decimals by default,
+    # which collapses the small shift onto the 7.0 boundary.
+    summary = az.summary(trace, round_to=8)
     means = {str(key): float(value) for key, value in summary["mean"].to_dict().items()}
 
     # Check x_true posterior for the 3rd point (index 2)
