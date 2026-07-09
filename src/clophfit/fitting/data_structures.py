@@ -19,18 +19,24 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 
 import matplotlib.pyplot as plt
 import numpy as np
-import odrpack
 import pandas as pd
-import xarray as xr
-from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
 from uncertainties import ufloat  # type: ignore[import-untyped]
+
+# Re-exported for back-compat: MiniT lives in the leaf ``clophfit_types`` module
+# so it stays out of the fitting-package import cycle (see its definition there).
+from clophfit.clophfit_types import MiniT as MiniT  # noqa: PLC0414
 
 from .errors import InvalidDataError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import xarray as xr
     from lmfit import Parameters  # type: ignore[import-untyped]
+    from lmfit.minimizer import (  # type: ignore[import-untyped]
+        Minimizer,
+        MinimizerResult,
+    )
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
@@ -435,7 +441,6 @@ class MiniProtocol(Protocol):
 
 
 MiniType = TypeVar("MiniType", bound=MiniProtocol)
-MiniT = Minimizer | odrpack.OdrResult | xr.DataTree
 
 
 @dataclass
