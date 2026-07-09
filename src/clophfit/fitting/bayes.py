@@ -151,9 +151,11 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 else:
                     priors["gain"][lbl] = pt.as_tensor_variable(0.0)
 
-    # 3. Alpha (proportional error)
+    # 3. Alpha (proportional error). "centered" and "free" always build a prior
+    # so a calibrated alpha of 0 becomes a prior *around* 0 (HalfNormal), not a
+    # hard 0; only "fixed" leaves the term truly absent when alpha is 0.
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
-    if has_alpha or alpha_mode == "free":
+    if has_alpha or alpha_mode in {"free", "centered"}:
         if shared_alpha:
             alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
             mu_a = np.mean(alphas) if alphas else 0.02

@@ -702,6 +702,32 @@ def test_free_noise_priors_scale_from_hints() -> None:
     assert alpha0_mean == pytest.approx(0.02 * np.sqrt(2 / np.pi), abs=0.005)
 
 
+def test_centered_zero_alpha_is_prior_around_zero() -> None:
+    """A calibrated alpha of 0 stays a prior around 0 in centered mode, not fixed.
+
+    Only "fixed" drops the alpha term when the whole plate has alpha == 0.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=2.0, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.0, alpha=0.0),
+    })
+    with pm.Model():
+        centered = bayes.build_pymc_noise_priors(
+            nm, gain_mode="centered", alpha_mode="centered"
+        )
+        draws = pm.draw(centered["rel_error"]["1"], draws=6000, random_seed=0)
+    # Term is present, strictly non-negative, non-degenerate, centered near 0.
+    assert "rel_error" in centered
+    assert float(draws.min()) >= 0.0
+    assert float(draws.std()) > 0.0
+    assert float(draws.mean()) == pytest.approx(0.02 * np.sqrt(2 / np.pi), abs=0.005)
+    with pm.Model():
+        fixed = bayes.build_pymc_noise_priors(nm, gain_mode="fixed", alpha_mode="fixed")
+    # "fixed" with an all-zero alpha leaves the term genuinely absent (hard 0).
+    assert "rel_error" not in fixed
+
+
 @pytest.mark.parametrize(
     ("value", "label", "expected"),
     [
