@@ -28,6 +28,7 @@ RESIDUAL_TABLE_COLUMNS = [
     "well",
     "label",
     "step",
+    "raw_i",
     "x",
     "y",
     "that",
@@ -45,7 +46,26 @@ RESIDUAL_TABLE_COLUMNS = [
 
 @dataclass
 class ResidualDiagnostics:
-    """Convenience wrapper for repeated residual diagnostics."""
+    """Single fluent home for residual analysis over a canonical residual table.
+
+    Build one from a fit (``ResidualDiagnostics.from_fit_results(...)``) or wrap
+    an existing table (``ResidualDiagnostics(fr.residuals)``), then chain
+    transforms and read summaries. This is the place to reach for residual
+    analysis; the module-level ``residual_*`` functions are its building blocks.
+
+    Transforms (return a new ``ResidualDiagnostics``): :meth:`annotate`,
+    :meth:`step_centered`, :meth:`label_scaled`, :meth:`well_scaled`,
+    :meth:`with_relative_residuals`.
+
+    Summaries / analyses (return frames): :meth:`well_summary`,
+    :meth:`normality`, :meth:`step_summary`, :meth:`position_summary`,
+    :meth:`tail_rows`, :meth:`distribution_summary`, :meth:`x_correlation`,
+    :meth:`lag1_autocorrelation`. Further building blocks are the module-level
+    ``residual_x_trend_summary`` / ``residual_cross_label_correlation``.
+
+    Plots: :meth:`plot_hist_qq`, :meth:`plot_step`, :meth:`plot_role`,
+    :meth:`plot_col`, :meth:`plot_well_summary`.
+    """
 
     residuals: pd.DataFrame
     value_col: str = "std_res"
@@ -237,6 +257,34 @@ class ResidualDiagnostics:
                 "skew",
             ])
         return out
+
+    # -- Distribution / trend / correlation analyses (delegate to the free
+    #    functions below, all on the ``std_res`` column). Grouped here so the
+    #    diagnostics object is the single place to reach for residual analysis.
+    def distribution_summary(self) -> pd.DataFrame:
+        """Per-(trace, label) residual distribution stats.
+
+        See :func:`residual_distribution_summary`. Supersedes
+        :func:`clophfit.fitting.residuals.residual_statistics`.
+        """
+        return residual_distribution_summary(self.residuals)
+
+    def x_correlation(self) -> pd.DataFrame:
+        """Pearson/Spearman correlation of residuals against x.
+
+        See :func:`residual_x_correlation`. Relates to
+        :func:`clophfit.fitting.residuals.estimate_x_shift_statistics`;
+        :func:`residual_x_trend_summary` gives the by-step trend.
+        """
+        return residual_x_correlation(self.residuals)
+
+    def lag1_autocorrelation(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Lag-1 residual autocorrelation per well and its per-label summary.
+
+        See :func:`residual_lag1_autocorrelation`. Supersedes
+        :func:`clophfit.fitting.residuals.detect_adjacent_correlation`.
+        """
+        return residual_lag1_autocorrelation(self.residuals)
 
     def tail_rows(self, n: int = 30, *, column: str | None = None) -> pd.DataFrame:
         """Return rows with largest absolute residual values."""
@@ -805,6 +853,45 @@ def _posterior_dataset_or_none(trace: _t.Any) -> _t.Any | None:
         return None
 
 
+def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
+    """Infer ``(robust, student_t_nu)`` from a trace's posterior variables.
+
+    Detects an inferred Student-t (a ``student_t_nu`` deterministic) or a
+    contamination mixture (``pi_outlier_*`` / ``outlier_inflate``). Used by
+    ``FitResult.residuals`` / ``MultiFitResult.residuals`` so the residual table
+    is standardized correctly without the caller re-supplying fit settings.
+
+    Parameters
+    ----------
+    trace : _t.Any
+        A PyMC trace (``xr.DataTree``) or ``None`` for classical fits.
+
+    Returns
+    -------
+    tuple[bool, float]
+        Whether a robust likelihood was used and the Student-t nu to apply.
+
+    Notes
+    -----
+    A *fixed*-nu Student-t leaves no trace marker and is reported as non-robust;
+    only the Normal-score transform of ``std_res`` differs (``raw_res``/``that``/
+    ``likelihood_res`` are unaffected). Pass ``robust=`` to
+    ``residual_table`` to override.
+    """
+    post = _posterior_dataset_or_none(trace)
+    if post is None:
+        return False, STUDENT_T_NU
+    names = {str(n) for n in getattr(post, "data_vars", {})}
+    if any(n.startswith("pi_outlier") for n in names) or "outlier_inflate" in names:
+        return True, STUDENT_T_NU
+    if "student_t_nu" in names:
+        try:
+            return True, float(post["student_t_nu"].mean())
+        except Exception:
+            return True, STUDENT_T_NU
+    return False, STUDENT_T_NU
+
+
 def _fit_result_labels(fit: _t.Any) -> tuple[str, ...]:
     dataset = getattr(fit, "dataset", None)
     if dataset is None:
@@ -1344,6 +1431,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "well": str(well),
                     "label": str(lbl),
                     "step": int(step[j]),
+                    "raw_i": int(step[j]),
                     "x": float(x[j]),
                     "y": float(y[j]),
                     "that": float(that[j]),
@@ -1424,6 +1512,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
                     "well": str(well),
                     "label": str(lbl),
                     "step": int(step[j]) if j < len(step) else int(j),
+                    "raw_i": int(step[j]) if j < len(step) else int(j),
                     "x": float(x[j]),
                     "y": float(y[j]),
                     "that": float(that[j]),

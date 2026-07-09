@@ -1728,7 +1728,7 @@ _DEFAULT_INIT = InitConfig()
 _DEFAULT_SAMPLER = SamplerConfig()
 
 
-def fit_binding_pymc(  # noqa: PLR0913, PLR0915
+def fit_binding_pymc(  # noqa: PLR0912, PLR0913, PLR0915
     ds_or_fr: Dataset | FitResult[MiniT],
     *,
     n_sd: float = 10.0,
@@ -1924,6 +1924,8 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
         }
         if sampler.max_treedepth is not None:
             sample_kwargs["max_treedepth"] = sampler.max_treedepth
+        if sampler.random_seed is not None:
+            sample_kwargs["random_seed"] = sampler.random_seed
         trace = pm.sample(n_samples, **sample_kwargs)
         trace = _compute_sample_log_likelihood(trace)
     p_names = list(params.keys())

@@ -80,6 +80,9 @@ class SamplerConfig:
         default.
     max_treedepth : int | None
         Maximum NUTS tree depth. ``None`` uses the backend default.
+    random_seed : int | None
+        Seed forwarded to ``pm.sample`` for reproducible draws. ``None`` (the
+        default) leaves sampling nondeterministic.
     """
 
     n_samples: int = 2000
@@ -87,6 +90,7 @@ class SamplerConfig:
     n_tune: int | None = None
     target_accept: float | None = None
     max_treedepth: int | None = None
+    random_seed: int | None = None
 
 
 @dataclass(frozen=True)
