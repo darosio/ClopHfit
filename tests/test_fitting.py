@@ -952,11 +952,10 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
     multi = fit_binding_pymc_multi(
         results,
         scheme,
-        noise_model=noise_model,
         n_sd=3.0,
         n_xerr=0.0,
-        n_samples=50,
-        n_tune=25,
+        noise=NoiseConfig.structured(noise_model=noise_model, shared_alpha=True),
+        sampler=SamplerConfig(n_samples=50, n_tune=25),
     )
 
     assert hasattr(multi.trace, "posterior")
@@ -986,12 +985,11 @@ def test_fit_binding_pymc_multi_noise_per_well(multi_dataset: Dataset) -> None:
     multi = fit_binding_pymc_multi(
         results,
         scheme,
-        noise_model=noise_model,
-        x_error_model="per_well",
         n_sd=3.0,
         n_xerr=1.0,
-        n_samples=50,
-        n_tune=25,
+        x_error_model="per_well",
+        noise=NoiseConfig.structured(noise_model=noise_model, shared_alpha=True),
+        sampler=SamplerConfig(n_samples=50, n_tune=25),
     )
 
     assert hasattr(multi.trace, "posterior")

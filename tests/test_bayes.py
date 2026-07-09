@@ -479,10 +479,9 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
         bayes.fit_binding_pymc_multi(
             {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
             scheme,
-            init_strategy="data_priors",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            init=InitConfig(strategy="data_priors"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1472,8 +1471,9 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     )
 
     assert len(calls) == 2
-    assert calls[0]["robust"] is True
-    assert calls[1]["robust"] is False
+    noise0 = cast("NoiseConfig", calls[0]["noise"])
+    assert cast("RobustConfig", calls[0]["robust"]).enabled is True
+    assert cast("RobustConfig", calls[1]["robust"]).enabled is False
     assert calls[0]["well_noise_scale"] is True
     assert calls[1]["well_noise_scale"] is True
     assert calls[0]["shared_well_noise_scale"] is False
@@ -1482,10 +1482,11 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     assert calls[0]["well_noise_sd_sigma"] == 0.3
     assert calls[0]["n_xerr"] == 1.0
     assert calls[1]["n_xerr"] == 1.0
-    assert calls[0]["noise_model"]["1"].sigma_floor == 0.3
-    assert calls[0]["noise_model"]["2"].alpha == 0.07
-    assert calls[0]["shared_alpha"] is False
-    assert calls[0]["alpha_mode"] == "free"
+    assert noise0.noise_model is not None
+    assert noise0.noise_model["1"].sigma_floor == 0.3
+    assert noise0.noise_model["2"].alpha == 0.07
+    assert noise0.shared_alpha is False
+    assert noise0.alpha_mode == "free"
     assert calls[1]["input_types"] == {"A01": "FitResult", "A02": "FitResult"}
     assert calls[1]["input_masks"]["A01"] == [True, False, True]
     assert result.masked_datasets["A01"]["1"].mask.tolist() == [True, False, True]
@@ -1572,10 +1573,9 @@ def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
         bayes.fit_binding_pymc_multi(
             {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "free", "gain": "free", "alpha": "free"}
@@ -1616,10 +1616,9 @@ def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
@@ -1659,10 +1658,9 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"labels": ["2"]}
@@ -1708,12 +1706,10 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            learn_ye_mags=True,
-            per_well_ye_mags=per_well_ye_mags,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            per_well_ye_mags=per_well_ye_mags,
+            noise=NoiseConfig.structured(noise_model=noise_model, learn_ye_mags=True),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"per_well": expected_per_well}
@@ -1755,12 +1751,11 @@ def test_fit_binding_pymc_multi_can_share_well_noise_scale_between_labels(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
+            n_xerr=0.0,
             well_noise_scale=True,
             shared_well_noise_scale=True,
-            n_samples=2,
-            n_tune=1,
-            n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert "label_noise_scale" in created_lognormals
@@ -1790,12 +1785,10 @@ def test_fit_binding_pymc_multi_robust_can_infer_student_t_nu(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            student_t_nu=None,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(enabled=True, nu=None),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["name"] == "y_likelihood_1"
@@ -1824,12 +1817,10 @@ def test_fit_binding_pymc_multi_robust_can_use_mixture_likelihood(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(enabled=True, likelihood="mixture"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {
@@ -1857,13 +1848,12 @@ def test_fit_binding_pymc_multi_mixture_accepts_contamination_prior_boundary(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior=0.5,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True, likelihood="mixture", contamination_frac_prior=0.5
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1879,13 +1869,12 @@ def test_fit_binding_pymc_multi_mixture_rejects_high_contamination_prior(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior=0.999,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True, likelihood="mixture", contamination_frac_prior=0.999
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1901,13 +1890,14 @@ def test_fit_binding_pymc_multi_mixture_rejects_unsafe_label_specific_prior(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True,
+                likelihood="mixture",
+                contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1944,10 +1934,9 @@ def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            n_samples=2,
-            n_tune=1,
             n_xerr=3.0,
             x_error_model="deterministic",
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     np.testing.assert_allclose(captured["x_errc"], expected_x_err)
@@ -1966,10 +1955,9 @@ def test_fit_binding_pymc_multi_deterministic_mode_uses_shared_fixed_x_true(
     multi = bayes.fit_binding_pymc_multi(
         {"A01": fr_init, "A02": fr_init},
         scheme,
-        n_samples=2,
-        n_tune=1,
         n_xerr=0.0,
         x_error_model="deterministic",
+        sampler=SamplerConfig(n_samples=2, n_tune=1),
     )
 
     x_true = x_true_from_trace_df(multi)
@@ -2018,11 +2006,10 @@ def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
         bayes.fit_binding_pymc_multi(
             {"A01": ds_a, "A02": ds_b},
             scheme,
-            noise_model=noise_model,
             x_error_model="hierarchical_per_well",
             n_xerr=0.0,
-            n_samples=2,
-            n_tune=1,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -2158,10 +2145,9 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
     multi = bayes.fit_binding_pymc_multi(
         fit_results,
         scheme,
-        n_samples=2,
-        n_tune=1,
         n_xerr=0.0,
         x_error_model="deterministic",
+        sampler=SamplerConfig(n_samples=2, n_tune=1),
     )
 
     assert set(multi.results) == {"A01", "A02"}
@@ -2195,11 +2181,10 @@ def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            n_samples=2,
-            n_tune=1,
             n_xerr=1.0,
             x_error_model="deterministic",
             min_x_step=0.35,
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["min_x_step"] == 0.35
@@ -2280,13 +2265,11 @@ def test_single_and_multi_pymc_none_noise_model_estimate_similar_ye_mags(
         multi = bayes.fit_binding_pymc_multi(
             copy.deepcopy(ds_dict),
             scheme,
-            n_samples=150,
-            n_tune=150,
             n_xerr=0.0,
-            noise_model=None,
-            shared_ye_mags=shared_ye_mags,
             per_well_ye_mags=True,
             x_error_model="deterministic",
+            noise=NoiseConfig.ye_mag(shared=shared_ye_mags),
+            sampler=SamplerConfig(n_samples=150, n_tune=150),
         )
 
         assert single.mini is not None
@@ -2672,11 +2655,11 @@ class TestYerrExtraction:
         multi = bayes.fit_binding_pymc_multi(
             results,
             scheme,
-            noise_model=noise_model,
-            n_samples=100,
-            n_tune=50,
             n_xerr=0.0,
-            floor_mode="centered",
+            noise=NoiseConfig.structured(
+                noise_model=noise_model, floor_mode="centered"
+            ),
+            sampler=SamplerConfig(n_samples=100, n_tune=50),
         )
 
         returned_dataset = multi.results["A01"].dataset
@@ -2726,10 +2709,8 @@ class TestYerrExtraction:
         multi = bayes.fit_binding_pymc_multi(
             results,
             scheme,
-            noise_model=None,
-            n_samples=100,
-            n_tune=50,
             n_xerr=0.0,
+            sampler=SamplerConfig(n_samples=100, n_tune=50),
         )
 
         returned_dataset = multi.results["A01"].dataset
