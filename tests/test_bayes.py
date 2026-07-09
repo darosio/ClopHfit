@@ -667,6 +667,41 @@ def test_structured_noise_without_model_activates_free_terms(
     assert any(name.startswith("rel_error") for name in names)
 
 
+def test_free_noise_priors_scale_from_hints() -> None:
+    """Free gain/alpha priors should take their scale from the noise-model hints."""
+    pytest.importorskip("pymc")
+    hinted = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.5, alpha=0.03)
+    })
+    plain = PlateNoiseModel({"1": NoiseModelParams(sigma_floor=1.0)})
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            hinted, gain_mode="free", alpha_mode="free"
+        )
+        gain_mean = float(
+            pm.draw(priors["gain"]["1"], draws=6000, random_seed=0).mean()
+        )
+        alpha_mean = float(
+            pm.draw(priors["rel_error"]["1"], draws=6000, random_seed=1).mean()
+        )
+    with pm.Model():
+        priors0 = bayes.build_pymc_noise_priors(
+            plain, gain_mode="free", alpha_mode="free"
+        )
+        gain0_mean = float(
+            pm.draw(priors0["gain"]["1"], draws=6000, random_seed=0).mean()
+        )
+        alpha0_mean = float(
+            pm.draw(priors0["rel_error"]["1"], draws=6000, random_seed=1).mean()
+        )
+    # Hinted: Exponential mean == gain hint (0.5); HalfNormal mean == sigma*sqrt(2/pi).
+    assert gain_mean == pytest.approx(0.5, abs=0.05)
+    assert alpha_mean == pytest.approx(0.03 * np.sqrt(2 / np.pi), abs=0.005)
+    # No hint: fall back to the historical defaults (gain mean 1, alpha sigma 0.02).
+    assert gain0_mean == pytest.approx(1.0, abs=0.1)
+    assert alpha0_mean == pytest.approx(0.02 * np.sqrt(2 / np.pi), abs=0.005)
+
+
 @pytest.mark.parametrize(
     ("value", "label", "expected"),
     [

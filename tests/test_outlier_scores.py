@@ -10,8 +10,7 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.utils import (
     apply_outlier_mask,
-    fit_gain_and_rel_error_from_residuals,
-    fit_noise_model_from_residuals,
+    fit_gain_from_residuals,
     fit_rel_error_from_residuals,
     outlier_scores_extended,
 )
@@ -121,76 +120,44 @@ def test_apply_outlier_mask_min_keep() -> None:
     assert da.mask.sum() >= 3
 
 
-# --- fit_noise_model_from_residuals ---
+# --- fit_gain_from_residuals ---
 
 
-def test_fit_noise_model_recovers_known_params() -> None:
-    """Floor and gain estimates should be within 3x of true values."""
-    rng = np.random.default_rng(42)
-    true_floor, true_gain, rel = 5.0, 2.0, 0.003
-    y = np.linspace(10, 1000, 300)
-    sigma = np.sqrt(true_floor**2 + true_gain * y + (rel * y) ** 2)
-    resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
-    floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=rel)
-    assert abs(floor_d["1"] - true_floor) <= true_floor
-    assert abs(gain_d["1"] - true_gain) < true_gain * 3
-
-
-def test_fit_noise_model_fallback_on_negative_params() -> None:
-    """Parameters should be clamped to non-negative values."""
+def test_fit_gain_recovers_known_gain() -> None:
+    """Estimated gain should be within 20% of true gain for N=400 samples."""
     rng = np.random.default_rng(0)
-    y = np.ones(50)
-    resid = rng.standard_normal(50) * 0.01
-    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
-    floor_d, gain_d = fit_noise_model_from_residuals(df, rel_error=0.003)
-    assert floor_d["1"] >= 0.0
-    assert gain_d["1"] >= 0.0
+    y_pred = np.linspace(50, 500, 400)
+    floor, true_gain = 5.0, 0.8
+    sigma = np.sqrt(floor**2 + true_gain * y_pred)
+    resid = sigma * rng.standard_normal(400)
+    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    gain = fit_gain_from_residuals(df, sigma_floor={"1": floor})
+    assert abs(gain["1"] - true_gain) / true_gain < 0.2
 
 
-def test_fit_noise_model_multi_label() -> None:
-    """Function handles multiple labels in the DataFrame."""
-    rng = np.random.default_rng(7)
-    y = np.linspace(10, 500, 100)
+def test_fit_gain_multi_label() -> None:
+    """Per-label gain recovery should work for multiple labels."""
+    rng = np.random.default_rng(3)
+    y = np.linspace(50, 500, 200)
     parts = []
-    for lbl, floor in [("1", 3.0), ("2", 10.0)]:
-        sigma = np.sqrt(floor**2 + 1.0 * y + (0.003 * y) ** 2)
-        resid = sigma * rng.standard_normal(100)
+    for lbl, gain_true, floor in [("1", 1.0, 5.0), ("2", 2.0, 3.0)]:
+        sigma = np.sqrt(floor**2 + gain_true * y)
+        resid = sigma * rng.standard_normal(200)
         parts.append(pd.DataFrame({"label": lbl, "resid_raw": resid, "predicted": y}))
     df = pd.concat(parts, ignore_index=True)
-    floor_d, _ = fit_noise_model_from_residuals(df, rel_error=0.003)
-    assert "1" in floor_d
-    assert "2" in floor_d
+    gain = fit_gain_from_residuals(df, sigma_floor={"1": 5.0, "2": 3.0})
+    assert gain["1"] >= 0.0
+    assert gain["2"] >= 0.0
 
 
-# --- fit_gain_and_rel_error_from_residuals ---
-
-
-def test_fit_gain_and_rel_error_recovers_known_params() -> None:
-    """Combined variance from estimates should be within 3x of true combined variance."""
-    rng = np.random.default_rng(99)
-    true_gain, true_alpha, floor = 2.0, 0.02, 5.0
-    y = np.linspace(50, 500, 300)
-    sigma = np.sqrt(floor**2 + true_gain * y + (true_alpha * y) ** 2)
-    resid = sigma * rng.standard_normal(300)
-    df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
-    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"1": floor})
-    assert gain_d["1"] >= 0.0
-    assert alpha_d["1"] >= 0.0
-    combined_est = gain_d["1"] * np.mean(y) + (alpha_d["1"] * np.mean(y)) ** 2
-    combined_true = true_gain * np.mean(y) + (true_alpha * np.mean(y)) ** 2
-    assert combined_est < 3 * combined_true
-
-
-def test_fit_gain_and_rel_error_non_negative() -> None:
-    """Estimated gain and rel_error should be non-negative."""
-    rng = np.random.default_rng(1)
+def test_fit_gain_non_negative_clamped() -> None:
+    """Gain should be clamped to 0 when residuals are smaller than floor."""
+    rng = np.random.default_rng(5)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
     df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y})
-    gain_d, alpha_d = fit_gain_and_rel_error_from_residuals(df, {"1": 10.0})
-    assert gain_d["1"] >= 0.0
-    assert alpha_d["1"] >= 0.0
+    gain = fit_gain_from_residuals(df, sigma_floor={"1": 100.0})
+    assert gain["1"] >= 0.0
 
 
 # --- fit_rel_error_from_residuals ---

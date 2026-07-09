@@ -125,7 +125,8 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if gain_mode == "fixed":
                 priors["gain"] = pt.as_tensor_variable(mu_g)
             elif gain_mode == "free":
-                priors["gain"] = pm.Exponential("gain", lam=1.0)
+                # Hint sets the prior mean (Exponential mean = 1/lam).
+                priors["gain"] = pm.Exponential("gain", lam=1.0 / max(mu_g, 1e-6))
             else:  # centered
                 priors["gain"] = pm.TruncatedNormal(
                     "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
@@ -137,7 +138,9 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if gain_mode == "fixed":
                     priors["gain"][lbl] = pt.as_tensor_variable(mu_g)
                 elif gain_mode == "free":
-                    priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=1.0)
+                    # Hint (if any) sets the Exponential prior mean; else mean 1.
+                    lam = 1.0 / mu_g if mu_g > 0.0 else 1.0
+                    priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=lam)
                 elif mu_g > 0.0:
                     priors["gain"][lbl] = pm.TruncatedNormal(
                         f"gain_{lbl}",
@@ -157,7 +160,8 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if alpha_mode == "fixed":
                 priors["rel_error"] = pt.as_tensor_variable(mu_a)
             elif alpha_mode == "free":
-                priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.02)
+                # Hint sets the HalfNormal scale (mu_a falls back to 0.02).
+                priors["rel_error"] = pm.HalfNormal("rel_error", sigma=max(mu_a, 1e-6))
             else:  # centered
                 priors["rel_error"] = pm.TruncatedNormal(
                     "rel_error", mu=mu_a, sigma=max(0.25 * mu_a, 0.001), lower=0.0
@@ -169,8 +173,10 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if alpha_mode == "fixed":
                     priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
                 elif alpha_mode == "free":
+                    # Hint (if any) sets the HalfNormal scale; else 0.02.
+                    sigma_a = mu_a if mu_a > 0.0 else 0.02
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=0.02
+                        f"rel_error_{lbl}", sigma=sigma_a
                     )
                 elif mu_a > 0.0:
                     priors["rel_error"][lbl] = pm.TruncatedNormal(
