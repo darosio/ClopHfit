@@ -46,7 +46,26 @@ RESIDUAL_TABLE_COLUMNS = [
 
 @dataclass
 class ResidualDiagnostics:
-    """Convenience wrapper for repeated residual diagnostics."""
+    """Single fluent home for residual analysis over a canonical residual table.
+
+    Build one from a fit (``ResidualDiagnostics.from_fit_results(...)``) or wrap
+    an existing table (``ResidualDiagnostics(fr.residuals)``), then chain
+    transforms and read summaries. This is the place to reach for residual
+    analysis; the module-level ``residual_*`` functions are its building blocks.
+
+    Transforms (return a new ``ResidualDiagnostics``): :meth:`annotate`,
+    :meth:`step_centered`, :meth:`label_scaled`, :meth:`well_scaled`,
+    :meth:`with_relative_residuals`.
+
+    Summaries / analyses (return frames): :meth:`well_summary`,
+    :meth:`normality`, :meth:`step_summary`, :meth:`position_summary`,
+    :meth:`tail_rows`, :meth:`distribution_summary`, :meth:`x_correlation`,
+    :meth:`lag1_autocorrelation`. Further building blocks are the module-level
+    ``residual_x_trend_summary`` / ``residual_cross_label_correlation``.
+
+    Plots: :meth:`plot_hist_qq`, :meth:`plot_step`, :meth:`plot_role`,
+    :meth:`plot_col`, :meth:`plot_well_summary`.
+    """
 
     residuals: pd.DataFrame
     value_col: str = "std_res"
@@ -238,6 +257,34 @@ class ResidualDiagnostics:
                 "skew",
             ])
         return out
+
+    # -- Distribution / trend / correlation analyses (delegate to the free
+    #    functions below, all on the ``std_res`` column). Grouped here so the
+    #    diagnostics object is the single place to reach for residual analysis.
+    def distribution_summary(self) -> pd.DataFrame:
+        """Per-(trace, label) residual distribution stats.
+
+        See :func:`residual_distribution_summary`. Supersedes
+        :func:`clophfit.fitting.residuals.residual_statistics`.
+        """
+        return residual_distribution_summary(self.residuals)
+
+    def x_correlation(self) -> pd.DataFrame:
+        """Pearson/Spearman correlation of residuals against x.
+
+        See :func:`residual_x_correlation`. Relates to
+        :func:`clophfit.fitting.residuals.estimate_x_shift_statistics`;
+        :func:`residual_x_trend_summary` gives the by-step trend.
+        """
+        return residual_x_correlation(self.residuals)
+
+    def lag1_autocorrelation(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Lag-1 residual autocorrelation per well and its per-label summary.
+
+        See :func:`residual_lag1_autocorrelation`. Supersedes
+        :func:`clophfit.fitting.residuals.detect_adjacent_correlation`.
+        """
+        return residual_lag1_autocorrelation(self.residuals)
 
     def tail_rows(self, n: int = 30, *, column: str | None = None) -> pd.DataFrame:
         """Return rows with largest absolute residual values."""

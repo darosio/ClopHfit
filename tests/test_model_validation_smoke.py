@@ -940,3 +940,21 @@ def test_residual_diagnostics_plot_col_requires_annotation() -> None:
     })
     with pytest.raises(ValueError, match="annotate"):
         ResidualDiagnostics(df).plot_col()
+
+
+def test_residual_diagnostics_analysis_methods_smoke() -> None:
+    """ResidualDiagnostics exposes the distribution/trend/correlation analyses."""
+    df = pd.DataFrame({
+        "trace_id": ["m1"] * 8,
+        "well": ["A01", "A02"] * 4,
+        "label": ["1", "1", "2", "2"] * 2,
+        "step": [0, 0, 0, 0, 1, 1, 1, 1],
+        "x": [8.9, 8.9, 8.9, 8.9, 8.2, 8.2, 8.2, 8.2],
+        "std_res": np.linspace(-1.0, 1.0, 8),
+    })
+    diag = ResidualDiagnostics(df)
+    assert len(diag.distribution_summary()) == 2  # one row per label
+    assert isinstance(diag.x_correlation(), pd.DataFrame)
+    lag, lag_summary = diag.lag1_autocorrelation()
+    assert isinstance(lag, pd.DataFrame)
+    assert isinstance(lag_summary, pd.DataFrame)
