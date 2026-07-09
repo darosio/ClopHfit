@@ -13,6 +13,7 @@ import copy
 import warnings
 from collections import UserDict
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
 
@@ -27,6 +28,8 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 from .errors import InvalidDataError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from lmfit import Parameters  # type: ignore[import-untyped]
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
@@ -471,6 +474,68 @@ class FitResult[MiniType: MiniProtocol]:
             and self.mini is not None
         )
 
+    @cached_property
+    def residuals(self) -> pd.DataFrame:
+        """Canonical per-observation residual table for this fit.
+
+        Lazily computed, cached, and returned in the schema shared across the
+        package (``clophfit.fitting.model_validation.RESIDUAL_TABLE_COLUMNS``:
+        ``raw_res``, ``that``, ``sigma``, ``std_res``, …). Works for both LMFit
+        and PyMC fits; robustness is auto-detected from the trace. Use
+        :meth:`residual_table` to override the model or robust settings.
+        """
+        return self.residual_table()
+
+    def residual_table(
+        self,
+        *,
+        binding_function: Callable[..., object] | None = None,
+        robust: bool | None = None,
+        student_t_nu: float | None = None,
+        outlier_threshold: float = 3.0,
+        well: str = "",
+    ) -> pd.DataFrame:
+        """Compute the canonical residual table with explicit settings.
+
+        Parameters
+        ----------
+        binding_function : Callable[..., object] | None
+            Model to evaluate the prediction; defaults to ``binding_1site``.
+        robust : bool | None
+            Force the robust standardization of ``std_res``. ``None``
+            auto-detects from the trace.
+        student_t_nu : float | None
+            Student-t degrees of freedom for the robust score. ``None`` uses the
+            detected/default value.
+        outlier_threshold : float
+            Threshold for the ``is_residual_outlier`` flag.
+        well : str
+            Value placed in the ``well`` column (single-fit label).
+
+        Returns
+        -------
+        pd.DataFrame
+            The canonical residual table (see :attr:`residuals`).
+        """
+        from clophfit.fitting import model_validation  # noqa: PLC0415
+        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
+
+        bfunc = binding_1site if binding_function is None else binding_function
+        if robust is None:
+            robust, detected_nu = model_validation.robust_settings_from_trace(self.mini)
+            if student_t_nu is None:
+                student_t_nu = detected_nu
+        if student_t_nu is None:
+            student_t_nu = model_validation.STUDENT_T_NU
+        return model_validation.residuals_from_fit_results(
+            {well: self},
+            trace_id="",
+            binding_function=bfunc,
+            robust=robust,
+            student_t_nu=student_t_nu,
+            outlier_threshold=outlier_threshold,
+        )
+
 
 @dataclass
 class MultiFitResult:
@@ -490,6 +555,64 @@ class MultiFitResult:
     def __getattr__(self, name: str) -> object:
         """Delegate trace attributes for convenient compatibility."""
         return getattr(self.trace, name)
+
+    @cached_property
+    def residuals(self) -> pd.DataFrame:
+        """Canonical per-observation residual table across all wells.
+
+        Lazily computed, cached, and returned in the shared schema
+        (``RESIDUAL_TABLE_COLUMNS``, including ``p_outlier_per_point`` extracted
+        from the trace). Robustness is auto-detected; use :meth:`residual_table`
+        to override.
+        """
+        return self.residual_table()
+
+    def residual_table(
+        self,
+        *,
+        binding_function: Callable[..., object] | None = None,
+        robust: bool | None = None,
+        student_t_nu: float | None = None,
+        outlier_threshold: float = 3.0,
+    ) -> pd.DataFrame:
+        """Compute the canonical multi-well residual table with explicit settings.
+
+        Parameters
+        ----------
+        binding_function : Callable[..., object] | None
+            Model to evaluate; defaults to ``binding_1site``.
+        robust : bool | None
+            Force robust standardization of ``std_res`` (``None`` auto-detects).
+        student_t_nu : float | None
+            Student-t degrees of freedom (``None`` uses detected/default).
+        outlier_threshold : float
+            Threshold for the ``is_residual_outlier`` flag.
+
+        Returns
+        -------
+        pd.DataFrame
+            The canonical residual table (see :attr:`residuals`).
+        """
+        from clophfit.fitting import model_validation  # noqa: PLC0415
+        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
+
+        bfunc = binding_1site if binding_function is None else binding_function
+        if robust is None:
+            robust, detected_nu = model_validation.robust_settings_from_trace(
+                self.trace
+            )
+            if student_t_nu is None:
+                student_t_nu = detected_nu
+        if student_t_nu is None:
+            student_t_nu = model_validation.STUDENT_T_NU
+        return model_validation.residuals_from_multifit(
+            self,
+            trace_id="",
+            binding_function=bfunc,
+            robust=robust,
+            student_t_nu=student_t_nu,
+            outlier_threshold=outlier_threshold,
+        )
 
 
 @dataclass

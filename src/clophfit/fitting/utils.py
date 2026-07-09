@@ -353,8 +353,8 @@ def fit_rel_error_from_residuals(
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with columns ``label`` (str), ``resid_raw`` (float), and
-        ``predicted`` (float -- the model-predicted signal at each point).
+        DataFrame with columns ``label`` (str), ``raw_res`` (float), and
+        ``that`` (float -- the model-predicted signal at each point).
         Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -372,7 +372,7 @@ def fit_rel_error_from_residuals(
     >>> floor, true_alpha = 5.0, 0.02
     >>> sigma = np.sqrt(floor**2 + (true_alpha * y_pred) ** 2)
     >>> resid = sigma * rng.standard_normal(200)
-    >>> df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
     >>> alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": floor})
     >>> round(alpha["1"], 2)  # should be close to true_alpha=0.02
     0.02
@@ -380,8 +380,8 @@ def fit_rel_error_from_residuals(
     result: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        r2_mean = float((grp["resid_raw"] ** 2).mean())
-        pred2_mean = float((grp["predicted"] ** 2).mean())
+        r2_mean = float((grp["raw_res"] ** 2).mean())
+        pred2_mean = float((grp["that"] ** 2).mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         alpha_sq = max(0.0, r2_mean - floor**2) / max(pred2_mean, 1e-12)
         result[lbl_str] = float(np.sqrt(alpha_sq))
@@ -408,8 +408,8 @@ def fit_gain_from_residuals(
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with columns ``label`` (str), ``resid_raw`` (float), and
-        ``predicted`` (float -- the model-predicted signal at each point).
+        DataFrame with columns ``label`` (str), ``raw_res`` (float), and
+        ``that`` (float -- the model-predicted signal at each point).
         Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -427,7 +427,7 @@ def fit_gain_from_residuals(
     >>> floor, true_gain = 5.0, 0.8
     >>> sigma = np.sqrt(floor**2 + true_gain * y_pred)
     >>> resid = sigma * rng.standard_normal(400)
-    >>> df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
     >>> gain = fit_gain_from_residuals(df, sigma_floor={"1": floor})
     >>> round(gain["1"], 1)  # should be close to true_gain=0.8
     0.8
@@ -435,8 +435,8 @@ def fit_gain_from_residuals(
     result: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        r2_mean = float((grp["resid_raw"] ** 2).mean())
-        pred_mean = float(grp["predicted"].mean())
+        r2_mean = float((grp["raw_res"] ** 2).mean())
+        pred_mean = float(grp["that"].mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         gain = max(0.0, r2_mean - floor**2) / max(pred_mean, 1e-12)
         result[lbl_str] = float(gain)
@@ -460,7 +460,7 @@ def fit_noise_model_nnls(
     Parameters
     ----------
     df : pd.DataFrame
-        Residual DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
+        Residual DataFrame with columns ``label``, ``raw_res``, ``that``.
     sigma_floor_fixed : dict[str, float] | None
         If given, fix floor per label and only fit gain and alpha.
     rel_error_fixed : dict[str, float] | None
@@ -486,8 +486,8 @@ def fit_noise_model_nnls(
 
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        y = grp["predicted"].to_numpy().astype(float)
-        r2 = grp["resid_raw"].to_numpy().astype(float) ** 2
+        y = grp["that"].to_numpy().astype(float)
+        r2 = grp["raw_res"].to_numpy().astype(float) ** 2
 
         if sigma_floor_fixed is not None:
             floor = sigma_floor_fixed.get(lbl_str, 0.0)
@@ -593,8 +593,8 @@ def fit_ph_slope_noise(
     Parameters
     ----------
     df : pd.DataFrame
-        Residual DataFrame with columns ``label``, ``well``, ``resid_raw``,
-        ``predicted``, and ``raw_i``.
+        Residual DataFrame with columns ``label``, ``well``, ``raw_res``,
+        ``that``, and ``raw_i``.
     noise_model : PlateNoiseModel
         Per-label noise model (floor, gain, alpha) fitted in the same pass.
     plate_slopes : dict[str, dict[str, np.ndarray]]
@@ -611,12 +611,12 @@ def fit_ph_slope_noise(
         params = noise_model[str(lbl)]
         mask = df["label"] == lbl
         df.loc[mask, "var_model"] = compute_noise_variance(
-            df.loc[mask, "predicted"].to_numpy(dtype=float),
+            df.loc[mask, "that"].to_numpy(dtype=float),
             params.sigma_floor,
             params.gain,
             params.alpha,
         )
-    df["var_excess"] = df["resid_raw"] ** 2 - df["var_model"]
+    df["var_excess"] = df["raw_res"] ** 2 - df["var_model"]
     df["slope_sq"] = np.nan
     for (lbl, well), grp in df.groupby(["label", "well"]):
         w_slopes_dict = plate_slopes.get(str(well))

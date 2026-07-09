@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 
 from clophfit.fitting.core import fit_binding_glob
@@ -13,6 +14,7 @@ from clophfit.fitting.data_structures import (
     NoiseModelParams,
     PlateNoiseModel,
 )
+from clophfit.fitting.model_validation import robust_settings_from_trace
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.residuals import (
@@ -100,30 +102,34 @@ class TestResidualPoint:
         point = ResidualPoint(
             label="1",
             x=7.0,
-            resid_weighted=0.5,
-            resid_raw=5.0,
+            y=1000.0,
+            that=995.0,
+            sigma=10.0,
+            raw_res=5.0,
+            likelihood_res=0.5,
+            std_res=0.5,
             raw_i=0,
-            y_err=10.0,
-            predicted=995.0,
         )
         assert point.label == "1"
         assert point.x == 7.0
-        assert point.resid_weighted == 0.5
-        assert point.resid_raw == 5.0
+        assert point.std_res == 0.5
+        assert point.raw_res == 5.0
         assert point.raw_i == 0
-        assert point.y_err == 10.0
-        assert point.predicted == 995.0
+        assert point.sigma == 10.0
+        assert point.that == 995.0
 
     def test_frozen(self) -> None:
         """Test that ResidualPoint is immutable."""
         point = ResidualPoint(
             label="1",
             x=7.0,
-            resid_weighted=0.5,
-            resid_raw=5.0,
+            y=1000.0,
+            that=995.0,
+            sigma=10.0,
+            raw_res=5.0,
+            likelihood_res=0.5,
+            std_res=0.5,
             raw_i=0,
-            y_err=10.0,
-            predicted=995.0,
         )
         with pytest.raises(AttributeError):
             point.x = 8.0  # type: ignore[misc]
@@ -142,8 +148,8 @@ class TestExtractResidualPoints:
         points = extract_residual_points(simple_fit_result)
         assert len(points) == 5
         assert all(p.label == "1" for p in points)
-        assert all(isinstance(p.resid_weighted, float) for p in points)
-        assert all(isinstance(p.resid_raw, float) for p in points)
+        assert all(isinstance(p.std_res, float) for p in points)
+        assert all(isinstance(p.raw_res, float) for p in points)
 
     def test_multi_label(
         self, multi_label_fit_result: FitResult[MinimizerResult]
@@ -193,8 +199,8 @@ class TestExtractResidualPoints:
         points = extract_residual_points(fr)
 
         assert [p.raw_i for p in points] == [0, 2, 3, 4]
-        assert [p.resid_weighted for p in points] == [1.0, 3.0, 4.0, 5.0]
-        assert 99.0 not in [p.resid_weighted for p in points]
+        assert [p.std_res for p in points] == [1.0, 3.0, 4.0, 5.0]
+        assert 99.0 not in [p.std_res for p in points]
 
 
 ###############################################################################
@@ -211,11 +217,13 @@ class TestResidualDataframe:
         expected_cols = {
             "label",
             "x",
-            "resid_weighted",
-            "resid_raw",
+            "y",
+            "that",
+            "sigma",
+            "raw_res",
+            "likelihood_res",
+            "std_res",
             "raw_i",
-            "y_err",
-            "predicted",
         }
         assert set(df.columns) == expected_cols
 
@@ -229,13 +237,52 @@ class TestResidualDataframe:
         df = residual_dataframe(empty_fit_result)
         assert len(df) == 0
 
+
+class TestResidualsEntryPoint:
+    """The FitResult.residuals cached-property entry point."""
+
+    def test_fitresult_residuals_canonical_and_cached(
+        self, simple_fit_result: FitResult[MinimizerResult]
+    ) -> None:
+        """fr.residuals returns the canonical schema and is cached."""
+        r = simple_fit_result.residuals
+        assert {"raw_res", "that", "std_res", "sigma", "raw_i", "label", "x"} <= set(
+            r.columns
+        )
+        assert simple_fit_result.residuals is r  # cached (same object)
+
+    def test_residual_table_override(
+        self, simple_fit_result: FitResult[MinimizerResult]
+    ) -> None:
+        """residual_table(...) yields the same columns as the property."""
+        table = simple_fit_result.residual_table(robust=False)
+        assert list(table.columns) == list(simple_fit_result.residuals.columns)
+
+    def test_robust_settings_from_trace(self) -> None:
+        """Robustness is inferred from posterior variable names."""
+        assert robust_settings_from_trace(None) == (False, 3.0)
+        post = xr.Dataset(
+            {"student_t_nu": (("chain", "draw"), np.array([[4.0, 6.0]]))},
+            coords={"chain": [0], "draw": [0, 1]},
+        )
+        trace = xr.DataTree.from_dict({"posterior": post})
+        robust, nu = robust_settings_from_trace(trace)
+        assert robust is True
+        assert nu == 5.0
+        mix = xr.Dataset(
+            {"pi_outlier_1": (("chain", "draw"), np.array([[0.1, 0.2]]))},
+            coords={"chain": [0], "draw": [0, 1]},
+        )
+        mtrace = xr.DataTree.from_dict({"posterior": mix})
+        assert robust_settings_from_trace(mtrace)[0] is True
+
     def test_dtypes(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test DataFrame column dtypes."""
         df = residual_dataframe(simple_fit_result)
         assert pd.api.types.is_string_dtype(df["label"])
         assert df["x"].dtype == np.float64
-        assert df["resid_weighted"].dtype == np.float64
-        assert df["resid_raw"].dtype == np.float64
+        assert df["std_res"].dtype == np.float64
+        assert df["raw_res"].dtype == np.float64
         assert df["raw_i"].dtype == np.int64
 
 
@@ -322,9 +369,9 @@ class TestResidualStatistics:
         # Create DataFrame with known outliers
         data = {
             "label": ["1"] * 10,
-            "resid_weighted": [0.0, 0.1, -0.1, 0.2, -0.2, 3.0, -3.0, 0.0, 0.1, -0.1],
+            "std_res": [0.0, 0.1, -0.1, 0.2, -0.2, 3.0, -3.0, 0.0, 0.1, -0.1],
             "x": list(range(10)),
-            "resid_raw": [0.0] * 10,
+            "raw_res": [0.0] * 10,
             "i": list(range(10)),
         }
         df = pd.DataFrame(data)
@@ -336,9 +383,9 @@ class TestResidualStatistics:
         """Test outlier rate calculation."""
         data = {
             "label": ["1"] * 10,
-            "resid_weighted": [0.0] * 8 + [3.0, -3.0],  # 2 outliers out of 10
+            "std_res": [0.0] * 8 + [3.0, -3.0],  # 2 outliers out of 10
             "x": list(range(10)),
-            "resid_raw": [0.0] * 10,
+            "raw_res": [0.0] * 10,
             "i": list(range(10)),
         }
         df = pd.DataFrame(data)
@@ -355,7 +402,7 @@ class TestResidualDiagnosticsHelpers:
             "well": ["A01", "A01", "A01", "A01", "A02", "A02", "A02", "A02"] * 2,
             "label": ["1"] * 8 + ["2"] * 8,
             "x": [6.0, 7.0, 8.0, 9.0, 6.0, 7.0, 8.0, 9.0] * 2,
-            "resid_weighted": [
+            "std_res": [
                 -1.0,
                 0.0,
                 1.0,
@@ -398,7 +445,7 @@ class TestResidualDiagnosticsHelpers:
             "well": ["A01", "A01", "A01"],
             "label": ["1", "1", "1"],
             "x": [6.0, 7.0, 8.0],
-            "resid_weighted": [1.0, 1.0, 1.0],
+            "std_res": [1.0, 1.0, 1.0],
         })
 
         rows, by_label = detect_adjacent_correlation(df)

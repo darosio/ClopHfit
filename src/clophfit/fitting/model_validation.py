@@ -28,6 +28,7 @@ RESIDUAL_TABLE_COLUMNS = [
     "well",
     "label",
     "step",
+    "raw_i",
     "x",
     "y",
     "that",
@@ -805,6 +806,45 @@ def _posterior_dataset_or_none(trace: _t.Any) -> _t.Any | None:
         return None
 
 
+def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
+    """Infer ``(robust, student_t_nu)`` from a trace's posterior variables.
+
+    Detects an inferred Student-t (a ``student_t_nu`` deterministic) or a
+    contamination mixture (``pi_outlier_*`` / ``outlier_inflate``). Used by
+    ``FitResult.residuals`` / ``MultiFitResult.residuals`` so the residual table
+    is standardized correctly without the caller re-supplying fit settings.
+
+    Parameters
+    ----------
+    trace : _t.Any
+        A PyMC trace (``xr.DataTree``) or ``None`` for classical fits.
+
+    Returns
+    -------
+    tuple[bool, float]
+        Whether a robust likelihood was used and the Student-t nu to apply.
+
+    Notes
+    -----
+    A *fixed*-nu Student-t leaves no trace marker and is reported as non-robust;
+    only the Normal-score transform of ``std_res`` differs (``raw_res``/``that``/
+    ``likelihood_res`` are unaffected). Pass ``robust=`` to
+    ``residual_table`` to override.
+    """
+    post = _posterior_dataset_or_none(trace)
+    if post is None:
+        return False, STUDENT_T_NU
+    names = {str(n) for n in getattr(post, "data_vars", {})}
+    if any(n.startswith("pi_outlier") for n in names) or "outlier_inflate" in names:
+        return True, STUDENT_T_NU
+    if "student_t_nu" in names:
+        try:
+            return True, float(post["student_t_nu"].mean())
+        except Exception:
+            return True, STUDENT_T_NU
+    return False, STUDENT_T_NU
+
+
 def _fit_result_labels(fit: _t.Any) -> tuple[str, ...]:
     dataset = getattr(fit, "dataset", None)
     if dataset is None:
@@ -1344,6 +1384,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "well": str(well),
                     "label": str(lbl),
                     "step": int(step[j]),
+                    "raw_i": int(step[j]),
                     "x": float(x[j]),
                     "y": float(y[j]),
                     "that": float(that[j]),
@@ -1424,6 +1465,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
                     "well": str(well),
                     "label": str(lbl),
                     "step": int(step[j]) if j < len(step) else int(j),
+                    "raw_i": int(step[j]) if j < len(step) else int(j),
                     "x": float(x[j]),
                     "y": float(y[j]),
                     "that": float(that[j]),

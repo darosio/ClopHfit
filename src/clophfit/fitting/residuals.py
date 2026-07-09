@@ -46,25 +46,37 @@ class ResidualPoint:
         Dataset label (e.g., '1', '2' for multi-label fits)
     x : float
         X-value (pH or ligand concentration)
-    resid_weighted : float
-        Weighted residual: (y - model) / y_err
-    resid_raw : float
-        Raw residual: (y - model)
+    y : float
+        Observed signal value.
+    that : float
+        Model-predicted signal value (``y - raw_res``).
+    sigma : float
+        Measurement uncertainty used during fitting.
+    raw_res : float
+        Raw residual: ``y - that``.
+    likelihood_res : float
+        Likelihood-scale residual: ``(y - that) / sigma``.
+    std_res : float
+        Normal-scale standardized residual (equal to *likelihood_res* for a
+        Normal likelihood, as produced by LMFit/ODR fits).
     raw_i : int
         Index into the original (unmasked) arrays for this label (`DataArray.xc/yc`).
-    y_err : float
-        Measurement uncertainty used during fitting.
-    predicted : float
-        Model-predicted signal value (y - resid_raw).
+
+    Notes
+    -----
+    Field names follow the canonical residual-table schema shared with
+    :data:`clophfit.fitting.model_validation.RESIDUAL_TABLE_COLUMNS`.
     """
 
     label: str
     x: float
-    resid_weighted: float
-    resid_raw: float
+    y: float
+    that: float
+    sigma: float
+    raw_res: float
+    likelihood_res: float
+    std_res: float
     raw_i: int
-    y_err: float
-    predicted: float
 
 
 def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
@@ -138,11 +150,13 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
             ResidualPoint(
                 label=lbl,
                 x=float(xs[i]),
-                resid_weighted=float(rw[i]),
-                resid_raw=float(rr[i]),
+                y=float(ys[i]),
+                that=float(ys[i]) - float(rr[i]),
+                sigma=float(y_err[i]),
+                raw_res=float(rr[i]),
+                likelihood_res=float(rw[i]),
+                std_res=float(rw[i]),
                 raw_i=int(raw_is[i]),
-                y_err=float(y_err[i]),
-                predicted=float(ys[i]) - float(rr[i]),
             )
             for i in range(len(rw))
         )
@@ -165,7 +179,8 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        DataFrame with columns: label, x, resid_weighted, resid_raw, raw_i, y_err, predicted
+        DataFrame with the canonical residual columns: label, x, y, that,
+        sigma, raw_res, likelihood_res, std_res, raw_i.
 
     Examples
     --------
@@ -201,7 +216,8 @@ def collect_multi_residuals(
     Returns
     -------
     pd.DataFrame
-        Combined DataFrame with columns: well, label, x, resid_weighted, resid_raw, raw_i
+        Combined DataFrame with the canonical residual columns plus ``well``:
+        well, label, x, y, that, sigma, raw_res, likelihood_res, std_res, raw_i.
 
     Examples
     --------
@@ -266,7 +282,7 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
         return int((np.abs(x) > OUTLIER_THRESHOLD_2SIGMA).sum())
 
     # Use dict format for agg to avoid mypy issues with tuple format
-    summary = df.groupby("label")["resid_weighted"].agg(
+    summary = df.groupby("label")["std_res"].agg(
         mean="mean",
         std="std",
         median="median",
@@ -330,7 +346,7 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
 
     # Check 1: Systematic bias (t-test against 0) per label
     for lbl, group in df.groupby("label"):
-        r_lbl = group["resid_weighted"].to_numpy()
+        r_lbl = group["std_res"].to_numpy()
         if len(r_lbl) > 1:
             _t_stat, p_value = sp_stats.ttest_1samp(r_lbl, 0)
             if p_value < BIAS_P_VALUE_THRESHOLD:
@@ -341,7 +357,7 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
                     )
 
     # Check 2: Outliers (more than 5% beyond ±2-sigma)
-    r_all = df["resid_weighted"].to_numpy()
+    r_all = df["std_res"].to_numpy()
     outlier_rate = (np.abs(r_all) > OUTLIER_THRESHOLD_2SIGMA).mean()
     checks["outliers_ok"] = bool(outlier_rate < OUTLIER_RATE_THRESHOLD)
     if not checks["outliers_ok"] and verbose:
@@ -353,7 +369,7 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
     for _lbl, group in df.groupby("label"):
         # Sort by x to ensure temporal/spatial adjacent ordering is correct
         g_sorted = group.sort_values("x")
-        r_lbl = g_sorted["resid_weighted"].to_numpy()
+        r_lbl = g_sorted["std_res"].to_numpy()
         if len(r_lbl) > 1:
             ss_diff += np.sum(np.diff(r_lbl) ** 2)
             ss_total += np.sum(r_lbl**2)
@@ -370,7 +386,7 @@ def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str,
 
 
 def compute_residual_covariance(
-    all_res: pd.DataFrame, value_col: str = "resid_weighted"
+    all_res: pd.DataFrame, value_col: str = "std_res"
 ) -> dict[str, pd.DataFrame]:
     """Compute covariance matrix of residuals for each label."""
     cov_by_label: dict[str, pd.DataFrame] = {}
@@ -416,25 +432,25 @@ def analyze_label_bias(
     all_res = all_res.copy()
     all_res["x_bin"] = pd.cut(all_res["x"], bins=n_bins)
 
-    mean_resid = all_res["resid_weighted"].mean()
-    std_resid = all_res["resid_weighted"].std()
-    all_res["std_res"] = (all_res["resid_weighted"] - mean_resid) / std_resid
+    mean_resid = all_res["std_res"].mean()
+    std_resid = all_res["std_res"].std()
+    all_res["std_res"] = (all_res["std_res"] - mean_resid) / std_resid
 
     bias_summary = all_res.groupby(["label", "x_bin"], observed=False).agg(
-        mean_resid=("resid_weighted", "mean"),
-        std_resid=("resid_weighted", "std"),
-        count=("resid_weighted", "count"),
+        mean_resid=("std_res", "mean"),
+        std_resid=("std_res", "std"),
+        count=("std_res", "count"),
         outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
         mean_std_res=("std_res", "mean"),
     )
 
     label_bias = all_res.groupby("label", observed=False).agg(
-        mean_resid=("resid_weighted", "mean"),
-        std_resid=("resid_weighted", "std"),
-        median_resid=("resid_weighted", "median"),
+        mean_resid=("std_res", "mean"),
+        std_resid=("std_res", "std"),
+        median_resid=("std_res", "median"),
         outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
         negative_bias_frac=(
-            "resid_weighted",
+            "std_res",
             lambda x: (x < strong_negative_threshold).mean(),
         ),
     )
@@ -451,7 +467,7 @@ def detect_adjacent_correlation(
 
     for (lbl, well), group in all_res.groupby(["label", "well"]):
         g = group.sort_values("x")
-        res = g["resid_weighted"].to_numpy()
+        res = g["std_res"].to_numpy()
 
         if len(res) > 1:
             corr = np.corrcoef(res[:-1], res[1:])[0, 1]
@@ -484,7 +500,7 @@ def estimate_x_shift_statistics(
 
         if len(sorted_group) > MIN_POINTS_FOR_TREND:
             x_vals = sorted_group["x"].to_numpy()
-            res_vals = sorted_group["resid_weighted"].to_numpy()
+            res_vals = sorted_group["std_res"].to_numpy()
 
             try:
                 slope, intercept = np.polyfit(x_vals, res_vals, 1)
@@ -520,7 +536,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
     ----------
     all_res : pd.DataFrame
         Residual DataFrame from ``collect_multi_residuals``.  Must contain
-        columns ``label``, ``predicted``, and ``resid_weighted``.
+        columns ``label``, ``that``, and ``std_res``.
     title : str, optional
         Figure suptitle suffix.
 
@@ -536,8 +552,8 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
 
     for ax, label in zip(axes[0], labels, strict=False):
         grp = all_res[all_res["label"] == label]
-        pred = grp["predicted"].to_numpy(dtype=float)
-        std_res = grp["resid_weighted"].to_numpy(dtype=float)
+        pred = grp["that"].to_numpy(dtype=float)
+        std_res = grp["std_res"].to_numpy(dtype=float)
         ax.scatter(pred, np.abs(std_res), s=8, alpha=0.3, color="C0")
 
         valid = np.isfinite(pred) & np.isfinite(std_res)
@@ -583,7 +599,7 @@ def plot_residual_vs_yerr(all_res: pd.DataFrame, title: str = "") -> Figure:
     ----------
     all_res : pd.DataFrame
         Residual DataFrame from ``collect_multi_residuals``.  Must contain
-        columns ``label``, ``y_err``, and ``resid_raw``.
+        columns ``label``, ``sigma``, and ``raw_res``.
     title : str, optional
         Figure suptitle suffix.
 
@@ -599,8 +615,8 @@ def plot_residual_vs_yerr(all_res: pd.DataFrame, title: str = "") -> Figure:
 
     for ax, label in zip(axes[0], labels, strict=False):
         grp = all_res[all_res["label"] == label]
-        y_err = grp["y_err"].to_numpy(dtype=float)
-        raw_res = grp["resid_raw"].to_numpy(dtype=float)
+        y_err = grp["sigma"].to_numpy(dtype=float)
+        raw_res = grp["raw_res"].to_numpy(dtype=float)
         valid = np.isfinite(y_err) & np.isfinite(raw_res) & (y_err > 0)
         ye_v, rr_v = y_err[valid], raw_res[valid]
 
