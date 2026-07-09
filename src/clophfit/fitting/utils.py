@@ -388,6 +388,61 @@ def fit_rel_error_from_residuals(
     return result
 
 
+def fit_gain_from_residuals(
+    df: "pd.DataFrame",
+    sigma_floor: dict[str, float],
+) -> dict[str, float]:
+    r"""Estimate Poisson gain per label via moment estimator.
+
+    Symmetric counterpart to :func:`fit_rel_error_from_residuals`. Assumes the
+    Poisson-only noise model ``sigma^2 = floor^2 + gain * that`` (no
+    proportional term), which sidesteps the gain/alpha collinearity of the
+    joint fit. With ``floor`` known from buffer measurements and using
+    model-predicted values ``that``, the closed-form moment estimator is:
+
+    .. math::
+
+        \hat{\text{gain}} =
+        \frac{\overline{r^2} - \sigma_{\text{floor}}^2}{\overline{\hat{y}}}
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns ``label`` (str), ``resid_raw`` (float), and
+        ``predicted`` (float -- the model-predicted signal at each point).
+        Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
+    sigma_floor : dict[str, float]
+        Known read-noise floor per label, e.g. from ``tit.bg_noise``.
+
+    Returns
+    -------
+    dict[str, float]
+        Per-label Poisson gain estimate (non-negative).
+
+    Examples
+    --------
+    >>> import numpy as np, pandas as pd
+    >>> rng = np.random.default_rng(0)
+    >>> y_pred = np.linspace(50, 500, 400)
+    >>> floor, true_gain = 5.0, 0.8
+    >>> sigma = np.sqrt(floor**2 + true_gain * y_pred)
+    >>> resid = sigma * rng.standard_normal(400)
+    >>> df = pd.DataFrame({"label": "1", "resid_raw": resid, "predicted": y_pred})
+    >>> gain = fit_gain_from_residuals(df, sigma_floor={"1": floor})
+    >>> round(gain["1"], 1)  # should be close to true_gain=0.8
+    0.8
+    """
+    result: dict[str, float] = {}
+    for lbl, grp in df.groupby("label"):
+        lbl_str = str(lbl)
+        r2_mean = float((grp["resid_raw"] ** 2).mean())
+        pred_mean = float(grp["predicted"].mean())
+        floor = float(sigma_floor.get(lbl_str, 0.0))
+        gain = max(0.0, r2_mean - floor**2) / max(pred_mean, 1e-12)
+        result[lbl_str] = float(gain)
+    return result
+
+
 def fit_noise_model_nnls(
     df: pd.DataFrame,
     sigma_floor_fixed: dict[str, float] | None = None,
@@ -467,60 +522,6 @@ def fit_noise_model_nnls(
             alpha_out[lbl_str] = float(np.sqrt(coeffs[2]))
 
     return sigma_floor_out, gain_out, alpha_out
-
-
-def fit_noise_model_from_residuals(
-    df: "pd.DataFrame",
-    rel_error: float | dict[str, float] = 0.003,
-) -> tuple[dict[str, float], dict[str, float]]:
-    r"""Fit per-label noise model parameters from first-pass residuals.
-
-    With ``rel_error`` fixed, the noise equation becomes linear in two unknowns
-    via non-negative least squares.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
-    rel_error : float | dict[str, float], optional
-        Fixed proportional error. A single float is broadcast to all labels.
-        Default is 0.003.
-
-    Returns
-    -------
-    tuple[dict[str, float], dict[str, float]]
-        ``(sigma_floor_dict, gain_dict)`` per label (non-negative).
-    """
-    if isinstance(rel_error, float):
-        labels = df["label"].unique()
-        rel_error = {str(lbl): rel_error for lbl in labels}
-    sigma_floor, gain_d, _ = fit_noise_model_nnls(df, rel_error_fixed=rel_error)
-    return sigma_floor, gain_d
-
-
-def fit_gain_and_rel_error_from_residuals(
-    df: "pd.DataFrame",
-    sigma_floor: dict[str, float],
-) -> tuple[dict[str, float], dict[str, float]]:
-    r"""Fit gain and rel_error per label from residuals with known floor.
-
-    Uses non-negative least squares on ``r^2 - floor^2 = gain * y + alpha^2 * y^2``
-    to handle collinearity between :math:`y` and :math:`y^2`.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame with columns ``label``, ``resid_raw``, ``predicted``.
-    sigma_floor : dict[str, float]
-        Known noise floor per label.
-
-    Returns
-    -------
-    tuple[dict[str, float], dict[str, float]]
-        ``(gain_dict, rel_error_dict)`` per label (non-negative).
-    """
-    _, gain_d, alpha_d = fit_noise_model_nnls(df, sigma_floor_fixed=sigma_floor)
-    return gain_d, alpha_d
 
 
 # ------------------------------------------------------------------

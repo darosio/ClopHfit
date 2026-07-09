@@ -7,6 +7,7 @@ import numpy as np
 from lmfit import Parameters  # type: ignore[import-untyped]
 
 from clophfit.fitting import bayes
+from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
@@ -63,7 +64,9 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
 
     # 2. Run Bayesian Fit with x-error modeling
     # n_xerr=1.0 enables x_true modeling
-    fit_res = bayes.fit_binding_pymc(fr, n_samples=500, n_xerr=1.0)
+    fit_res = bayes.fit_binding_pymc(
+        fr, n_xerr=1.0, sampler=SamplerConfig(n_samples=500)
+    )
     assert fit_res.mini is not None
     assert hasattr(fit_res.mini, "posterior")
     trace = fit_res.mini

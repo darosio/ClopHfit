@@ -24,6 +24,18 @@ from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
 
 from clophfit.fitting import model_validation
+from clophfit.fitting.bayes_config import (
+    ContaminationFracPrior,
+    DataKPrior,
+    InitConfig,
+    InitStrategy,
+    NoiseConfig,
+    NoiseParamMode,
+    RobustConfig,
+    RobustLikelihood,
+    SamplerConfig,
+    _validate_contamination_frac_prior,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
@@ -46,14 +58,11 @@ if typing.TYPE_CHECKING:
     from clophfit.prtecan import PlateScheme
 
 
-NoiseParamMode = Literal["fixed", "free", "centered"]
-RobustLikelihood = Literal["student_t", "mixture"]
-InitStrategy = Literal["lmfit", "data_priors"]
-DataKPrior = Literal["midpoint_truncnorm", "uniform"]
-
 _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
-_MIN_CONTAMINATION_FRAC_PRIOR = 1e-3
-_MAX_CONTAMINATION_FRAC_PRIOR = 0.5
+# Numeric floor for free/centered noise-prior scales, so a 0 hint gives the
+# tightest around-zero prior (never a degenerate 0) and the prior width grows
+# monotonically with the hint.
+_MIN_NOISE_PRIOR_SCALE = 1e-3
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -114,11 +123,14 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     if has_gain or gain_mode == "free":
         if shared_gain:
             gains = [p.gain for p in noise_model.values() if p.gain > 0]
-            mu_g = np.mean(gains) if gains else 1.0
+            mu_g = float(np.mean(gains)) if gains else 0.0
             if gain_mode == "fixed":
                 priors["gain"] = pt.as_tensor_variable(mu_g)
             elif gain_mode == "free":
-                priors["gain"] = pm.Exponential("gain", lam=1.0)
+                # Hint sets the Exponential prior mean (= 1/lam), floored so a 0
+                # hint is the tightest around-zero prior (Poisson term ~off).
+                lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
+                priors["gain"] = pm.Exponential("gain", lam=lam)
             else:  # centered
                 priors["gain"] = pm.TruncatedNormal(
                     "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
@@ -130,7 +142,9 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if gain_mode == "fixed":
                     priors["gain"][lbl] = pt.as_tensor_variable(mu_g)
                 elif gain_mode == "free":
-                    priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=1.0)
+                    # Hint sets the Exponential mean; a 0 hint -> tightest (~off).
+                    lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
+                    priors["gain"][lbl] = pm.Exponential(f"gain_{lbl}", lam=lam)
                 elif mu_g > 0.0:
                     priors["gain"][lbl] = pm.TruncatedNormal(
                         f"gain_{lbl}",
@@ -141,19 +155,29 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 else:
                     priors["gain"][lbl] = pt.as_tensor_variable(0.0)
 
-    # 3. Alpha (proportional error)
+    # 3. Alpha (proportional error). "centered" and "free" always build a prior
+    # so a calibrated alpha of 0 becomes a tight prior *around* 0, not a hard 0;
+    # only "fixed" leaves the term truly absent when alpha is 0. The alpha hint
+    # is the prior scale (HalfNormal sigma / TruncatedNormal mean), floored at
+    # _MIN_NOISE_PRIOR_SCALE so the width grows monotonically with the hint (the
+    # weak 0.02 default lives in NoiseConfig.alpha, not here).
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
-    if has_alpha or alpha_mode == "free":
+    if has_alpha or alpha_mode in {"free", "centered"}:
         if shared_alpha:
             alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
-            mu_a = np.mean(alphas) if alphas else 0.02
+            mu_a = float(np.mean(alphas)) if alphas else 0.0
             if alpha_mode == "fixed":
                 priors["rel_error"] = pt.as_tensor_variable(mu_a)
             elif alpha_mode == "free":
-                priors["rel_error"] = pm.HalfNormal("rel_error", sigma=0.02)
+                priors["rel_error"] = pm.HalfNormal(
+                    "rel_error", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                )
             else:  # centered
                 priors["rel_error"] = pm.TruncatedNormal(
-                    "rel_error", mu=mu_a, sigma=max(0.25 * mu_a, 0.001), lower=0.0
+                    "rel_error",
+                    mu=mu_a,
+                    sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
+                    lower=0.0,
                 )
         else:
             priors["rel_error"] = {}
@@ -163,18 +187,18 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
                 elif alpha_mode == "free":
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=0.02
+                        f"rel_error_{lbl}", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
                     )
-                elif mu_a > 0.0:
+                elif mu_a > 0.0:  # centered on a positive hint
                     priors["rel_error"][lbl] = pm.TruncatedNormal(
                         f"rel_error_{lbl}",
                         mu=mu_a,
-                        sigma=max(0.25 * mu_a, 0.001),
+                        sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
                         lower=0.0,
                     )
-                else:
+                else:  # centered on 0 -> tight prior around 0
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=0.02
+                        f"rel_error_{lbl}", sigma=_MIN_NOISE_PRIOR_SCALE
                     )
 
     return priors
@@ -1093,43 +1117,6 @@ def _add_mixture_likelihood(  # noqa: PLR0913
     )
 
 
-def _validate_robust_likelihood(robust_likelihood: RobustLikelihood) -> None:
-    """Validate the robust likelihood selector."""
-    if robust_likelihood not in typing.get_args(RobustLikelihood):
-        msg = "robust_likelihood must be 'student_t' or 'mixture'."
-        raise ValueError(msg)
-
-
-ContaminationFracPrior = float | Mapping[str, float]
-
-
-def _validate_contamination_frac_prior(contamination_frac_prior: float) -> float:
-    """Return a valid prior mean for the outlier fraction."""
-    contamination_frac = float(contamination_frac_prior)
-    if not (
-        _MIN_CONTAMINATION_FRAC_PRIOR
-        <= contamination_frac
-        <= _MAX_CONTAMINATION_FRAC_PRIOR
-    ):
-        msg = (
-            "contamination_frac_prior must be between "
-            f"{_MIN_CONTAMINATION_FRAC_PRIOR:g} and "
-            f"{_MAX_CONTAMINATION_FRAC_PRIOR:g}."
-        )
-        raise ValueError(msg)
-    return contamination_frac
-
-
-def _validate_contamination_frac_prior_spec(
-    contamination_frac_prior: ContaminationFracPrior,
-) -> None:
-    if isinstance(contamination_frac_prior, MappingABC):
-        for value in contamination_frac_prior.values():
-            _validate_contamination_frac_prior(value)
-    else:
-        _validate_contamination_frac_prior(contamination_frac_prior)
-
-
 def _build_outlier_priors(
     labels: Sequence[str], contamination_frac_prior: ContaminationFracPrior
 ) -> tuple[dict[str, typing.Any], typing.Any]:
@@ -1237,6 +1224,47 @@ def _plate_noise_from_bg(
             sigma_floor=floor,
             gain=0.0,
             alpha=alpha,
+        )
+    return model
+
+
+def _noise_hint_value(
+    hint: float | Mapping[str, float] | None, label: str
+) -> float | None:
+    """Return the per-label value of a scalar/mapping noise hint, or ``None``."""
+    if hint is None:
+        return None
+    if isinstance(hint, MappingABC):
+        value = hint.get(label, hint.get(str(label)))
+        return None if value is None else float(value)
+    return float(hint)
+
+
+def _default_floor_from_data(da: DataArray) -> float:
+    """Return a positive floor scale hint from a label's observed errors."""
+    scale = float(np.nanmedian(np.asarray(da.y_err, dtype=float)))
+    return scale if np.isfinite(scale) and scale > 0.0 else 1.0
+
+
+def _resolve_structured_noise_model(noise: NoiseConfig, ds: Dataset) -> PlateNoiseModel:
+    """Return the explicit noise model or synthesize one from the dataset.
+
+    Used by the ``"structured"`` noise path so the ``*_mode`` selectors work
+    without a hand-built :class:`PlateNoiseModel`. Each label's ``sigma_floor``
+    comes from the *floor* hint (falling back to the label's ``y_err`` scale),
+    plus the *gain* and *alpha* hints.
+    """
+    if noise.noise_model is not None:
+        return noise.noise_model
+    model = PlateNoiseModel()
+    for lbl, da in ds.items():
+        floor = _noise_hint_value(noise.floor, str(lbl))
+        if floor is None or not np.isfinite(floor) or floor <= 0.0:
+            floor = _default_floor_from_data(da)
+        gain = _noise_hint_value(noise.gain, str(lbl)) or 0.0
+        alpha = _noise_hint_value(noise.alpha, str(lbl)) or 0.0
+        model[str(lbl)] = NoiseModelParams(
+            sigma_floor=float(floor), gain=float(gain), alpha=float(alpha)
         )
     return model
 
@@ -1694,151 +1722,77 @@ def _per_well_fit_results_from_trace(
     return per_well_results
 
 
-def fit_binding_pymc(  # noqa: PLR0912, PLR0913
+_DEFAULT_NOISE = NoiseConfig()
+_DEFAULT_ROBUST = RobustConfig()
+_DEFAULT_INIT = InitConfig()
+_DEFAULT_SAMPLER = SamplerConfig()
+
+
+def fit_binding_pymc(  # noqa: PLR0913, PLR0915
     ds_or_fr: Dataset | FitResult[MiniT],
+    *,
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
-    n_samples: int = 2000,
-    nuts_sampler: str = "default",
-    *,
-    n_tune: int | None = None,
-    target_accept: float | None = None,
-    max_treedepth: int | None = None,
-    noise_model: PlateNoiseModel | None = None,
-    shared_alpha: bool = True,
-    shared_gain: bool = False,
-    robust: bool = False,
-    robust_likelihood: RobustLikelihood = "student_t",
-    student_t_nu: float | None = 3.0,
-    contamination_frac_prior: ContaminationFracPrior = 0.15,
-    floor_mode: NoiseParamMode | None = None,
-    gain_mode: NoiseParamMode | None = None,
-    alpha_mode: NoiseParamMode | None = None,
-    learn_ye_mags: bool = False,
-    shared_ye_mags: bool = False,
-    ye_mag_prior: Literal["halfnormal", "lognormal"] = "lognormal",
-    ye_mag_mu: float | Mapping[str, float] = 0.0,
-    ye_mag_sigma: float | Mapping[str, float] = 1.5,
     min_x_step: float = 0.2,
-    init_strategy: InitStrategy = "lmfit",
-    data_prior_edge_points: int = 2,
-    data_prior_signal_sigma_scale: float = 0.5,
-    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
-    data_prior_k_bounds: tuple[float, float] | None = None,
-    data_prior_k_sigma: float = 1.5,
+    noise: NoiseConfig = _DEFAULT_NOISE,
+    robust: RobustConfig = _DEFAULT_ROBUST,
+    init: InitConfig = _DEFAULT_INIT,
+    sampler: SamplerConfig = _DEFAULT_SAMPLER,
 ) -> FitResult[xr.DataTree]:
     """Analyze multi-label titration datasets using PyMC (single model).
 
     Parameters
     ----------
     ds_or_fr : Dataset | FitResult[MiniT]
-        Either a Dataset (will run initial LS fit) or a FitResult with initial params.
+        Either a ``Dataset`` (an initial LS fit is run) or a ``FitResult`` whose
+        params seed the PyMC priors.
     n_sd : float
         Number of standard deviations for parameter priors.
     n_xerr : float
         Scaling factor for x-error.
-    n_samples : int
-        Number of MCMC samples.
-    nuts_sampler : str
-        NUTS sampler backend: ``"default"`` (PyMC C/pytensor), ``"blackjax"``,
-        ``"numpyro"``, or ``"nutpie"``.
-    n_tune : int | None
-        Number of tuning steps. If ``None`` (default), use ``n_samples // 2``.
-    target_accept : float | None
-        NUTS target acceptance probability. If ``None`` (default), 0.95 is
-        used when *n_xerr* > 0 and 0.9 otherwise.
-    max_treedepth : int | None
-        Maximum tree depth for NUTS sampler. If ``None`` (default), PyMC's
-        default is used.
-    noise_model : PlateNoiseModel | None
-        Noise model specification.  ``None`` (default) uses a simple per-label
-        ``ye_mag_{lbl}`` LogNormal to scale the existing ``y_err``.  Pass a
-        ``PlateNoiseModel`` to infer per-label floor, gain, and alpha
-        from the full heteroscedastic noise model.
-    shared_alpha : bool
-        If ``True`` (default), use one ``rel_error`` variable for all labels
-        when *noise_model* is provided.
-    shared_gain : bool
-        If ``True``, use one ``gain`` variable for all labels when
-        *noise_model* is provided.
-    robust : bool
-        If ``True``, use the selected robust likelihood for regression.
-    robust_likelihood : RobustLikelihood
-        Robust likelihood used when *robust* is ``True``. ``"student_t"``
-        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
-        normal/outlier mixture with per-label outlier probabilities.
-    student_t_nu : float | None
-        Student-t degrees of freedom when *robust* is ``True``. Positive values
-        are fixed; ``None`` infers ``student_t_nu`` with support above 2.
-    contamination_frac_prior : ContaminationFracPrior
-        Prior mean for per-label outlier fractions when
-        ``robust_likelihood="mixture"``. A mapping supplies label-specific
-        means. Each value must be between 0.001 and 0.5.
-    floor_mode : NoiseParamMode | None
-        How to treat the floor parameter.  ``None`` (default) resolves to
-        ``"centered"`` for pre-fit ``FitResult`` input and ``"free"`` for raw
-        ``Dataset`` input.
-    gain_mode : NoiseParamMode | None
-        How to treat the gain parameter.  ``None`` follows the same input-based
-        rule as *floor_mode*.
-    alpha_mode : NoiseParamMode | None
-        How to treat the alpha (rel_error) parameter.  ``None`` follows the
-        same input-based rule as *floor_mode*.
-    learn_ye_mags : bool
-        If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
-        when a full *noise_model* is provided.
-    shared_ye_mags : bool
-        If ``True``, use one shared ``ye_mag`` variable for all labels instead
-        of per-label ``ye_mag_{lbl}``.
-    ye_mag_prior : Literal["halfnormal", "lognormal"]
-        Prior family for ``ye_mag`` variables when *noise_model* is ``None``.
-    ye_mag_mu : float | Mapping[str, float]
-        LogNormal location parameter for ``ye_mag`` variables when
-        *noise_model* is ``None``. Ignored for HalfNormal priors.
-    ye_mag_sigma : float | Mapping[str, float]
-        Prior sigma for ``ye_mag`` variables when *noise_model* is ``None``.
-        A mapping supplies label-specific sigmas.
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps
         when latent-x modeling is enabled.
-    init_strategy : InitStrategy
-        ``"lmfit"`` keeps the historical behavior: raw ``Dataset`` input is
-        first fitted with LMFit and PyMC priors are centered on that result.
-        ``"data_priors"`` skips LMFit and derives weak priors directly from
-        the observed titration endpoints and midpoint.
-    data_prior_edge_points : int
-        Number of active points averaged at each titration edge to initialize
-        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
-    data_prior_signal_sigma_scale : float
-        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
-        signal range when ``init_strategy="data_priors"``.
-    data_prior_k_prior : DataKPrior
-        K prior family for ``init_strategy="data_priors"``. Use
-        ``"midpoint_truncnorm"`` for a truncated Normal centered at the observed
-        half-signal pH, or ``"uniform"`` for a flat prior.
-    data_prior_k_bounds : tuple[float, float] | None
-        Lower and upper K bounds for data-derived priors. ``None`` (default)
-        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)``
-        otherwise.
-    data_prior_k_sigma : float
-        Truncated-Normal K prior sigma for data-derived priors.
+    noise : NoiseConfig
+        Observation-noise configuration. Default scales ``y_err`` by a learned
+        ``ye_mag`` multiplier; use :meth:`NoiseConfig.structured` for a
+        floor/gain/alpha noise model. See :class:`NoiseConfig`.
+    robust : RobustConfig
+        Robust-likelihood configuration (Student-t or contamination mixture).
+        See :class:`RobustConfig`.
+    init : InitConfig
+        Prior-initialization strategy (``"lmfit"`` prefit or ``"data_priors"``).
+        See :class:`InitConfig`.
+    sampler : SamplerConfig
+        NUTS sampling controls. See :class:`SamplerConfig`.
 
     Returns
     -------
     FitResult[xr.DataTree]
         Bayesian fitting results.
     """
-    _validate_robust_likelihood(robust_likelihood)
-    if robust and robust_likelihood == "mixture":
-        _validate_contamination_frac_prior_spec(contamination_frac_prior)
+    robust_on = robust.enabled
+    robust_likelihood = robust.likelihood
+    student_t_nu = robust.nu
+    contamination_frac_prior = robust.contamination_frac_prior
+    shared_alpha = noise.shared_alpha
+    shared_gain = noise.shared_gain
+    learn_ye_mags = noise.learn_ye_mags
+    shared_ye_mags = noise.shared_ye_mags
+    ye_mag_prior = noise.ye_mag_prior
+    ye_mag_mu = noise.ye_mag_mu
+    ye_mag_sigma = noise.ye_mag_sigma
+    n_samples = sampler.n_samples
+    nuts_sampler = sampler.nuts_sampler
+
     fr, prefer_centered = _normalize_fit_input(
         ds_or_fr,
-        init_strategy=init_strategy,
-        data_prior_edge_points=data_prior_edge_points,
-        data_prior_signal_sigma_scale=data_prior_signal_sigma_scale,
-        data_prior_k_prior=data_prior_k_prior,
-        data_prior_k_bounds=data_prior_k_bounds,
-        data_prior_k_sigma=data_prior_k_sigma,
+        init_strategy=init.strategy,
+        data_prior_edge_points=init.edge_points,
+        data_prior_signal_sigma_scale=init.signal_sigma_scale,
+        data_prior_k_prior=init.k_prior,
+        data_prior_k_bounds=init.k_bounds,
+        data_prior_k_sigma=init.k_sigma,
     )
 
     if fr.result is None or fr.dataset is None:
@@ -1850,35 +1804,35 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
     x_errc = next(iter(ds.values())).x_errc
     floor_mode, gain_mode, alpha_mode = _resolve_noise_modes(
         prefer_centered=prefer_centered,
-        floor_mode=floor_mode,
-        gain_mode=gain_mode,
-        alpha_mode=alpha_mode,
+        floor_mode=noise.floor_mode,
+        gain_mode=noise.gain_mode,
+        alpha_mode=noise.alpha_mode,
     )
     with pm.Model():
         pars = (
             create_data_parameter_priors(
                 params,
-                k_prior=data_prior_k_prior,
-                k_bounds=data_prior_k_bounds,
+                k_prior=init.k_prior,
+                k_bounds=init.k_bounds,
                 is_ph=ds.is_ph,
             )
-            if init_strategy == "data_priors"
+            if init.strategy == "data_priors"
             else create_parameter_priors(params, n_sd)
         )
         x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
         robust_nu = (
             _student_t_nu_value(student_t_nu)
-            if robust and robust_likelihood == "student_t"
+            if robust_on and robust_likelihood == "student_t"
             else 3.0
         )
-        if robust and robust_likelihood == "mixture":
+        if robust_on and robust_likelihood == "mixture":
             pi_outliers, outlier_inflate = _build_outlier_priors(
                 labels, contamination_frac_prior
             )
         else:
             pi_outliers, outlier_inflate = {}, None
 
-        if noise_model is None:
+        if noise.kind == "ye_mag":
             ye_mags = _build_ye_mag_priors(
                 labels,
                 shared_ye_mags=shared_ye_mags,
@@ -1900,13 +1854,14 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
                     y_model,
                     da,
                     sigma,
-                    robust=robust,
+                    robust=robust_on,
                     student_t_nu=robust_nu,
                     robust_likelihood=robust_likelihood,
                     pi_outlier=pi_outliers.get(lbl),
                     outlier_inflate=outlier_inflate,
                 )
         else:
+            noise_model = _resolve_structured_noise_model(noise, ds)
             active_noise_model = _active_noise_model(noise_model, labels)
             noise_priors = build_pymc_noise_priors(
                 active_noise_model,
@@ -1945,7 +1900,7 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
                     y_model,
                     da,
                     sigma_det[da.mask],
-                    robust=robust,
+                    robust=robust_on,
                     student_t_nu=robust_nu,
                     robust_likelihood=robust_likelihood,
                     pi_outlier=pi_outliers.get(lbl),
@@ -1953,9 +1908,13 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
                 )
 
         # Inference
-        tune = n_tune if n_tune is not None else n_samples // 2
+        tune = sampler.n_tune if sampler.n_tune is not None else n_samples // 2
         target_accept_ = (
-            target_accept if target_accept is not None else 0.95 if n_xerr > 0 else 0.9
+            sampler.target_accept
+            if sampler.target_accept is not None
+            else 0.95
+            if n_xerr > 0
+            else 0.9
         )
         sample_kwargs: dict[str, object] = {
             "tune": tune,
@@ -1963,14 +1922,14 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913
             "return_inferencedata": True,
             **_pymc_sample_parallel_args(nuts_sampler),
         }
-        if max_treedepth is not None:
-            sample_kwargs["max_treedepth"] = max_treedepth
+        if sampler.max_treedepth is not None:
+            sample_kwargs["max_treedepth"] = sampler.max_treedepth
         trace = pm.sample(n_samples, **sample_kwargs)
         trace = _compute_sample_log_likelihood(trace)
     p_names = list(params.keys())
-    if robust and robust_likelihood == "student_t" and student_t_nu is None:
+    if robust_on and robust_likelihood == "student_t" and student_t_nu is None:
         p_names.append("student_t_nu")
-    if robust and robust_likelihood == "mixture":
+    if robust_on and robust_likelihood == "mixture":
         p_names.extend([f"pi_outlier_{lbl}" for lbl in labels])
         p_names.append("outlier_inflate")
     return process_trace(trace, p_names, ds)
@@ -2058,28 +2017,33 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
         Initial robust fit, residual table, masked dataset, and final refit.
     """
     use_proportional = noise_strategy == "proportional"
+    sampler = SamplerConfig(
+        n_samples=n_samples,
+        nuts_sampler=nuts_sampler,
+        n_tune=n_tune,
+        target_accept=target_accept,
+        max_treedepth=max_treedepth,
+    )
     if use_proportional:
         proportional_noise_model = noise_model or _plate_noise_from_bg(
             bg_noise, ds.keys(), alpha=proportional_alpha
         )
-        initial = fit_binding_pymc(
-            ds,
-            n_sd=n_sd,
-            n_xerr=n_xerr,
-            n_samples=n_samples,
-            nuts_sampler=nuts_sampler,
-            n_tune=n_tune,
-            target_accept=target_accept,
-            max_treedepth=max_treedepth,
-            robust=True,
+        proportional_noise = NoiseConfig.structured(
             noise_model=proportional_noise_model,
             floor_mode="centered",
             gain_mode="fixed",
             alpha_mode="free",
             shared_alpha=False,
             shared_gain=False,
-            learn_ye_mags=False,
+        )
+        initial = fit_binding_pymc(
+            ds,
+            n_sd=n_sd,
+            n_xerr=n_xerr,
             min_x_step=min_x_step,
+            robust=RobustConfig(enabled=True),
+            noise=proportional_noise,
+            sampler=sampler,
         )
     else:
         bg_noise_scale = float(bg_noise_scale)
@@ -2096,17 +2060,15 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
             dataset_with_unit_yerr(ds),
             n_sd=n_sd,
             n_xerr=n_xerr,
-            n_samples=n_samples,
-            nuts_sampler=nuts_sampler,
-            n_tune=n_tune,
-            target_accept=target_accept,
-            max_treedepth=max_treedepth,
-            robust=True,
-            shared_ye_mags=shared_ye_mags,
-            ye_mag_prior="lognormal",
-            ye_mag_mu=first_ye_mag_mu,
-            ye_mag_sigma=bg_noise_log_sigma,
             min_x_step=min_x_step,
+            robust=RobustConfig(enabled=True),
+            noise=NoiseConfig.ye_mag(
+                shared=shared_ye_mags,
+                prior="lognormal",
+                mu=first_ye_mag_mu,
+                sigma=bg_noise_log_sigma,
+            ),
+            sampler=sampler,
         )
     residuals = model_validation.residuals_from_fit_results(
         {"single": initial},
@@ -2135,37 +2097,22 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
             seeded_final_input,
             n_sd=n_sd,
             n_xerr=n_xerr,
-            n_samples=n_samples,
-            nuts_sampler=nuts_sampler,
-            n_tune=n_tune,
-            target_accept=target_accept,
-            max_treedepth=max_treedepth,
-            robust=False,
-            noise_model=proportional_noise_model,
-            floor_mode="centered",
-            gain_mode="fixed",
-            alpha_mode="free",
-            shared_alpha=False,
-            shared_gain=False,
-            learn_ye_mags=False,
             min_x_step=min_x_step,
+            robust=RobustConfig(enabled=False),
+            noise=proportional_noise,
+            sampler=sampler,
         )
     else:
         final = fit_binding_pymc(
             seeded_final_input,
             n_sd=n_sd,
             n_xerr=n_xerr,
-            n_samples=n_samples,
-            nuts_sampler=nuts_sampler,
-            n_tune=n_tune,
-            target_accept=target_accept,
-            max_treedepth=max_treedepth,
-            robust=False,
-            shared_ye_mags=shared_ye_mags,
-            ye_mag_prior="lognormal",
-            ye_mag_mu=0.0,
-            ye_mag_sigma=0.25,
             min_x_step=min_x_step,
+            robust=RobustConfig(enabled=False),
+            noise=NoiseConfig.ye_mag(
+                shared=shared_ye_mags, prior="lognormal", mu=0.0, sigma=0.25
+            ),
+            sampler=sampler,
         )
     return PymcResidualRefitResult(initial, residuals, masked, final)
 
@@ -2304,15 +2251,14 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         else:
             proportional_noise_model = noise_model
         initial_inputs: Mapping[str, Dataset | FitResult[MiniT]] = results
-        common_noise_kwargs: dict[str, object] = {
-            "noise_model": proportional_noise_model,
-            "floor_mode": "centered",
-            "gain_mode": "fixed",
-            "alpha_mode": "free",
-            "shared_alpha": False,
-            "shared_gain": False,
-            "learn_ye_mags": False,
-        }
+        noise_cfg = NoiseConfig.structured(
+            noise_model=proportional_noise_model,
+            floor_mode="centered",
+            gain_mode="fixed",
+            alpha_mode="free",
+            shared_alpha=False,
+            shared_gain=False,
+        )
     else:
         unit_inputs: dict[str, Dataset | FitResult[MiniT]] = {}
         for key, item in results.items():
@@ -2324,31 +2270,31 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
             else:
                 unit_inputs[str(key)] = dataset_with_unit_yerr(item)
         initial_inputs = unit_inputs
-        common_noise_kwargs = {
-            "noise_model": None,
-            "shared_ye_mags": shared_ye_mags,
-        }
+        noise_cfg = NoiseConfig.ye_mag(shared=shared_ye_mags)
 
-    initial = fit_binding_pymc_multi(
-        initial_inputs,
-        scheme,
-        n_sd=n_sd,
-        n_xerr=n_xerr,
+    sampler = SamplerConfig(
         n_samples=n_samples,
         nuts_sampler=nuts_sampler,
         n_tune=n_tune,
         target_accept=target_accept,
         max_treedepth=max_treedepth,
+    )
+    initial = fit_binding_pymc_multi(
+        initial_inputs,
+        scheme,
+        n_sd=n_sd,
+        n_xerr=n_xerr,
+        min_x_step=min_x_step,
         x_error_model=x_error_model,
         acid_drop_between_sigma=acid_drop_between_sigma,
         ctr_free_k=ctr_free_k,
-        robust=True,
         well_noise_scale=well_noise_scale,
         shared_well_noise_scale=shared_well_noise_scale,
         label_noise_scale_sigma=label_noise_scale_sigma,
         well_noise_sd_sigma=well_noise_sd_sigma,
-        min_x_step=min_x_step,
-        **typing.cast("typing.Any", common_noise_kwargs),
+        noise=noise_cfg,
+        robust=RobustConfig(enabled=True),
+        sampler=sampler,
     )
     residuals = model_validation.residuals_from_multifit(
         initial,
@@ -2388,21 +2334,17 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         scheme,
         n_sd=n_sd / 2,
         n_xerr=n_xerr if final_n_xerr is None else final_n_xerr,
-        n_samples=n_samples,
-        nuts_sampler=nuts_sampler,
-        n_tune=n_tune,
-        target_accept=target_accept,
-        max_treedepth=max_treedepth,
+        min_x_step=min_x_step,
         x_error_model=x_error_model,
         acid_drop_between_sigma=acid_drop_between_sigma,
         ctr_free_k=ctr_free_k,
-        robust=False,
         well_noise_scale=well_noise_scale,
         shared_well_noise_scale=shared_well_noise_scale,
         label_noise_scale_sigma=label_noise_scale_sigma,
         well_noise_sd_sigma=well_noise_sd_sigma,
-        min_x_step=min_x_step,
-        **typing.cast("typing.Any", common_noise_kwargs),
+        noise=noise_cfg,
+        robust=RobustConfig(enabled=False),
+        sampler=sampler,
     )
     return PymcMultiResidualRefitResult(initial, residuals, masked, final)
 
@@ -2637,51 +2579,29 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
+def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     results: Mapping[str, Dataset | FitResult[MiniT]],
     scheme: PlateScheme,
+    *,
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
-    n_samples: int = 2000,
-    nuts_sampler: str = "default",
-    *,
-    noise_model: PlateNoiseModel | None = None,
-    shared_alpha: bool = True,
-    shared_gain: bool = False,
-    n_tune: int | None = None,
-    target_accept: float | None = None,
-    max_treedepth: int | None = None,
+    min_x_step: float = 0.2,
     x_error_model: Literal[
         "deterministic", "per_well", "hierarchical_per_well"
     ] = "deterministic",
     acid_drop_between_sigma: float = 0.005,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
-    robust: bool = False,
-    robust_likelihood: RobustLikelihood = "student_t",
-    student_t_nu: float | None = 3.0,
-    contamination_frac_prior: ContaminationFracPrior = 0.15,
-    floor_mode: NoiseParamMode | None = None,
-    gain_mode: NoiseParamMode | None = None,
-    alpha_mode: NoiseParamMode | None = None,
-    learn_ye_mags: bool = False,
-    shared_ye_mags: bool = False,
     per_well_ye_mags: bool | None = None,
-    ye_mag_prior: Literal["halfnormal", "lognormal"] = "lognormal",
-    ye_mag_mu: float | Mapping[str, float] = 0.0,
-    ye_mag_sigma: float | Mapping[str, float] = 1.5,
     well_noise_scale: bool = False,
     shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
     well_noise_sd_sigma: float = 0.3,
     well_noise_scale_sigma: float | None = None,
-    min_x_step: float = 0.2,
-    init_strategy: InitStrategy = "lmfit",
-    data_prior_edge_points: int = 2,
-    data_prior_signal_sigma_scale: float = 0.5,
-    data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
-    data_prior_k_bounds: tuple[float, float] | None = None,
-    data_prior_k_sigma: float = 1.5,
+    noise: NoiseConfig = _DEFAULT_NOISE,
+    robust: RobustConfig = _DEFAULT_ROBUST,
+    init: InitConfig = _DEFAULT_INIT,
+    sampler: SamplerConfig = _DEFAULT_SAMPLER,
 ) -> MultiFitResult:
     """Multi-well PyMC with shared K per control group and per-label noise.
 
@@ -2696,144 +2616,44 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         Prior width multiplier for per-well S0/S1 parameters.
     n_xerr : float
         Scaling factor applied to x-value uncertainties.
-    n_samples : int
-        Number of MCMC posterior samples per chain.
-    nuts_sampler : str
-        NUTS sampler backend (``"default"``, ``"blackjax"``, ``"numpyro"``,
-        ``"nutpie"``).
-    noise_model : PlateNoiseModel | None
-        Noise model specification.  ``None`` (default) uses per-label
-        ``ye_mag_{lbl}`` HalfNormal to scale existing ``y_err``.  Pass a
-        ``PlateNoiseModel`` to infer floor, gain, and alpha from the full
-        heteroscedastic noise model.
-    shared_alpha : bool
-        If ``True`` (default), use a single ``rel_error`` variable for all
-        labels (comprehensive model).  If ``False``, use per-label
-        ``rel_error_{lbl}`` (proportional model).  Only used when
-        *noise_model* is provided.
-    shared_gain : bool
-        If ``True``, use a single ``gain`` variable for all labels.
-        If ``False`` (default), use per-label ``gain_{lbl}``.  Only used
-        when *noise_model* is provided and gain terms are present.
-    n_tune : int | None
-        Number of tuning steps for MCMC. If None, defaults to n_samples // 2.
-    target_accept : float | None
-        NUTS target acceptance probability. If ``None`` (default), 0.95 is
-        used when *n_xerr* > 0 and 0.9 otherwise.
-    max_treedepth : int | None
-        Maximum tree depth for NUTS sampler. If ``None`` (default), PyMC's
-        default is used.
+    min_x_step : float
+        Minimum inferred change in ``x`` between consecutive titration steps.
     x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
-        Model for x-error propagation. ``"deterministic"`` uses one shared
-        ``x_true`` across all wells. ``"per_well"`` gives each well its own
-        independent ``x_step`` (shared ``x_start``, per-well cumulative
-        additions constrained by ``min_x_step``).
-        ``"hierarchical_per_well"`` uses an acid-addition formulation:
-        shared ``acid_drop_global`` per step (uncertainty from quadrature
-        sum of adjacent ``x_errc``), per-well ``acid_drop_well`` deviating
-        at fixed ``acid_drop_between_sigma`` scale (not inferred).
+        Model for x-error propagation across wells. ``"deterministic"`` shares
+        one ``x_true``; ``"per_well"`` gives each well its own cumulative
+        additions; ``"hierarchical_per_well"`` uses an acid-addition formulation.
     acid_drop_between_sigma : float
         Fixed between-well scale for the ``acid_drop`` variation used by
-        ``"hierarchical_per_well"`` (not inferred — set to the experimental
-        tolerance).  0.005 (default) is very tight — suitable when all wells
-        receive identical 2 uL additions.  Increase to 0.01--0.02 for larger
-        pipetting/buffer differences.
+        ``"hierarchical_per_well"`` (set to the experimental tolerance).
     ctr_free_k : bool
-        If True, each CTR replicate well gets its own independent flat K prior
-        ``Normal(group_mean, 0.2)`` — identical to UNK well treatment, no
-        hierarchical shrinkage.  The spread of K posteriors across replicates
-        then quantifies between-replicate accuracy.  If False (default), all
-        replicates of the same CTR share a single K.
+        If ``True``, each control replicate gets an independent flat K prior
+        instead of a shared control K.
     sample_ppc : bool
-        If True, generates posterior predictive samples and adds them to the
-        returned InferenceData object. Needed for `plot_ppc_well`.
-    robust : bool
-        If True, use the selected robust likelihood instead of Normal.
-    robust_likelihood : RobustLikelihood
-        Robust likelihood used when *robust* is ``True``. ``"student_t"``
-        keeps the existing Student-t model. ``"mixture"`` uses a marginalized
-        normal/outlier mixture with per-label outlier probabilities.
-    student_t_nu : float | None
-        Student-t degrees of freedom when *robust* is ``True``. Positive values
-        are fixed; ``None`` infers ``student_t_nu`` with support above 2.
-    contamination_frac_prior : ContaminationFracPrior
-        Prior mean for per-label outlier fractions when
-        ``robust_likelihood="mixture"``. A mapping supplies label-specific
-        means. Each value must be between 0.001 and 0.5.
-    floor_mode : NoiseParamMode | None
-        How to treat the floor parameter.  ``None`` (default) resolves to
-        ``"centered"`` when every input is already a ``FitResult`` and to
-        ``"free"`` when any raw ``Dataset`` is supplied.
-    gain_mode : NoiseParamMode | None
-        How to treat the gain parameter.  ``None`` follows the same input-based
-        rule as *floor_mode*.
-    alpha_mode : NoiseParamMode | None
-        How to treat the alpha (rel_error) parameter.  ``None`` follows the
-        same input-based rule as *floor_mode*.
-    learn_ye_mags : bool
-        If ``True``, learn per-label scaling factors (``ye_mag_{lbl}``) even
-        when a full *noise_model* is provided.
-    shared_ye_mags : bool
-        If ``True``, use a single shared ``ye_mag`` variable for all labels
-        instead of per-label ``ye_mag_{lbl}`` when ``ye_mag`` priors are used.
-        Default ``False``.
+        If ``True``, add posterior predictive samples to the returned trace.
     per_well_ye_mags : bool | None
-        If ``True``, infer ``ye_mag`` variables with a ``well`` dimension.
-        With ``shared_ye_mags=False`` this creates ``ye_mag_{lbl}[well]``.
-        With ``shared_ye_mags=True`` this creates one ``ye_mag[well]`` shared
-        by labels within each well. ``None`` (default) uses per-well
-        ``ye_mag`` when ``learn_ye_mags=True`` with a noise model, and scalar
-        ``ye_mag`` otherwise.
-    ye_mag_prior : Literal["halfnormal", "lognormal"]
-        Prior family for ``ye_mag`` variables when *noise_model* is ``None``.
-    ye_mag_mu : float | Mapping[str, float]
-        LogNormal location parameter for ``ye_mag`` variables when
-        *noise_model* is ``None``. Ignored for HalfNormal priors.
-    ye_mag_sigma : float | Mapping[str, float]
-        Prior sigma for ``ye_mag`` variables when *noise_model* is ``None``.
-        A mapping supplies label-specific sigmas.
+        Learn per-well (not just per-label) ``ye_mag`` factors. ``None`` follows
+        the noise config's ``learn_ye_mags`` when a structured model is supplied.
     well_noise_scale : bool
-        If ``True``, multiply each label's observation scale by a per-well
-        LogNormal factor ``well_noise_scale_{lbl}`` with dims ``well``.  This is
-        useful for robust multi-well screening, where a global label-level noise
-        model otherwise turns real well-to-well variance into apparent outliers.
+        Enable a per-well multiplicative noise scale.
     shared_well_noise_scale : bool
-        If ``True`` and *well_noise_scale* is enabled, use one shared
-        ``well_noise_scale`` vector with dims ``well`` for all labels instead
-        of per-label ``well_noise_scale_{lbl}`` vectors.
+        Share the well-noise scale across labels.
     label_noise_scale_sigma : float
-        Log-scale prior sigma for label-level residual scale
-        ``label_noise_scale_{lbl}``, centered at one.
+        LogNormal prior scale for the per-label noise scale.
     well_noise_sd_sigma : float
-        HalfNormal prior sigma for the between-well log-scale spread
-        ``well_noise_sd_{lbl}``.
+        HalfNormal prior scale for the per-well noise spread.
     well_noise_scale_sigma : float | None
         Backwards-compatible alias for *well_noise_sd_sigma*.
-    min_x_step : float
-        Minimum inferred change in ``x`` between consecutive titration steps
-        when latent-x modeling is enabled.
-    init_strategy : InitStrategy
-        ``"lmfit"`` keeps the historical behavior: each raw ``Dataset`` is first
-        fitted with LMFit and per-well priors are centered on that result.
-        ``"data_priors"`` skips LMFit and seeds each well directly from its
-        observed titration endpoints and midpoint (any supplied pre-fit result
-        is ignored in favour of its dataset).
-    data_prior_edge_points : int
-        Number of active points averaged at each titration edge to initialize
-        ``S0`` and ``S1`` when ``init_strategy="data_priors"``.
-    data_prior_signal_sigma_scale : float
-        Prior sigma for ``S0``/``S1`` as a fraction of each label's observed
-        signal range when ``init_strategy="data_priors"``.
-    data_prior_k_prior : DataKPrior
-        K seed family for ``init_strategy="data_priors"``. ``"midpoint_truncnorm"``
-        seeds K at the observed half-signal x; ``"uniform"`` seeds it at the
-        bound midpoint. The multi model always centers a Normal K prior on the
-        resulting seed.
-    data_prior_k_bounds : tuple[float, float] | None
-        Lower and upper K bounds for the data-derived seed. ``None`` (default)
-        resolves to ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)`` otherwise.
-    data_prior_k_sigma : float
-        K seed sigma for data-derived priors, scaled by ``n_sd`` in the model.
+    noise : NoiseConfig
+        Observation-noise configuration (ye_mag multiplier or structured
+        floor/gain/alpha). See :class:`NoiseConfig`.
+    robust : RobustConfig
+        Robust-likelihood configuration (Student-t or contamination mixture).
+        See :class:`RobustConfig`.
+    init : InitConfig
+        Prior-initialization strategy (``"lmfit"`` prefit or ``"data_priors"``).
+        See :class:`InitConfig`.
+    sampler : SamplerConfig
+        NUTS sampling controls. See :class:`SamplerConfig`.
 
     Returns
     -------
@@ -2845,9 +2665,32 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     ValueError
         If no valid dataset is found in results.
     """
-    _validate_robust_likelihood(robust_likelihood)
-    if robust and robust_likelihood == "mixture":
-        _validate_contamination_frac_prior_spec(contamination_frac_prior)
+    robust_on = robust.enabled
+    robust_likelihood = robust.likelihood
+    student_t_nu = robust.nu
+    contamination_frac_prior = robust.contamination_frac_prior
+    shared_alpha = noise.shared_alpha
+    shared_gain = noise.shared_gain
+    learn_ye_mags = noise.learn_ye_mags
+    shared_ye_mags = noise.shared_ye_mags
+    ye_mag_prior = noise.ye_mag_prior
+    ye_mag_mu = noise.ye_mag_mu
+    ye_mag_sigma = noise.ye_mag_sigma
+    n_samples = sampler.n_samples
+    nuts_sampler = sampler.nuts_sampler
+    n_tune = sampler.n_tune
+    target_accept = sampler.target_accept
+    max_treedepth = sampler.max_treedepth
+    init_strategy = init.strategy
+    data_prior_edge_points = init.edge_points
+    data_prior_signal_sigma_scale = init.signal_sigma_scale
+    data_prior_k_prior = init.k_prior
+    data_prior_k_bounds = init.k_bounds
+    data_prior_k_sigma = init.k_sigma
+    floor_mode = noise.floor_mode
+    gain_mode = noise.gain_mode
+    alpha_mode = noise.alpha_mode
+
     fit_results, prefer_centered = _normalize_fit_inputs(
         results,
         init_strategy=init_strategy,
@@ -2861,6 +2704,11 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     if ds is None:
         msg = "No valid dataset found in results."
         raise ValueError(msg)
+    noise_model = (
+        _resolve_structured_noise_model(noise, ds)
+        if noise.kind == "structured"
+        else None
+    )
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     labels = list(ds.keys())
@@ -2910,10 +2758,10 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
     with pm.Model(coords=coords):
         robust_nu = (
             _student_t_nu_value(student_t_nu)
-            if robust and robust_likelihood == "student_t"
+            if robust_on and robust_likelihood == "student_t"
             else 3.0
         )
-        if robust and robust_likelihood == "mixture":
+        if robust_on and robust_likelihood == "mixture":
             pi_outliers, outlier_inflate = _build_outlier_priors(
                 labels, contamination_frac_prior
             )
@@ -3215,7 +3063,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                 )
                 sigma_vec = sigma_obs_all_det[mask_lbl]
 
-            if robust and robust_likelihood == "mixture":
+            if robust_on and robust_likelihood == "mixture":
                 _add_mixture_likelihood(
                     f"y_likelihood_{lbl}",
                     mu_vec,
@@ -3224,7 +3072,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
                     pi_outlier=pi_outliers[lbl],
                     outlier_inflate=outlier_inflate,
                 )
-            elif robust:
+            elif robust_on:
                 pm.StudentT(
                     f"y_likelihood_{lbl}",
                     nu=robust_nu,
@@ -3261,9 +3109,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915, PLR0917
         trace = _compute_sample_log_likelihood(trace)
 
     global_names: list[str] = []
-    if robust and robust_likelihood == "student_t" and student_t_nu is None:
+    if robust_on and robust_likelihood == "student_t" and student_t_nu is None:
         global_names.append("student_t_nu")
-    if robust and robust_likelihood == "mixture":
+    if robust_on and robust_likelihood == "mixture":
         global_names.extend(f"pi_outlier_{lbl}" for lbl in labels)
         global_names.append("outlier_inflate")
 

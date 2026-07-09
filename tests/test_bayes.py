@@ -12,7 +12,7 @@ import pytest
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 
-from clophfit.fitting import bayes
+from clophfit.fitting import bayes, bayes_config
 from clophfit.fitting.bayes import (
     create_parameter_priors,
     create_x_true,
@@ -21,6 +21,12 @@ from clophfit.fitting.bayes import (
     process_trace,
     weighted_stats,
     x_true_from_trace_df,
+)
+from clophfit.fitting.bayes_config import (
+    InitConfig,
+    NoiseConfig,
+    RobustConfig,
+    SamplerConfig,
 )
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
@@ -366,10 +372,9 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
-            init_strategy="data_priors",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            init=InitConfig(strategy="data_priors"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -474,10 +479,9 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
         bayes.fit_binding_pymc_multi(
             {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
             scheme,
-            init_strategy="data_priors",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            init=InitConfig(strategy="data_priors"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -577,6 +581,156 @@ def test_plate_noise_from_bg_floor_resolution(
     assert model["1"].alpha == pytest.approx(0.1)
 
 
+def test_noise_config_factory_field_mapping() -> None:
+    """The NoiseConfig factories should set kind and route their arguments."""
+    assert NoiseConfig().kind == "ye_mag"
+    ym = NoiseConfig.ye_mag(shared=True, prior="halfnormal", mu=0.1, sigma=2.0)
+    assert ym.kind == "ye_mag"
+    assert ym.shared_ye_mags is True
+    assert ym.ye_mag_prior == "halfnormal"
+    assert (ym.ye_mag_mu, ym.ye_mag_sigma) == (0.1, 2.0)
+    st = NoiseConfig.structured(
+        gain_mode="free", alpha_mode="free", floor=4.0, gain=0.1
+    )
+    assert st.kind == "structured"
+    assert (st.gain_mode, st.alpha_mode) == ("free", "free")
+    assert (st.floor, st.gain) == (4.0, 0.1)
+
+
+def test_robust_config_validation() -> None:
+    """RobustConfig should validate its likelihood and contamination prior."""
+    with pytest.raises(ValueError, match=r"student_t.*mixture"):
+        RobustConfig(likelihood="bogus")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
+        RobustConfig(enabled=True, likelihood="mixture", contamination_frac_prior=0.9)
+    # An out-of-range prior is ignored unless the mixture likelihood is active.
+    assert RobustConfig(enabled=False, contamination_frac_prior=0.9).enabled is False
+
+
+def test_resolve_structured_noise_model_passthrough(ph_dataset: Dataset) -> None:
+    """An explicit noise model should be returned unchanged."""
+    explicit = PlateNoiseModel({"default": NoiseModelParams(sigma_floor=9.0)})
+    noise = NoiseConfig.structured(noise_model=explicit)
+    assert bayes._resolve_structured_noise_model(noise, ph_dataset) is explicit  # noqa: SLF001
+
+
+def test_resolve_structured_noise_model_synthesizes_from_data(
+    ph_dataset: Dataset,
+) -> None:
+    """Without a model, the floor is taken from the label's y_err scale."""
+    ph_dataset["default"].y_err = np.full_like(ph_dataset["default"].yc, 3.0)
+    noise = NoiseConfig.structured(alpha=0.02)
+    model = bayes._resolve_structured_noise_model(noise, ph_dataset)  # noqa: SLF001
+    assert model["default"].sigma_floor == pytest.approx(3.0)
+    assert model["default"].gain == 0.0
+    assert model["default"].alpha == pytest.approx(0.02)
+
+
+def test_resolve_structured_noise_model_uses_hints(cl_dataset: Dataset) -> None:
+    """Explicit floor/gain hints seed the synthesized model."""
+    noise = NoiseConfig.structured(floor=5.0, gain=0.1)
+    model = bayes._resolve_structured_noise_model(noise, cl_dataset)  # noqa: SLF001
+    for params in model.values():
+        assert params.sigma_floor == pytest.approx(5.0)
+        assert params.gain == pytest.approx(0.1)
+
+
+def test_structured_noise_without_model_activates_free_terms(
+    monkeypatch: pytest.MonkeyPatch,
+    ph_dataset: Dataset,
+) -> None:
+    """structured(gain_mode/alpha_mode='free') creates gain/rel_error vars.
+
+    Previously these modes were silently ignored unless a PlateNoiseModel was
+    passed; this exercises the fix.
+    """
+    captured: dict[str, set[str]] = {}
+
+    def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
+        model = pm.modelcontext(None)
+        captured["vars"] = {rv.name for rv in model.free_RVs}
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(pm, "sample", stop_sample)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            ph_dataset,
+            n_xerr=0.0,
+            noise=NoiseConfig.structured(gain_mode="free", alpha_mode="free"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
+
+    names = captured["vars"]
+    assert any(name.startswith("gain") for name in names)
+    assert any(name.startswith("rel_error") for name in names)
+
+
+def test_free_noise_priors_scale_from_hints() -> None:
+    """Free gain/alpha priors should take their scale from the noise-model hints."""
+    pytest.importorskip("pymc")
+    hinted = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.5, alpha=0.03)
+    })
+    plain = PlateNoiseModel({"1": NoiseModelParams(sigma_floor=1.0)})
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            hinted, gain_mode="free", alpha_mode="free"
+        )
+        gain_mean = float(
+            pm.draw(priors["gain"]["1"], draws=6000, random_seed=0).mean()
+        )
+        alpha_mean = float(
+            pm.draw(priors["rel_error"]["1"], draws=6000, random_seed=1).mean()
+        )
+    with pm.Model():
+        priors0 = bayes.build_pymc_noise_priors(
+            plain, gain_mode="free", alpha_mode="free"
+        )
+        gain0_mean = float(
+            pm.draw(priors0["gain"]["1"], draws=6000, random_seed=0).mean()
+        )
+        alpha0_mean = float(
+            pm.draw(priors0["rel_error"]["1"], draws=6000, random_seed=1).mean()
+        )
+    # Hinted: Exponential mean == gain hint (0.5); HalfNormal mean == sigma*sqrt(2/pi).
+    assert gain_mean == pytest.approx(0.5, abs=0.05)
+    assert alpha_mean == pytest.approx(0.03 * np.sqrt(2 / np.pi), abs=0.005)
+    # gain=0 / alpha=0 -> tightest around-zero priors (floored at 1e-3), so each
+    # width is strictly *below* a small positive hint (monotonic in the hint).
+    assert gain0_mean == pytest.approx(1e-3, abs=5e-4)
+    assert alpha0_mean == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert gain0_mean < gain_mean
+    assert alpha0_mean < alpha_mean
+
+
+def test_centered_zero_alpha_is_prior_around_zero() -> None:
+    """A calibrated alpha of 0 stays a prior around 0 in centered mode, not fixed.
+
+    Only "fixed" drops the alpha term when the whole plate has alpha == 0.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=2.0, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.0, alpha=0.0),
+    })
+    with pm.Model():
+        centered = bayes.build_pymc_noise_priors(
+            nm, gain_mode="centered", alpha_mode="centered"
+        )
+        draws = pm.draw(centered["rel_error"]["1"], draws=6000, random_seed=0)
+    # Term is present, strictly non-negative, non-degenerate, tight around 0
+    # (HalfNormal floored at 1e-3, not the legacy 0.02).
+    assert "rel_error" in centered
+    assert float(draws.min()) >= 0.0
+    assert float(draws.std()) > 0.0
+    assert float(draws.mean()) == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    with pm.Model():
+        fixed = bayes.build_pymc_noise_priors(nm, gain_mode="fixed", alpha_mode="fixed")
+    # "fixed" with an all-zero alpha leaves the term genuinely absent (hard 0).
+    assert "rel_error" not in fixed
+
+
 @pytest.mark.parametrize(
     ("value", "label", "expected"),
     [
@@ -641,7 +795,7 @@ def test_shared_ye_mag_sigma(sigma: float | dict[str, float], expected: float) -
 def test_validate_robust_likelihood_rejects_unknown() -> None:
     """An unrecognized robust-likelihood selector should raise ValueError."""
     with pytest.raises(ValueError, match=r"student_t.*mixture"):
-        bayes._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # noqa: SLF001
+        bayes_config._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # noqa: SLF001
 
 
 def test_add_y_likelihood_mixture_requires_outlier_priors() -> None:
@@ -860,10 +1014,9 @@ def test_fit_binding_pymc_dataset_defaults_free_noise_modes(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "free", "gain": "free", "alpha": "free"}
@@ -899,10 +1052,9 @@ def test_fit_binding_pymc_fitresult_defaults_centered_noise_modes(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             fit_binding_glob(ph_dataset),
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
@@ -938,12 +1090,11 @@ def test_fit_binding_pymc_passes_shared_noise_flags(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             multi_dataset,
-            noise_model=noise_model,
-            shared_alpha=False,
-            shared_gain=True,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(
+                noise_model=noise_model, shared_alpha=False, shared_gain=True
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"shared_alpha": False, "shared_gain": True}
@@ -966,11 +1117,9 @@ def test_fit_binding_pymc_robust_uses_fixed_student_t_nu(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
-            robust=True,
-            student_t_nu=7.5,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(enabled=True, nu=7.5),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["name"] == "y_likelihood_default"
@@ -994,11 +1143,9 @@ def test_fit_binding_pymc_robust_can_infer_student_t_nu(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
-            robust=True,
-            student_t_nu=None,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(enabled=True, nu=None),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["name"] == "y_likelihood_default"
@@ -1023,11 +1170,9 @@ def test_fit_binding_pymc_robust_can_use_mixture_likelihood(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
-            robust=True,
-            robust_likelihood="mixture",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(enabled=True, likelihood="mixture"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {
@@ -1058,12 +1203,13 @@ def test_fit_binding_pymc_mixture_accepts_label_specific_contamination_prior(
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             multi_dataset,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1.0 / 63.0},
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(
+                enabled=True,
+                likelihood="mixture",
+                contamination_frac_prior={"1": 1.0 / 7.0, "2": 1.0 / 63.0},
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["pi_outlier_1"] == pytest.approx(6.0)
@@ -1079,12 +1225,13 @@ def test_fit_binding_pymc_mixture_rejects_unsafe_contamination_prior(
     with pytest.raises(ValueError, match=r"between 0\.001 and 0\.5"):
         fit_binding_pymc(
             ph_dataset,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior=contamination_frac_prior,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(
+                enabled=True,
+                likelihood="mixture",
+                contamination_frac_prior=contamination_frac_prior,
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1095,11 +1242,9 @@ def test_fit_binding_pymc_robust_rejects_nonpositive_student_t_nu(
     with pytest.raises(ValueError, match="student_t_nu must be positive"):
         fit_binding_pymc(
             ph_dataset,
-            robust=True,
-            student_t_nu=0.0,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            robust=RobustConfig(enabled=True, nu=0.0),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1146,14 +1291,14 @@ def test_fit_binding_pymc_residual_refit_uses_requested_two_pass_settings(
     np.testing.assert_allclose(
         calls[1]["y_errc"], np.full_like(ph_dataset["default"].yc, 7.0)
     )
-    assert calls[0]["robust"] is True
-    assert calls[0]["ye_mag_prior"] == "lognormal"
-    assert calls[0]["ye_mag_mu"] == {"default": pytest.approx(np.log(1.08))}
-    assert calls[0]["ye_mag_sigma"] == 0.5
-    assert calls[1]["robust"] is False
-    assert calls[1]["ye_mag_prior"] == "lognormal"
-    assert calls[1]["ye_mag_mu"] == 0.0
-    assert calls[1]["ye_mag_sigma"] == 0.25
+    assert calls[0]["robust"].enabled is True
+    assert calls[0]["noise"].ye_mag_prior == "lognormal"
+    assert calls[0]["noise"].ye_mag_mu == {"default": pytest.approx(np.log(1.08))}
+    assert calls[0]["noise"].ye_mag_sigma == 0.5
+    assert calls[1]["robust"].enabled is False
+    assert calls[1]["noise"].ye_mag_prior == "lognormal"
+    assert calls[1]["noise"].ye_mag_mu == 0.0
+    assert calls[1]["noise"].ye_mag_sigma == 0.25
 
 
 def test_fit_binding_pymc_residual_refit_masks_one_outlier_per_label_by_default(
@@ -1247,13 +1392,14 @@ def test_fit_binding_pymc_residual_refit_proportional_noise_strategy(
         calls[0]["y_errc"], np.full_like(ph_dataset["default"].yc, 2.0)
     )
     for call in calls:
-        assert call["noise_model"]["default"].sigma_floor == 0.3
-        assert call["noise_model"]["default"].alpha == 0.07
-        assert call["floor_mode"] == "centered"
-        assert call["gain_mode"] == "fixed"
-        assert call["alpha_mode"] == "free"
-        assert call["learn_ye_mags"] is False
-        assert "ye_mag_prior" not in call
+        noise = call["noise"]
+        assert noise.kind == "structured"
+        assert noise.noise_model["default"].sigma_floor == 0.3
+        assert noise.noise_model["default"].alpha == 0.07
+        assert noise.floor_mode == "centered"
+        assert noise.gain_mode == "fixed"
+        assert noise.alpha_mode == "free"
+        assert noise.learn_ye_mags is False
 
 
 def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
@@ -1325,8 +1471,9 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     )
 
     assert len(calls) == 2
-    assert calls[0]["robust"] is True
-    assert calls[1]["robust"] is False
+    noise0 = cast("NoiseConfig", calls[0]["noise"])
+    assert cast("RobustConfig", calls[0]["robust"]).enabled is True
+    assert cast("RobustConfig", calls[1]["robust"]).enabled is False
     assert calls[0]["well_noise_scale"] is True
     assert calls[1]["well_noise_scale"] is True
     assert calls[0]["shared_well_noise_scale"] is False
@@ -1335,10 +1482,11 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     assert calls[0]["well_noise_sd_sigma"] == 0.3
     assert calls[0]["n_xerr"] == 1.0
     assert calls[1]["n_xerr"] == 1.0
-    assert calls[0]["noise_model"]["1"].sigma_floor == 0.3
-    assert calls[0]["noise_model"]["2"].alpha == 0.07
-    assert calls[0]["shared_alpha"] is False
-    assert calls[0]["alpha_mode"] == "free"
+    assert noise0.noise_model is not None
+    assert noise0.noise_model["1"].sigma_floor == 0.3
+    assert noise0.noise_model["2"].alpha == 0.07
+    assert noise0.shared_alpha is False
+    assert noise0.alpha_mode == "free"
     assert calls[1]["input_types"] == {"A01": "FitResult", "A02": "FitResult"}
     assert calls[1]["input_masks"]["A01"] == [True, False, True]
     assert result.masked_datasets["A01"]["1"].mask.tolist() == [True, False, True]
@@ -1425,10 +1573,9 @@ def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
         bayes.fit_binding_pymc_multi(
             {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "free", "gain": "free", "alpha": "free"}
@@ -1469,10 +1616,9 @@ def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"floor": "centered", "gain": "centered", "alpha": "centered"}
@@ -1512,10 +1658,9 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"labels": ["2"]}
@@ -1561,12 +1706,10 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
-            learn_ye_mags=True,
-            per_well_ye_mags=per_well_ye_mags,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
+            per_well_ye_mags=per_well_ye_mags,
+            noise=NoiseConfig.structured(noise_model=noise_model, learn_ye_mags=True),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {"per_well": expected_per_well}
@@ -1608,12 +1751,11 @@ def test_fit_binding_pymc_multi_can_share_well_noise_scale_between_labels(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            noise_model=noise_model,
+            n_xerr=0.0,
             well_noise_scale=True,
             shared_well_noise_scale=True,
-            n_samples=2,
-            n_tune=1,
-            n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert "label_noise_scale" in created_lognormals
@@ -1643,12 +1785,10 @@ def test_fit_binding_pymc_multi_robust_can_infer_student_t_nu(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            student_t_nu=None,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(enabled=True, nu=None),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["name"] == "y_likelihood_1"
@@ -1677,12 +1817,10 @@ def test_fit_binding_pymc_multi_robust_can_use_mixture_likelihood(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(enabled=True, likelihood="mixture"),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured == {
@@ -1710,13 +1848,12 @@ def test_fit_binding_pymc_multi_mixture_accepts_contamination_prior_boundary(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior=0.5,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True, likelihood="mixture", contamination_frac_prior=0.5
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1732,13 +1869,12 @@ def test_fit_binding_pymc_multi_mixture_rejects_high_contamination_prior(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior=0.999,
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True, likelihood="mixture", contamination_frac_prior=0.999
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1754,13 +1890,14 @@ def test_fit_binding_pymc_multi_mixture_rejects_unsafe_label_specific_prior(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            robust=True,
-            robust_likelihood="mixture",
-            contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
-            n_samples=2,
-            n_tune=1,
             n_xerr=0.0,
             x_error_model="deterministic",
+            robust=RobustConfig(
+                enabled=True,
+                likelihood="mixture",
+                contamination_frac_prior={"1": 1.0 / 7.0, "2": 1e-4},
+            ),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -1797,10 +1934,9 @@ def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            n_samples=2,
-            n_tune=1,
             n_xerr=3.0,
             x_error_model="deterministic",
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     np.testing.assert_allclose(captured["x_errc"], expected_x_err)
@@ -1819,10 +1955,9 @@ def test_fit_binding_pymc_multi_deterministic_mode_uses_shared_fixed_x_true(
     multi = bayes.fit_binding_pymc_multi(
         {"A01": fr_init, "A02": fr_init},
         scheme,
-        n_samples=2,
-        n_tune=1,
         n_xerr=0.0,
         x_error_model="deterministic",
+        sampler=SamplerConfig(n_samples=2, n_tune=1),
     )
 
     x_true = x_true_from_trace_df(multi)
@@ -1871,11 +2006,10 @@ def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
         bayes.fit_binding_pymc_multi(
             {"A01": ds_a, "A02": ds_b},
             scheme,
-            noise_model=noise_model,
             x_error_model="hierarchical_per_well",
             n_xerr=0.0,
-            n_samples=2,
-            n_tune=1,
+            noise=NoiseConfig.structured(noise_model=noise_model),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
@@ -2011,10 +2145,9 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
     multi = bayes.fit_binding_pymc_multi(
         fit_results,
         scheme,
-        n_samples=2,
-        n_tune=1,
         n_xerr=0.0,
         x_error_model="deterministic",
+        sampler=SamplerConfig(n_samples=2, n_tune=1),
     )
 
     assert set(multi.results) == {"A01", "A02"}
@@ -2048,11 +2181,10 @@ def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
             scheme,
-            n_samples=2,
-            n_tune=1,
             n_xerr=1.0,
             x_error_model="deterministic",
             min_x_step=0.35,
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     assert captured["min_x_step"] == 0.35
@@ -2126,22 +2258,18 @@ def test_single_and_multi_pymc_none_noise_model_estimate_similar_ye_mags(
     for shared_ye_mags in (False, True):
         single = fit_binding_pymc(
             fit_binding_glob(copy.deepcopy(ds_dict["A01"])),
-            n_samples=150,
-            n_tune=150,
             n_xerr=0.0,
-            noise_model=None,
-            shared_ye_mags=shared_ye_mags,
+            noise=NoiseConfig.ye_mag(shared=shared_ye_mags),
+            sampler=SamplerConfig(n_samples=150, n_tune=150),
         )
         multi = bayes.fit_binding_pymc_multi(
             copy.deepcopy(ds_dict),
             scheme,
-            n_samples=150,
-            n_tune=150,
             n_xerr=0.0,
-            noise_model=None,
-            shared_ye_mags=shared_ye_mags,
             per_well_ye_mags=True,
             x_error_model="deterministic",
+            noise=NoiseConfig.ye_mag(shared=shared_ye_mags),
+            sampler=SamplerConfig(n_samples=150, n_tune=150),
         )
 
         assert single.mini is not None
@@ -2170,7 +2298,9 @@ def test_fit_binding_pymc_smoke_test(ph_dataset: Dataset) -> None:
     assert initial_fit.dataset is not None
     # Now, run the pymc fitter with very few samples (just to test it runs)
     # Use tune=50 to reduce sampling time
-    fit_result_pymc = fit_binding_pymc(initial_fit, n_samples=50, n_xerr=0, n_sd=10.0)
+    fit_result_pymc = fit_binding_pymc(
+        initial_fit, n_xerr=0, n_sd=10.0, sampler=SamplerConfig(n_samples=50)
+    )
     # Check that we got a result
     assert fit_result_pymc.mini is not None
     assert fit_result_pymc.result is not None
@@ -2192,7 +2322,9 @@ def test_fit_binding_pymc_with_xerr(ph_dataset: Dataset) -> None:
     assert initial_fit.result is not None
     assert initial_fit.dataset is not None
     # Run PyMC with x error modeling (reduced samples for speed)
-    fit_result = fit_binding_pymc(initial_fit, n_samples=50, n_xerr=1.0, n_sd=10.0)
+    fit_result = fit_binding_pymc(
+        initial_fit, n_xerr=1.0, n_sd=10.0, sampler=SamplerConfig(n_samples=50)
+    )
     assert fit_result.result is not None
     assert "K" in fit_result.result.params
     # Check that K is reasonably close to expected value
@@ -2214,7 +2346,11 @@ def test_fit_binding_pymc_separate_smoke_test(multi_dataset: Dataset) -> None:
         lbl: NoiseModelParams(sigma_floor=10.0) for lbl in initial_fit.dataset
     })
     fit_result = fit_binding_pymc(
-        initial_fit, n_samples=50, n_xerr=0, n_sd=10.0, noise_model=noise_model
+        initial_fit,
+        n_xerr=0,
+        n_sd=10.0,
+        noise=NoiseConfig.structured(noise_model=noise_model),
+        sampler=SamplerConfig(n_samples=50),
     )
     assert fit_result.result is not None
     assert "K" in fit_result.result.params
@@ -2228,7 +2364,7 @@ def test_fit_binding_pymc_empty_result() -> None:
     # Create an empty FitResult
     empty_result: FitResult[MiniT] = FitResult()
     # Should return empty result without crashing
-    result = fit_binding_pymc(empty_result, n_samples=10)
+    result = fit_binding_pymc(empty_result, sampler=SamplerConfig(n_samples=10))
     assert result.result is None or result.mini is None
 
 
@@ -2519,11 +2655,11 @@ class TestYerrExtraction:
         multi = bayes.fit_binding_pymc_multi(
             results,
             scheme,
-            noise_model=noise_model,
-            n_samples=100,
-            n_tune=50,
             n_xerr=0.0,
-            floor_mode="centered",
+            noise=NoiseConfig.structured(
+                noise_model=noise_model, floor_mode="centered"
+            ),
+            sampler=SamplerConfig(n_samples=100, n_tune=50),
         )
 
         returned_dataset = multi.results["A01"].dataset
@@ -2573,10 +2709,8 @@ class TestYerrExtraction:
         multi = bayes.fit_binding_pymc_multi(
             results,
             scheme,
-            noise_model=None,
-            n_samples=100,
-            n_tune=50,
             n_xerr=0.0,
+            sampler=SamplerConfig(n_samples=100, n_tune=50),
         )
 
         returned_dataset = multi.results["A01"].dataset
