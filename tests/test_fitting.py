@@ -16,6 +16,7 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc,
     fit_binding_pymc_multi,
 )
+from clophfit.fitting.bayes_config import NoiseConfig, SamplerConfig
 from clophfit.fitting.core import (
     analyze_spectra,
     fit_binding_glob,
@@ -212,7 +213,9 @@ def _() -> None:
         initial_fit = fit_binding_glob(ph_dataset)
         # Now, run the pymc fitter with very few samples
         # We are not testing for correctness of the result, just that it runs.
-        fit_result_pymc = fit_binding_pymc(initial_fit, n_samples=10, n_xerr=0)
+        fit_result_pymc = fit_binding_pymc(
+            initial_fit, n_xerr=0, sampler=SamplerConfig(n_samples=10)
+        )
         assert fit_result_pymc.result is not None  # Should be an InferenceData object
         assert "K" in fit_result_pymc.result.posterior
     """
@@ -864,7 +867,7 @@ def test_fit_binding_odr_multi(multi_dataset: Dataset) -> None:
 
 def test_fit_binding_pymc_ph(ph_dataset: Dataset) -> None:
     """Test PyMC Bayesian fitting on pH dataset."""
-    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0)
+    fr = fit_binding_pymc(ph_dataset, n_sd=1.0, sampler=SamplerConfig(n_samples=100))
     assert fr.result is not None
     assert "K" in fr.result.params
     # Check K value is reasonable
@@ -880,7 +883,7 @@ def test_fit_binding_pymc_avoids_log_likelihood_deprecation(
     """PyMC fitting should not emit the log_likelihood idata_kwargs deprecation."""
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        fr = fit_binding_pymc(ph_dataset, n_samples=20, n_sd=1.0)
+        fr = fit_binding_pymc(ph_dataset, n_sd=1.0, sampler=SamplerConfig(n_samples=20))
 
     assert fr.result is not None
     loglike_future_warnings = [
@@ -897,7 +900,7 @@ def test_fit_binding_pymc_from_fitresult(ph_dataset: Dataset) -> None:
     fr_init = fit_binding_glob(ph_dataset)
     assert fr_init.result is not None
 
-    fr_pymc = fit_binding_pymc(fr_init, n_samples=50, n_sd=1.0)
+    fr_pymc = fit_binding_pymc(fr_init, n_sd=1.0, sampler=SamplerConfig(n_samples=50))
     assert fr_pymc.result is not None
     assert "K" in fr_pymc.result.params
 
@@ -907,7 +910,12 @@ def test_fit_binding_pymc_separate_ph(ph_dataset: Dataset) -> None:
     noise_model = PlateNoiseModel({
         lbl: NoiseModelParams(sigma_floor=10.0) for lbl in ph_dataset
     })
-    fr = fit_binding_pymc(ph_dataset, n_samples=100, n_sd=1.0, noise_model=noise_model)
+    fr = fit_binding_pymc(
+        ph_dataset,
+        n_sd=1.0,
+        noise=NoiseConfig.structured(noise_model=noise_model),
+        sampler=SamplerConfig(n_samples=100),
+    )
     assert fr.result is not None
     assert "K" in fr.result.params
     assert fr.result.residual is not None
@@ -915,7 +923,7 @@ def test_fit_binding_pymc_separate_ph(ph_dataset: Dataset) -> None:
 
 def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
     """Test PyMC on multi-label dataset."""
-    fr = fit_binding_pymc(multi_dataset, n_samples=50, n_sd=1.0)
+    fr = fit_binding_pymc(multi_dataset, n_sd=1.0, sampler=SamplerConfig(n_samples=50))
     assert fr.result is not None
     assert "K" in fr.result.params
     assert "S0_1" in fr.result.params

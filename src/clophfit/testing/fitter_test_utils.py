@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import numpy as np
 
 from clophfit.fitting.bayes import fit_binding_pymc
+from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.core import (
     fit_binding_glob,
     weight_da,
@@ -228,7 +229,12 @@ def apply_tecan_combination(
     if final_stage == "odr":
         return cast("FitResult[MiniT]", fit_binding_odr(prefit_result))
     if final_stage == "mcmc_single":
-        return fit_binding_pymc(prefit_result, n_sd=5.0, n_xerr=1.0, n_samples=200)
+        return fit_binding_pymc(
+            prefit_result,
+            n_sd=5.0,
+            n_xerr=1.0,
+            sampler=SamplerConfig(n_samples=200),
+        )
     msg = (
         f"Final stage '{final_stage}' requires full TitrationAnalysis context and "
         "is not supported by dataset-only benchmark utilities."

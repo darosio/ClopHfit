@@ -11,6 +11,7 @@ import pandas as pd
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc_residual_refit
+from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.pipeline import fit_plate
@@ -127,8 +128,10 @@ def fit_single_mcmc(
         mcmc_fits = {
             key: fit_binding_pymc(
                 ds,
-                n_samples=titration.params.n_mcmc_samples,
-                nuts_sampler=titration.params.nuts_sampler,
+                sampler=SamplerConfig(
+                    n_samples=titration.params.n_mcmc_samples,
+                    nuts_sampler=titration.params.nuts_sampler,
+                ),
             )
             for key, ds in datasets.items()
         }
