@@ -130,7 +130,7 @@ def test_fit_gain_recovers_known_gain() -> None:
     floor, true_gain = 5.0, 0.8
     sigma = np.sqrt(floor**2 + true_gain * y_pred)
     resid = sigma * rng.standard_normal(400)
-    df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
+    df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y_pred})
     gain = fit_gain_from_residuals(df, sigma_floor={"1": floor})
     assert abs(gain["1"] - true_gain) / true_gain < 0.2
 
@@ -143,7 +143,7 @@ def test_fit_gain_multi_label() -> None:
     for lbl, gain_true, floor in [("1", 1.0, 5.0), ("2", 2.0, 3.0)]:
         sigma = np.sqrt(floor**2 + gain_true * y)
         resid = sigma * rng.standard_normal(200)
-        parts.append(pd.DataFrame({"label": lbl, "raw_res": resid, "that": y}))
+        parts.append(pd.DataFrame({"label": lbl, "raw_res": resid, "yhat": y}))
     df = pd.concat(parts, ignore_index=True)
     gain = fit_gain_from_residuals(df, sigma_floor={"1": 5.0, "2": 3.0})
     assert gain["1"] >= 0.0
@@ -155,7 +155,7 @@ def test_fit_gain_non_negative_clamped() -> None:
     rng = np.random.default_rng(5)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
-    df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y})
+    df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y})
     gain = fit_gain_from_residuals(df, sigma_floor={"1": 100.0})
     assert gain["1"] >= 0.0
 
@@ -170,7 +170,7 @@ def test_fit_rel_error_recovers_known_alpha() -> None:
     floor, true_alpha = 5.0, 0.02
     sigma = np.sqrt(floor**2 + (true_alpha * y_pred) ** 2)
     resid = sigma * rng.standard_normal(400)
-    df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
+    df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y_pred})
     alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": floor})
     assert abs(alpha["1"] - true_alpha) / true_alpha < 0.2
 
@@ -183,7 +183,7 @@ def test_fit_rel_error_multi_label() -> None:
     for lbl, alpha_true, floor in [("1", 0.02, 5.0), ("2", 0.04, 3.0)]:
         sigma = np.sqrt(floor**2 + (alpha_true * y) ** 2)
         resid = sigma * rng.standard_normal(200)
-        parts.append(pd.DataFrame({"label": lbl, "raw_res": resid, "that": y}))
+        parts.append(pd.DataFrame({"label": lbl, "raw_res": resid, "yhat": y}))
     df = pd.concat(parts, ignore_index=True)
     alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": 5.0, "2": 3.0})
     assert "1" in alpha
@@ -197,7 +197,7 @@ def test_fit_rel_error_non_negative_clamped() -> None:
     rng = np.random.default_rng(5)
     y = np.ones(50) * 100
     resid = rng.standard_normal(50) * 0.001
-    df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y})
+    df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y})
     alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": 100.0})
     assert alpha["1"] >= 0.0
 

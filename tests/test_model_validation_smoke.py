@@ -80,7 +80,7 @@ def test_residual_diagnostics_wrapper_summarizes_and_annotates() -> None:
         "step": [0, 1, 0, 1],
         "x": [8.9, 8.2, 8.9, 8.2],
         "y": [1.0, 1.1, 2.0, 2.1],
-        "that": [1.0, 1.2, 1.9, 2.0],
+        "yhat": [1.0, 1.2, 1.9, 2.0],
         "sigma": [1.0, 1.0, 1.0, 1.0],
         "std_res": [0.1, -0.2, 0.3, -0.4],
     })
@@ -110,7 +110,7 @@ def test_residual_diagnostics_relative_well_scaled_and_trace_summary() -> None:
         "step": [0, 1, 0, 1] * 2,
         "x": [8.9, 8.2, 8.9, 8.2] * 2,
         "y": [10.0, 12.0, 20.0, 18.0, 11.0, 14.0, 22.0, 17.0],
-        "that": [9.0, 13.0, 21.0, 19.0, 10.0, 15.0, 20.0, 18.0],
+        "yhat": [9.0, 13.0, 21.0, 19.0, 10.0, 15.0, 20.0, 18.0],
         "sigma": [1.0] * 8,
         "std_res": [1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 2.0, -1.0],
     })
@@ -206,7 +206,7 @@ def test_residual_diagnostics_scaling_and_plot_guards() -> None:
         "step": [0, 1, 2, 3] * 2,
         "x": [6.0, 7.0, 8.0, 9.0] * 2,
         "y": [1.0] * 8,
-        "that": [1.0] * 8,
+        "yhat": [1.0] * 8,
         "sigma": [1.0] * 8,
         "std_res": [0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 2.0],
     })
@@ -886,7 +886,7 @@ def annotated_diagnostics() -> ResidualDiagnostics:
         "step": [0, 0, 0, 0, 1, 1, 1, 1],
         "x": [8.9, 8.9, 8.9, 8.9, 8.2, 8.2, 8.2, 8.2],
         "y": [1.0, 1.1, 2.0, 2.1, 1.2, 1.3, 2.2, 2.3],
-        "that": [1.0, 1.2, 1.9, 2.0, 1.1, 1.4, 2.1, 2.2],
+        "yhat": [1.0, 1.2, 1.9, 2.0, 1.1, 1.4, 2.1, 2.2],
         "sigma": [1.0] * 8,
         "std_res": [0.1, -0.2, 0.3, -0.4, 0.2, -0.1, 0.4, -0.3],
     })
@@ -953,8 +953,8 @@ def test_residual_diagnostics_analysis_methods_smoke() -> None:
         "std_res": np.linspace(-1.0, 1.0, 8),
     })
     diag = ResidualDiagnostics(df)
-    assert len(diag.distribution_summary()) == 2  # one row per label
-    assert isinstance(diag.x_correlation(), pd.DataFrame)
-    lag, lag_summary = diag.lag1_autocorrelation()
+    assert len(diag.analysis.distribution_summary()) == 2  # one row per label
+    assert isinstance(diag.analysis.x_correlation(), pd.DataFrame)
+    lag, lag_summary = diag.analysis.lag1_autocorrelation()
     assert isinstance(lag, pd.DataFrame)
     assert isinstance(lag_summary, pd.DataFrame)

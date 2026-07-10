@@ -48,14 +48,14 @@ class ResidualPoint:
         X-value (pH or ligand concentration)
     y : float
         Observed signal value.
-    that : float
+    yhat : float
         Model-predicted signal value (``y - raw_res``).
     sigma : float
         Measurement uncertainty used during fitting.
     raw_res : float
-        Raw residual: ``y - that``.
+        Raw residual: ``y - yhat``.
     likelihood_res : float
-        Likelihood-scale residual: ``(y - that) / sigma``.
+        Likelihood-scale residual: ``(y - yhat) / sigma``.
     std_res : float
         Normal-scale standardized residual (equal to *likelihood_res* for a
         Normal likelihood, as produced by LMFit/ODR fits).
@@ -71,7 +71,7 @@ class ResidualPoint:
     label: str
     x: float
     y: float
-    that: float
+    yhat: float
     sigma: float
     raw_res: float
     likelihood_res: float
@@ -151,7 +151,7 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
                 label=lbl,
                 x=float(xs[i]),
                 y=float(ys[i]),
-                that=float(ys[i]) - float(rr[i]),
+                yhat=float(ys[i]) - float(rr[i]),
                 sigma=float(y_err[i]),
                 raw_res=float(rr[i]),
                 likelihood_res=float(rw[i]),
@@ -179,7 +179,7 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        DataFrame with the canonical residual columns: label, x, y, that,
+        DataFrame with the canonical residual columns: label, x, y, yhat,
         sigma, raw_res, likelihood_res, std_res, raw_i.
 
     Examples
@@ -217,7 +217,7 @@ def collect_multi_residuals(
     -------
     pd.DataFrame
         Combined DataFrame with the canonical residual columns plus ``well``:
-        well, label, x, y, that, sigma, raw_res, likelihood_res, std_res, raw_i.
+        well, label, x, y, yhat, sigma, raw_res, likelihood_res, std_res, raw_i.
 
     Examples
     --------
@@ -298,176 +298,33 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     return summary_df
 
 
-def validate_residuals(fr: FitResult[Any], *, verbose: bool = True) -> dict[str, bool]:
-    """Validate residual quality for a fit result.
+def detect_adjacent_correlation(
+    all_res: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, ArrayF]]:
+    """Detect correlation between adjacent (lag-1) residuals within wells.
 
-    Checks for common issues:
-    - Systematic bias (mean significantly different from 0, checked per label)
-    - Outliers (more than 5% beyond ±2-sigma overall)
-    - Serial correlation (adjacent residuals within each label)
+    Tests whether adjacent points show systematic patterns (e.g. positive then
+    negative), which can indicate x-value errors or model misspecification.
 
     Parameters
     ----------
-    fr : FitResult[Any]
-        Fit result to validate
-    verbose : bool
-        Print warnings for failed checks
+    all_res : pd.DataFrame
+        Residual table with ``label``, ``well``, ``x`` and ``std_res`` columns.
 
     Returns
     -------
-    dict[str, bool]
-        Dictionary of check results: {'bias_ok', 'outliers_ok', 'correlation_ok'}
-
-    Examples
-    --------
-    >>> from clophfit.fitting.core import fit_binding_glob
-    >>> from clophfit.fitting.data_structures import Dataset, DataArray
-    >>> import numpy as np
-    >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
-    >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"1": da}, is_ph=True)
-    >>> fr = fit_binding_glob(dataset)
-    >>> checks = validate_residuals(fr, verbose=False)
-    >>> isinstance(checks, dict) and "bias_ok" in checks
-    True
+    correlation_stats : pd.DataFrame
+        Lag-1 correlation statistics per (label, well).
+    correlations_by_label : dict[str, ArrayF]
+        Array of lag-1 correlations for each label.
     """
-    checks = {"bias_ok": True, "outliers_ok": True, "correlation_ok": True}
-
-    if fr.result is None or fr.result.residual is None or fr.dataset is None:
-        return checks
-
-    # Extract clean residuals per label to avoid cross-label boundary artifacts
-    pts = extract_residual_points(fr)
-    if not pts:
-        return checks
-
-    df = pd.DataFrame([asdict(p) for p in pts])
-
-    # Check 1: Systematic bias (t-test against 0) per label
-    for lbl, group in df.groupby("label"):
-        r_lbl = group["std_res"].to_numpy()
-        if len(r_lbl) > 1:
-            _t_stat, p_value = sp_stats.ttest_1samp(r_lbl, 0)
-            if p_value < BIAS_P_VALUE_THRESHOLD:
-                checks["bias_ok"] = False
-                if verbose:
-                    print(
-                        f"⚠️  Systematic bias detected in label {lbl} (mean={r_lbl.mean():.3f}, p={p_value:.4f})"
-                    )
-
-    # Check 2: Outliers (more than 5% beyond ±2-sigma)
-    r_all = df["std_res"].to_numpy()
-    outlier_rate = (np.abs(r_all) > OUTLIER_THRESHOLD_2SIGMA).mean()
-    checks["outliers_ok"] = bool(outlier_rate < OUTLIER_RATE_THRESHOLD)
-    if not checks["outliers_ok"] and verbose:
-        print(f"⚠️  High outlier rate: {outlier_rate:.1%} beyond ±2-sigma")
-
-    # Check 3: Serial correlation (Durbin-Watson test approximation within labels)
-    ss_diff = 0.0
-    ss_total = 0.0
-    for _lbl, group in df.groupby("label"):
-        # Sort by x to ensure temporal/spatial adjacent ordering is correct
-        g_sorted = group.sort_values("x")
-        r_lbl = g_sorted["std_res"].to_numpy()
-        if len(r_lbl) > 1:
-            ss_diff += np.sum(np.diff(r_lbl) ** 2)
-            ss_total += np.sum(r_lbl**2)
-
-    if ss_total > 0:
-        dw_stat = float(ss_diff / ss_total)
-        checks["correlation_ok"] = bool(DW_LOWER_BOUND < dw_stat < DW_UPPER_BOUND)
-        if not checks["correlation_ok"] and verbose:
-            print(f"⚠️  Serial correlation detected (DW={dw_stat:.2f})")
-    else:
-        checks["correlation_ok"] = True
-
-    return checks
-
-
-def compute_residual_covariance(
-    all_res: pd.DataFrame, value_col: str = "std_res"
-) -> dict[str, pd.DataFrame]:
-    """Compute covariance matrix of residuals for each label."""
-    cov_by_label: dict[str, pd.DataFrame] = {}
-    for lbl, g in all_res.groupby("label"):
-        pivot_table = g.pivot_table(
-            index="well", columns="x", values=value_col, aggfunc="mean"
-        )
-        # drop wells missing any x (to make a clean covariance across x points)
-        pivot_table = pivot_table.dropna(axis=0, how="any")
-        data = pivot_table.to_numpy(dtype=float)
-        # covariance across x-points (features), so rowvar=False
-        cov = np.cov(data, rowvar=False, ddof=1)
-        cov_by_label[str(lbl)] = pd.DataFrame(
-            cov,
-            index=pivot_table.columns.to_list(),
-            columns=pivot_table.columns.to_list(),
-        )
-    return cov_by_label
-
-
-def compute_correlation_matrices(
-    cov_by_label: dict[str, pd.DataFrame],
-) -> dict[str, pd.DataFrame]:
-    """Convert covariance matrices to correlation matrices."""
-    corr_by_label: dict[str, pd.DataFrame] = {}
-    for lbl, cov_df in cov_by_label.items():
-        cov = cov_df.to_numpy()
-        std_outer = np.outer(np.sqrt(np.diag(cov)), np.sqrt(np.diag(cov)))
-        corr = cov / std_outer
-        corr_by_label[lbl] = pd.DataFrame(
-            corr, index=cov_df.index, columns=cov_df.columns
-        )
-    return corr_by_label
-
-
-def analyze_label_bias(
-    all_res: pd.DataFrame, n_bins: int = 5
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Detect systematic bias by label and x-range."""
-    outlier_threshold = 3.0  # Standard deviations
-    strong_negative_threshold = -0.5
-
-    all_res = all_res.copy()
-    all_res["x_bin"] = pd.cut(all_res["x"], bins=n_bins)
-
-    mean_resid = all_res["std_res"].mean()
-    std_resid = all_res["std_res"].std()
-    all_res["std_res"] = (all_res["std_res"] - mean_resid) / std_resid
-
-    bias_summary = all_res.groupby(["label", "x_bin"], observed=False).agg(
-        mean_resid=("std_res", "mean"),
-        std_resid=("std_res", "std"),
-        count=("std_res", "count"),
-        outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
-        mean_std_res=("std_res", "mean"),
-    )
-
-    label_bias = all_res.groupby("label", observed=False).agg(
-        mean_resid=("std_res", "mean"),
-        std_resid=("std_res", "std"),
-        median_resid=("std_res", "median"),
-        outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
-        negative_bias_frac=(
-            "std_res",
-            lambda x: (x < strong_negative_threshold).mean(),
-        ),
-    )
-
-    return bias_summary, label_bias
-
-
-def detect_adjacent_correlation(
-    all_res: pd.DataFrame,
-) -> tuple[pd.DataFrame, dict[str, np.ndarray]]:
-    """Detect correlation between adjacent residuals within wells."""
     correlations = []
     correlations_by_label: dict[str, list[float]] = {}
 
     for (lbl, well), group in all_res.groupby(["label", "well"]):
+        # Sort by x so adjacent points are sequential.
         g = group.sort_values("x")
-        res = g["std_res"].to_numpy()
+        res = g["std_res"].to_numpy(dtype=float)
 
         if len(res) > 1:
             corr = np.corrcoef(res[:-1], res[1:])[0, 1]
@@ -478,7 +335,7 @@ def detect_adjacent_correlation(
                     "lag1_corr": corr,
                     "n_points": len(res),
                 })
-                correlations_by_label.setdefault(str(lbl), []).append(corr)
+                correlations_by_label.setdefault(str(lbl), []).append(float(corr))
 
     correlation_stats = pd.DataFrame(correlations)
     correlations_by_label_arr = {
@@ -490,24 +347,45 @@ def detect_adjacent_correlation(
 
 def estimate_x_shift_statistics(
     all_res: pd.DataFrame,
-    fit_results: dict[str, Any],  # noqa: ARG001
+    fit_results: dict[str, Any] | None = None,  # noqa: ARG001
 ) -> pd.DataFrame:
-    """Estimate potential systematic x-shifts per well (heuristics)."""
+    """Estimate potential systematic x-shifts per well (heuristics).
+
+    Analyzes residual-vs-x patterns to flag wells whose x-values (e.g. pH) may
+    be systematically off: a linear trend of residuals against x, and asymmetry
+    between positive and negative residuals.
+
+    Parameters
+    ----------
+    all_res : pd.DataFrame
+        Residual table with ``label``, ``well``, ``x`` and ``std_res`` columns.
+    fit_results : dict[str, Any] | None
+        Per-well fit results, reserved for future x-shift fitting; currently
+        unused.
+
+    Returns
+    -------
+    pd.DataFrame
+        Per-well shift indicators: ``residual_slope``, ``residual_intercept``,
+        ``trend_strength``, ``asymmetry`` and ``n_points``.
+    """
     shift_stats = []
 
     for (lbl, well), group in all_res.groupby(["label", "well"]):
         sorted_group = group.sort_values("x")
 
         if len(sorted_group) > MIN_POINTS_FOR_TREND:
-            x_vals = sorted_group["x"].to_numpy()
-            res_vals = sorted_group["std_res"].to_numpy()
+            x_vals = sorted_group["x"].to_numpy(dtype=float)
+            res_vals = sorted_group["std_res"].to_numpy(dtype=float)
 
+            # 1. Systematic linear trend of residuals against x.
             try:
                 slope, intercept = np.polyfit(x_vals, res_vals, 1)
                 trend_strength = np.abs(slope) * (x_vals.max() - x_vals.min())
             except (np.linalg.LinAlgError, ValueError):
                 slope = intercept = trend_strength = np.nan
 
+            # 2. Asymmetry of positive vs negative residuals (~0 if symmetric).
             pos_mean = res_vals[res_vals > 0].mean() if (res_vals > 0).any() else 0
             neg_mean = res_vals[res_vals < 0].mean() if (res_vals < 0).any() else 0
             asymmetry = pos_mean + neg_mean
@@ -536,7 +414,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
     ----------
     all_res : pd.DataFrame
         Residual DataFrame from ``collect_multi_residuals``.  Must contain
-        columns ``label``, ``that``, and ``std_res``.
+        columns ``label``, ``yhat``, and ``std_res``.
     title : str, optional
         Figure suptitle suffix.
 
@@ -552,7 +430,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
 
     for ax, label in zip(axes[0], labels, strict=False):
         grp = all_res[all_res["label"] == label]
-        pred = grp["that"].to_numpy(dtype=float)
+        pred = grp["yhat"].to_numpy(dtype=float)
         std_res = grp["std_res"].to_numpy(dtype=float)
         ax.scatter(pred, np.abs(std_res), s=8, alpha=0.3, color="C0")
 

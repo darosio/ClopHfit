@@ -485,7 +485,7 @@ class FitResult[MiniType: MiniProtocol]:
 
         Lazily computed, cached, and returned in the schema shared across the
         package (``clophfit.fitting.model_validation.RESIDUAL_TABLE_COLUMNS``:
-        ``raw_res``, ``that``, ``sigma``, ``std_res``, …). Works for both LMFit
+        ``raw_res``, ``yhat``, ``sigma``, ``std_res``, …). Works for both LMFit
         and PyMC fits; robustness is auto-detected from the trace. Use
         :meth:`residual_table` to override the model or robust settings.
         """

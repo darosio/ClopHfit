@@ -86,7 +86,7 @@ def calibrate_noise_robust(
     ----------
     residuals : pd.DataFrame
         Canonical residual table (e.g. ``MultiFitResult.residuals`` from a
-        mixture fit). Must have ``label``, ``raw_res``, ``that`` columns; a
+        mixture fit). Must have ``label``, ``raw_res``, ``yhat`` columns; a
         ``p_outlier_per_point`` column enables screening (otherwise all points
         are used).
     sigma_floor : dict[str, float]

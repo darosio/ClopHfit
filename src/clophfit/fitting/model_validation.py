@@ -19,6 +19,15 @@ import pandas as pd
 import xarray as xr
 from scipy import stats as sp_stats
 
+from clophfit.fitting.residuals import (
+    BIAS_P_VALUE_THRESHOLD,
+    DW_LOWER_BOUND,
+    DW_UPPER_BOUND,
+    OUTLIER_RATE_THRESHOLD,
+    OUTLIER_THRESHOLD_2SIGMA,
+    OUTLIER_THRESHOLD_3SIGMA,
+)
+
 ArrayLike = _t.Any
 
 STUDENT_T_NU = 3.0
@@ -31,7 +40,7 @@ RESIDUAL_TABLE_COLUMNS = [
     "raw_i",
     "x",
     "y",
-    "that",
+    "yhat",
     "sigma",
     "raw_res",
     "likelihood_res",
@@ -42,6 +51,210 @@ RESIDUAL_TABLE_COLUMNS = [
     "is_residual_outlier",
     "outlier_threshold",
 ]
+
+
+@dataclass
+class ResidualAnalysis:
+    """Statistical and structural residual analyses over a residual table.
+
+    The single home for frame-returning residual analyses: per-(trace, label)
+    distribution stats (:meth:`distribution_summary`), residual-vs-x correlation
+    (:meth:`x_correlation`), lag-1 autocorrelation (:meth:`lag1_autocorrelation`),
+    covariance and correlation across x-positions (:meth:`covariance`,
+    :meth:`correlation`), systematic label bias (:meth:`label_bias`), and boolean
+    quality-control checks (:meth:`validate`). Reach it from
+    :attr:`ResidualDiagnostics.analysis`, or construct it directly from a
+    canonical residual table.
+
+    Parameters
+    ----------
+    residuals : pd.DataFrame
+        Canonical residual table (Schema B) carrying ``well``/``label``/``x``/
+        ``std_res`` columns.
+    """
+
+    residuals: pd.DataFrame
+
+    def distribution_summary(self) -> pd.DataFrame:
+        """Per-(trace, label) residual distribution stats.
+
+        See :func:`residual_distribution_summary`. Supersedes
+        :func:`clophfit.fitting.residuals.residual_statistics`.
+        """
+        return residual_distribution_summary(self.residuals)
+
+    def x_correlation(self) -> pd.DataFrame:
+        """Pearson/Spearman correlation of residuals against x.
+
+        See :func:`residual_x_correlation`. Relates to
+        :func:`clophfit.fitting.residuals.estimate_x_shift_statistics`;
+        :func:`residual_x_trend_summary` gives the by-step trend.
+        """
+        return residual_x_correlation(self.residuals)
+
+    def lag1_autocorrelation(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Lag-1 residual autocorrelation per well and its per-label summary.
+
+        See :func:`residual_lag1_autocorrelation`. Supersedes
+        :func:`clophfit.fitting.residuals.detect_adjacent_correlation`.
+        """
+        return residual_lag1_autocorrelation(self.residuals)
+
+    def covariance(self, *, value_col: str = "std_res") -> dict[str, pd.DataFrame]:
+        """Per-label covariance of residuals across x-positions.
+
+        Parameters
+        ----------
+        value_col : str
+            Residual column to use (default ``"std_res"``).
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            One ``x``-by-``x`` covariance matrix per label, over the wells that
+            share a complete set of x-points.
+        """
+        cov_by_label: dict[str, pd.DataFrame] = {}
+        for lbl, g in self.residuals.groupby("label"):
+            pivot = g.pivot_table(
+                index="well", columns="x", values=value_col, aggfunc="mean"
+            )
+            # drop wells missing any x, for a clean covariance across x-points
+            pivot = pivot.dropna(axis=0, how="any")
+            data = pivot.to_numpy(dtype=float)
+            cov = np.cov(data, rowvar=False, ddof=1)
+            cov_by_label[str(lbl)] = pd.DataFrame(
+                cov,
+                index=pivot.columns.to_list(),
+                columns=pivot.columns.to_list(),
+            )
+        return cov_by_label
+
+    def correlation(self, *, value_col: str = "std_res") -> dict[str, pd.DataFrame]:
+        """Per-label correlation matrices derived from :meth:`covariance`.
+
+        Parameters
+        ----------
+        value_col : str
+            Residual column to use (default ``"std_res"``).
+
+        Returns
+        -------
+        dict[str, pd.DataFrame]
+            One ``x``-by-``x`` correlation matrix per label.
+        """
+        corr_by_label: dict[str, pd.DataFrame] = {}
+        for lbl, cov_df in self.covariance(value_col=value_col).items():
+            cov = cov_df.to_numpy()
+            std_outer = np.outer(np.sqrt(np.diag(cov)), np.sqrt(np.diag(cov)))
+            corr = cov / std_outer
+            corr_by_label[lbl] = pd.DataFrame(
+                corr, index=cov_df.index, columns=cov_df.columns
+            )
+        return corr_by_label
+
+    def label_bias(self, *, n_bins: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Detect systematic residual bias by label and x-range bin.
+
+        Residuals are globally z-scored before aggregation so the summaries are
+        comparable across labels.
+
+        Parameters
+        ----------
+        n_bins : int
+            Number of equal-width x bins for the per-(label, bin) summary.
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame]
+            ``(bias_by_label_and_bin, bias_by_label)``.
+        """
+        outlier_threshold = OUTLIER_THRESHOLD_3SIGMA
+        strong_negative_threshold = -0.5
+
+        df = self.residuals.copy()
+        df["x_bin"] = pd.cut(df["x"], bins=n_bins)
+        mean_resid = df["std_res"].mean()
+        std_resid = df["std_res"].std()
+        df["std_res"] = (df["std_res"] - mean_resid) / std_resid
+
+        bias_summary = df.groupby(["label", "x_bin"], observed=False).agg(
+            mean_resid=("std_res", "mean"),
+            std_resid=("std_res", "std"),
+            count=("std_res", "count"),
+            outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
+            mean_std_res=("std_res", "mean"),
+        )
+        label_bias = df.groupby("label", observed=False).agg(
+            mean_resid=("std_res", "mean"),
+            std_resid=("std_res", "std"),
+            median_resid=("std_res", "median"),
+            outlier_rate=("std_res", lambda x: (np.abs(x) > outlier_threshold).mean()),
+            negative_bias_frac=(
+                "std_res",
+                lambda x: (x < strong_negative_threshold).mean(),
+            ),
+        )
+        return bias_summary, label_bias
+
+    def validate(self, *, verbose: bool = False) -> dict[str, bool]:
+        """Boolean residual-quality checks over the table.
+
+        Runs three checks: per-label systematic bias (t-test against zero), the
+        overall outlier rate (beyond ±2 sigma), and serial correlation within
+        each label (Durbin-Watson statistic on x-sorted residuals).
+
+        Parameters
+        ----------
+        verbose : bool
+            Print a warning for each failed check.
+
+        Returns
+        -------
+        dict[str, bool]
+            ``{"bias_ok", "outliers_ok", "correlation_ok"}``. An empty table
+            passes every check.
+        """
+        checks = {"bias_ok": True, "outliers_ok": True, "correlation_ok": True}
+        df = self.residuals
+        if df.empty or "std_res" not in df.columns:
+            return checks
+
+        # Check 1: systematic bias (t-test against 0) per label
+        for lbl, group in df.groupby("label"):
+            r_lbl = group["std_res"].to_numpy(dtype=float)
+            if len(r_lbl) > 1:
+                _t_stat, p_value = sp_stats.ttest_1samp(r_lbl, 0)
+                if p_value < BIAS_P_VALUE_THRESHOLD:
+                    checks["bias_ok"] = False
+                    if verbose:
+                        print(
+                            f"⚠️  Systematic bias detected in label {lbl} "
+                            f"(mean={r_lbl.mean():.3f}, p={p_value:.4f})"
+                        )
+
+        # Check 2: outliers (more than 5% beyond ±2-sigma)
+        r_all = df["std_res"].to_numpy(dtype=float)
+        outlier_rate = float((np.abs(r_all) > OUTLIER_THRESHOLD_2SIGMA).mean())
+        checks["outliers_ok"] = bool(outlier_rate < OUTLIER_RATE_THRESHOLD)
+        if not checks["outliers_ok"] and verbose:
+            print(f"⚠️  High outlier rate: {outlier_rate:.1%} beyond ±2-sigma")
+
+        # Check 3: serial correlation (Durbin-Watson) within labels
+        ss_diff = 0.0
+        ss_total = 0.0
+        for _lbl, group in df.groupby("label"):
+            g_sorted = group.sort_values("x")
+            r_lbl = g_sorted["std_res"].to_numpy(dtype=float)
+            if len(r_lbl) > 1:
+                ss_diff += float(np.sum(np.diff(r_lbl) ** 2))
+                ss_total += float(np.sum(r_lbl**2))
+        if ss_total > 0:
+            dw_stat = ss_diff / ss_total
+            checks["correlation_ok"] = bool(DW_LOWER_BOUND < dw_stat < DW_UPPER_BOUND)
+            if not checks["correlation_ok"] and verbose:
+                print(f"⚠️  Serial correlation detected (DW={dw_stat:.2f})")
+        return checks
 
 
 @dataclass
@@ -57,11 +270,15 @@ class ResidualDiagnostics:
     :meth:`step_centered`, :meth:`label_scaled`, :meth:`well_scaled`,
     :meth:`with_relative_residuals`.
 
-    Summaries / analyses (return frames): :meth:`well_summary`,
-    :meth:`normality`, :meth:`step_summary`, :meth:`position_summary`,
-    :meth:`tail_rows`, :meth:`distribution_summary`, :meth:`x_correlation`,
-    :meth:`lag1_autocorrelation`. Further building blocks are the module-level
-    ``residual_x_trend_summary`` / ``residual_cross_label_correlation``.
+    Summaries (return frames): :meth:`well_summary`, :meth:`normality`,
+    :meth:`step_summary`, :meth:`position_summary`, :meth:`tail_rows`.
+
+    Statistical and structural analyses (distribution, x-correlation, lag-1
+    autocorrelation, covariance, correlation, label bias, QA checks) live under
+    :attr:`analysis` (a :class:`ResidualAnalysis`). Their module-level building
+    blocks are ``residual_distribution_summary`` / ``residual_x_correlation`` /
+    ``residual_lag1_autocorrelation`` / ``residual_x_trend_summary`` /
+    ``residual_cross_label_correlation``.
 
     Plots: :meth:`plot_hist_qq`, :meth:`plot_step`, :meth:`plot_role`,
     :meth:`plot_col`, :meth:`plot_well_summary`.
@@ -142,14 +359,14 @@ class ResidualDiagnostics:
     def with_relative_residuals(
         self,
         *,
-        denominator: str = "that",
+        denominator: str = "yhat",
         raw_col: str = "raw_res",
         eps: float = 1e-12,
     ) -> ResidualDiagnostics:
         """Return diagnostics with raw and relative residual columns added."""
         df = self.residuals.copy()
         if raw_col not in df:
-            df[raw_col] = df["y"] - df["that"]
+            df[raw_col] = df["y"] - df["yhat"]
         denom = df[denominator].abs().clip(lower=eps)
         df["rel_res"] = df[raw_col] / denom
         df["abs_rel_res"] = df["rel_res"].abs()
@@ -177,10 +394,10 @@ class ResidualDiagnostics:
         """Summarize residual and signal behavior per well and label."""
         column = column or self.value_col
         df = self.residuals.copy()
-        if "raw_res" not in df and {"y", "that"}.issubset(df.columns):
-            df["raw_res"] = df["y"] - df["that"]
-        if "rel_res" not in df and {"raw_res", "that"}.issubset(df.columns):
-            denom = df["that"].abs().clip(lower=1e-12)
+        if "raw_res" not in df and {"y", "yhat"}.issubset(df.columns):
+            df["raw_res"] = df["y"] - df["yhat"]
+        if "rel_res" not in df and {"raw_res", "yhat"}.issubset(df.columns):
+            denom = df["yhat"].abs().clip(lower=1e-12)
             df["rel_res"] = df["raw_res"] / denom
 
         agg: dict[str, pd.NamedAgg] = {
@@ -188,7 +405,7 @@ class ResidualDiagnostics:
             "std_res_mean": pd.NamedAgg(column=column, aggfunc="mean"),
             "std_res_sd": pd.NamedAgg(column=column, aggfunc="std"),
             "y_mean": pd.NamedAgg(column="y", aggfunc="mean"),
-            "that_mean": pd.NamedAgg(column="that", aggfunc="mean"),
+            "yhat_mean": pd.NamedAgg(column="yhat", aggfunc="mean"),
             "sigma_med": pd.NamedAgg(column="sigma", aggfunc="median"),
         }
         if "raw_res" in df:
@@ -258,33 +475,19 @@ class ResidualDiagnostics:
             ])
         return out
 
-    # -- Distribution / trend / correlation analyses (delegate to the free
-    #    functions below, all on the ``std_res`` column). Grouped here so the
-    #    diagnostics object is the single place to reach for residual analysis.
-    def distribution_summary(self) -> pd.DataFrame:
-        """Per-(trace, label) residual distribution stats.
+    @property
+    def analysis(self) -> ResidualAnalysis:
+        """Structural analyses (covariance, correlation, bias, QA) over the table.
 
-        See :func:`residual_distribution_summary`. Supersedes
-        :func:`clophfit.fitting.residuals.residual_statistics`.
+        Returns
+        -------
+        ResidualAnalysis
+            Accessor exposing :meth:`~ResidualAnalysis.covariance`,
+            :meth:`~ResidualAnalysis.correlation`,
+            :meth:`~ResidualAnalysis.label_bias`, and
+            :meth:`~ResidualAnalysis.validate`.
         """
-        return residual_distribution_summary(self.residuals)
-
-    def x_correlation(self) -> pd.DataFrame:
-        """Pearson/Spearman correlation of residuals against x.
-
-        See :func:`residual_x_correlation`. Relates to
-        :func:`clophfit.fitting.residuals.estimate_x_shift_statistics`;
-        :func:`residual_x_trend_summary` gives the by-step trend.
-        """
-        return residual_x_correlation(self.residuals)
-
-    def lag1_autocorrelation(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Lag-1 residual autocorrelation per well and its per-label summary.
-
-        See :func:`residual_lag1_autocorrelation`. Supersedes
-        :func:`clophfit.fitting.residuals.detect_adjacent_correlation`.
-        """
-        return residual_lag1_autocorrelation(self.residuals)
+        return ResidualAnalysis(self.residuals)
 
     def tail_rows(self, n: int = 30, *, column: str | None = None) -> pd.DataFrame:
         """Return rows with largest absolute residual values."""
@@ -295,7 +498,7 @@ class ResidualDiagnostics:
             "step",
             "x",
             "y",
-            "that",
+            "yhat",
             "sigma",
             "std_res",
             column,
@@ -382,7 +585,7 @@ class ResidualDiagnostics:
     def plot_well_summary(
         self,
         *,
-        x: str = "that_mean",
+        x: str = "yhat_mean",
         y: str = "std_res_sd",
         hue: str = "role",
     ) -> _t.Any:
@@ -874,7 +1077,7 @@ def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
     Notes
     -----
     A *fixed*-nu Student-t leaves no trace marker and is reported as non-robust;
-    only the Normal-score transform of ``std_res`` differs (``raw_res``/``that``/
+    only the Normal-score transform of ``std_res`` differs (``raw_res``/``yhat``/
     ``likelihood_res`` are unaffected). Pass ``robust=`` to
     ``residual_table`` to override.
     """
@@ -1403,7 +1606,7 @@ def residuals_from_multifit(  # noqa: PLR0913
             else:
                 y = np.asarray(da.y, dtype=float)
 
-            that = binding_function(
+            yhat = binding_function(
                 x,
                 pars["K"].value,
                 pars[f"S0_{lbl}"].value,
@@ -1414,7 +1617,7 @@ def residuals_from_multifit(  # noqa: PLR0913
             p_outlier = _outlier_probability_for_label_well(
                 multi.trace, lbl, str(well), mask, multi.results
             )
-            likelihood_res = (y - that) / sigma
+            likelihood_res = (y - yhat) / sigma
             std_res = residual_normal_scores(
                 likelihood_res, robust=robust, student_t_nu=student_t_nu
             )
@@ -1434,9 +1637,9 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "raw_i": int(step[j]),
                     "x": float(x[j]),
                     "y": float(y[j]),
-                    "that": float(that[j]),
+                    "yhat": float(yhat[j]),
                     "sigma": float(sigma[j]),
-                    "raw_res": float(y[j] - that[j]),
+                    "raw_res": float(y[j] - yhat[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
                     "p_outlier_per_point": float(p_outlier[j]),
@@ -1484,7 +1687,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
             step = np.flatnonzero(mask)
             x = np.asarray(da.x, dtype=float)
             y = np.asarray(da.y, dtype=float)
-            that = binding_function(
+            yhat = binding_function(
                 x,
                 pars["K"].value,
                 pars[f"S0_{lbl}"].value,
@@ -1496,7 +1699,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
             else:
                 sigma = np.ones_like(y, dtype=float)
             sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
-            likelihood_res = (y - that) / sigma
+            likelihood_res = (y - yhat) / sigma
             std_res = residual_normal_scores(
                 likelihood_res, robust=robust, student_t_nu=student_t_nu
             )
@@ -1515,9 +1718,9 @@ def residuals_from_fit_results(  # noqa: PLR0913
                     "raw_i": int(step[j]) if j < len(step) else int(j),
                     "x": float(x[j]),
                     "y": float(y[j]),
-                    "that": float(that[j]),
+                    "yhat": float(yhat[j]),
                     "sigma": float(sigma[j]),
-                    "raw_res": float(y[j] - that[j]),
+                    "raw_res": float(y[j] - yhat[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
                     "residual_likelihood": "student_t" if robust else "normal",

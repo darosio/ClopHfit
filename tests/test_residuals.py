@@ -14,7 +14,10 @@ from clophfit.fitting.data_structures import (
     NoiseModelParams,
     PlateNoiseModel,
 )
-from clophfit.fitting.model_validation import robust_settings_from_trace
+from clophfit.fitting.model_validation import (
+    ResidualAnalysis,
+    robust_settings_from_trace,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.residuals import (
@@ -24,16 +27,12 @@ from clophfit.fitting.residuals import (
     OUTLIER_RATE_THRESHOLD,
     OUTLIER_THRESHOLD_2SIGMA,
     ResidualPoint,
-    analyze_label_bias,
     collect_multi_residuals,
-    compute_correlation_matrices,
-    compute_residual_covariance,
     detect_adjacent_correlation,
     estimate_x_shift_statistics,
     extract_residual_points,
     residual_dataframe,
     residual_statistics,
-    validate_residuals,
 )
 
 ###############################################################################
@@ -103,7 +102,7 @@ class TestResidualPoint:
             label="1",
             x=7.0,
             y=1000.0,
-            that=995.0,
+            yhat=995.0,
             sigma=10.0,
             raw_res=5.0,
             likelihood_res=0.5,
@@ -116,7 +115,7 @@ class TestResidualPoint:
         assert point.raw_res == 5.0
         assert point.raw_i == 0
         assert point.sigma == 10.0
-        assert point.that == 995.0
+        assert point.yhat == 995.0
 
     def test_frozen(self) -> None:
         """Test that ResidualPoint is immutable."""
@@ -124,7 +123,7 @@ class TestResidualPoint:
             label="1",
             x=7.0,
             y=1000.0,
-            that=995.0,
+            yhat=995.0,
             sigma=10.0,
             raw_res=5.0,
             likelihood_res=0.5,
@@ -218,7 +217,7 @@ class TestResidualDataframe:
             "label",
             "x",
             "y",
-            "that",
+            "yhat",
             "sigma",
             "raw_res",
             "likelihood_res",
@@ -246,7 +245,7 @@ class TestResidualsEntryPoint:
     ) -> None:
         """fr.residuals returns the canonical schema and is cached."""
         r = simple_fit_result.residuals
-        assert {"raw_res", "that", "std_res", "sigma", "raw_i", "label", "x"} <= set(
+        assert {"raw_res", "yhat", "std_res", "sigma", "raw_i", "label", "x"} <= set(
             r.columns
         )
         assert simple_fit_result.residuals is r  # cached (same object)
@@ -422,9 +421,10 @@ class TestResidualDiagnosticsHelpers:
             ],
         })
 
-        cov = compute_residual_covariance(df)
-        corr = compute_correlation_matrices(cov)
-        bias_summary, label_bias = analyze_label_bias(df, n_bins=2)
+        analysis = ResidualAnalysis(df)
+        cov = analysis.covariance()
+        corr = analysis.correlation()
+        bias_summary, label_bias = analysis.label_bias(n_bins=2)
         lag_rows, lag_by_label = detect_adjacent_correlation(df)
         shift = estimate_x_shift_statistics(df, {})
 
@@ -455,16 +455,16 @@ class TestResidualDiagnosticsHelpers:
 
 
 ###############################################################################
-# Tests for validate_residuals
+# Tests for ResidualAnalysis.validate
 ###############################################################################
 
 
 class TestValidateResiduals:
-    """Test the validate_residuals function."""
+    """Test ResidualAnalysis.validate residual-quality checks."""
 
     def test_good_fit(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test validation of a good fit."""
-        checks = validate_residuals(simple_fit_result, verbose=False)
+        checks = ResidualAnalysis(simple_fit_result.residuals).validate(verbose=False)
         assert isinstance(checks, dict)
         assert "bias_ok" in checks
         assert "outliers_ok" in checks
@@ -472,7 +472,7 @@ class TestValidateResiduals:
 
     def test_empty_result(self, empty_fit_result: FitResult[MinimizerResult]) -> None:
         """Test validation of empty fit result."""
-        checks = validate_residuals(empty_fit_result, verbose=False)
+        checks = ResidualAnalysis(empty_fit_result.residuals).validate(verbose=False)
         # All checks should pass (no data to fail on)
         assert checks["bias_ok"] is True
         assert checks["outliers_ok"] is True
@@ -491,7 +491,7 @@ class TestValidateResiduals:
         fr = fit_binding_glob(dataset)
         # With a constant offset, the fit should still be good
         # (offset absorbed by S0/S1), so bias_ok should be True
-        checks = validate_residuals(fr, verbose=False)
+        checks = ResidualAnalysis(fr.residuals).validate(verbose=False)
         assert isinstance(checks["bias_ok"], bool)
 
     def test_verbose_output(
@@ -500,14 +500,14 @@ class TestValidateResiduals:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that verbose mode produces output."""
-        validate_residuals(noisy_fit_result, verbose=True)
+        ResidualAnalysis(noisy_fit_result.residuals).validate(verbose=True)
         captured = capsys.readouterr()
         # Verbose mode should produce some output (may or may not warn)
         assert isinstance(captured.out, str)
 
     def test_returns_dict(self, noisy_fit_result: FitResult[MinimizerResult]) -> None:
         """Test that function returns correct structure."""
-        checks = validate_residuals(noisy_fit_result, verbose=False)
+        checks = ResidualAnalysis(noisy_fit_result.residuals).validate(verbose=False)
         assert set(checks.keys()) == {"bias_ok", "outliers_ok", "correlation_ok"}
         # Values are bool or numpy.bool_
         assert all(isinstance(v, (bool, np.bool_)) for v in checks.values())
@@ -563,7 +563,7 @@ class TestResidualWorkflow:
 
         # Validate individual fits
         for fr in fit_results.values():
-            checks = validate_residuals(fr, verbose=False)
+            checks = ResidualAnalysis(fr.residuals).validate(verbose=False)
             assert all(isinstance(v, (bool, np.bool_)) for v in checks.values())
 
     def test_multi_label_workflow(self) -> None:

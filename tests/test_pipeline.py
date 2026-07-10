@@ -231,7 +231,7 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
     df = pd.DataFrame({
         "label": "1",
         "raw_res": np.full(120, 2.0),
-        "that": y,
+        "yhat": y,
         "p_outlier_per_point": np.zeros(120),
     })
     # Inject one gross outlier flagged by the mixture.
@@ -249,7 +249,7 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
 def test_calibrate_noise_robust_without_probability_column() -> None:
     """Without p_outlier_per_point, all points are used (no screening)."""
     y = np.linspace(50.0, 500.0, 80)
-    df = pd.DataFrame({"label": "1", "raw_res": np.full(80, 2.0), "that": y})
+    df = pd.DataFrame({"label": "1", "raw_res": np.full(80, 2.0), "yhat": y})
     model = pipeline.calibrate_noise_robust(df, {"1": 1.5})
     assert model["1"].sigma_floor == 1.5
     assert model["1"].gain >= 0.0

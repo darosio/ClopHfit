@@ -340,9 +340,9 @@ def fit_rel_error_from_residuals(
 ) -> dict[str, float]:
     r"""Estimate proportional error (alpha) per label via moment estimator.
 
-    Assumes the simplified noise model ``sigma^2 = floor^2 + alpha^2 * that^2``
+    Assumes the simplified noise model ``sigma^2 = floor^2 + alpha^2 * yhat^2``
     (no Poisson gain term). With ``floor`` known from buffer measurements
-    and using model-predicted values ``that`` in the denominator to avoid
+    and using model-predicted values ``yhat`` in the denominator to avoid
     noise-in-variables bias, the closed-form moment estimator is:
 
     .. math::
@@ -354,7 +354,7 @@ def fit_rel_error_from_residuals(
     ----------
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
-        ``that`` (float -- the model-predicted signal at each point).
+        ``yhat`` (float -- the model-predicted signal at each point).
         Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -372,7 +372,7 @@ def fit_rel_error_from_residuals(
     >>> floor, true_alpha = 5.0, 0.02
     >>> sigma = np.sqrt(floor**2 + (true_alpha * y_pred) ** 2)
     >>> resid = sigma * rng.standard_normal(200)
-    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
+    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y_pred})
     >>> alpha = fit_rel_error_from_residuals(df, sigma_floor={"1": floor})
     >>> round(alpha["1"], 2)  # should be close to true_alpha=0.02
     0.02
@@ -381,7 +381,7 @@ def fit_rel_error_from_residuals(
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
         r2_mean = float((grp["raw_res"] ** 2).mean())
-        pred2_mean = float((grp["that"] ** 2).mean())
+        pred2_mean = float((grp["yhat"] ** 2).mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         alpha_sq = max(0.0, r2_mean - floor**2) / max(pred2_mean, 1e-12)
         result[lbl_str] = float(np.sqrt(alpha_sq))
@@ -395,10 +395,10 @@ def fit_gain_from_residuals(
     r"""Estimate Poisson gain per label via moment estimator.
 
     Symmetric counterpart to :func:`fit_rel_error_from_residuals`. Assumes the
-    Poisson-only noise model ``sigma^2 = floor^2 + gain * that`` (no
+    Poisson-only noise model ``sigma^2 = floor^2 + gain * yhat`` (no
     proportional term), which sidesteps the gain/alpha collinearity of the
     joint fit. With ``floor`` known from buffer measurements and using
-    model-predicted values ``that``, the closed-form moment estimator is:
+    model-predicted values ``yhat``, the closed-form moment estimator is:
 
     .. math::
 
@@ -409,7 +409,7 @@ def fit_gain_from_residuals(
     ----------
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
-        ``that`` (float -- the model-predicted signal at each point).
+        ``yhat`` (float -- the model-predicted signal at each point).
         Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -427,7 +427,7 @@ def fit_gain_from_residuals(
     >>> floor, true_gain = 5.0, 0.8
     >>> sigma = np.sqrt(floor**2 + true_gain * y_pred)
     >>> resid = sigma * rng.standard_normal(400)
-    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "that": y_pred})
+    >>> df = pd.DataFrame({"label": "1", "raw_res": resid, "yhat": y_pred})
     >>> gain = fit_gain_from_residuals(df, sigma_floor={"1": floor})
     >>> round(gain["1"], 1)  # should be close to true_gain=0.8
     0.8
@@ -436,7 +436,7 @@ def fit_gain_from_residuals(
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
         r2_mean = float((grp["raw_res"] ** 2).mean())
-        pred_mean = float(grp["that"].mean())
+        pred_mean = float(grp["yhat"].mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         gain = max(0.0, r2_mean - floor**2) / max(pred_mean, 1e-12)
         result[lbl_str] = float(gain)
@@ -460,7 +460,7 @@ def fit_noise_model_nnls(
     Parameters
     ----------
     df : pd.DataFrame
-        Residual DataFrame with columns ``label``, ``raw_res``, ``that``.
+        Residual DataFrame with columns ``label``, ``raw_res``, ``yhat``.
     sigma_floor_fixed : dict[str, float] | None
         If given, fix floor per label and only fit gain and alpha.
     rel_error_fixed : dict[str, float] | None
@@ -486,7 +486,7 @@ def fit_noise_model_nnls(
 
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        y = grp["that"].to_numpy().astype(float)
+        y = grp["yhat"].to_numpy().astype(float)
         r2 = grp["raw_res"].to_numpy().astype(float) ** 2
 
         if sigma_floor_fixed is not None:
@@ -594,7 +594,7 @@ def fit_ph_slope_noise(
     ----------
     df : pd.DataFrame
         Residual DataFrame with columns ``label``, ``well``, ``raw_res``,
-        ``that``, and ``raw_i``.
+        ``yhat``, and ``raw_i``.
     noise_model : PlateNoiseModel
         Per-label noise model (floor, gain, alpha) fitted in the same pass.
     plate_slopes : dict[str, dict[str, np.ndarray]]
@@ -611,7 +611,7 @@ def fit_ph_slope_noise(
         params = noise_model[str(lbl)]
         mask = df["label"] == lbl
         df.loc[mask, "var_model"] = compute_noise_variance(
-            df.loc[mask, "that"].to_numpy(dtype=float),
+            df.loc[mask, "yhat"].to_numpy(dtype=float),
             params.sigma_floor,
             params.gain,
             params.alpha,
