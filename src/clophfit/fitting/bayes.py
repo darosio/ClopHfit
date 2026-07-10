@@ -3103,6 +3103,8 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         }
         if max_treedepth is not None:
             sample_kwargs["max_treedepth"] = max_treedepth
+        if sampler.random_seed is not None:
+            sample_kwargs["random_seed"] = sampler.random_seed
         trace: xr.DataTree = pm.sample(n_samples, **sample_kwargs)
 
         if sample_ppc:
