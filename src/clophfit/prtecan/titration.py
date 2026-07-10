@@ -92,8 +92,6 @@ class TitrationConfig:
     """Mask geometric outliers in each well's curve before fitting. Default is False."""
     outlier_threshold: float = field(default=0.2)
     """Threshold for geometric outlier scoring (0-1). Default is 0.2."""
-    discard_bad_wells: bool = field(default=False)
-    """Automatically detect and discard bad wells before fitting. Default is False."""
 
     _callback: Callable[[], None] | None = field(
         default=None, repr=False, compare=False
@@ -618,7 +616,6 @@ class Titration(TecanfilesGroup):
     _data: dict[str, dict[str, ArrayF]] = field(init=False, default_factory=dict)
 
     _dil_corr: ArrayF = field(init=False, default_factory=lambda: np.array([]))
-    _bad_wells_detected: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         """Create metadata and data."""
@@ -763,14 +760,6 @@ class Titration(TecanfilesGroup):
             self.clear_all_data_results()
 
         return sorted(new_discards)
-
-    def _ensure_bad_wells_detected(self) -> None:
-        if not self.params.discard_bad_wells:
-            return
-        if self._bad_wells_detected:
-            return
-        self._bad_wells_detected = True
-        self.detect_and_discard_bad_wells()
 
     def _reset_data_and_results(self) -> None:
         self._data = {}

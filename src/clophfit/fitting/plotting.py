@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import InitVar, dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import arviz as az  # type: ignore[import-untyped]
 import corner  # type: ignore[import-untyped]
@@ -50,7 +50,7 @@ from clophfit.fitting.data_structures import Dataset, MultiFitResult
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from lmfit import Parameters  # type: ignore[import-untyped]
     from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
@@ -84,6 +84,8 @@ __all__ = [
     "plot_spectra",
     "plot_spectra_distributed",
     "print_emcee",
+    "qc_flag_bad_wells",
+    "qc_flag_bad_wells_titration",
 ]
 
 
@@ -189,7 +191,155 @@ def _annotate_qc_point(ax: Axes, x: float, y: float, well: str, color: str) -> N
     )
 
 
-def _render_qc_panel(  # noqa: PLR0913
+def _qc_amplitude(valid: ArrayF, center: str | float) -> float:
+    """Per-well signal amplitude for QC.
+
+    ``center`` is ``"mean"`` (mean ``|signal|``), ``"max"`` (peak ``|signal|``),
+    or a quantile in ``(0, 1)`` (``quantile(|signal|, center)``). A high quantile
+    such as ``0.9`` is more robust than ``"max"`` to a single spurious reading.
+    """
+    absv = np.abs(valid)
+    if center == "mean":
+        return float(np.mean(absv))
+    if center == "max":
+        return float(np.max(absv))
+    return float(np.quantile(absv, float(center)))
+
+
+def _qc_span(valid: ArrayF, span_q: tuple[float, float] | None) -> float:
+    """Per-well dynamic range for QC.
+
+    ``span_q`` ``None`` gives the raw ``max - min``; a ``(lo, hi)`` pair gives the
+    robust inter-quantile range ``quantile(hi) - quantile(lo)``, ignoring a lone
+    spike that would otherwise inflate the span.
+    """
+    if span_q is None:
+        return float(np.max(valid) - np.min(valid))
+    lo, hi = span_q
+    return float(np.quantile(valid, hi) - np.quantile(valid, lo))
+
+
+def _qc_axis_label(center: str | float) -> str:
+    """Human-readable label for the QC amplitude axis."""
+    if center == "mean":
+        return "Mean"
+    if center == "max":
+        return "Max"
+    return f"Q{round(float(center) * 100)}"
+
+
+def _qc_panel_rows(
+    da_dict: Mapping[str, ArrayF],
+    *,
+    center: str | float,
+    span_q: tuple[float, float] | None,
+) -> list[dict[str, str | float]]:
+    """Build per-well amplitude/span rows for one QC label panel."""
+    rows: list[dict[str, str | float]] = []
+    for well, y_arr in da_dict.items():
+        y = np.asarray(y_arr)
+        valid = y[~np.isnan(y)]
+        if len(valid) < 2:  # noqa: PLR2004
+            continue
+        rows.append({
+            "well": well,
+            "center": _qc_amplitude(valid, center),
+            "span": _qc_span(valid, span_q),
+        })
+    return rows
+
+
+def _combine_flagged(
+    flagged: dict[str, list[str]], how: Literal["intersection", "union"]
+) -> list[str]:
+    """Combine per-label flagged wells into one sorted set.
+
+    ``"intersection"`` keeps only wells flagged in *every* label (conservative;
+    a well dead in a single channel may still be real signal absence).
+    ``"union"`` keeps wells flagged in *any* label.
+    """
+    sets = [set(wells) for wells in flagged.values()]
+    if not sets:
+        return []
+    combined = set.intersection(*sets) if how == "intersection" else set.union(*sets)
+    return sorted(combined)
+
+
+def _qc_flag_panel(  # noqa: PLR0913
+    panel_df: pd.DataFrame,
+    *,
+    x_col: str = "center",
+    y_col: str = "span",
+    z_threshold: float,
+    bg_value: float | None,
+    bg_multiplier: float,
+    ctrl_mask: pd.Series | None = None,
+) -> tuple[pd.Series, pd.Series]:
+    """Return ``(trend_outliers, bg_outliers)`` boolean masks for a QC panel.
+
+    Shared by :func:`_render_qc_panel` and :func:`qc_flag_bad_wells` so the plot
+    highlights exactly the wells the detector reports. Control wells
+    (``ctrl_mask``) are excluded from the trendline fit and from trend-outlier
+    (z-score) flagging — they are good data with different span-vs-signal
+    statistics that would otherwise bias the trend or appear as false outliers.
+    The background floor still applies to controls, so one that is genuinely
+    below ``bg_multiplier * bg`` is still flagged as dead.
+    """
+    from clophfit.fitting.utils import flag_trend_outliers  # noqa: PLC0415
+
+    x_val = panel_df[x_col]
+    y_val = panel_df[y_col]
+    # Trend fit/flagging on candidate (non-control) wells only.
+    cand = panel_df if ctrl_mask is None else panel_df.loc[~ctrl_mask]
+    trend = pd.Series(data=False, index=panel_df.index)
+    if not cand.empty:
+        cand_flags = flag_trend_outliers(
+            cand[x_col], cand[y_col], threshold=z_threshold
+        )
+        trend.loc[cand_flags.index] = cand_flags
+    # Background floor applies to every well, controls included.
+    bg = pd.Series(data=False, index=panel_df.index)
+    if bg_value is not None:
+        threshold_bg = bg_multiplier * bg_value
+        bg = (x_val < threshold_bg) | (
+            (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
+        )
+    return trend, bg
+
+
+def _ctrl_trend_outliers(  # noqa: PLR0913
+    panel_df: pd.DataFrame,
+    ctrl_mask: pd.Series,
+    *,
+    x_col: str,
+    y_col: str,
+    m: float,
+    c: float,
+    z_threshold: float,
+) -> pd.Series:
+    """Flag controls whose residual from the fitted trend ``(m, c)`` exceeds z.
+
+    Uses the robust spread (MAD) of the candidate (non-control) residuals as the
+    reference scale, mirroring :func:`flag_trend_outliers`. These controls are
+    kept (not discarded) but worth annotating on the QC plot for inspection.
+    """
+    out = pd.Series(data=False, index=panel_df.index)
+    cand = panel_df.loc[~ctrl_mask]
+    if len(cand) < 2 or not bool(ctrl_mask.any()):  # noqa: PLR2004
+        return out
+    resid = cand[y_col].to_numpy() - (m * cand[x_col].to_numpy() + c)
+    med = float(np.median(resid))
+    mad = float(np.median(np.abs(resid - med)))
+    scale = 1.4826 * mad if mad > 1e-6 else float(np.std(resid))  # noqa: PLR2004
+    if scale <= 1e-6:  # noqa: PLR2004
+        return out
+    all_resid = panel_df[y_col].to_numpy() - (m * panel_df[x_col].to_numpy() + c)
+    z = (all_resid - med) / scale
+    out[:] = (np.abs(z) > z_threshold) & ctrl_mask.to_numpy()
+    return out
+
+
+def _render_qc_panel(  # noqa: C901, PLR0913
     ax: Axes,
     panel_df: pd.DataFrame,
     *,
@@ -203,27 +353,42 @@ def _render_qc_panel(  # noqa: PLR0913
     bg_multiplier: float = 4.0,
     annotate_wells: list[str] | None = None,
     loglog: bool = False,
+    ctrl_wells: list[str] | None = None,
 ) -> None:
     """Render one QC scatter panel with shared highlighting logic."""
-    from clophfit.fitting.utils import (  # noqa: PLC0415
-        fit_trendline,
-        flag_trend_outliers,
+    from clophfit.fitting.utils import fit_trendline  # noqa: PLC0415
+
+    ctrl_mask = (
+        panel_df["well"].isin(ctrl_wells)
+        if ctrl_wells
+        else pd.Series(data=False, index=panel_df.index)
+    )
+    outliers, bg_outliers = _qc_flag_panel(
+        panel_df,
+        x_col=x_col,
+        y_col=y_col,
+        z_threshold=z_threshold,
+        bg_value=bg_value,
+        bg_multiplier=bg_multiplier,
+        ctrl_mask=ctrl_mask if ctrl_wells else None,
     )
 
-    x_val = panel_df[x_col]
-    y_val = panel_df[y_col]
-    outliers = flag_trend_outliers(x_val, y_val, threshold=z_threshold)
-
-    bg_outliers = pd.Series(data=False, index=panel_df.index)
-    if bg_value is not None:
-        threshold_bg = bg_multiplier * bg_value
-        bg_outliers = (x_val < threshold_bg) | (
-            (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
+    # Fit the reference trendline on candidate (non-control) wells only.
+    cand = panel_df.loc[~ctrl_mask]
+    ctrl_dev = pd.Series(data=False, index=panel_df.index)
+    if len(cand) >= 2:  # noqa: PLR2004
+        m, c = fit_trendline(cand[x_col], cand[y_col])
+        x_line = np.linspace(float(cand[x_col].min()), float(cand[x_col].max()), 100)
+        ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
+        ctrl_dev = _ctrl_trend_outliers(
+            panel_df,
+            ctrl_mask,
+            x_col=x_col,
+            y_col=y_col,
+            m=m,
+            c=c,
+            z_threshold=z_threshold,
         )
-
-    m, c = fit_trendline(x_val, y_val)
-    x_line = np.linspace(float(x_val.min()), float(x_val.max()), 100)
-    ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
 
     if bg_value is not None:
         ax.axvline(
@@ -233,15 +398,35 @@ def _render_qc_panel(  # noqa: PLR0913
             alpha=0.7,
         )
 
-    good = panel_df[~(outliers | bg_outliers)]
+    good = panel_df[~(outliers | bg_outliers) & ~ctrl_mask]
     ax.scatter(
         good[x_col],
         good[y_col],
-        alpha=0.7,
+        alpha=0.5,  # shade crowded sample regions
         color="indigo",
         edgecolors="none",
         label="Wells",
     )
+
+    # Only good controls are drawn as reference; controls below the background
+    # floor fall into ``bad_bg`` below.
+    ctrls = panel_df[ctrl_mask & ~bg_outliers]
+    if not ctrls.empty:
+        ax.scatter(
+            ctrls[x_col],
+            ctrls[y_col],
+            alpha=0.5,  # shade the crowded control cluster
+            color="green",
+            s=45,
+            marker="D",
+            label="Controls",
+        )
+    # Name-annotate controls that deviate from the sample trend (kept, not
+    # discarded) so odd controls are visible.
+    for _, row in panel_df[ctrl_dev & ~bg_outliers].iterrows():
+        _annotate_qc_point(
+            ax, float(row[x_col]), float(row[y_col]), str(row["well"]), "green"
+        )
 
     bad_bg = panel_df[bg_outliers]
     if not bad_bg.empty:
@@ -1276,14 +1461,16 @@ def plot_ppc_well(
 
 
 def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
-    data: Mapping[int, Mapping[str, ArrayF]],
-    center: str = "mean",
+    data: Mapping[str, Mapping[str, ArrayF]],
+    center: str | float = "mean",
     figsize_per_label: tuple[float, float] = (5, 4),
     z_threshold: float = 3.0,
     bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = None,
     bg_multiplier: float = 4.0,
     loglog: bool = False,  # noqa: FBT001, FBT002
     annotate_wells: list[str] | None = None,
+    span_q: tuple[float, float] | None = None,
+    ctrl_wells: list[str] | None = None,
 ) -> Figure:
     """Plot signal span versus center for quality control of titration wells.
 
@@ -1292,11 +1479,11 @@ def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
 
     Parameters
     ----------
-    data : Mapping[int, Mapping[str, ArrayF]]
-        Raw or normalised data keyed by label index, then by well name.
-    center : str
-        How to compute the x-axis value per well: ``"mean"`` (default) or
-        ``"max"`` (maximum absolute signal).
+    data : Mapping[str, Mapping[str, ArrayF]]
+        Raw or normalised data keyed by label, then by well name.
+    center : str | float
+        X-axis amplitude per well: ``"mean"``, ``"max"``, or a quantile in
+        ``(0, 1)`` of ``|signal|`` (e.g. ``0.9``, more robust than ``"max"``).
     figsize_per_label : tuple[float, float]
         Figure size allocated per spectral label.
     z_threshold : float
@@ -1309,7 +1496,16 @@ def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
     loglog : bool
         If True, use log-log axes.
     annotate_wells : list[str] | None
-        Well IDs to annotate even if not flagged as outliers.
+        Well IDs to annotate even if not flagged as outliers (e.g. to overlay
+        wells flagged by another detector for comparison).
+    span_q : tuple[float, float] | None
+        ``None`` uses ``max - min`` for the y-axis span; a ``(lo, hi)`` pair uses
+        the robust inter-quantile range ``quantile(hi) - quantile(lo)``.
+    ctrl_wells : list[str] | None
+        Control wells: excluded from the trendline fit and the z-score flagging
+        (good data with different span-vs-signal statistics) but still subject
+        to the background floor. Good controls are drawn distinctly for
+        reference; controls below the floor appear as background outliers.
 
     Returns
     -------
@@ -1318,71 +1514,196 @@ def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
     """
     labels = list(data.keys())
     fig, axes = _create_qc_subplots(labels, figsize_per_label)
+    span_label = (
+        "Span (max - min)"
+        if span_q is None
+        else f"Span (q{span_q[1]:g}-q{span_q[0]:g})"
+    )
 
     for ax, lbl in zip(axes, labels, strict=False):
-        da_dict = data[lbl]
-        panel_rows: list[dict[str, str | float]] = []
-        for well, y_arr in da_dict.items():
-            y = np.asarray(y_arr)
-            valid = y[~np.isnan(y)]
-            if len(valid) < 2:  # noqa: PLR2004
-                continue
-            center_value = (
-                float(np.mean(np.abs(valid)))
-                if center == "mean"
-                else float(np.max(np.abs(valid)))
-            )
-            panel_rows.append({
-                "well": well,
-                "center": center_value,
-                "span": float(np.max(valid) - np.min(valid)),
-            })
-
+        panel_rows = _qc_panel_rows(data[lbl], center=center, span_q=span_q)
         if not panel_rows:
             ax.set_title(f"QC: Span vs Center ({lbl}) — no data")
             continue
 
         panel_df = pd.DataFrame(panel_rows)
-        xlabel = f"{'Mean' if center == 'mean' else 'Max'} signal (label {lbl})"
+        amp_label = _qc_axis_label(center)
         _render_qc_panel(
             ax,
             panel_df,
             x_col="center",
             y_col="span",
-            title=f"QC: Span vs {center.capitalize()} ({lbl})",
-            xlabel=xlabel,
-            ylabel="Span (max - min)",
+            title=f"QC: Span vs {amp_label} ({lbl})",
+            xlabel=f"{amp_label} signal (label {lbl})",
+            ylabel=span_label,
             z_threshold=z_threshold,
             bg_value=_resolve_qc_bg_value(bg_noise, lbl),
             bg_multiplier=bg_multiplier,
             annotate_wells=annotate_wells,
             loglog=loglog,
+            ctrl_wells=ctrl_wells,
         )
 
     fig.tight_layout()
     return fig
 
 
+def qc_flag_bad_wells(  # noqa: PLR0913
+    data: Mapping[str, Mapping[str, ArrayF]],
+    *,
+    center: str | float = 0.9,
+    span_q: tuple[float, float] | None = (0.1, 0.9),
+    z_threshold: float = 3.0,
+    bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = None,
+    bg_multiplier: float = 4.0,
+    ctrl_wells: Iterable[str] = (),
+    combine: Literal["intersection", "union"] | None = None,
+) -> dict[str, list[str]] | list[str]:
+    """Flag low-quality wells from span-vs-amplitude QC, without plotting.
+
+    A robust, non-mutating alternative to
+    :meth:`clophfit.prtecan.Titration.detect_and_discard_bad_wells`: fits a
+    Theil-Sen trend of span versus a robust amplitude (quantile ``center``) and
+    applies a background floor. Returns, per label, the wells that are trend
+    outliers or fall below ``bg_multiplier * bg_noise``. The companion
+    :func:`plot_qc_span_vs_center` highlights exactly these wells.
+
+    Parameters
+    ----------
+    data : Mapping[str, Mapping[str, ArrayF]]
+        Per-label, per-well signal arrays (exclude buffer wells beforehand).
+    center : str | float
+        Amplitude measure; a quantile such as ``0.9`` is robust to spikes.
+    span_q : tuple[float, float] | None
+        Robust inter-quantile span ``(lo, hi)``, or ``None`` for ``max - min``.
+    z_threshold : float
+        Robust z-score threshold for trend-outlier flagging.
+    bg_noise : Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None
+        Background reference per label for the low-signal floor.
+    bg_multiplier : float
+        Multiplier on ``bg_noise`` for the floor.
+    ctrl_wells : Iterable[str]
+        Control wells: excluded from the trend fit and the z-score flagging
+        (good data with different span-vs-signal statistics), but still subject
+        to the background floor.
+    combine : Literal["intersection", "union"] | None
+        ``None`` returns the per-label dict. ``"intersection"`` returns one
+        sorted list of wells flagged in *every* label (conservative);
+        ``"union"`` returns wells flagged in *any* label.
+
+    Returns
+    -------
+    dict[str, list[str]] | list[str]
+        Per-label flagged wells, or a single combined list when ``combine`` is
+        set.
+    """
+    ctrl = set(ctrl_wells)
+    flagged: dict[str, list[str]] = {}
+    for lbl, da_dict in data.items():
+        rows = _qc_panel_rows(da_dict, center=center, span_q=span_q)
+        if not rows:
+            flagged[str(lbl)] = []
+            continue
+        panel_df = pd.DataFrame(rows)
+        ctrl_mask = panel_df["well"].isin(ctrl) if ctrl else None
+        trend, bg = _qc_flag_panel(
+            panel_df,
+            z_threshold=z_threshold,
+            bg_value=_resolve_qc_bg_value(bg_noise, lbl),
+            bg_multiplier=bg_multiplier,
+            ctrl_mask=ctrl_mask,
+        )
+        flagged[str(lbl)] = panel_df.loc[trend | bg, "well"].astype(str).tolist()
+    if combine is not None:
+        return _combine_flagged(flagged, combine)
+    return flagged
+
+
+def _titration_qc_data(tit: object) -> dict[str, dict[str, ArrayF]]:
+    """Per-label QC data from a Titration, excluding buffer wells.
+
+    Buffer wells are background by design (near-zero span) and would bend the
+    QC trendline, so they are dropped. Discarded/candidate wells are kept so a
+    QC pass can be compared against an existing detector.
+    """
+    if hasattr(tit, "_get_normalized_or_raw_data"):
+        data = tit._get_normalized_or_raw_data()  # noqa: SLF001
+    else:
+        data = getattr(tit, "data", {})
+    buffer = set(getattr(getattr(tit, "scheme", None), "buffer", []) or [])
+    return {
+        str(lbl): {w: v for w, v in dd.items() if w not in buffer}
+        for lbl, dd in data.items()
+    }
+
+
+def _titration_bg_noise(tit: object) -> Mapping[str, float | ArrayF] | None:
+    """Extract the per-label background reference from a Titration, if any."""
+    bg = getattr(tit, "bg_noise", None)
+    return bg or None
+
+
+def _titration_ctrl_wells(tit: object) -> list[str]:
+    """Control wells from a Titration scheme, if any."""
+    return list(getattr(getattr(tit, "scheme", None), "ctrl", []) or [])
+
+
+def qc_flag_bad_wells_titration(  # noqa: PLR0913
+    tit: object,
+    *,
+    center: str | float = 0.9,
+    span_q: tuple[float, float] | None = (0.1, 0.9),
+    z_threshold: float = 3.0,
+    bg_multiplier: float = 4.0,
+    combine: Literal["intersection", "union"] | None = None,
+) -> dict[str, list[str]] | list[str]:
+    """Robust QC bad-well detection from a Titration (buffers + controls handled).
+
+    Non-mutating alternative to
+    :meth:`clophfit.prtecan.Titration.detect_and_discard_bad_wells`; see
+    :func:`qc_flag_bad_wells`. Buffer wells are dropped and control wells
+    (``tit.scheme.ctrl``) are excluded from the trend fit and the z-score
+    flagging, but a control below the background floor is still flagged. Pass
+    ``combine="intersection"`` for one set of wells flagged in every label.
+    Does not touch ``tit.scheme``.
+    """
+    return qc_flag_bad_wells(
+        _titration_qc_data(tit),
+        center=center,
+        span_q=span_q,
+        z_threshold=z_threshold,
+        bg_noise=_titration_bg_noise(tit),
+        bg_multiplier=bg_multiplier,
+        ctrl_wells=_titration_ctrl_wells(tit),
+        combine=combine,
+    )
+
+
 def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
     tit: object,
-    center: str = "mean",
+    center: str | float = 0.9,
     figsize_per_label: tuple[float, float] = (5, 4),
     z_threshold: float = 3.0,
     bg_multiplier: float = 4.0,
     loglog: bool = False,  # noqa: FBT001, FBT002
     annotate_wells: list[str] | None = None,
+    span_q: tuple[float, float] | None = (0.1, 0.9),
 ) -> Figure:
     """Plot signal span versus center for quality control using a Titration object.
 
-    Convenience wrapper around :func:`plot_qc_span_vs_center` that extracts
-    data and background noise directly from a :class:`~clophfit.prtecan.Titration`.
+    Convenience wrapper around :func:`plot_qc_span_vs_center` that extracts data
+    and background noise from a :class:`~clophfit.prtecan.Titration`, excludes
+    buffer wells, and defaults to the robust ``q90`` amplitude and inter-quantile
+    span. Pass ``annotate_wells=tit.scheme.discard`` to overlay another detector's
+    verdict for comparison.
 
     Parameters
     ----------
     tit : object
         The titration object.
-    center : str
-        How to compute the x-axis value per well: ``"mean"`` or ``"max"``.
+    center : str | float
+        Amplitude measure forwarded to :func:`plot_qc_span_vs_center` (default
+        ``0.9`` quantile).
     figsize_per_label : tuple[float, float]
         Figure size per spectral label.
     z_threshold : float
@@ -1393,28 +1714,24 @@ def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
         If True, use log-log axes.
     annotate_wells : list[str] | None
         Well IDs to annotate even if not flagged.
+    span_q : tuple[float, float] | None
+        Robust span quantiles ``(lo, hi)`` (default ``(0.1, 0.9)``), or ``None``
+        for ``max - min``.
 
     Returns
     -------
     Figure
         The generated QC matplotlib figure.
     """
-    if hasattr(tit, "_get_normalized_or_raw_data"):
-        data = tit._get_normalized_or_raw_data()  # noqa: SLF001
-    else:
-        # Fallback if method is missing or not a prtecan Titration
-        data = getattr(tit, "data", {})
-
-    bg_noise: dict[str, float] | None = None
-    if hasattr(tit, "bg_noise") and tit.bg_noise:
-        bg_noise = tit.bg_noise
     return plot_qc_span_vs_center(
-        data,
+        _titration_qc_data(tit),
         center=center,
         figsize_per_label=figsize_per_label,
         z_threshold=z_threshold,
-        bg_noise=bg_noise,
+        bg_noise=_titration_bg_noise(tit),
         bg_multiplier=bg_multiplier,
         loglog=loglog,
         annotate_wells=annotate_wells,
+        span_q=span_q,
+        ctrl_wells=_titration_ctrl_wells(tit),
     )

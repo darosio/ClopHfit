@@ -1,5 +1,7 @@
 """Test cases for the clophfit.fitting.residuals module."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -452,6 +454,45 @@ class TestResidualDiagnosticsHelpers:
 
         assert rows.empty
         assert by_label == {}
+
+    def test_covariance_aligns_on_step_with_jittered_x(self) -> None:
+        """Per-well jittered x must align on ``step``, not collapse to all-NaN."""
+        rng_x = [4.8, 5.2, 6.0, 7.0, 8.0, 8.2]
+        rows = [
+            {
+                "well": f"A{w:02d}",
+                "label": "1",
+                "step": s,
+                "x": round(x + 0.01 * w, 3),  # every well has distinct x-values
+                "std_res": float(np.sin(w + s)),
+            }
+            for w in range(6)
+            for s, x in enumerate(rng_x)
+        ]
+        analysis = ResidualAnalysis(pd.DataFrame(rows))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            cov = analysis.covariance()
+            corr = analysis.correlation()
+
+        assert cov["1"].shape == (6, 6)
+        assert not cov["1"].isna().any().any()  # would be all-NaN if pivoting on x
+        assert np.allclose(np.diag(corr["1"].to_numpy()), 1.0)
+
+    def test_covariance_empty_for_single_well_label(self) -> None:
+        """A label with a single well cannot form a covariance; return empty."""
+        df = pd.DataFrame({
+            "well": ["A01", "A01", "A01"],
+            "label": ["1", "1", "1"],
+            "step": [0, 1, 2],
+            "x": [6.0, 7.0, 8.0],
+            "std_res": [0.1, -0.2, 0.3],
+        })
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            cov = ResidualAnalysis(df).covariance()
+        assert cov["1"].empty
 
 
 ###############################################################################

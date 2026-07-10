@@ -100,54 +100,85 @@ class ResidualAnalysis:
         """
         return residual_lag1_autocorrelation(self.residuals)
 
-    def covariance(self, *, value_col: str = "std_res") -> dict[str, pd.DataFrame]:
-        """Per-label covariance of residuals across x-positions.
+    def covariance(
+        self, *, value_col: str = "std_res", by: str | None = None
+    ) -> dict[str, pd.DataFrame]:
+        """Per-label covariance of residuals across titration points.
+
+        Wells are aligned on a shared point index (``by``) rather than the raw
+        ``x``, because in real titrations each well carries its own jittered
+        x-values (e.g. pH), which would leave no two wells sharing a column.
 
         Parameters
         ----------
         value_col : str
             Residual column to use (default ``"std_res"``).
+        by : str | None
+            Column that indexes the shared titration point across wells.
+            ``None`` auto-selects the first available of ``"step"``, ``"raw_i"``,
+            ``"x"``.
 
         Returns
         -------
         dict[str, pd.DataFrame]
-            One ``x``-by-``x`` covariance matrix per label, over the wells that
-            share a complete set of x-points.
+            One point-by-point covariance matrix per label, over the wells that
+            share a complete set of points. Axes are labelled by the mean ``x``
+            at each point when available. Labels with fewer than two complete
+            wells map to an empty frame.
         """
+        align = by or next(
+            (c for c in ("step", "raw_i", "x") if c in self.residuals.columns), "x"
+        )
         cov_by_label: dict[str, pd.DataFrame] = {}
         for lbl, g in self.residuals.groupby("label"):
             pivot = g.pivot_table(
-                index="well", columns="x", values=value_col, aggfunc="mean"
+                index="well", columns=align, values=value_col, aggfunc="mean"
             )
-            # drop wells missing any x, for a clean covariance across x-points
+            # complete-case wells only, for a clean covariance across points
             pivot = pivot.dropna(axis=0, how="any")
-            data = pivot.to_numpy(dtype=float)
-            cov = np.cov(data, rowvar=False, ddof=1)
-            cov_by_label[str(lbl)] = pd.DataFrame(
-                cov,
-                index=pivot.columns.to_list(),
-                columns=pivot.columns.to_list(),
+            if pivot.shape[0] < 2 or pivot.shape[1] < 1:
+                cov_by_label[str(lbl)] = pd.DataFrame()
+                continue
+            if align != "x" and "x" in g.columns:
+                xmap = g.groupby(align)["x"].mean().round(3)
+                axis = [xmap.get(k, k) for k in pivot.columns]
+            else:
+                axis = pivot.columns.to_list()
+            cov = np.atleast_2d(
+                np.cov(pivot.to_numpy(dtype=float), rowvar=False, ddof=1)
             )
+            cov_by_label[str(lbl)] = pd.DataFrame(cov, index=axis, columns=axis)
         return cov_by_label
 
-    def correlation(self, *, value_col: str = "std_res") -> dict[str, pd.DataFrame]:
+    def correlation(
+        self, *, value_col: str = "std_res", by: str | None = None
+    ) -> dict[str, pd.DataFrame]:
         """Per-label correlation matrices derived from :meth:`covariance`.
 
         Parameters
         ----------
         value_col : str
             Residual column to use (default ``"std_res"``).
+        by : str | None
+            Shared point index forwarded to :meth:`covariance`.
 
         Returns
         -------
         dict[str, pd.DataFrame]
-            One ``x``-by-``x`` correlation matrix per label.
+            One point-by-point correlation matrix per label (empty where the
+            covariance is empty).
         """
         corr_by_label: dict[str, pd.DataFrame] = {}
-        for lbl, cov_df in self.covariance(value_col=value_col).items():
+        for lbl, cov_df in self.covariance(value_col=value_col, by=by).items():
+            if cov_df.empty:
+                corr_by_label[lbl] = cov_df
+                continue
             cov = cov_df.to_numpy()
-            std_outer = np.outer(np.sqrt(np.diag(cov)), np.sqrt(np.diag(cov)))
-            corr = cov / std_outer
+            std = np.sqrt(np.diag(cov))
+            std_outer = np.outer(std, std)
+            corr = np.divide(
+                cov, std_outer, out=np.full_like(cov, np.nan), where=std_outer != 0
+            )
             corr_by_label[lbl] = pd.DataFrame(
                 corr, index=cov_df.index, columns=cov_df.columns
             )

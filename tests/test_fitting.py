@@ -40,7 +40,10 @@ from clophfit.fitting.plotting import (
     plot_fit,
     plot_noise_vs_signal,
     plot_qc_mean_vs_std,
+    plot_qc_span_vs_center,
     plot_qc_span_vs_center_titration,
+    qc_flag_bad_wells,
+    qc_flag_bad_wells_titration,
 )
 from clophfit.prtecan import PlateScheme
 
@@ -1182,7 +1185,7 @@ def test_plot_qc_span_vs_center_titration_matches_mean_vs_std_style() -> None:
     ax = fig.axes[0]
     assert ax.get_xscale() == "log"
     assert ax.get_yscale() == "log"
-    assert ax.get_title() == "QC: Span vs Mean (1)"
+    assert ax.get_title() == "QC: Span vs Q90 (1)"
     legend = ax.get_legend()
     assert legend is not None
     legend_labels = [text.get_text() for text in legend.get_texts()]
@@ -1192,6 +1195,134 @@ def test_plot_qc_span_vs_center_titration_matches_mean_vs_std_style() -> None:
     assert "4.0x bg" not in legend_labels
     annotations = {text.get_text() for text in ax.texts}
     assert {"A01", "A02"}.issubset(annotations)
+
+
+def test_qc_flag_bad_wells_robust_to_spike() -> None:
+    """Robust q90/inter-quantile QC flags a flat well that a lone spike hides."""
+    x = np.linspace(5, 8, 8)
+    data: dict[str, dict[str, np.ndarray]] = {"1": {}}
+    for w in range(8):  # healthy sigmoidal wells
+        rng = np.random.default_rng(w)
+        data["1"][f"A{w:02d}"] = 200 + 800 / (1 + 10 ** (7 - x)) + rng.normal(0, 5, 8)
+    data["1"]["H01"] = np.full(8, 50.0)  # dead/flat well
+    spiky = np.full(8, 60.0)
+    spiky[3] = 2000.0  # flat but one huge spike -> max() would look bright + dynamic
+    data["1"]["H02"] = spiky
+
+    flagged = qc_flag_bad_wells(data, bg_noise={"1": 40.0})
+    assert "H01" in flagged["1"]
+    assert "H02" in flagged["1"]  # robust measures see through the spike
+
+
+def test_qc_flag_bad_wells_titration_excludes_buffer() -> None:
+    """The titration wrapper drops buffer wells from the QC set."""
+
+    class _Scheme:
+        def __init__(self) -> None:
+            self.buffer = ["A01"]
+
+    class _Tit:
+        def __init__(self) -> None:
+            self.scheme = _Scheme()
+            self.bg_noise = {"1": 40.0}
+
+        def _get_normalized_or_raw_data(self) -> dict[str, dict[str, np.ndarray]]:
+            x = np.linspace(5, 8, 8)
+            out = {f"B{w:02d}": 200 + 800 / (1 + 10 ** (7 - x)) for w in range(6)}
+            out["A01"] = np.full(8, 50.0)  # buffer well: flat, would flag if kept
+            return {"1": out}
+
+    flagged = qc_flag_bad_wells_titration(_Tit())
+    assert "A01" not in flagged["1"]  # excluded as buffer, not reported
+
+
+def test_qc_flag_bad_wells_combine_intersection_vs_union() -> None:
+    """``combine`` aggregates per-label sets by intersection or union."""
+    x = np.linspace(5, 8, 8)
+
+    def _good(seed: int) -> np.ndarray:
+        return (
+            200
+            + 800 / (1 + 10 ** (7 - x))
+            + np.random.default_rng(seed).normal(0, 3, 8)
+        )
+
+    dead = np.full(8, 50.0)
+    base = {f"A{w:02d}": _good(w) for w in range(6)}
+    # H01 dead only in label 1; H02 dead only in label 2.
+    data = {
+        "1": {**base, "H01": dead.copy(), "H02": _good(101)},
+        "2": {**base, "H01": _good(102), "H02": dead.copy()},
+    }
+    bg = {"1": 40.0, "2": 40.0}
+    per_label = qc_flag_bad_wells(data, bg_noise=bg)
+    sets = [set(v) for v in per_label.values()]
+    union = qc_flag_bad_wells(data, bg_noise=bg, combine="union")
+    inter = qc_flag_bad_wells(data, bg_noise=bg, combine="intersection")
+
+    assert set(union) == set.union(*sets)
+    assert set(inter) == set.intersection(*sets)
+    assert union == sorted(union)
+    assert inter == sorted(inter)
+    assert set(inter) < set(union)  # single-label-dead wells drop from intersection
+
+
+def test_qc_flag_bad_wells_excludes_control_wells() -> None:
+    """Control wells (different span-vs-signal stats) are never flagged."""
+    x = np.linspace(5, 8, 12)
+    data: dict[str, dict[str, np.ndarray]] = {"1": {}}
+    for w in range(10):  # samples: deep sigmoid, large span
+        rng = np.random.default_rng(w)
+        data["1"][f"A{w:02d}"] = 200 + 800 / (1 + 10 ** (7 - x)) + rng.normal(0, 5, 12)
+    # a control: bright but shallow -> sits below the sample span/signal trend
+    data["1"]["C01"] = 900 - 300 / (1 + 10 ** (7 - x))
+
+    flagged_no_ctrl = qc_flag_bad_wells(data, bg_noise={"1": 40.0}, z_threshold=3.0)
+    flagged_ctrl = qc_flag_bad_wells(
+        data, bg_noise={"1": 40.0}, z_threshold=3.0, ctrl_wells=["C01"]
+    )
+    assert "C01" in flagged_no_ctrl["1"]  # flagged as a trend outlier when unmarked
+    assert "C01" not in flagged_ctrl["1"]  # never flagged once marked as control
+
+
+def test_qc_flag_bad_wells_control_below_background_still_flagged() -> None:
+    """A control below the background floor is dead and stays flagged."""
+    x = np.linspace(5, 8, 12)
+    data: dict[str, dict[str, np.ndarray]] = {"1": {}}
+    for w in range(10):
+        rng = np.random.default_rng(w)
+        data["1"][f"A{w:02d}"] = 200 + 800 / (1 + 10 ** (7 - x)) + rng.normal(0, 5, 12)
+    data["1"]["C01"] = np.full(12, 30.0)  # control, but genuinely dead (below bg floor)
+
+    flagged = qc_flag_bad_wells(
+        data, bg_noise={"1": 40.0}, bg_multiplier=4.0, ctrl_wells=["C01"]
+    )
+    assert "C01" in flagged["1"]  # bg floor still applies to controls
+
+
+def test_qc_plot_annotates_deviating_control_without_discarding() -> None:
+    """A control off the sample trend is name-annotated but not discarded."""
+    x = np.linspace(5, 8, 12)
+    data: dict[str, dict[str, np.ndarray]] = {"1": {}}
+    for w in range(10):
+        rng = np.random.default_rng(w)
+        data["1"][f"A{w:02d}"] = 200 + 800 / (1 + 10 ** (7 - x)) + rng.normal(0, 5, 12)
+    data["1"]["C01"] = 900 - 300 / (1 + 10 ** (7 - x))  # bright, shallow: off-trend
+
+    fig = plot_qc_span_vs_center(
+        data,
+        center=0.9,
+        span_q=(0.1, 0.9),
+        bg_noise={"1": 40.0},
+        z_threshold=3.0,
+        ctrl_wells=["C01"],
+    )
+    annotations = {t.get_text() for t in fig.axes[0].texts}
+    flagged = qc_flag_bad_wells(
+        data, bg_noise={"1": 40.0}, z_threshold=3.0, ctrl_wells=["C01"]
+    )
+    assert "C01" in annotations  # shown by name on the plot
+    assert "C01" not in flagged["1"]  # but not in the discard set
 
 
 ###############################################################################
