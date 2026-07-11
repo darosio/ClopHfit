@@ -778,3 +778,48 @@ Old prior for L2 V224L CTR (mean=5.54, σ=0.20) was 3.8σ from MCMC posterior
 ** Next steps
 - Re-run with C05 excluded or investigate C05 data quality (potential overflow)
 - Consider switching sampler (blackjax/numpyro) to avoid pytensor graph limit
+
+* TODO Revisit x-error step-sigma prior in create_x_true (looks wrong)
+** Problem
+=create_x_true= (src/clophfit/fitting/bayes.py:~882-892) does NOT give each pH
+point an independent x-error prior. It builds x_true as a cumulative sum
+(x_true = x_start + cumsum(x_step)) and derives each step sigma from the
+*running maximum* of x_errc:
+  cummax        = np.maximum.accumulate(x_errc * n_xerr)
+  σ(x_start)    = cummax[0]
+  σ(x_step[k])  = sqrt(cummax[k+1]² - cummax[k]²)   # floored at 1e-6
+A step only gets freedom when its point sets a NEW max in x_errc. Any point
+whose error is <= the running max collapses to σ≈1e-6 and is effectively
+pinned. This is order-dependent and physically odd: a point with a real,
+nonzero pH error can end up with zero independent step freedom just because an
+earlier point happened to have an equal/larger error.
+
+** Evidence (tutorial, well D10, tests/Tecan/L1)
+  xc     = [8.9,  8.3,  7.7,  7.05, 6.55, 6.0,  5.5 ]
+  x_errc = [0.04, 0.05, 0.05, 0.06, 0.07, 0.08, 0.10]
+x_errc[2]==x_errc[1]=0.05 (not a new max) => x_step[1] prior σ = √(0.05²-0.05²)
+=> 1e-6. az.summary then reports x_step[1] mean=0.6, sd=9.8e-7, hdi 0.6..0.6
+(virtually certain), while r_hat=1.0 and ess~3.7k are healthy — so it's the
+prior, not sampling. Reproduced: prior step sigmas match the posterior sds
+almost exactly (data barely updates the x-steps).
+
+** Nuance (why it "mostly works" today)
+The variances telescope so the MARGINAL uncertainty is still sane:
+  Var(x_true[i]) = σ(x_start)² + Σ σ(x_step[k])² = cummax[i]²
+i.e. x_true[i] marginal sd = running-max(x_errc[0..i]). So x_true is fine to
+read; only the per-step reparameterization looks pinned. But the running-max
+(rather than per-point) coupling is the suspicious bit and probably not what we
+want.
+
+** To decide / do
+- Should each point's step reflect its OWN x_errc (independent TruncatedNormal
+  per gap), decoupled from earlier points? That removes the pinning but must
+  still keep x_true ordered (monotone pH) — the original reason for the
+  cumulative/monotone construction.
+- If keeping monotonicity, reconsider whether running-max accumulation is the
+  right way to allocate per-step variance (vs. e.g. per-point σ with an
+  ordering constraint / soft penalty).
+- Add a regression test asserting a point with x_errc <= a neighbor's still
+  gets nonzero step freedom (once the intended behavior is decided).
+- Meanwhile, note in docs/tutorials/prtecan.ipynb that a near-zero x_step row
+  is expected under the current prior so readers aren't alarmed.
