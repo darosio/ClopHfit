@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import InitVar, dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, overload
 
 import arviz as az  # type: ignore[import-untyped]
 import corner  # type: ignore[import-untyped]
@@ -1548,6 +1548,30 @@ def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
     return fig
 
 
+@overload
+def qc_flag_bad_wells(
+    data: Mapping[str, Mapping[str, ArrayF]],
+    *,
+    center: str | float = ...,
+    span_q: tuple[float, float] | None = ...,
+    z_threshold: float = ...,
+    bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = ...,
+    bg_multiplier: float = ...,
+    ctrl_wells: Iterable[str] = ...,
+    combine: None = ...,
+) -> dict[str, list[str]]: ...
+@overload
+def qc_flag_bad_wells(
+    data: Mapping[str, Mapping[str, ArrayF]],
+    *,
+    center: str | float = ...,
+    span_q: tuple[float, float] | None = ...,
+    z_threshold: float = ...,
+    bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = ...,
+    bg_multiplier: float = ...,
+    ctrl_wells: Iterable[str] = ...,
+    combine: Literal["intersection", "union"],
+) -> list[str]: ...
 def qc_flag_bad_wells(  # noqa: PLR0913
     data: Mapping[str, Mapping[str, ArrayF]],
     *,
@@ -1648,6 +1672,26 @@ def _titration_ctrl_wells(tit: object) -> list[str]:
     return list(getattr(getattr(tit, "scheme", None), "ctrl", []) or [])
 
 
+@overload
+def qc_flag_bad_wells_titration(
+    tit: object,
+    *,
+    center: str | float = ...,
+    span_q: tuple[float, float] | None = ...,
+    z_threshold: float = ...,
+    bg_multiplier: float = ...,
+    combine: None = ...,
+) -> dict[str, list[str]]: ...
+@overload
+def qc_flag_bad_wells_titration(
+    tit: object,
+    *,
+    center: str | float = ...,
+    span_q: tuple[float, float] | None = ...,
+    z_threshold: float = ...,
+    bg_multiplier: float = ...,
+    combine: Literal["intersection", "union"],
+) -> list[str]: ...
 def qc_flag_bad_wells_titration(  # noqa: PLR0913
     tit: object,
     *,
