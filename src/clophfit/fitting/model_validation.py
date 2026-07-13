@@ -1305,8 +1305,8 @@ def pareto_k_table(
         raise ValueError(msg)
     if not hasattr(trace, "log_likelihood"):
         msg = (
-            "Trace does not contain a log_likelihood group; "
-            "run pointwise log-likelihood first."
+            "Trace does not contain a log_likelihood group; refit with "
+            "SamplerConfig(compute_log_likelihood=True) to enable LOO/az.compare."
         )
         raise ValueError(msg)
 

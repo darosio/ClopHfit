@@ -23,6 +23,7 @@ dependencies = [
   "emcee>=3.1.6",
   "lmfit>=1.3.4",
   "matplotlib>=3.11.0",
+  "nutpie>=0.16.11", # default NUTS sampler: robust on hierarchical latent-x models
   "odrpack>=0.6.1",
   "openpyxl>=3.1.5",
   "pandas>=3.0.4",
@@ -50,7 +51,6 @@ gpu = [
   "blackjax>=1.6",
   "jax[cuda12]>=0.10.2",
   "numpyro>=0.21.0",
-  "nutpie>=0.16.11",
 ]
 docs = [
   "graphviz>=0.21",

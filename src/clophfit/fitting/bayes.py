@@ -20,11 +20,11 @@ import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
-from pytensor.configdefaults import config as pytensor_config
 from pytensor.tensor import as_tensor_variable
 
 from clophfit.fitting import model_validation
 from clophfit.fitting.bayes_config import (
+    ChainMethod,
     ContaminationFracPrior,
     DataKPrior,
     InitConfig,
@@ -283,11 +283,40 @@ __all__ = [
 ]
 
 
-pytensor_config.linker = "cvm"  # ← ripristina backend C come PyMC 5
+def _pymc_sample_parallel_args(
+    nuts_sampler: str = "default",
+    *,
+    chains: int | None = None,
+    cores: int | None = None,
+    chain_method: ChainMethod = "auto",
+) -> dict[str, object]:
+    """Return sampling kwargs for ``pm.sample()``.
 
+    Parameters
+    ----------
+    nuts_sampler : str
+        NUTS backend (``"default"``, ``"nutpie"``, ``"blackjax"``,
+        ``"numpyro"``). Non-default JAX backends are import-checked here.
+    chains : int | None
+        Number of MCMC chains. ``None`` leaves the PyMC default.
+    cores : int | None
+        Number of CPU cores for parallel chains. ``None`` leaves the PyMC
+        default.
+    chain_method : ChainMethod
+        Chain strategy for JAX backends. ``"auto"`` selects ``"vectorized"``
+        (all chains on one GPU); ignored by CPU backends.
 
-def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, object]:
-    """Return sampling kwargs for pm.sample(), including optional nuts_sampler."""
+    Returns
+    -------
+    dict[str, object]
+        Keyword arguments to splat into ``pm.sample()``.
+
+    Raises
+    ------
+    ImportError
+        If *nuts_sampler* names a JAX/nutpie backend whose package is not
+        installed.
+    """
     kwargs: dict[str, object] = {}
     if nuts_sampler != "default":
         sampler_import_check = {
@@ -310,12 +339,18 @@ def _pymc_sample_parallel_args(nuts_sampler: str = "default") -> dict[str, objec
         # JAX-based samplers (blackjax, numpyro) use jax.pmap by default which
         # requires N devices for N chains.  On a single GPU, use chain_method=
         # "vectorized" (jax.vmap) so all chains run on one device.
-        # The blackjax inner progress bar uses JAX IO callbacks which are not
-        # supported inside jax.vmap ("IO effect not supported in vmap-of-cond"),
-        # so disable it via progressbar=False.
         if nuts_sampler in {"blackjax", "numpyro"}:
-            kwargs["nuts_sampler_kwargs"] = {"chain_method": "vectorized"}
-            kwargs["progressbar"] = False
+            method = "vectorized" if chain_method == "auto" else chain_method
+            kwargs["chain_method"] = method
+            # The blackjax inner progress bar uses JAX IO callbacks which are
+            # not supported inside jax.vmap ("IO effect not supported in
+            # vmap-of-cond"), so disable it under vectorized chains.
+            if method == "vectorized":
+                kwargs["progressbar"] = False
+    if chains is not None:
+        kwargs["chains"] = chains
+    if cores is not None:
+        kwargs["cores"] = cores
     if "PYTEST_CURRENT_TEST" in os.environ:
         kwargs.update({"cores": 1, "chains": 1})
     return kwargs
@@ -327,6 +362,57 @@ def _compute_sample_log_likelihood(trace: xr.DataTree) -> xr.DataTree:
         "xr.DataTree",
         pm.compute_log_likelihood(trace, extend_inferencedata=True, progressbar=False),
     )
+
+
+def _sample_trace(
+    n_samples: int,
+    *,
+    tune: int,
+    target_accept: float,
+    sampler: SamplerConfig,
+) -> xr.DataTree:
+    """Run ``pm.sample`` with :class:`SamplerConfig` controls.
+
+    Must be called inside an active ``pm.Model`` context. Assembles the
+    backend, chain/core, tree-depth, seed and compile options from *sampler*.
+
+    Parameters
+    ----------
+    n_samples : int
+        Number of posterior draws per chain.
+    tune : int
+        Number of tuning draws.
+    target_accept : float
+        Target acceptance probability.
+    sampler : SamplerConfig
+        Sampling controls (backend, chains, cores, chain method, seed,
+        max tree depth, compile options).
+
+    Returns
+    -------
+    xr.DataTree
+        The sampled inference data (without the log_likelihood group).
+    """
+    sample_kwargs: dict[str, object] = {
+        "tune": tune,
+        "target_accept": target_accept,
+        "return_inferencedata": True,
+        **_pymc_sample_parallel_args(
+            sampler.nuts_sampler,
+            chains=sampler.chains,
+            cores=sampler.cores,
+            chain_method=sampler.chain_method,
+        ),
+    }
+    if sampler.max_treedepth is not None:
+        sample_kwargs["max_treedepth"] = sampler.max_treedepth
+    if sampler.random_seed is not None:
+        sample_kwargs["random_seed"] = sampler.random_seed
+    if sampler.backend is not None:
+        sample_kwargs["backend"] = sampler.backend
+    if sampler.compile_kwargs is not None:
+        sample_kwargs["compile_kwargs"] = dict(sampler.compile_kwargs)
+    return typing.cast("xr.DataTree", pm.sample(n_samples, **sample_kwargs))
 
 
 def _active_xy_for_prior(da: DataArray) -> tuple[np.ndarray, np.ndarray]:
@@ -1728,7 +1814,7 @@ _DEFAULT_INIT = InitConfig()
 _DEFAULT_SAMPLER = SamplerConfig()
 
 
-def fit_binding_pymc(  # noqa: PLR0912, PLR0913, PLR0915
+def fit_binding_pymc(  # noqa: PLR0913, PLR0915
     ds_or_fr: Dataset | FitResult[MiniT],
     *,
     n_sd: float = 10.0,
@@ -1783,7 +1869,6 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913, PLR0915
     ye_mag_mu = noise.ye_mag_mu
     ye_mag_sigma = noise.ye_mag_sigma
     n_samples = sampler.n_samples
-    nuts_sampler = sampler.nuts_sampler
 
     fr, prefer_centered = _normalize_fit_input(
         ds_or_fr,
@@ -1916,18 +2001,11 @@ def fit_binding_pymc(  # noqa: PLR0912, PLR0913, PLR0915
             if n_xerr > 0
             else 0.9
         )
-        sample_kwargs: dict[str, object] = {
-            "tune": tune,
-            "target_accept": target_accept_,
-            "return_inferencedata": True,
-            **_pymc_sample_parallel_args(nuts_sampler),
-        }
-        if sampler.max_treedepth is not None:
-            sample_kwargs["max_treedepth"] = sampler.max_treedepth
-        if sampler.random_seed is not None:
-            sample_kwargs["random_seed"] = sampler.random_seed
-        trace = pm.sample(n_samples, **sample_kwargs)
-        trace = _compute_sample_log_likelihood(trace)
+        trace = _sample_trace(
+            n_samples, tune=tune, target_accept=target_accept_, sampler=sampler
+        )
+        if sampler.compute_log_likelihood:
+            trace = _compute_sample_log_likelihood(trace)
     p_names = list(params.keys())
     if robust_on and robust_likelihood == "student_t" and student_t_nu is None:
         p_names.append("student_t_nu")
@@ -1949,7 +2027,7 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
-    nuts_sampler: str = "default",
+    nuts_sampler: str = "nutpie",
     n_tune: int | None = None,
     target_accept: float | None = None,
     max_treedepth: int | None = None,
@@ -2130,7 +2208,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
     n_samples: int = 2000,
-    nuts_sampler: str = "default",
+    nuts_sampler: str = "nutpie",
     n_tune: int | None = None,
     target_accept: float | None = None,
     max_treedepth: int | None = None,
@@ -2770,10 +2848,8 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     ye_mag_mu = noise.ye_mag_mu
     ye_mag_sigma = noise.ye_mag_sigma
     n_samples = sampler.n_samples
-    nuts_sampler = sampler.nuts_sampler
     n_tune = sampler.n_tune
     target_accept = sampler.target_accept
-    max_treedepth = sampler.max_treedepth
     init_strategy = init.strategy
     data_prior_edge_points = init.edge_points
     data_prior_signal_sigma_scale = init.signal_sigma_scale
@@ -3182,22 +3258,15 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         target_accept_ = (
             target_accept if target_accept is not None else 0.95 if n_xerr > 0 else 0.9
         )
-        sample_kwargs: dict[str, object] = {
-            "tune": tune_steps,
-            "target_accept": target_accept_,
-            "return_inferencedata": True,
-            **_pymc_sample_parallel_args(nuts_sampler),
-        }
-        if max_treedepth is not None:
-            sample_kwargs["max_treedepth"] = max_treedepth
-        if sampler.random_seed is not None:
-            sample_kwargs["random_seed"] = sampler.random_seed
-        trace: xr.DataTree = pm.sample(n_samples, **sample_kwargs)
+        trace: xr.DataTree = _sample_trace(
+            n_samples, tune=tune_steps, target_accept=target_accept_, sampler=sampler
+        )
 
         if sample_ppc:
             pm.sample_posterior_predictive(trace, extend_inferencedata=True)
 
-        trace = _compute_sample_log_likelihood(trace)
+        if sampler.compute_log_likelihood:
+            trace = _compute_sample_log_likelihood(trace)
 
     global_names: list[str] = []
     if robust_on and robust_likelihood == "student_t" and student_t_nu is None:

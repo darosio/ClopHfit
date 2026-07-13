@@ -21,6 +21,7 @@ NoiseParamMode = Literal["fixed", "free", "centered"]
 RobustLikelihood = Literal["student_t", "mixture"]
 InitStrategy = Literal["lmfit", "data_priors"]
 DataKPrior = Literal["midpoint_truncnorm", "uniform"]
+ChainMethod = Literal["auto", "parallel", "vectorized"]
 ContaminationFracPrior = float | Mapping[str, float]
 
 _MIN_CONTAMINATION_FRAC_PRIOR = 1e-3
@@ -71,8 +72,14 @@ class SamplerConfig:
     n_samples : int
         Number of posterior draws per chain.
     nuts_sampler : str
-        NUTS backend (``"default"``, ``"numpyro"``, ``"blackjax"``,
-        ``"nutpie"``).
+        NUTS backend. Defaults to ``"nutpie"`` — its warmup/mass-matrix
+        adaptation handles the funnel geometry of the hierarchical latent-x
+        model, where the built-in ``"pymc"`` sampler diverges heavily and fails
+        to converge. ``"pymc"`` (built-in NUTS, Numba backend) is fine and
+        marginally faster on simple deterministic-x fits. ``"default"`` lets
+        PyMC auto-select whatever is installed; ``"numpyro"``/``"blackjax"``
+        (JAX/GPU) request those explicitly but are unusable here (numpyro lacks
+        an ``erfcx`` implementation; blackjax is incompatible with PyMC 6.1).
     n_tune : int | None
         Number of tuning draws. ``None`` uses ``n_samples // 2``.
     target_accept : float | None
@@ -83,14 +90,46 @@ class SamplerConfig:
     random_seed : int | None
         Seed forwarded to ``pm.sample`` for reproducible draws. ``None`` (the
         default) leaves sampling nondeterministic.
+    chains : int | None
+        Number of MCMC chains. ``None`` uses the PyMC default (4).
+    cores : int | None
+        Number of CPU cores for parallel chains. ``None`` uses the PyMC
+        default (min of chains and available cores). Set to 1 on a laptop to
+        avoid multiprocessing overhead, or higher on a many-core server.
+    chain_method : ChainMethod
+        Chain execution strategy for the JAX backends (``"blackjax"``,
+        ``"numpyro"``). ``"auto"`` selects ``"vectorized"`` so all chains run
+        on a single GPU (``jax.vmap``); ``"parallel"`` maps chains across
+        devices (``jax.pmap``). Ignored by CPU backends.
+    compute_log_likelihood : bool
+        Compute the per-observation ``log_likelihood`` group after sampling.
+        Disabled by default because it adds a full post-sampling pass and is
+        only needed for out-of-sample model comparison (``az.loo`` /
+        ``az.compare``). Enable it when a downstream comparison requires it.
+    backend : str | None
+        Compilation backend forwarded to ``pm.sample(backend=...)``, e.g.
+        ``"jax"`` to JIT-compile the model's logp/dlogp through JAX (GPU) or
+        ``"numba"``. ``None`` uses the sampler's default. Cannot be combined
+        with ``compile_kwargs={"mode": ...}``.
+    compile_kwargs : Mapping[str, typing.Any] | None
+        Extra keyword arguments forwarded to the functions compiled by the
+        step methods (``pm.sample(compile_kwargs=...)``), e.g. a custom
+        ``{"mode": ...}``. ``None`` uses the default. Note: use *backend* to
+        select JAX/Numba — ``"backend"`` is not a valid ``compile_kwargs`` key.
     """
 
     n_samples: int = 2000
-    nuts_sampler: str = "default"
+    nuts_sampler: str = "nutpie"
     n_tune: int | None = None
     target_accept: float | None = None
     max_treedepth: int | None = None
     random_seed: int | None = None
+    chains: int | None = None
+    cores: int | None = None
+    chain_method: ChainMethod = "auto"
+    compute_log_likelihood: bool = False
+    backend: str | None = None
+    compile_kwargs: Mapping[str, typing.Any] | None = None
 
 
 @dataclass(frozen=True)
