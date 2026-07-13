@@ -394,7 +394,7 @@ wheels = [
 
 [[package]]
 name = "blackjax"
-version = "1.5"
+version = "1.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax" },
@@ -404,9 +404,9 @@ dependencies = [
     { name = "scipy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/2e/49621e028c395730d005bff2272b7bb144b7e0eb40028f8ba569cf6e2712/blackjax-1.5.tar.gz", hash = "sha256:c4a9898d4f5340894301cd382c28d72790e38847edaf4cfc9584dbd47bd205e1", size = 4710254, upload-time = "2026-04-03T07:20:06.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/0f/9da22812a20bd4f7da5b4f67ad79f459324c701fcca434ce583d90bd32e4/blackjax-1.6.tar.gz", hash = "sha256:fc1af2565bcf129974daa5d25067616aea85ea3e22e35d57d492d14bcd74daa5", size = 5174101, upload-time = "2026-07-10T20:30:31.99Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/a7/83b321492fe7e5d0af07f484ec0100bb6ca561aa64cad1d34fc58a015d0f/blackjax-1.5-py3-none-any.whl", hash = "sha256:f3ba5cab7aeee79939326a49d71a08dd1ce35f647e96ff82d2e8556f19e4e487", size = 4697170, upload-time = "2026-04-03T07:20:05.139Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/64/3d9dcc0e3fbba2de25c39adf302b6ad2ca3c119299ac087b8002161958b8/blackjax-1.6-py3-none-any.whl", hash = "sha256:d1c135f448789961a4bada1e2eb803a1da55c0622c5f77eddce80bb3f7351fd5", size = 4857402, upload-time = "2026-07-10T20:30:30.492Z" },
 ]
 
 [[package]]
@@ -682,7 +682,7 @@ tests = [
 [package.metadata]
 requires-dist = [
     { name = "arviz", specifier = ">=1.2.0" },
-    { name = "blackjax", marker = "extra == 'gpu'", specifier = ">=1.5" },
+    { name = "blackjax", marker = "extra == 'gpu'", specifier = ">=1.6" },
     { name = "click", specifier = ">=8.3.3" },
     { name = "corner", specifier = ">=2.3.0" },
     { name = "emcee", specifier = ">=3.1.6" },
