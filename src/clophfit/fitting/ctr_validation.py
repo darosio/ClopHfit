@@ -22,6 +22,26 @@ def free_ctr_param_name(group_name: str, well: str) -> str:
     return f"K_{group_name}_{well}"
 
 
+def _well_k_draws(
+    posterior: _t.Any, well: str, *, scalar_name: str
+) -> tuple[np.ndarray, str] | None:
+    """Return ``(draws, resolved_name)`` for a well's posterior K, or ``None``.
+
+    Resolves K from either the legacy scalar variable (``scalar_name``, e.g.
+    ``K_{well}`` or ``K_{group}_{well}``) or the vectorized ``K_free`` variable
+    indexed by the ``free_well`` coordinate produced by the multi-well fit.
+    Returns ``None`` when the well is present in neither.
+    """
+    if scalar_name in posterior:
+        return np.asarray(posterior[scalar_name].values), scalar_name
+    if "K_free" in posterior:
+        k_free = posterior["K_free"]
+        coord = k_free.coords.get("free_well")
+        if coord is not None and well in {str(w) for w in coord.values}:
+            return np.asarray(k_free.sel(free_well=well).values), f"K_free[{well}]"
+    return None
+
+
 def make_ctr_holdout_scheme(
     scheme: _t.Any, *, group_name: str, heldout_well: str
 ) -> _t.Any:
@@ -143,11 +163,11 @@ def summarize_bayesian_ctr_holdout(  # noqa: PLR0913
     weighted posterior mean of the remaining free-control K variables.
     """
     posterior = posterior_dataset(trace)
-    heldout_var = f"K_{heldout_well}"
-
-    if heldout_var not in posterior:
-        msg = f"Missing heldout variable {heldout_var!r}"
+    heldout = _well_k_draws(posterior, heldout_well, scalar_name=f"K_{heldout_well}")
+    if heldout is None:
+        msg = f"Missing heldout variable {f'K_{heldout_well}'!r}"
         raise KeyError(msg)
+    heldout_draws, heldout_var = heldout
 
     if reference_mode == "shared":
         reference_vars = [ctr_param_name(ctr_group)]
@@ -160,20 +180,27 @@ def summarize_bayesian_ctr_holdout(  # noqa: PLR0913
         if remaining_ctr_wells is None:
             msg = "remaining_ctr_wells is required for weighted_mean reference."
             raise ValueError(msg)
-        reference_vars = [
-            free_ctr_param_name(ctr_group, well) for well in remaining_ctr_wells
+        resolved = [
+            (well, _well_k_draws(posterior, well, scalar_name=name))
+            for well in remaining_ctr_wells
+            for name in [free_ctr_param_name(ctr_group, well)]
         ]
-        missing = [var for var in reference_vars if var not in posterior]
+        missing = [
+            free_ctr_param_name(ctr_group, well)
+            for well, draws in resolved
+            if draws is None
+        ]
         if missing:
             msg = f"Missing free-control variables {missing!r}"
             raise KeyError(msg)
-        reference_arrays = [posterior[var].values for var in reference_vars]
+        reference_arrays = [draws[0] for _, draws in resolved if draws is not None]
+        reference_vars = [draws[1] for _, draws in resolved if draws is not None]
         reference, reference_weights = weighted_mean_reference(reference_arrays)
     else:
         msg = f"Unsupported CTR-LOO reference mode: {reference_mode!r}"
         raise ValueError(msg)
 
-    diff = posterior[heldout_var].values.ravel() - reference
+    diff = heldout_draws.ravel() - reference
     diff = diff[np.isfinite(diff)]
     if diff.size == 0:
         msg = "No finite posterior ΔK draws."

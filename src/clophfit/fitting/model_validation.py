@@ -1222,6 +1222,7 @@ def trace_diagnostics(
     if summary_var_names is None:
         summary_var_names = [
             "K",
+            "K_free",
             "K_ctr",
             "x_start",
             "x_true",

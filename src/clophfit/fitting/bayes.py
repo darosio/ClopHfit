@@ -2465,6 +2465,97 @@ def _build_ctr_k_params(  # noqa: PLR0913
     return k_params, k_replicate
 
 
+def _free_k_init(  # noqa: PLR0913
+    fit_results: dict[str, FitResult[MiniT]],
+    wells_list: list[str],
+    scheme: PlateScheme,
+    ctr_ks: dict[str, tuple[float, float]],
+    n_sd: float,
+    *,
+    ctr_free_k: bool,
+    fallback_sigma: float = 0.6,
+) -> tuple[list[str], ArrayF, ArrayF, dict[str, str]]:
+    """Classify wells for the multi-fit K prior and return free-well init.
+
+    Wells that receive an *individual* K prior — every unknown well, plus each
+    control replicate when *ctr_free_k* is True — are collected into
+    ``free_wells`` with aligned prior mean/sigma vectors, so the caller can
+    build a single vectorized ``K_free`` random variable (one graph node)
+    instead of one scalar ``pm.Normal`` per well.  Wells whose K is shared
+    across a control group (``ctr_free_k`` False) are returned in ``shared_of``
+    mapping well -> group name; the caller supplies their shared scalar RV.
+
+    The per-well ``(mu, sigma)`` values reproduce the previous scalar-prior
+    construction exactly, including the mode-dependent sigma floor.
+
+    Parameters
+    ----------
+    fit_results : dict[str, FitResult[MiniT]]
+        Per-well preliminary fit results.
+    wells_list : list[str]
+        Ordered active well keys.
+    scheme : PlateScheme
+        Plate scheme defining control groups.
+    ctr_ks : dict[str, tuple[float, float]]
+        Weighted K mean and stderr per control group.
+    n_sd : float
+        Prior width multiplier applied to the preliminary-fit stderr.
+    ctr_free_k : bool
+        If True, control replicates get individual priors (like unknowns).
+    fallback_sigma : float
+        Prior sigma for control replicates lacking a reliable preliminary fit.
+
+    Returns
+    -------
+    free_wells : list[str]
+        Wells receiving an individual (vectorized) K prior, in input order.
+    mu : ArrayF
+        Prior means aligned with *free_wells*.
+    sigma : ArrayF
+        Prior sigmas aligned with *free_wells*.
+    shared_of : dict[str, str]
+        Maps each shared (control-group) well to its group name.
+
+    Raises
+    ------
+    ValueError
+        If an active well in *wells_list* has no preliminary fit result.
+    """
+    well_to_group: dict[str, str] = {}
+    for name, wells in scheme.names.items():
+        for well in wells:
+            well_to_group.setdefault(well, name)
+    well_k_init = (
+        _well_k_init_from_results(fit_results, scheme, n_sd) if ctr_free_k else {}
+    )
+    free_wells: list[str] = []
+    mus: list[float] = []
+    sigmas: list[float] = []
+    shared_of: dict[str, str] = {}
+    for key in wells_list:
+        group = well_to_group.get(key, "")
+        if group and not ctr_free_k:
+            shared_of[key] = group
+            continue
+        result = fit_results[key].result
+        if result is None:
+            msg = f"Fit result for well {key} is missing."
+            raise ValueError(msg)
+        if group:  # ctr_free_k replicate: own preliminary fit or group fallback
+            mu, sigma = well_k_init.get(key, (ctr_ks[group][0], fallback_sigma))
+        elif ctr_free_k:  # unknown well (free-CTR mode uses _safe_sigma default)
+            p = result.params["K"]
+            mu, sigma = p.value, _safe_sigma(p.stderr, n_sd)
+        else:  # unknown well (shared-CTR mode uses a 1e-3 sigma floor)
+            p = result.params["K"]
+            mu = p.value
+            sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
+        free_wells.append(key)
+        mus.append(float(mu))
+        sigmas.append(float(sigma))
+    return free_wells, np.asarray(mus), np.asarray(sigmas), shared_of
+
+
 def _resolve_well_k(  # noqa: PLR0913
     key: str,
     ctr_name: str,
@@ -2751,11 +2842,18 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     n_wells = len(wells_list)
     n_steps = len(xc)
 
+    # Split wells into individually-fit (vectorized K_free) and shared-group K.
+    free_wells, k_free_mu, k_free_sigma, shared_of = _free_k_init(
+        fit_results, wells_list, scheme, ctr_ks, n_sd, ctr_free_k=ctr_free_k
+    )
+
     coords: dict[str, list[int] | list[str]] = {
         "well": wells_list,
         "step": list(range(n_steps)),
         "step_diff": list(range(n_steps - 1)),
     }
+    if free_wells:
+        coords["free_well"] = free_wells
 
     with pm.Model(coords=coords):
         robust_nu = (
@@ -2893,42 +2991,31 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
             x_w_all = pt.tile(x_true[:, None], (1, n_wells))
 
-        k_params, k_replicate = _build_ctr_k_params(
-            scheme,
-            ctr_ks,
-            active_wells,
-            ctr_free_k=ctr_free_k,
-            well_k_init=_well_k_init_from_results(fit_results, scheme, n_sd),
-        )
-
-        # Collect vectorized K
-        k_list = []
-        for key in wells_list:
-            ctr_name = next(
-                (name for name, wells in scheme.names.items() if key in wells), ""
+        # Vectorized K priors: the individually-fit wells (all unknowns, plus
+        # every control replicate when ctr_free_k) share a single K_free RV
+        # with dims="free_well" — one graph node instead of a scalar pm.Normal
+        # per well, which speeds up compilation and NUTS sampling. Shared
+        # control groups keep one scalar K_ctr_* RV each, broadcast across
+        # their replicate wells.
+        k_params: dict[str, typing.Any] = {}
+        if not ctr_free_k:
+            k_params, _ = _build_ctr_k_params(
+                scheme, ctr_ks, active_wells, ctr_free_k=False
             )
-            r = fit_results[key]
-            if r.result is None:
-                msg = f"Fit result for well {key} is missing."
-                raise ValueError(msg)
-            # We need to access the pars dict to get the UNK K's, but we don't have it yet.
-            # Let's just resolve K here directly.
-            if ctr_free_k:
-                k_well = k_replicate.get(key)
-                if k_well is None:
-                    # It's an UNK well, create its K prior
-                    p = r.result.params["K"]
-                    sigma = _safe_sigma(p.stderr, n_sd)
-                    k_well = pm.Normal(f"K_{key}", mu=p.value, sigma=sigma)
-            elif ctr_name:
-                k_well = k_params[ctr_name]
+        k_free = (
+            pm.Normal("K_free", mu=k_free_mu, sigma=k_free_sigma, dims="free_well")
+            if free_wells
+            else None
+        )
+        free_pos = {well: i for i, well in enumerate(free_wells)}
+        k_segments: list[typing.Any] = []
+        for key in wells_list:
+            if key in free_pos:
+                assert k_free is not None  # noqa: S101 — free_pos implies k_free built
+                k_segments.append(k_free[free_pos[key]])
             else:
-                # It's an UNK well, create its K prior
-                p = r.result.params["K"]
-                sigma = max(p.stderr * n_sd, 1e-3) if p.stderr else 1e-3
-                k_well = pm.Normal(f"K_{key}", mu=p.value, sigma=sigma)
-            k_list.append(k_well)
-        k_all = pt.stack(k_list)  # (n_wells,)
+                k_segments.append(k_params[shared_of[key]])
+        k_all = pt.stack(k_segments)  # (n_wells,)
 
         # Collect and create vectorized S0 and S1 priors
         s0_vars = {}
