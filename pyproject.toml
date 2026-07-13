@@ -71,7 +71,7 @@ dev = [
   "mdformat>=1.0.0",
   "mdformat-gfm>=1.0.0",
   "pylsp-mypy>=0.7.3",
-  "ruff>=0.15.20",
+  "ruff>=0.15.21",
   "python-lsp-ruff>=2.3.1",
   "cruft>=2.16.0",
 ]
