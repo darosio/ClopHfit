@@ -779,7 +779,7 @@ Old prior for L2 V224L CTR (mean=5.54, σ=0.20) was 3.8σ from MCMC posterior
 - Re-run with C05 excluded or investigate C05 data quality (potential overflow)
 - Consider switching sampler (blackjax/numpyro) to avoid pytensor graph limit
 
-* TODO Revisit x-error step-sigma prior in create_x_true (looks wrong)
+* DONE Revisit x-error step-sigma prior in create_x_true (de-noised pipetting walk)
 ** Problem
 =create_x_true= (src/clophfit/fitting/bayes.py:~882-892) does NOT give each pH
 point an independent x-error prior. It builds x_true as a cumulative sum
@@ -811,15 +811,33 @@ read; only the per-step reparameterization looks pinned. But the running-max
 (rather than per-point) coupling is the suspicious bit and probably not what we
 want.
 
-** To decide / do
-- Should each point's step reflect its OWN x_errc (independent TruncatedNormal
-  per gap), decoupled from earlier points? That removes the pinning but must
-  still keep x_true ordered (monotone pH) — the original reason for the
-  cumulative/monotone construction.
-- If keeping monotonicity, reconsider whether running-max accumulation is the
-  right way to allocate per-step variance (vs. e.g. per-point σ with an
-  ordering constraint / soft penalty).
-- Add a regression test asserting a point with x_errc <= a neighbor's still
-  gets nonzero step freedom (once the intended behavior is decided).
-- Meanwhile, note in docs/tutorials/prtecan.ipynb that a near-zero x_step row
-  is expected under the current prior so readers aren't alarmed.
+** Resolution (done)
+The measurement physics settled it: pH is measured in 3 wells while 2 uL acid is
+added sequentially; the 3-well SD is CUMULATIVE — read noise (step-0 SD) that
+recurs every step, plus per-addition pipetting errors that accumulate. So the
+x_true = x_start + cumsum(x_step) random walk is CORRECT (points are positively
+correlated via shared addition history); independent-per-point would have been
+wrong (drops the correlation). Two real flaws remained, both fixed:
+- Read noise was injected into the walk via σ(x_start)=x_errc[0]. Now x_start is
+  a strong anchor at the standard error of the step-0 mean (x_errc[0]/√3), so the
+  recurring read noise stays out of the latent pH; the per-addition differences
+  x_errc[k]²−x_errc[k-1]² already cancel σ_meas.
+- Pinning from noisy flat 3-well SDs. Now each per-addition variance has a
+  positive floor (fraction of the average per-addition variance), so no step
+  collapses to ~0 — every 2 uL delivery keeps a real pipetting error.
+- Frozen leading spike. The 3-well SD is a noisy estimator that routinely
+  violates monotonicity: real plate-1 x_errc[0]=0.067 (wells 8.92/8.8/8.91) but
+  drops to 0.017 next step. np.maximum.accumulate FROZE that spike and propagated
+  it forward, inflating σ(x_start)=0.067/√3=0.038 into a persistent pH-axis
+  offset that shifts K (the K↔pH degeneracy). Replaced the running max with
+  isotonic regression (scipy.optimize.isotonic_regression) on the cumulative
+  variance, which PULLS a leading over-estimate DOWN to be consistent with the
+  smaller later values (plate 1 x_start 0.038 -> 0.025; midpoint pH / K width
+  narrows), while being a no-op on clean monotone profiles (D10, plate 2 start).
+Implemented in _pipetting_step_sigmas(), used by create_x_true and the per_well
+model. Validated on D10 and both real plate arrays; x_true marginal sd grows
+monotonically and every prior draw stays ordered. Regression test:
+test_pipetting_step_sigmas_isotonic_pulls_down_leading_spike. Existing min-gap /
+lower-bound truncation (min_x_step, lower_nsd) kept. Left as-is: hierarchical_per_well
+(acid_drop) uses a different difference-based scheme; revisit separately if
+needed.

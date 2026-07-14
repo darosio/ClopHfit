@@ -14,6 +14,7 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 
 from clophfit.fitting import bayes, bayes_config
 from clophfit.fitting.bayes import (
+    _pipetting_step_sigmas,  # noqa: PLC2701
     create_parameter_priors,
     create_x_true,
     extract_fit,
@@ -186,6 +187,29 @@ def test_create_x_true_respects_minimum_step_size() -> None:
     inferred_drops = -np.diff(x_true_samples, axis=1)
 
     assert np.all(inferred_drops >= min_x_step - 1e-6)
+
+
+def test_pipetting_step_sigmas_isotonic_pulls_down_leading_spike() -> None:
+    """An atypically large early SD is pulled down, not frozen and propagated.
+
+    Cumulative pipetting variance must be non-decreasing; a noisy leading spike
+    (e.g. a real but transient step-0 well-to-well spread that reconverges next
+    step) violates that. Isotonic regression pulls it toward the smaller later
+    values, so the ``x_start`` anchor is not inflated by one bad 3-well SD.
+    """
+    # Real plate-1 profile: step-0 SD (0.067) exceeds the next four steps.
+    x_errc = np.array([0.0666, 0.0173, 0.0351, 0.0351, 0.0436, 0.0702, 0.0702])
+    x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc)
+
+    n_wells = 3.0
+    naive_anchor = x_errc[0] / np.sqrt(n_wells)  # what a running-max would freeze
+    assert x_start_sigma < naive_anchor  # spike pulled down
+    assert np.all(step_sigmas > 0.0)  # no pinned step
+
+    # On a clean non-decreasing profile isotonic is a no-op: anchor == step-0 SE.
+    mono = np.array([0.01, 0.05, 0.09, 0.11, 0.14, 0.16, 0.18])
+    mono_anchor, _ = _pipetting_step_sigmas(mono)
+    assert mono_anchor == pytest.approx(mono[0] / np.sqrt(n_wells))
 
 
 def test_create_x_true_lower_bound() -> None:
@@ -2323,7 +2347,10 @@ def test_fit_binding_pymc_with_xerr(ph_dataset: Dataset) -> None:
     assert initial_fit.dataset is not None
     # Run PyMC with x error modeling (reduced samples for speed)
     fit_result = fit_binding_pymc(
-        initial_fit, n_xerr=1.0, n_sd=10.0, sampler=SamplerConfig(n_samples=50)
+        initial_fit,
+        n_xerr=1.0,
+        n_sd=10.0,
+        sampler=SamplerConfig(n_samples=50, random_seed=42),
     )
     assert fit_result.result is not None
     assert "K" in fit_result.result.params

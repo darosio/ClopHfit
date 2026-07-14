@@ -21,6 +21,7 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
+from scipy.optimize import isotonic_regression
 
 from clophfit.fitting import model_validation
 from clophfit.fitting.bayes_config import (
@@ -953,6 +954,56 @@ def _summary_mean_or_none(trace_df: pd.DataFrame, name: str) -> float | None:
     return value if np.isfinite(value) else None
 
 
+# Number of pH-monitor wells the step-0 SD is measured over; the true starting
+# pH is anchored by the standard error of their mean (strong but not fixed).
+_N_PH_REPLICATE_WELLS = 3
+# Minimum per-addition pipetting variance, as a fraction of the average
+# per-addition variance, so a noisy flat 3-well SD cannot pin a step to ~zero:
+# every 2 uL delivery carries a real, nonzero volume error.
+_MIN_PIPETTING_STEP_FRAC = 0.25
+
+
+def _pipetting_step_sigmas(x_errc_scaled: ArrayF) -> tuple[float, ArrayF]:
+    """Split a cumulative pH-SD profile into per-addition pipetting sigmas.
+
+    The 3-well SD at step ``N`` is cumulative:
+    ``x_errc[N]**2 = read_noise**2 + sum_{k<=N} pipetting_var[k]``. The recurring
+    read noise (the step-0 SD) cancels in consecutive differences, so per-addition
+    variance is the increment of the cumulative variance.
+
+    Accumulated pipetting variance is physically non-decreasing, but the 3-well
+    SDs are noisy and routinely violate that (an atypically large early value, or
+    dips). We therefore fit the least-squares monotone (isotonic) cumulative
+    variance rather than a running maximum: ``np.maximum.accumulate`` would
+    *freeze* a noisy early spike and propagate it forward (inflating the
+    ``x_start`` anchor and, via the K/pH degeneracy, K), whereas isotonic pulls
+    such a spike down to be consistent with the smaller later values. A positive
+    floor keeps every addition nonzero, so a flat stretch cannot pin a step.
+
+    Parameters
+    ----------
+    x_errc_scaled : ArrayF
+        Per-step cumulative pH SD, already scaled by ``n_xerr`` and floored > 0.
+
+    Returns
+    -------
+    tuple[float, ArrayF]
+        ``(x_start_sigma, step_sigmas)``: ``x_start_sigma`` anchors the starting
+        pH (standard error of the step-0 mean, so the recurring read noise does
+        not enter the walk); ``step_sigmas[k]`` is addition ``k``'s pipetting
+        sigma (length ``len(x_errc_scaled) - 1``).
+    """
+    cum_var = isotonic_regression(x_errc_scaled**2).x
+    x_start_sigma = float(np.sqrt(cum_var[0]) / np.sqrt(_N_PH_REPLICATE_WELLS))
+    if len(cum_var) <= 1:
+        return x_start_sigma, np.empty(0, dtype=float)
+    raw_step_var = np.diff(cum_var)
+    total_pipetting_var = max(float(cum_var[-1] - cum_var[0]), 0.0)
+    floor_var = _MIN_PIPETTING_STEP_FRAC * total_pipetting_var / (len(cum_var) - 1)
+    step_var = np.maximum(raw_step_var, max(floor_var, 1e-12))
+    return x_start_sigma, np.sqrt(step_var)
+
+
 def create_x_true(
     xc: ArrayF,
     x_errc: ArrayF,
@@ -962,33 +1013,29 @@ def create_x_true(
 ) -> ArrayF | pm.Deterministic:
     """Create latent variables for x-values with uncertainty.
 
-    Returns a PyMC Deterministic variable when in a Model context with uncertainty,
-    or a numpy array when there's no uncertainty or no active Model.
+    Models the pH axis as a pipetting random walk: the true pH accumulates
+    independent per-addition volume errors, so ``x_true = x_start +
+    cumsum(x_step)`` with each step's sigma taken from the per-addition pipetting
+    variance (see :func:`_pipetting_step_sigmas`). Returns a PyMC Deterministic
+    variable when in a Model context with uncertainty, or a numpy array when
+    there's no uncertainty or no active Model.
     """
     if n_xerr > 0 and np.any(x_errc > 0):
         x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
-        x_errc_cumulative = np.maximum.accumulate(x_errc_scaled)
-        step_sigmas = np.empty_like(x_errc_cumulative)
-        step_sigmas[0] = x_errc_cumulative[0]
-        if len(xc) > 1:
-            step_var = np.maximum(
-                x_errc_cumulative[1:] ** 2 - x_errc_cumulative[:-1] ** 2,
-                1e-12,
-            )
-            step_sigmas[1:] = np.sqrt(step_var)
+        x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc_scaled)
 
         direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
         step_nominal = direction * np.diff(xc)
         min_steps = np.maximum(
-            step_nominal - lower_nsd * step_sigmas[1:],
+            step_nominal - lower_nsd * step_sigmas,
             min_x_step,
         )
 
-        x_start = pm.Normal("x_start", mu=xc[0], sigma=step_sigmas[0])
+        x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
         x_step = pm.TruncatedNormal(
             "x_step",
             mu=step_nominal,
-            sigma=np.maximum(step_sigmas[1:], 1e-6),
+            sigma=np.maximum(step_sigmas, 1e-6),
             lower=min_steps,
             shape=len(xc) - 1,
         )
@@ -3007,27 +3054,19 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
         elif x_error_model == "per_well" and n_xerr > 0:
             x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
-            x_errc_cumulative = np.maximum.accumulate(x_errc_scaled)
-            step_sigmas = np.empty_like(x_errc_cumulative)
-            step_sigmas[0] = x_errc_cumulative[0]
-            if len(xc) > 1:
-                step_var = np.maximum(
-                    x_errc_cumulative[1:] ** 2 - x_errc_cumulative[:-1] ** 2,
-                    1e-12,
-                )
-                step_sigmas[1:] = np.sqrt(step_var)
+            x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc_scaled)
             direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
             step_nominal = direction * np.diff(xc)
             lower_nsd = 2.5
             min_steps = np.maximum(
-                step_nominal - lower_nsd * step_sigmas[1:],
+                step_nominal - lower_nsd * step_sigmas,
                 min_x_step,
             )
-            x_start = pm.Normal("x_start", mu=xc[0], sigma=step_sigmas[0])
+            x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
             x_step = pm.TruncatedNormal(
                 "x_step",
                 mu=step_nominal[:, None],
-                sigma=np.maximum(step_sigmas[1:], 1e-6)[:, None],
+                sigma=np.maximum(step_sigmas, 1e-6)[:, None],
                 lower=min_steps[:, None],
                 shape=(n_steps - 1, n_wells),
                 dims=("step_diff", "well"),
