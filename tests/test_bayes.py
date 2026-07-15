@@ -2037,6 +2037,129 @@ def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
         )
 
 
+def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin hierarchical_per_well to the de-noised pipetting derivation.
+
+    ``x_start`` must be anchored at the isotonic standard error of the step-0
+    mean and ``acid_drop_global`` must use the isotonic per-addition pipetting
+    sigma — not the pre-fix read-noise-inflated raw / quadrature values. This
+    guards against a silent regression to the old formulation.
+    """
+    # Decreasing pH (acid titration) with a noisy leading x_errc spike, the
+    # real-plate scenario the de-noising fix targeted.
+    xc = np.array([8.92, 8.80, 8.40, 7.90, 7.30, 6.60, 6.00])
+    x_errc = np.array([0.067, 0.017, 0.015, 0.016, 0.014, 0.015, 0.013])
+    y1 = binding_1site(xc, 7.2, 2.0, 1.0, is_ph=True)
+    y2 = binding_1site(xc, 7.2, 0.1, 1.0, is_ph=True)
+    ds = Dataset(
+        {"1": DataArray(xc, y1, x_errc=x_errc), "2": DataArray(xc, y2, x_errc=x_errc)},
+        is_ph=True,
+    )
+    fr_init = fit_binding_glob(ds)
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    _dir, exp_x_start_sigma, _nom, exp_step_sigmas, _min = bayes._pipetting_walk_params(  # noqa: SLF001
+        xc, x_errc, 1.0, min_x_step=0.2
+    )
+
+    captured: dict[str, object] = {}
+    orig_normal = pm.Normal
+    orig_truncnormal = pm.TruncatedNormal
+
+    def fake_normal(name: str, **kwargs: object) -> object:
+        if name == "x_start":
+            captured["x_start_sigma"] = float(cast("float", kwargs["sigma"]))
+        return orig_normal(name, **kwargs)
+
+    def fake_truncnormal(name: str, **kwargs: object) -> object:
+        if name == "acid_drop_global":
+            captured["global_sigma"] = np.asarray(
+                cast("Any", kwargs["sigma"]), dtype=float
+            )
+            raise _StopBayesBuildError
+        return orig_truncnormal(name, **kwargs)
+
+    monkeypatch.setattr(pm, "Normal", fake_normal)
+    monkeypatch.setattr(pm, "TruncatedNormal", fake_truncnormal)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            n_xerr=1.0,
+            x_error_model="hierarchical_per_well",
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
+
+    x_start_sigma = cast("float", captured["x_start_sigma"])
+    global_sigma = cast("np.ndarray", captured["global_sigma"])
+    # x_start anchored at the de-noised SE of the step-0 mean ...
+    assert x_start_sigma == pytest.approx(max(exp_x_start_sigma, 1e-6))
+    # ... far below the raw leading 3-well SD it used to inherit.
+    assert x_start_sigma < x_errc[0]
+
+    # acid_drop_global uses the isotonic per-addition pipetting sigma ...
+    np.testing.assert_allclose(global_sigma, np.maximum(exp_step_sigmas, 1e-6))
+    # ... not the old quadrature measured-difference sigma.
+    old_quadrature = np.sqrt(x_errc[:-1] ** 2 + x_errc[1:] ** 2)
+    assert not np.allclose(global_sigma, old_quadrature)
+
+
+@pytest.mark.parametrize(("between", "expect_well"), [(0.0, False), (0.03, True)])
+def test_fit_binding_pymc_multi_x_start_between_sigma_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+    between: float,
+    expect_well: bool,  # noqa: FBT001
+) -> None:
+    """A positive x_start_between_sigma adds a per-well x_start_well term.
+
+    ``0.0`` (default) keeps a single shared scalar anchor (unchanged behavior).
+    """
+    xc = np.array([6.0, 6.6, 7.3, 8.0])
+    x_errc = np.array([0.02, 0.02, 0.02, 0.02])
+    y1 = binding_1site(xc, 7.0, 1.0, 2.0, is_ph=True)
+    y2 = binding_1site(xc, 7.0, 1.0, 0.1, is_ph=True)
+    ds = Dataset(
+        {"1": DataArray(xc, y1, x_errc=x_errc), "2": DataArray(xc, y2, x_errc=x_errc)},
+        is_ph=True,
+    )
+    fr_init = fit_binding_glob(ds)
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+
+    normal_names: list[str] = []
+    orig_normal = pm.Normal
+    orig_truncnormal = pm.TruncatedNormal
+
+    def fake_normal(name: str, **kwargs: object) -> object:
+        normal_names.append(name)
+        return orig_normal(name, **kwargs)
+
+    def fake_truncnormal(name: str, **kwargs: object) -> object:
+        if name == "x_step":
+            raise _StopBayesBuildError
+        return orig_truncnormal(name, **kwargs)
+
+    monkeypatch.setattr(pm, "Normal", fake_normal)
+    monkeypatch.setattr(pm, "TruncatedNormal", fake_truncnormal)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            n_xerr=1.0,
+            x_error_model="per_well",
+            x_start_between_sigma=between,
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
+
+    assert "x_start" in normal_names
+    assert ("x_start_well" in normal_names) is expect_well
+
+
 def test_extract_fit_accepts_multifitresult_deterministic() -> None:
     """extract_fit should accept MultiFitResult and use shared x_true."""
     trace_df = pd.DataFrame(

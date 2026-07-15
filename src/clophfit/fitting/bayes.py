@@ -1004,6 +1004,100 @@ def _pipetting_step_sigmas(x_errc_scaled: ArrayF) -> tuple[float, ArrayF]:
     return x_start_sigma, np.sqrt(step_var)
 
 
+def _pipetting_walk_params(
+    xc: ArrayF,
+    x_errc: ArrayF,
+    n_xerr: float,
+    *,
+    min_x_step: float,
+    lower_nsd: float = 2.5,
+) -> tuple[float, float, ArrayF, ArrayF, ArrayF]:
+    """Derive the shared numpy priors for the pipetting random walk.
+
+    Single source of truth for the de-noised per-addition step derivation used
+    by :func:`create_x_true` (single latent ``x_true``) and by the ``per_well``
+    and ``hierarchical_per_well`` x-error models in
+    :func:`fit_binding_pymc_multi`. Each caller builds its own RVs from these
+    arrays with the appropriate shape/dims.
+
+    Parameters
+    ----------
+    xc : ArrayF
+        Nominal x (pH) values, monotone in either direction.
+    x_errc : ArrayF
+        Per-step cumulative x SD (from the pH-monitor wells).
+    n_xerr : float
+        Scaling factor applied to ``x_errc``.
+    min_x_step : float
+        Minimum inferred change in x between consecutive steps.
+    lower_nsd : float
+        Number of step sigmas below the nominal step for the truncation lower
+        bound, before flooring at ``min_x_step``.
+
+    Returns
+    -------
+    tuple[float, float, ArrayF, ArrayF, ArrayF]
+        ``(direction, x_start_sigma, step_nominal, step_sigmas, min_steps)``.
+        ``direction`` is ``+1`` for increasing x, ``-1`` for decreasing;
+        ``x_start_sigma`` anchors the (shared) starting x; ``step_nominal`` are
+        the direction-signed nominal steps (positive); ``step_sigmas`` are the
+        de-noised per-addition sigmas; ``min_steps`` is the order-preserving
+        lower bound for each step.
+    """
+    x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
+    x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc_scaled)
+    direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
+    step_nominal = direction * np.diff(xc)
+    min_steps = np.maximum(step_nominal - lower_nsd * step_sigmas, min_x_step)
+    return direction, x_start_sigma, step_nominal, step_sigmas, min_steps
+
+
+def _build_multi_x_start(
+    xc: ArrayF,
+    x_start_sigma: float,
+    x_start_between_sigma: float,
+) -> typing.Any:  # noqa: ANN401
+    """Build the starting-x anchor for the multi-well x-error models.
+
+    The plate shares one buffer and one pre-addition reading, so the starting x
+    (pH) is common: a single ``x_start`` RV anchored at the de-noised standard
+    error of the step-0 mean (``x_start_sigma``). When
+    ``x_start_between_sigma > 0`` an opt-in per-well term
+    ``x_start_well ~ Normal(x_start, x_start_between_sigma)`` is added, letting
+    each well's x0 wobble around the shared plate value — a common-mode global
+    anchor plus independent per-well jitter. The between-well scale is fixed,
+    not sampled, to avoid a centered funnel.
+
+    Parameters
+    ----------
+    xc : ArrayF
+        Nominal x (pH) values; ``xc[0]`` centres the shared anchor.
+    x_start_sigma : float
+        De-noised prior sigma for the shared ``x_start`` anchor (standard error
+        of the step-0 mean).
+    x_start_between_sigma : float
+        Fixed between-well scale. ``<= 0`` returns the shared scalar anchor;
+        ``> 0`` adds the per-well ``x_start_well`` term.
+
+    Returns
+    -------
+    typing.Any
+        A scalar ``x_start`` tensor (shared anchor) when
+        ``x_start_between_sigma <= 0``, otherwise a ``dims="well"`` vector
+        centred on the shared anchor. Both broadcast against the
+        ``(step, well)`` offset/drop tensors.
+    """
+    x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
+    if x_start_between_sigma <= 0:
+        return x_start
+    return pm.Normal(
+        "x_start_well",
+        mu=x_start,
+        sigma=x_start_between_sigma,
+        dims="well",
+    )
+
+
 def create_x_true(
     xc: ArrayF,
     x_errc: ArrayF,
@@ -1021,16 +1115,11 @@ def create_x_true(
     there's no uncertainty or no active Model.
     """
     if n_xerr > 0 and np.any(x_errc > 0):
-        x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
-        x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc_scaled)
-
-        direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
-        step_nominal = direction * np.diff(xc)
-        min_steps = np.maximum(
-            step_nominal - lower_nsd * step_sigmas,
-            min_x_step,
+        direction, x_start_sigma, step_nominal, step_sigmas, min_steps = (
+            _pipetting_walk_params(
+                xc, x_errc, n_xerr, min_x_step=min_x_step, lower_nsd=lower_nsd
+            )
         )
-
         x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
         x_step = pm.TruncatedNormal(
             "x_step",
@@ -2808,6 +2897,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         "deterministic", "per_well", "hierarchical_per_well"
     ] = "deterministic",
     acid_drop_between_sigma: float = 0.005,
+    x_start_between_sigma: float = 0.0,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
@@ -2843,6 +2933,14 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     acid_drop_between_sigma : float
         Fixed between-well scale for the ``acid_drop`` variation used by
         ``"hierarchical_per_well"`` (set to the experimental tolerance).
+    x_start_between_sigma : float
+        Fixed between-well scale for the starting x (pH). ``0.0`` (default)
+        shares a single ``x_start`` anchor across all wells — appropriate when
+        the plate shares one buffer and one pre-addition reading. A positive
+        value adds an opt-in per-well term ``x_start_well ~ Normal(x_start,
+        x_start_between_sigma)`` (common-mode global anchor plus independent
+        per-well jitter), a safety valve for genuine per-well starting-pH
+        offsets. Applies to ``"per_well"`` and ``"hierarchical_per_well"``.
     ctr_free_k : bool
         If ``True``, each control replicate gets an independent flat K prior
         instead of a shared control K.
@@ -2999,30 +3097,23 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 )
                 raise ValueError(msg)
 
-            nominal_drop = -np.diff(xc)  # positive pH drops
-
-            x_sigma = np.maximum(x_errc * n_xerr, 1e-6)
-
-            # Uncertainty of a measured pH difference (quadrature sum).
-            drop_meas_sigma = np.sqrt(x_sigma[:-1] ** 2 + x_sigma[1:] ** 2)
-
-            lower_nsd = 2.5
-            min_acid_drop = 1e-6
-            min_drops = np.maximum(
-                nominal_drop - lower_nsd * drop_meas_sigma,
-                min_acid_drop,
+            # Shared de-noised pipetting derivation. pH decreases as acid is
+            # added, so direction is -1: step_nominal are the positive acid
+            # drops and step_sigmas the per-addition pipetting sigmas (read
+            # noise removed, isotonic-regularized), matching create_x_true. The
+            # global-drop prior is now the pipetting-process sigma rather than
+            # the quadrature measurement-difference sigma, and x_start is
+            # anchored at the de-noised standard error of the step-0 mean.
+            _direction, x_start_sigma, nominal_drop, step_sigmas, min_drops = (
+                _pipetting_walk_params(xc, x_errc, n_xerr, min_x_step=min_x_step)
             )
 
-            x_start = pm.Normal(
-                "x_start",
-                mu=xc[0],
-                sigma=max(x_sigma[0], 1e-6),
-            )
+            x_start = _build_multi_x_start(xc, x_start_sigma, x_start_between_sigma)
 
             acid_drop_global = pm.TruncatedNormal(
                 "acid_drop_global",
                 mu=nominal_drop,
-                sigma=np.maximum(drop_meas_sigma, 1e-6),
+                sigma=np.maximum(step_sigmas, 1e-6),
                 lower=min_drops,
                 dims="step_diff",
             )
@@ -3053,16 +3144,10 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
 
         elif x_error_model == "per_well" and n_xerr > 0:
-            x_errc_scaled = np.maximum(x_errc * n_xerr, 1e-6)
-            x_start_sigma, step_sigmas = _pipetting_step_sigmas(x_errc_scaled)
-            direction = 1.0 if np.all(np.diff(xc) >= 0.0) else -1.0
-            step_nominal = direction * np.diff(xc)
-            lower_nsd = 2.5
-            min_steps = np.maximum(
-                step_nominal - lower_nsd * step_sigmas,
-                min_x_step,
+            direction, x_start_sigma, step_nominal, step_sigmas, min_steps = (
+                _pipetting_walk_params(xc, x_errc, n_xerr, min_x_step=min_x_step)
             )
-            x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
+            x_start = _build_multi_x_start(xc, x_start_sigma, x_start_between_sigma)
             x_step = pm.TruncatedNormal(
                 "x_step",
                 mu=step_nominal[:, None],
