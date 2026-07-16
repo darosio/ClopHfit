@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import numpy as np
@@ -619,6 +620,20 @@ class TestTitrationResults:
         df = titration_results.dataframe
         assert isinstance(df, pd.DataFrame)
         assert "A01" in df.index
+
+    def test_titration_initvar_snapshots_without_retaining(self) -> None:
+        """``titration=`` copies scheme+fit_keys and does not retain the object."""
+        scheme = PlateScheme()
+        scheme.names = {"sample1": {"A01"}}
+        fake_tit = SimpleNamespace(scheme=scheme, fit_keys={"A01", "A02"})
+        tr = TitrationResults(
+            results={"A01": FitResult()},
+            titration=fake_tit,  # type: ignore[arg-type]
+        )
+        assert tr.scheme is scheme
+        assert tr.fit_keys == {"A01", "A02"}
+        # InitVar must not be stored on the instance (no raw-data retention).
+        assert "titration" not in tr.__dict__
 
 
 class TestTitration:

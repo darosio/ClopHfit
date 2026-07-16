@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import typing
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -412,12 +412,29 @@ class Buffer:
 
 @dataclass
 class TitrationResults:
-    """Manage titration results with optional lazy computation."""
+    """Manage titration results with optional lazy computation.
 
-    scheme: PlateScheme
-    fit_keys: set[str]
+    Provide either the small ``scheme`` + ``fit_keys`` directly, or a
+    ``titration`` keyword to snapshot both from a :class:`Titration`::
+
+        TitrationResults(scheme=tit.scheme, fit_keys=tit.fit_keys, results=res)
+        TitrationResults(results=res, titration=tit)  # equivalent, more concise
+
+    ``titration`` is an ``InitVar``: only ``scheme`` and ``fit_keys`` are copied
+    off it, so the (potentially large) raw plate data is never retained.
+    """
+
+    scheme: PlateScheme = field(default_factory=PlateScheme)
+    fit_keys: set[str] = field(default_factory=set)
     results: dict[str, FitResult[typing.Any]] = field(default_factory=dict)
     _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
+    titration: InitVar[Titration | None] = None
+
+    def __post_init__(self, titration: Titration | None) -> None:
+        """Snapshot ``scheme`` and ``fit_keys`` from *titration* when given."""
+        if titration is not None:
+            self.scheme = titration.scheme
+            self.fit_keys = titration.fit_keys
 
     @property
     def dataframe(self) -> pd.DataFrame:
