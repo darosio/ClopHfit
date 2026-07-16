@@ -400,6 +400,25 @@ class TestResidualStatistics:
         stats = residual_statistics(df)
         assert stats.loc["1", "outlier_rate"] == 0.2  # 2/10
 
+    def test_robust_outlier_count_surfaces_masked_points(self) -> None:
+        """robust_outlier_count catches points that the std-z flag masks.
+
+        A tight bulk near 0.2 with two points at ~-0.5: the model-standardized
+        |std_res| stays below 2 (std-z flags nothing), but the modified z-score
+        on the residuals' own MAD scale flags the two.
+        """
+        std_res = [0.20, 0.22, 0.18, 0.24, 0.19, -0.50, -0.52]
+        df = pd.DataFrame({
+            "label": ["1"] * 7,
+            "std_res": std_res,
+            "x": list(range(7)),
+            "raw_res": [0.0] * 7,
+        })
+        stats = residual_statistics(df)
+        assert stats.loc["1", "outlier_count"] == 0  # std-z misses them
+        assert stats.loc["1", "robust_outlier_count"] == 2  # robust MAD-z catches
+        assert stats.loc["1", "robust_outlier_rate"] == pytest.approx(2 / 7)
+
 
 class TestResidualDiagnosticsHelpers:
     """Test dataframe-level residual diagnostic helpers."""
