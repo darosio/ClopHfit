@@ -411,6 +411,23 @@ def test_dataarray_masking() -> None:
     assert np.array_equal(da.x_errc, np.array([]))
 
 
+def test_mask_label_steps_excludes_only_that_label() -> None:
+    """mask_label_steps drops given steps for one label, leaving others intact."""
+    x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
+    y = np.array([2.0, 1.8, 1.5, 1.2, 1.0])
+    ds = Dataset({"1": DataArray(x, y), "2": DataArray(x, y * 2)}, is_ph=True)
+
+    ds.mask_label_steps("1", [0, 4])  # drop the pH extremes on label 1 only
+    np.testing.assert_array_equal(ds["1"].x, np.array([8.0, 7.0, 6.0]))
+    np.testing.assert_array_equal(ds["2"].x, x)  # label 2 untouched
+
+    # out-of-range indices are ignored; missing label raises
+    ds["1"].mask_steps([99, -1])
+    np.testing.assert_array_equal(ds["1"].x, np.array([8.0, 7.0, 6.0]))
+    with pytest.raises(KeyError, match="Label '3' not in dataset"):
+        ds.mask_label_steps("3", [0])
+
+
 def test_dataarray_initialization_failure() -> None:
     """Test for length mismatch error during DataArray initialization."""
     xc = np.array([1, 2, 3])

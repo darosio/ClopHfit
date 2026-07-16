@@ -29,7 +29,7 @@ from clophfit.clophfit_types import MiniT as MiniT  # noqa: PLC0414
 from .errors import InvalidDataError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     import xarray as xr
     from lmfit import Parameters  # type: ignore[import-untyped]
@@ -99,6 +99,23 @@ class DataArray:
     def mask(self, mask: ArrayMask) -> None:
         """Only boolean where yc is not nan are considered."""
         self._mask = mask & ~np.isnan(self.yc)
+
+    def mask_steps(self, steps: Iterable[int]) -> None:
+        """Exclude the given step indices from the fit, in place.
+
+        Masks positions in the original (unmasked) array while preserving any
+        existing mask. Out-of-range indices are ignored.
+
+        Parameters
+        ----------
+        steps : Iterable[int]
+            Step indices to mask out (e.g. ``[0, 6]`` for the pH extremes).
+        """
+        m = self.mask.copy()
+        for s in steps:
+            if 0 <= int(s) < m.size:
+                m[int(s)] = False
+        self.mask = m
 
     @property
     def x(self) -> ArrayF:
@@ -269,6 +286,32 @@ class Dataset(UserDict[str, DataArray]):
             end_idx = start_idx + len(da.y)
             da.mask[da.mask] &= combined_mask[start_idx:end_idx]
             start_idx = end_idx
+
+    def mask_label_steps(self, label: str, steps: Iterable[int]) -> None:
+        """Exclude step indices for one label's DataArray, in place.
+
+        Drops a known-bad measurement region on a single channel without
+        touching the others — e.g. the extreme-pH endpoints on a noisy,
+        boosted-gain label::
+
+            ds.mask_label_steps("1", [0, 6])
+
+        Parameters
+        ----------
+        label : str
+            Label key into the dataset.
+        steps : Iterable[int]
+            Step indices to mask out.
+
+        Raises
+        ------
+        KeyError
+            If *label* is not present in the dataset.
+        """
+        if label not in self:
+            msg = f"Label {label!r} not in dataset; have {list(self)}."
+            raise KeyError(msg)
+        self[label].mask_steps(steps)
 
     def copy(self, keys: list[str] | set[str] | None = None) -> Dataset:
         """Return a copy of the Dataset.
