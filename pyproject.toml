@@ -48,7 +48,7 @@ version = "0.13.0"
 
 [project.optional-dependencies]
 gpu = [
-  "blackjax>=1.6",
+  "blackjax>=1.6.2",
   "jax[cuda12]>=0.10.2",
   "numpyro>=0.21.0",
 ]
