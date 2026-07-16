@@ -77,7 +77,7 @@ def calibrate_noise_robust(
     label with the single-term moment estimators
     (:func:`~clophfit.fitting.utils.fit_gain_from_residuals`,
     :func:`~clophfit.fitting.utils.fit_rel_error_from_residuals`) on the
-    retained points. Screening with the mixture's ``p_outlier_per_point`` keeps
+    retained points. Screening with the mixture's ``p_outlier`` keeps
     outliers from inflating the estimate, while the two single-term estimators
     avoid the gain/alpha collinearity of the joint NNLS over narrow titration
     ranges.
@@ -87,7 +87,7 @@ def calibrate_noise_robust(
     residuals : pd.DataFrame
         Canonical residual table (e.g. ``MultiFitResult.residuals`` from a
         mixture fit). Must have ``label``, ``raw_res``, ``yhat`` columns; a
-        ``p_outlier_per_point`` column enables screening (otherwise all points
+        ``p_outlier`` column enables screening (otherwise all points
         are used).
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. ``tit.bg_noise``. Used as the
@@ -104,10 +104,10 @@ def calibrate_noise_robust(
         Per-label model with ``sigma_floor`` from *sigma_floor* and calibrated
         ``gain``/``alpha``.
     """
-    if "p_outlier_per_point" in residuals.columns:
+    if "p_outlier" in residuals.columns:
         kept: list[pd.DataFrame] = []
         for _label, group in residuals.groupby("label", observed=True):
-            inliers = group[group["p_outlier_per_point"].fillna(0.0) < p_threshold]
+            inliers = group[group["p_outlier"].fillna(0.0) < p_threshold]
             kept.append(group if len(inliers) < min_keep else inliers)
         clean = pd.concat(kept, ignore_index=True) if kept else residuals
     else:

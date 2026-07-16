@@ -278,7 +278,7 @@ class TestResidualsEntryPoint:
         mtrace = xr.DataTree.from_dict({"posterior": mix})
         # A mixture is Normal-standardized (no Student-t transform), so it does
         # not request the robust std_res calibration; its outlier structure is
-        # reported via p_outlier_per_point instead.
+        # reported via p_outlier instead.
         assert robust_settings_from_trace(mtrace) == (False, 3.0)
         assert robust_likelihood_from_trace(mtrace) == "mixture"
         assert robust_likelihood_from_trace(trace) == "student_t"

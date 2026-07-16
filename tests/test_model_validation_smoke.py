@@ -341,7 +341,7 @@ def test_masked_datasets_from_outlier_probabilities_accepts_ds_dict() -> None:
         "well": ["A01", "A01"],
         "label": ["1", "1"],
         "step": [1, 2],
-        "p_outlier_per_point": [0.9, 0.95],
+        "p_outlier": [0.9, 0.95],
     })
 
     masked = masked_datasets_from_outlier_probabilities({"A01": ds}, residuals)
@@ -715,7 +715,7 @@ def test_residuals_from_multifit_returns_convenient_schema() -> None:
     assert residuals.loc[0, "label"] == "1"
     assert residuals.loc[0, "step"] == 0
     assert residuals.loc[0, "residual_likelihood"] == "normal"
-    assert bool(residuals["p_outlier_per_point"].isna().iloc[0])
+    assert bool(residuals["p_outlier"].isna().iloc[0])
     assert not bool(residuals.loc[0, "is_residual_outlier"])
 
 
@@ -764,7 +764,7 @@ def test_residuals_from_multifit_maps_outlier_probability_by_point() -> None:
         {"well": "A02", "step": 1},
     ]
     np.testing.assert_allclose(
-        residuals["p_outlier_per_point"].to_numpy(),
+        residuals["p_outlier"].to_numpy(),
         np.array([0.1, 0.3, 0.2, 0.4]),
     )
 
@@ -838,8 +838,8 @@ def test_single_well_residuals_extract_p_outlier_from_mixture_trace() -> None:
     )()
     df = _single_well_fit_result(trace).residual_table(robust=False, well="A01")
 
-    assert "p_outlier_per_point" in df.columns
-    assert np.allclose(df["p_outlier_per_point"].to_numpy(), known)
+    assert "p_outlier" in df.columns
+    assert np.allclose(df["p_outlier"].to_numpy(), known)
     # Schema parity with the multi-well builder.
     assert list(df.columns)[: len(RESIDUAL_TABLE_COLUMNS)] == RESIDUAL_TABLE_COLUMNS
 
@@ -858,8 +858,8 @@ def test_single_well_residuals_extract_p_outlier_from_mixture_trace() -> None:
 def test_single_well_residuals_p_outlier_nan_without_mixture(mini: object) -> None:
     """Without a mixture deterministic (or any trace) the column stays NaN."""
     df = _single_well_fit_result(mini).residual_table(robust=False, well="A01")
-    assert "p_outlier_per_point" in df.columns
-    assert df["p_outlier_per_point"].isna().all()
+    assert "p_outlier" in df.columns
+    assert df["p_outlier"].isna().all()
 
 
 def test_single_well_residuals_label_mixture_without_t_transform() -> None:
@@ -867,7 +867,7 @@ def test_single_well_residuals_label_mixture_without_t_transform() -> None:
 
     The mixture uses Normal components, so ``std_res`` must be the identity of
     ``likelihood_res`` (no Student-t transform) and ``student_t_nu`` NaN; the
-    outlier structure is reported via ``p_outlier_per_point``.
+    outlier structure is reported via ``p_outlier``.
     """
     known = np.array([0.02, 0.10, 0.97])
     op = xr.DataArray(np.broadcast_to(known, (2, 4, 3)), dims=["chain", "draw", "obs"])
@@ -892,7 +892,7 @@ def test_single_well_residuals_label_mixture_without_t_transform() -> None:
     np.testing.assert_allclose(
         df["std_res"].to_numpy(), df["likelihood_res"].to_numpy()
     )
-    assert np.allclose(df["p_outlier_per_point"].to_numpy(), known)
+    assert np.allclose(df["p_outlier"].to_numpy(), known)
 
 
 def test_trace_diagnostics_collects_stats_loo_and_x_sanity(
