@@ -961,6 +961,10 @@ _N_PH_REPLICATE_WELLS = 3
 # per-addition variance, so a noisy flat 3-well SD cannot pin a step to ~zero:
 # every 2 uL delivery carries a real, nonzero volume error.
 _MIN_PIPETTING_STEP_FRAC = 0.25
+# Default between-well scale for the per-well starting-x (x_start_well). Small and
+# nonzero so multi-well fits give each well its own x0, tightly anchored on the
+# shared plate x_start prior. Set to 0 for a single shared x_start.
+_DEFAULT_X_START_BETWEEN_SIGMA = 0.05
 
 
 def _pipetting_step_sigmas(x_errc_scaled: ArrayF) -> tuple[float, ArrayF]:
@@ -1016,9 +1020,8 @@ def _pipetting_walk_params(
 
     Single source of truth for the de-noised per-addition step derivation used
     by :func:`create_x_true` (single latent ``x_true``) and by the ``per_well``
-    and ``hierarchical_per_well`` x-error models in
-    :func:`fit_binding_pymc_multi`. Each caller builds its own RVs from these
-    arrays with the appropriate shape/dims.
+    x-error model in :func:`fit_binding_pymc_multi`. Each caller builds its own
+    RVs from these arrays with the appropriate shape/dims.
 
     Parameters
     ----------
@@ -1933,7 +1936,7 @@ def _per_well_fit_results_from_trace(
     fit_results: Mapping[str, FitResult[MiniT]],
     scheme: PlateScheme,
     *,
-    x_error_model: Literal["deterministic", "per_well", "hierarchical_per_well"],
+    x_error_model: Literal["deterministic", "per_well"],
     global_p_names: typing.Iterable[str] = (),
 ) -> dict[str, FitResult[xr.DataTree]]:
     """Reconstruct per-well fit results from a shared multi-well trace."""
@@ -1943,7 +1946,7 @@ def _per_well_fit_results_from_trace(
         if fr.dataset is None:
             continue
         ctr = next((name for name, wells in scheme.names.items() if key in wells), "")
-        well_key = key if x_error_model in {"per_well", "hierarchical_per_well"} else ""
+        well_key = key if x_error_model == "per_well" else ""
         ds = copy.deepcopy(fr.dataset)
         per_well_results[key] = extract_fit(
             key,
@@ -2362,10 +2365,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
     n_tune: int | None = None,
     target_accept: float | None = None,
     max_treedepth: int | None = None,
-    x_error_model: Literal[
-        "deterministic", "per_well", "hierarchical_per_well"
-    ] = "deterministic",
-    acid_drop_between_sigma: float = 0.005,
+    x_error_model: Literal["deterministic", "per_well"] = "deterministic",
     ctr_free_k: bool = False,
     shared_ye_mags: bool = False,
     outlier_threshold: float = 3.0,
@@ -2417,10 +2417,8 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         NUTS target acceptance probability.
     max_treedepth : int | None
         Maximum NUTS tree depth.
-    x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
+    x_error_model : Literal["deterministic", "per_well"]
         Latent-x error model forwarded to :func:`fit_binding_pymc_multi`.
-    acid_drop_between_sigma : float, optional
-        Between-well acid-drop prior scale.
     ctr_free_k : bool, optional
         Allow control wells to have free K values in the multi-well model.
     shared_ye_mags : bool, optional
@@ -2516,7 +2514,6 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         n_xerr=n_xerr,
         min_x_step=min_x_step,
         x_error_model=x_error_model,
-        acid_drop_between_sigma=acid_drop_between_sigma,
         ctr_free_k=ctr_free_k,
         well_noise_scale=well_noise_scale,
         shared_well_noise_scale=shared_well_noise_scale,
@@ -2566,7 +2563,6 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         n_xerr=n_xerr if final_n_xerr is None else final_n_xerr,
         min_x_step=min_x_step,
         x_error_model=x_error_model,
-        acid_drop_between_sigma=acid_drop_between_sigma,
         ctr_free_k=ctr_free_k,
         well_noise_scale=well_noise_scale,
         shared_well_noise_scale=shared_well_noise_scale,
@@ -2907,11 +2903,8 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     n_sd: float = 5.0,
     n_xerr: float = 1.0,
     min_x_step: float = 0.2,
-    x_error_model: Literal[
-        "deterministic", "per_well", "hierarchical_per_well"
-    ] = "deterministic",
-    acid_drop_between_sigma: float = 0.005,
-    x_start_between_sigma: float = 0.0,
+    x_error_model: Literal["deterministic", "per_well"] = "deterministic",
+    x_start_between_sigma: float = _DEFAULT_X_START_BETWEEN_SIGMA,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
@@ -2940,21 +2933,16 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         Scaling factor applied to x-value uncertainties.
     min_x_step : float
         Minimum inferred change in ``x`` between consecutive titration steps.
-    x_error_model : Literal["deterministic", "per_well", "hierarchical_per_well"]
+    x_error_model : Literal["deterministic", "per_well"]
         Model for x-error propagation across wells. ``"deterministic"`` shares
-        one ``x_true``; ``"per_well"`` gives each well its own cumulative
-        additions; ``"hierarchical_per_well"`` uses an acid-addition formulation.
-    acid_drop_between_sigma : float
-        Fixed between-well scale for the per-well ``x_step`` variation used by
-        ``"hierarchical_per_well"`` (set to the experimental tolerance).
+        one latent ``x_true`` walk across all wells; ``"per_well"`` gives each
+        well its own cumulative-additions walk.
     x_start_between_sigma : float
-        Fixed between-well scale for the starting x (pH). ``0.0`` (default)
-        shares a single ``x_start`` anchor across all wells — appropriate when
-        the plate shares one buffer and one pre-addition reading. A positive
-        value adds an opt-in per-well term ``x_start_well ~ Normal(x_start,
-        x_start_between_sigma)`` (common-mode global anchor plus independent
-        per-well jitter), a safety valve for genuine per-well starting-pH
-        offsets. Applies to ``"per_well"`` and ``"hierarchical_per_well"``.
+        Fixed between-well scale for the starting x (pH). Defaults to a small
+        nonzero value, so each well gets its own ``x_start_well ~ Normal(
+        x_start, x_start_between_sigma)`` tightly anchored on the shared plate
+        ``x_start`` prior (common-mode anchor plus independent per-well jitter).
+        Set to ``0.0`` for a single shared ``x_start`` across all wells.
     ctr_free_k : bool
         If ``True``, each control replicate gets an independent flat K prior
         instead of a shared control K.
@@ -3103,61 +3091,15 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         else:
             pi_outliers, outlier_inflate = {}, None
 
-        if x_error_model == "hierarchical_per_well" and n_xerr > 0:
-            if not np.all(np.diff(xc) < 0):
-                msg = (
-                    "hierarchical_per_well acid-addition model expects "
-                    "decreasing pH values."
-                )
-                raise ValueError(msg)
-
-            # Shared de-noised pipetting derivation. pH decreases as acid is
-            # added, so direction is -1: step_nominal are the positive acid
-            # drops and step_sigmas the per-addition pipetting sigmas (read
-            # noise removed, isotonic-regularized), matching create_x_true. The
-            # global-drop prior is now the pipetting-process sigma rather than
-            # the quadrature measurement-difference sigma, and x_start is
-            # anchored at the de-noised standard error of the step-0 mean.
-            _direction, x_start_sigma, nominal_drop, step_sigmas, min_drops = (
-                _pipetting_walk_params(xc, x_errc, n_xerr, min_x_step=min_x_step)
+        if x_error_model not in {"deterministic", "per_well"}:
+            msg = (
+                f"Unknown x_error_model {x_error_model!r}; valid options are "
+                "'deterministic' and 'per_well' "
+                "('hierarchical_per_well' was removed)."
             )
+            raise ValueError(msg)
 
-            x_start = _build_multi_x_start(xc, x_start_sigma, x_start_between_sigma)
-
-            x_step_global = pm.TruncatedNormal(
-                "x_step_global",
-                mu=nominal_drop,
-                sigma=np.maximum(step_sigmas, 1e-6),
-                lower=min_drops,
-                dims="step_diff",
-            )
-
-            # Fixed between-well scale — do not sample a variance parameter;
-            # the centered funnel destroys sampler performance.
-            x_step = pm.TruncatedNormal(
-                "x_step",
-                mu=x_step_global[:, None],
-                sigma=max(acid_drop_between_sigma, 1e-6),
-                lower=min_drops[:, None],
-                shape=(n_steps - 1, n_wells),
-                dims=("step_diff", "well"),
-            )
-
-            cumulative_drop = pm.math.cumsum(x_step, axis=0)
-
-            # Use ones_like on a slice to inherit the well-dimension shape.
-            start_row = pt.ones_like(x_step[:1, :]) * x_start  # type: ignore[no-untyped-call]
-            x_matrix = pm.math.concatenate(
-                [start_row, x_start - cumulative_drop], axis=0
-            )
-
-            x_w_all = pm.Deterministic(
-                "x_true",
-                x_matrix,
-                dims=("step", "well"),
-            )
-
-        elif x_error_model == "per_well" and n_xerr > 0:
+        if x_error_model == "per_well" and n_xerr > 0:
             direction, x_start_sigma, step_nominal, step_sigmas, min_steps = (
                 _pipetting_walk_params(xc, x_errc, n_xerr, min_x_step=min_x_step)
             )
@@ -3178,7 +3120,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 dims=("step", "well"),
             )
 
-        elif x_error_model in {"per_well", "hierarchical_per_well"}:
+        elif x_error_model == "per_well":
             x_matrix = np.empty((n_steps, n_wells), dtype=float)
             for w_idx, key in enumerate(wells_list):
                 well_ds = fit_results[key].dataset

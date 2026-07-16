@@ -2044,20 +2044,20 @@ def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
         bayes.fit_binding_pymc_multi(
             {"A01": ds_a, "A02": ds_b},
             scheme,
-            x_error_model="hierarchical_per_well",
+            x_error_model="per_well",
             n_xerr=0.0,
             noise=NoiseConfig.structured(noise_model=noise_model),
             sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
 
-def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
+def test_fit_binding_pymc_multi_per_well_uses_denoised_sigmas(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pin hierarchical_per_well to the de-noised pipetting derivation.
+    """Pin per_well to the de-noised pipetting derivation.
 
     ``x_start`` must be anchored at the isotonic standard error of the step-0
-    mean and ``x_step_global`` must use the isotonic per-addition pipetting
+    mean and the per-well ``x_step`` must use the isotonic per-addition pipetting
     sigma — not the pre-fix read-noise-inflated raw / quadrature values. This
     guards against a silent regression to the old formulation.
     """
@@ -2089,9 +2089,9 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
         return orig_normal(name, **kwargs)
 
     def fake_truncnormal(name: str, **kwargs: object) -> object:
-        if name == "x_step_global":
-            captured["global_sigma"] = np.asarray(
-                cast("Any", kwargs["sigma"]), dtype=float
+        if name == "x_step":
+            captured["step_sigma"] = np.ravel(
+                np.asarray(cast("Any", kwargs["sigma"]), dtype=float)
             )
             raise _StopBayesBuildError
         return orig_truncnormal(name, **kwargs)
@@ -2104,22 +2104,22 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
             {"A01": fr_init, "A02": fr_init},
             scheme,
             n_xerr=1.0,
-            x_error_model="hierarchical_per_well",
+            x_error_model="per_well",
             sampler=SamplerConfig(n_samples=2, n_tune=1),
         )
 
     x_start_sigma = cast("float", captured["x_start_sigma"])
-    global_sigma = cast("np.ndarray", captured["global_sigma"])
+    step_sigma = cast("np.ndarray", captured["step_sigma"])
     # x_start anchored at the de-noised SE of the step-0 mean ...
     assert x_start_sigma == pytest.approx(max(exp_x_start_sigma, 1e-6))
     # ... far below the raw leading 3-well SD it used to inherit.
     assert x_start_sigma < x_errc[0]
 
-    # x_step_global uses the isotonic per-addition pipetting sigma ...
-    np.testing.assert_allclose(global_sigma, np.maximum(exp_step_sigmas, 1e-6))
+    # per-well x_step uses the isotonic per-addition pipetting sigma ...
+    np.testing.assert_allclose(step_sigma, np.maximum(exp_step_sigmas, 1e-6))
     # ... not the old quadrature measured-difference sigma.
     old_quadrature = np.sqrt(x_errc[:-1] ** 2 + x_errc[1:] ** 2)
-    assert not np.allclose(global_sigma, old_quadrature)
+    assert not np.allclose(step_sigma, old_quadrature)
 
 
 @pytest.mark.parametrize(("between", "expect_well"), [(0.0, False), (0.03, True)])
@@ -2172,6 +2172,23 @@ def test_fit_binding_pymc_multi_x_start_between_sigma_opt_in(
 
     assert "x_start" in normal_names
     assert ("x_start_well" in normal_names) is expect_well
+
+
+def test_fit_binding_pymc_multi_rejects_removed_hierarchical_model() -> None:
+    """The removed hierarchical_per_well x_error_model raises a clear error."""
+    xc = np.array([6.0, 6.6, 7.3, 8.0])
+    y = binding_1site(xc, 7.0, 1.0, 2.0, is_ph=True)
+    ds = Dataset({"1": DataArray(xc, y)}, is_ph=True)
+    fr_init = fit_binding_glob(ds)
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01"}}
+    with pytest.raises(ValueError, match="hierarchical_per_well"):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init},
+            scheme,
+            x_error_model="hierarchical_per_well",  # type: ignore[arg-type]
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
 
 
 def test_extract_fit_accepts_multifitresult_deterministic() -> None:
