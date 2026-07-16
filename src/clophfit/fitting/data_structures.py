@@ -572,7 +572,7 @@ class MultiFitResult:
         """Canonical per-observation residual table across all wells.
 
         Lazily computed, cached, and returned in the shared schema
-        (``RESIDUAL_TABLE_COLUMNS``, including ``p_outlier_per_point`` extracted
+        (``RESIDUAL_TABLE_COLUMNS``, including ``p_outlier`` extracted
         from the trace). Robustness is auto-detected; use :meth:`residual_table`
         to override.
         """

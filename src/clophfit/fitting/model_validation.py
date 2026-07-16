@@ -45,7 +45,7 @@ RESIDUAL_TABLE_COLUMNS = [
     "raw_res",
     "likelihood_res",
     "std_res",
-    "p_outlier_per_point",
+    "p_outlier",
     "residual_likelihood",
     "student_t_nu",
     "is_residual_outlier",
@@ -880,7 +880,7 @@ def masked_datasets_from_residual_outliers(
 def mark_outlier_probability_outliers(
     residuals: _t.Any,
     *,
-    probability_col: str = "p_outlier_per_point",
+    probability_col: str = "p_outlier",
     threshold: float = 0.9,
     exclude_col: str = "exclude_outlier_probability",
 ) -> pd.DataFrame:
@@ -932,7 +932,7 @@ def masked_datasets_from_outlier_probabilities(
     results: _t.Mapping[str, _t.Any],
     residuals: _t.Any,
     *,
-    probability_col: str = "p_outlier_per_point",
+    probability_col: str = "p_outlier",
     threshold: float = 0.9,
     min_keep: int = 3,
 ) -> dict[str, _t.Any]:
@@ -1123,7 +1123,7 @@ def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
     probability-integral transform", which is correct **only** for a Student-t
     likelihood.  A contamination mixture uses Normal components, so its residuals
     are standardized as Normal (``robust=False``) and its outlier structure is
-    reported through ``p_outlier_per_point`` instead.  Used by
+    reported through ``p_outlier`` instead.  Used by
     ``FitResult.residuals`` / ``MultiFitResult.residuals`` so the residual table
     is standardized correctly without the caller re-supplying fit settings.
 
@@ -1706,7 +1706,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "raw_res": float(y[j] - yhat[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
-                    "p_outlier_per_point": float(p_outlier[j]),
+                    "p_outlier": float(p_outlier[j]),
                     "residual_likelihood": family,
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),
@@ -1762,7 +1762,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
     trace : _t.Any
         Optional PyMC trace. When it carries ``outlier_probability_{label}``
         deterministics (contamination-mixture fits), the per-point posterior
-        outlier probability is extracted into ``p_outlier_per_point``; otherwise
+        outlier probability is extracted into ``p_outlier``; otherwise
         that column is ``NaN``. Mirrors :func:`residuals_from_multifit` so
         single-well and multi-well tables share the full schema.
     residual_likelihood : str | None
@@ -1831,7 +1831,7 @@ def residuals_from_fit_results(  # noqa: PLR0913
                     "raw_res": float(y[j] - yhat[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
-                    "p_outlier_per_point": float(p_outlier[j]),
+                    "p_outlier": float(p_outlier[j]),
                     "residual_likelihood": family,
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),

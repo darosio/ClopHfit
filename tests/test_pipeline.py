@@ -232,11 +232,11 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
         "label": "1",
         "raw_res": np.full(120, 2.0),
         "yhat": y,
-        "p_outlier_per_point": np.zeros(120),
+        "p_outlier": np.zeros(120),
     })
     # Inject one gross outlier flagged by the mixture.
     df.loc[0, "raw_res"] = 1.0e4
-    df.loc[0, "p_outlier_per_point"] = 0.99
+    df.loc[0, "p_outlier"] = 0.99
 
     screened = pipeline.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=0.9)
     # p_threshold above 1.0 keeps every point (nothing screened).
@@ -247,7 +247,7 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
 
 
 def test_calibrate_noise_robust_without_probability_column() -> None:
-    """Without p_outlier_per_point, all points are used (no screening)."""
+    """Without p_outlier, all points are used (no screening)."""
     y = np.linspace(50.0, 500.0, 80)
     df = pd.DataFrame({"label": "1", "raw_res": np.full(80, 2.0), "yhat": y})
     model = pipeline.calibrate_noise_robust(df, {"1": 1.5})
