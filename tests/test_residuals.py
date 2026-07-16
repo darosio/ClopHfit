@@ -18,6 +18,7 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
+    residuals_from_fit_results,
     robust_likelihood_from_trace,
     robust_settings_from_trace,
 )
@@ -30,7 +31,6 @@ from clophfit.fitting.residuals import (
     OUTLIER_RATE_THRESHOLD,
     OUTLIER_THRESHOLD_2SIGMA,
     ResidualPoint,
-    collect_multi_residuals,
     detect_adjacent_correlation,
     estimate_x_shift_statistics,
     extract_residual_points,
@@ -295,49 +295,6 @@ class TestResidualsEntryPoint:
 
 
 ###############################################################################
-# Tests for collect_multi_residuals
-###############################################################################
-
-
-class TestCollectMultiResiduals:
-    """Test the collect_multi_residuals function."""
-
-    def test_single_well(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
-        """Test collection from single well."""
-        results = {"A01": simple_fit_result}
-        df = collect_multi_residuals(results)
-        assert "well" in df.columns
-        assert (df["well"] == "A01").all()
-        assert len(df) == 5
-
-    def test_multiple_wells(
-        self, simple_fit_result: FitResult[MinimizerResult]
-    ) -> None:
-        """Test collection from multiple wells."""
-        results = {
-            "A01": simple_fit_result,
-            "A02": simple_fit_result,
-            "B01": simple_fit_result,
-        }
-        df = collect_multi_residuals(results)
-        assert len(df) == 15  # 5 points * 3 wells
-        assert set(df["well"].unique()) == {"A01", "A02", "B01"}
-
-    def test_x_rounding(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
-        """Test x value rounding."""
-        results = {"A01": simple_fit_result}
-        df_rounded = collect_multi_residuals(results, round_x=2)
-        df_not_rounded = collect_multi_residuals(results, round_x=None)
-        # Both should have same values since input is already clean
-        assert len(df_rounded) == len(df_not_rounded)
-
-    def test_empty_dict(self) -> None:
-        """Test collection from empty dictionary raises ValueError."""
-        with pytest.raises(ValueError, match="No objects to concatenate"):
-            collect_multi_residuals({})
-
-
-###############################################################################
 # Tests for residual_statistics
 ###############################################################################
 
@@ -348,7 +305,9 @@ class TestResidualStatistics:
     def test_columns(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test that statistics DataFrame has expected columns."""
         results = {"A01": simple_fit_result}
-        df = collect_multi_residuals(results)
+        df = residuals_from_fit_results(
+            results, trace_id="", binding_function=binding_1site
+        )
         stats = residual_statistics(df)
         expected_cols = {
             "mean",
@@ -366,7 +325,9 @@ class TestResidualStatistics:
     ) -> None:
         """Test that statistics are grouped by label."""
         results = {"A01": multi_label_fit_result}
-        df = collect_multi_residuals(results)
+        df = residuals_from_fit_results(
+            results, trace_id="", binding_function=binding_1site
+        )
         stats = residual_statistics(df)
         assert len(stats) == 2  # y1 and y2
         assert "1" in stats.index
@@ -620,7 +581,9 @@ class TestResidualWorkflow:
         fit_results = {f"A{i:02d}": fit_binding_glob(dataset) for i in range(1, 4)}
 
         # Collect residuals
-        all_residuals = collect_multi_residuals(fit_results)
+        all_residuals = residuals_from_fit_results(
+            fit_results, trace_id="", binding_function=binding_1site
+        )
         assert len(all_residuals) == 15  # 5 points * 3 wells
 
         # Compute statistics

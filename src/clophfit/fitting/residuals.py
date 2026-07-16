@@ -203,62 +203,13 @@ def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
     return pd.DataFrame([asdict(p) for p in extract_residual_points(fr)])
 
 
-def collect_multi_residuals(
-    fit_results: dict[str, FitResult[Any]],
-    round_x: int | None = 3,
-) -> pd.DataFrame:
-    """Collect residuals from multiple fit results into a single DataFrame.
-
-    Parameters
-    ----------
-    fit_results : dict[str, FitResult[Any]]
-        Dictionary mapping well/key identifiers to fit results
-    round_x : int | None
-        Number of decimals to round x values (avoids float drift).
-        Set to None to disable rounding.
-
-    Returns
-    -------
-    pd.DataFrame
-        Combined DataFrame with the canonical residual columns plus ``well``:
-        well, label, x, y, yhat, sigma, raw_res, likelihood_res, std_res, raw_i.
-
-    Examples
-    --------
-    >>> from clophfit.fitting.core import fit_binding_glob
-    >>> from clophfit.fitting.data_structures import Dataset, DataArray
-    >>> import numpy as np
-    >>> x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
-    >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
-    >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
-    >>> dataset = Dataset({"1": da}, is_ph=True)
-    >>> results = {"A01": fit_binding_glob(dataset), "A02": fit_binding_glob(dataset)}
-    >>> all_res = collect_multi_residuals(results)
-    >>> "well" in all_res.columns
-    True
-    >>> len(all_res) == 10  # 2 wells * 5 points
-    True
-    """
-    rows = []
-    for well, fr in fit_results.items():
-        df = residual_dataframe(fr).assign(well=well)
-        rows.append(df)
-
-    all_res = pd.concat(rows, ignore_index=True)
-
-    if round_x is not None:
-        all_res["x"] = all_res["x"].round(round_x)
-
-    return all_res
-
-
 def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     """Compute residual statistics by label.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Residual DataFrame (from residual_dataframe or collect_multi_residuals)
+        Residual DataFrame (from residual_dataframe or residuals_from_fit_results)
 
     Returns
     -------
@@ -281,8 +232,8 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     >>> y = 500 + 500 * 10 ** (7.0 - x) / (1 + 10 ** (7.0 - x))
     >>> da = DataArray(xc=x, yc=y, y_errc=np.ones_like(y) * 10)
     >>> dataset = Dataset({"1": da}, is_ph=True)
-    >>> results = {"A01": fit_binding_glob(dataset)}
-    >>> all_res = collect_multi_residuals(results)
+    >>> fr = fit_binding_glob(dataset)
+    >>> all_res = residual_dataframe(fr)
     >>> stats = residual_statistics(all_res)
     >>> "mean" in stats.columns
     True
@@ -445,7 +396,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
     Parameters
     ----------
     all_res : pd.DataFrame
-        Residual DataFrame from ``collect_multi_residuals``.  Must contain
+        Residual DataFrame from ``residuals_from_fit_results``.  Must contain
         columns ``label``, ``yhat``, and ``std_res``.
     title : str, optional
         Figure suptitle suffix.
@@ -508,7 +459,7 @@ def plot_residual_vs_yerr(all_res: pd.DataFrame, title: str = "") -> Figure:
     Parameters
     ----------
     all_res : pd.DataFrame
-        Residual DataFrame from ``collect_multi_residuals``.  Must contain
+        Residual DataFrame from ``residuals_from_fit_results``.  Must contain
         columns ``label``, ``sigma``, and ``raw_res``.
     title : str, optional
         Figure suptitle suffix.

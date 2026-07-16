@@ -355,7 +355,7 @@ def fit_rel_error_from_residuals(
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
         ``yhat`` (float -- the model-predicted signal at each point).
-        Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
+        Typically from :func:`clophfit.fitting.model_validation.residuals_from_fit_results`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
 
@@ -410,7 +410,7 @@ def fit_gain_from_residuals(
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
         ``yhat`` (float -- the model-predicted signal at each point).
-        Typically from :func:`clophfit.fitting.residuals.collect_multi_residuals`.
+        Typically from :func:`clophfit.fitting.model_validation.residuals_from_fit_results`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
 

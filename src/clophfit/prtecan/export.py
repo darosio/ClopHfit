@@ -14,9 +14,10 @@ from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc_residual_r
 from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
+from clophfit.fitting.model_validation import residuals_from_fit_results
+from clophfit.fitting.models import binding_1site
 from clophfit.fitting.pipeline import fit_plate
 from clophfit.fitting.residuals import (
-    collect_multi_residuals,
     plot_residual_vs_predicted,
     plot_residual_vs_yerr,
     residual_statistics,
@@ -69,7 +70,9 @@ def export_residuals(
 ) -> None:
     """Export fit residuals and their statistics to files."""
     try:
-        all_res = collect_multi_residuals(fit_results)
+        all_res = residuals_from_fit_results(
+            fit_results, trace_id="", binding_function=binding_1site
+        )
     except (ValueError, KeyError):
         return
     all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)

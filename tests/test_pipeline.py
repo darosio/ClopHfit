@@ -128,7 +128,9 @@ def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(
         methods.append(method)
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
-    def fake_residuals(results: dict[str, FitResult[Any]]) -> pd.DataFrame:
+    def fake_residuals(
+        results: dict[str, FitResult[Any]], *_args: object, **_kwargs: object
+    ) -> pd.DataFrame:
         assert "A01" in results
         return pd.DataFrame({
             "well": ["A01"],
@@ -142,7 +144,7 @@ def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(
 
     monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fake_fit)
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.collect_multi_residuals", fake_residuals
+        "clophfit.fitting.pipeline.residuals_from_fit_results", fake_residuals
     )
     monkeypatch.setattr(
         "clophfit.fitting.pipeline.fit_noise_model_nnls",
@@ -190,7 +192,9 @@ def test_fgls_plate_fit_converges_and_handles_failed_well(
             raise InsufficientDataError(msg)
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
-    def fake_residuals(_results: dict[str, FitResult[Any]]) -> pd.DataFrame:
+    def fake_residuals(
+        _results: dict[str, FitResult[Any]], *_args: object, **_kwargs: object
+    ) -> pd.DataFrame:
         return pd.DataFrame({
             "well": ["good"],
             "label": ["1"],
@@ -204,7 +208,7 @@ def test_fgls_plate_fit_converges_and_handles_failed_well(
     datasets = {"good": _dataset(), "bad": _dataset()}
     monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fake_fit)
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.collect_multi_residuals", fake_residuals
+        "clophfit.fitting.pipeline.residuals_from_fit_results", fake_residuals
     )
     monkeypatch.setattr(
         "clophfit.fitting.pipeline.fit_noise_model_nnls",

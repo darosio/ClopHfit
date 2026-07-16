@@ -14,8 +14,9 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
 )
 from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.model_validation import residuals_from_fit_results
+from clophfit.fitting.models import binding_1site
 from clophfit.fitting.odr import fit_binding_odr
-from clophfit.fitting.residuals import collect_multi_residuals
 from clophfit.fitting.utils import (
     compute_plate_slopes,
     fit_gain_from_residuals,
@@ -184,7 +185,9 @@ def fgls_plate_fit(  # noqa: PLR0913
                 results[well] = FitResult()
 
         # Calibrate per-label noise (floor fixed, gain + alpha via NNLS)
-        df_res = collect_multi_residuals(results)
+        df_res = residuals_from_fit_results(
+            results, trace_id="", binding_function=binding_1site
+        )
         try:
             floors, gains, alphas = fit_noise_model_nnls(
                 df_res, sigma_floor_fixed=sigma_floor
