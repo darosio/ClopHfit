@@ -1367,12 +1367,21 @@ def _build_outlier_priors(
 
 
 def _student_t_nu_value(student_t_nu: float | None) -> typing.Any:  # noqa: ANN401
-    """Return a fixed or inferred Student-t degrees-of-freedom value."""
+    """Return a fixed or inferred Student-t degrees-of-freedom value.
+
+    In both branches a ``student_t_nu`` variable is registered in the model, so a
+    fit's robustness and nu are recoverable from the trace alone (see
+    :func:`clophfit.fitting.model_validation.robust_settings_from_trace`). A fixed
+    value is recorded as a constant ``Deterministic`` while the plain float is
+    still handed to the likelihood; ``None`` infers nu with support above 2.
+    """
     if student_t_nu is not None:
         if student_t_nu <= 0:
             msg = "student_t_nu must be positive, or None to infer it."
             raise ValueError(msg)
-        return float(student_t_nu)
+        nu = float(student_t_nu)
+        pm.Deterministic("student_t_nu", as_tensor_variable(nu))
+        return nu
     nu_minus_two = pm.Exponential("student_t_nu_minus_two", lam=1 / 30)
     return pm.Deterministic("student_t_nu", nu_minus_two + 2.0)
 
@@ -1566,7 +1575,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     ds : Dataset
         Per-well dataset whose x values are updated in-place from the trace.
     well_key : str, optional
-        When provided, per-well x posteriors (``x_per_well[step, well_key]``)
+        When provided, per-well x posteriors (``x_true[step, well_key]``)
         are used instead of the global ``x_true``.  Pass the well identifier
         for xrw fits so each well's .dat/.png uses its own inferred pH axis.
     raw_trace : xr.DataTree | None, optional
@@ -1657,7 +1666,9 @@ def _extract_x_true_from_trace_df(
     rows: dict[int, tuple[float, float]] = {}
     fallback_rows: list[tuple[float, float]] = []
     for name, row in trace_df.iterrows():
-        if isinstance(name, str) and name.startswith("x_true"):
+        # Skip per-well ``x_true[step, well]`` rows (comma-indexed): this reads
+        # only the global 1-D ``x_true[step]`` axis.
+        if isinstance(name, str) and name.startswith("x_true") and "," not in name:
             x_mean = float(row["mean"])
             x_sd = float(row["sd"])
             match = _X_TRUE_INDEX_RE.match(name)
@@ -1689,11 +1700,14 @@ def _extract_x_per_well_from_xarray(
     -------
     tuple[np.ndarray, np.ndarray]
         Arrays of per-well x posterior means and standard deviations.
-        Empty if ``x_per_well`` is absent.
+        Empty if a per-well ``x_true`` (with a ``well`` dim) is absent.
     """
-    if not hasattr(trace, "posterior") or "x_per_well" not in trace.posterior:
+    if not hasattr(trace, "posterior") or "x_true" not in trace.posterior:
         return np.array([]), np.array([])
-    da = trace.posterior["x_per_well"]
+    da = trace.posterior["x_true"]
+    if "well" not in da.dims:
+        # Global 1-D x_true (deterministic x-error): not a per-well axis.
+        return np.array([]), np.array([])
     sample_dims = [d for d in da.dims if d in {"chain", "draw"}]
     # mean/std across chains and draws for the specific well
     well_da = da.sel(well=well_key)
@@ -1712,12 +1726,12 @@ def _extract_x_per_well_from_trace_df(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract per-well x values for *well_key* from an xrw trace summary.
 
-    ArviZ names the ``x_per_well`` deterministic (with dims ``step`` x ``well``)
-    as ``x_per_well[{step}, {well}]``.  This function collects those rows for a
-    specific well and returns them sorted by step index.
+    ArviZ names the per-well ``x_true`` deterministic (with dims ``step`` x
+    ``well``) as ``x_true[{step}, {well}]``.  This function collects those rows
+    for a specific well and returns them sorted by step index.
 
-    When found, per-well x values take precedence over the global ``x_true``,
-    allowing each well in an xrw fit to use its own inferred pH axis.
+    When found, per-well x values take precedence over the global 1-D
+    ``x_true``, allowing each well in an xrw fit to use its own inferred pH axis.
 
     Parameters
     ----------
@@ -1730,7 +1744,7 @@ def _extract_x_per_well_from_trace_df(
     -------
     tuple[np.ndarray, np.ndarray]
         Arrays of per-well x posterior means and standard deviations ordered
-        by step.  Both arrays are empty if ``x_per_well`` rows are absent.
+        by step.  Both arrays are empty if per-well ``x_true`` rows are absent.
 
     Notes
     -----
@@ -1744,10 +1758,10 @@ def _extract_x_per_well_from_trace_df(
     for name, row in trace_df.iterrows():
         if (
             isinstance(name, str)
-            and name.startswith("x_per_well[")
+            and name.startswith("x_true[")
             and name.endswith(suffix)
         ):
-            step_str = name[len("x_per_well[") : -len(suffix)]
+            step_str = name[len("x_true[") : -len(suffix)]
             try:
                 step = int(step_str)
                 rows[step] = (float(row["mean"]), float(row["sd"]))
@@ -2931,7 +2945,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         one ``x_true``; ``"per_well"`` gives each well its own cumulative
         additions; ``"hierarchical_per_well"`` uses an acid-addition formulation.
     acid_drop_between_sigma : float
-        Fixed between-well scale for the ``acid_drop`` variation used by
+        Fixed between-well scale for the per-well ``x_step`` variation used by
         ``"hierarchical_per_well"`` (set to the experimental tolerance).
     x_start_between_sigma : float
         Fixed between-well scale for the starting x (pH). ``0.0`` (default)
@@ -3110,8 +3124,8 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
             x_start = _build_multi_x_start(xc, x_start_sigma, x_start_between_sigma)
 
-            acid_drop_global = pm.TruncatedNormal(
-                "acid_drop_global",
+            x_step_global = pm.TruncatedNormal(
+                "x_step_global",
                 mu=nominal_drop,
                 sigma=np.maximum(step_sigmas, 1e-6),
                 lower=min_drops,
@@ -3120,25 +3134,25 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
             # Fixed between-well scale — do not sample a variance parameter;
             # the centered funnel destroys sampler performance.
-            acid_drop_well = pm.TruncatedNormal(
-                "acid_drop_well",
-                mu=acid_drop_global[:, None],
+            x_step = pm.TruncatedNormal(
+                "x_step",
+                mu=x_step_global[:, None],
                 sigma=max(acid_drop_between_sigma, 1e-6),
                 lower=min_drops[:, None],
                 shape=(n_steps - 1, n_wells),
                 dims=("step_diff", "well"),
             )
 
-            cumulative_drop = pm.math.cumsum(acid_drop_well, axis=0)
+            cumulative_drop = pm.math.cumsum(x_step, axis=0)
 
             # Use ones_like on a slice to inherit the well-dimension shape.
-            start_row = pt.ones_like(acid_drop_well[:1, :]) * x_start  # type: ignore[no-untyped-call]
+            start_row = pt.ones_like(x_step[:1, :]) * x_start  # type: ignore[no-untyped-call]
             x_matrix = pm.math.concatenate(
                 [start_row, x_start - cumulative_drop], axis=0
             )
 
             x_w_all = pm.Deterministic(
-                "x_per_well",
+                "x_true",
                 x_matrix,
                 dims=("step", "well"),
             )
@@ -3159,7 +3173,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
             x_cumsum = pm.math.cumsum(x_step, axis=0)
             x_offsets = pm.math.concatenate([pt.zeros((1, n_wells)), x_cumsum], axis=0)
             x_w_all = pm.Deterministic(
-                "x_per_well",
+                "x_true",
                 x_start + direction * x_offsets,
                 dims=("step", "well"),
             )
@@ -3177,7 +3191,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     raise ValueError(msg)
                 x_matrix[:, w_idx] = np.asarray(well_x, dtype=float)
             x_w_all = pm.Deterministic(
-                "x_per_well",
+                "x_true",
                 as_tensor_variable(x_matrix),
                 dims=("step", "well"),
             )

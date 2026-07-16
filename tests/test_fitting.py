@@ -996,12 +996,12 @@ def test_fit_binding_pymc_multi_noise_per_well(multi_dataset: Dataset) -> None:
     )
 
     assert hasattr(multi.trace, "posterior")
-    assert "x_step" in multi.trace.posterior or "x_per_well" in multi.trace.posterior
+    assert "x_step" in multi.trace.posterior or "x_true" in multi.trace.posterior
     assert "rel_error" in multi.trace.posterior
-    if "x_per_well" in multi.trace.posterior:
-        # x_per_well has dims (step, well)
-        assert "step" in multi.trace.posterior["x_per_well"].dims
-        assert "well" in multi.trace.posterior["x_per_well"].dims
+    if "x_true" in multi.trace.posterior:
+        # per-well x_true has dims (step, well)
+        assert "step" in multi.trace.posterior["x_true"].dims
+        assert "well" in multi.trace.posterior["x_true"].dims
     assert set(multi.results) == {"A01", "A02"}
 
 

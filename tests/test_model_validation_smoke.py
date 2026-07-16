@@ -812,6 +812,89 @@ def test_residuals_from_fit_results_robust_params_and_drop_invalid_sigma() -> No
     assert residuals["is_residual_outlier"].any()
 
 
+def _single_well_fit_result(mini: object) -> FitResult[Any]:
+    """Build a minimal single-well FitResult carrying *mini* as its trace."""
+    params = Parameters()
+    params.add("K", value=7.0)
+    params.add("S0_1", value=100.0)
+    params.add("S1_1", value=200.0)
+    x = np.array([6.0, 7.0, 8.0])
+    y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, 40.0])
+    ds = Dataset({"1": DataArray(x, y, y_errc=np.array([1.0, 1.0, 2.0]))}, is_ph=True)
+    result = cast("Any", type("Result", (), {"params": params})())
+    return FitResult(result=result, dataset=ds, mini=cast("Any", mini))
+
+
+def test_single_well_residuals_extract_p_outlier_from_mixture_trace() -> None:
+    """A single-well mixture trace should surface per-point outlier probabilities."""
+    known = np.array([0.02, 0.10, 0.97])
+    outlier_prob = xr.DataArray(
+        np.broadcast_to(known, (2, 4, 3)), dims=["chain", "draw", "obs"]
+    )
+    trace = type(
+        "TraceMix",
+        (),
+        {"posterior": xr.Dataset({"outlier_probability_1": outlier_prob})},
+    )()
+    df = _single_well_fit_result(trace).residual_table(robust=False, well="A01")
+
+    assert "p_outlier_per_point" in df.columns
+    assert np.allclose(df["p_outlier_per_point"].to_numpy(), known)
+    # Schema parity with the multi-well builder.
+    assert list(df.columns)[: len(RESIDUAL_TABLE_COLUMNS)] == RESIDUAL_TABLE_COLUMNS
+
+
+@pytest.mark.parametrize(
+    "mini",
+    [
+        None,
+        type(
+            "TraceNoMix",
+            (),
+            {"posterior": xr.Dataset({"K": xr.DataArray(np.zeros((2, 4)))})},
+        )(),
+    ],
+)
+def test_single_well_residuals_p_outlier_nan_without_mixture(mini: object) -> None:
+    """Without a mixture deterministic (or any trace) the column stays NaN."""
+    df = _single_well_fit_result(mini).residual_table(robust=False, well="A01")
+    assert "p_outlier_per_point" in df.columns
+    assert df["p_outlier_per_point"].isna().all()
+
+
+def test_single_well_residuals_label_mixture_without_t_transform() -> None:
+    """A mixture fit is labeled 'mixture' with Normal-standardized std_res.
+
+    The mixture uses Normal components, so ``std_res`` must be the identity of
+    ``likelihood_res`` (no Student-t transform) and ``student_t_nu`` NaN; the
+    outlier structure is reported via ``p_outlier_per_point``.
+    """
+    known = np.array([0.02, 0.10, 0.97])
+    op = xr.DataArray(np.broadcast_to(known, (2, 4, 3)), dims=["chain", "draw", "obs"])
+    pi = xr.DataArray(np.full((2, 4), 0.1), dims=["chain", "draw"])
+    infl = xr.DataArray(np.full((2, 4), 0.5), dims=["chain", "draw"])
+    trace = type(
+        "TraceMix",
+        (),
+        {
+            "posterior": xr.Dataset({
+                "outlier_probability_1": op,
+                "pi_outlier_1": pi,
+                "outlier_inflate": infl,
+            })
+        },
+    )()
+    # No robust override: the family is auto-detected from the trace.
+    df = _single_well_fit_result(trace).residual_table(well="A01")
+
+    assert (df["residual_likelihood"] == "mixture").all()
+    assert df["student_t_nu"].isna().all()
+    np.testing.assert_allclose(
+        df["std_res"].to_numpy(), df["likelihood_res"].to_numpy()
+    )
+    assert np.allclose(df["p_outlier_per_point"].to_numpy(), known)
+
+
 def test_trace_diagnostics_collects_stats_loo_and_x_sanity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -819,7 +902,7 @@ def test_trace_diagnostics_collects_stats_loo_and_x_sanity(
     posterior = xr.Dataset(
         data_vars={
             "K": (("chain", "draw"), np.array([[7.0, 7.1]])),
-            "x_per_well": (
+            "x_true": (
                 ("chain", "draw", "step", "well"),
                 np.array([[[[8.0, 8.0], [7.0, 7.1]], [[8.1, 8.1], [7.2, 7.3]]]]),
             ),

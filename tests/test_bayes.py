@@ -1150,6 +1150,20 @@ def test_fit_binding_pymc_robust_uses_fixed_student_t_nu(
     assert captured["nu"] == 7.5
 
 
+def test_student_t_nu_value_records_fixed_nu_as_deterministic() -> None:
+    """A fixed nu is also recorded as a ``student_t_nu`` deterministic.
+
+    This lets ``robust_settings_from_trace`` recover the Student-t likelihood from
+    the trace alone, so ``FitResult.residuals`` standardizes ``std_res`` correctly
+    without an explicit ``robust=`` override.
+    """
+    with pm.Model() as model:
+        nu = bayes._student_t_nu_value(7.5)  # noqa: SLF001
+    assert nu == 7.5  # plain float is still handed to the likelihood
+    assert "student_t_nu" in model.named_vars
+    assert float(model["student_t_nu"].eval()) == 7.5
+
+
 def test_fit_binding_pymc_robust_can_infer_student_t_nu(
     monkeypatch: pytest.MonkeyPatch,
     ph_dataset: Dataset,
@@ -2043,7 +2057,7 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
     """Pin hierarchical_per_well to the de-noised pipetting derivation.
 
     ``x_start`` must be anchored at the isotonic standard error of the step-0
-    mean and ``acid_drop_global`` must use the isotonic per-addition pipetting
+    mean and ``x_step_global`` must use the isotonic per-addition pipetting
     sigma — not the pre-fix read-noise-inflated raw / quadrature values. This
     guards against a silent regression to the old formulation.
     """
@@ -2075,7 +2089,7 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
         return orig_normal(name, **kwargs)
 
     def fake_truncnormal(name: str, **kwargs: object) -> object:
-        if name == "acid_drop_global":
+        if name == "x_step_global":
             captured["global_sigma"] = np.asarray(
                 cast("Any", kwargs["sigma"]), dtype=float
             )
@@ -2101,7 +2115,7 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
     # ... far below the raw leading 3-well SD it used to inherit.
     assert x_start_sigma < x_errc[0]
 
-    # acid_drop_global uses the isotonic per-addition pipetting sigma ...
+    # x_step_global uses the isotonic per-addition pipetting sigma ...
     np.testing.assert_allclose(global_sigma, np.maximum(exp_step_sigmas, 1e-6))
     # ... not the old quadrature measured-difference sigma.
     old_quadrature = np.sqrt(x_errc[:-1] ** 2 + x_errc[1:] ** 2)
@@ -2198,7 +2212,7 @@ def test_extract_fit_accepts_multifitresult_deterministic() -> None:
 
 
 def test_extract_fit_accepts_multifitresult_per_well() -> None:
-    """extract_fit should prefer per-well x_per_well from MultiFitResult."""
+    """extract_fit should prefer per-well x_true from MultiFitResult."""
     # fmt: off
     trace_df = pd.DataFrame(
         {
@@ -2217,12 +2231,12 @@ def test_extract_fit_accepts_multifitresult_per_well() -> None:
             "x_true[0]",
             "x_true[1]",
             "x_true[2]",
-            "x_per_well[0, A01]",
-            "x_per_well[1, A01]",
-            "x_per_well[2, A01]",
-            "x_per_well[0, A02]",
-            "x_per_well[1, A02]",
-            "x_per_well[2, A02]",
+            "x_true[0, A01]",
+            "x_true[1, A01]",
+            "x_true[2, A01]",
+            "x_true[0, A02]",
+            "x_true[1, A02]",
+            "x_true[2, A02]",
         ],
     )
     # fmt: on
@@ -2587,7 +2601,7 @@ def test_extract_x_per_well_from_xarray_returns_correct_ordered_values() -> None
     x_data[1, :, :, 1] -= 0.01
 
     ds = xr.Dataset(
-        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        {"x_true": (["chain", "draw", "step", "well"], x_data)},
         coords={
             "chain": [0, 1],
             "draw": [0, 1, 2],
@@ -2608,13 +2622,13 @@ def test_extract_x_per_well_from_xarray_returns_correct_ordered_values() -> None
 
 
 def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
-    """extract_fit must read x_per_well from raw_trace, not from az.summary.
+    """extract_fit must read per-well x_true from raw_trace, not from az.summary.
 
     Regression test: az.summary can wrongly index multi-dim deterministics
     (producing wrong step-0 values per well).  The raw xarray trace is the
     ground truth, and extract_fit with raw_trace must use it.
     """
-    # Build xarray trace with CORRECT x_per_well
+    # Build xarray trace with CORRECT per-well x_true
     n_chains, n_draws, n_steps, n_wells = 1, 2, 3, 2
     x_data = np.zeros((n_chains, n_draws, n_steps, n_wells))
     for c in range(n_chains):
@@ -2623,7 +2637,7 @@ def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
             x_data[c, d, :, 1] = [8.9, 8.4, 7.9]
 
     ds = xr.Dataset(
-        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        {"x_true": (["chain", "draw", "step", "well"], x_data)},
         coords={
             "chain": [0],
             "draw": [0, 1],
@@ -2649,15 +2663,15 @@ def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
             "x_true[0]",
             "x_true[1]",
             "x_true[2]",
-            "x_per_well[0, A01]",
-            "x_per_well[1, A01]",
-            "x_per_well[2, A01]",
-            "x_per_well[0, A02]",
-            "x_per_well[1, A02]",
-            "x_per_well[2, A02]",
+            "x_true[0, A01]",
+            "x_true[1, A01]",
+            "x_true[2, A01]",
+            "x_true[0, A02]",
+            "x_true[1, A02]",
+            "x_true[2, A02]",
         ],
     )
-    # The broken summary has x_per_well[0, A01]=9, x_per_well[0, A02]=8.1 —
+    # The broken summary has x_true[0, A01]=9, x_true[0, A02]=8.1 —
     # both WRONG (should be 8.9 for step 0).
 
     dataset = Dataset(
@@ -2753,7 +2767,7 @@ def test_x_per_well_extraction_from_xarray_not_string_names() -> None:
         x_data[0, d, :, 1] = [8.9, 8.0]
 
     ds = xr.Dataset(
-        {"x_per_well": (["chain", "draw", "step", "well"], x_data)},
+        {"x_true": (["chain", "draw", "step", "well"], x_data)},
         coords={
             "chain": [0],
             "draw": [0, 1],

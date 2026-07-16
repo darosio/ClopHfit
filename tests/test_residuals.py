@@ -18,6 +18,7 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
+    robust_likelihood_from_trace,
     robust_settings_from_trace,
 )
 from clophfit.fitting.models import binding_1site
@@ -275,7 +276,13 @@ class TestResidualsEntryPoint:
             coords={"chain": [0], "draw": [0, 1]},
         )
         mtrace = xr.DataTree.from_dict({"posterior": mix})
-        assert robust_settings_from_trace(mtrace)[0] is True
+        # A mixture is Normal-standardized (no Student-t transform), so it does
+        # not request the robust std_res calibration; its outlier structure is
+        # reported via p_outlier_per_point instead.
+        assert robust_settings_from_trace(mtrace) == (False, 3.0)
+        assert robust_likelihood_from_trace(mtrace) == "mixture"
+        assert robust_likelihood_from_trace(trace) == "student_t"
+        assert robust_likelihood_from_trace(None) == "normal"
 
     def test_dtypes(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
         """Test DataFrame column dtypes."""

@@ -526,7 +526,11 @@ class FitResult[MiniType: MiniProtocol]:
         from clophfit.fitting.models import binding_1site  # noqa: PLC0415
 
         bfunc = binding_1site if binding_function is None else binding_function
+        residual_likelihood: str | None = None
         if robust is None:
+            residual_likelihood = model_validation.robust_likelihood_from_trace(
+                self.mini
+            )
             robust, detected_nu = model_validation.robust_settings_from_trace(self.mini)
             if student_t_nu is None:
                 student_t_nu = detected_nu
@@ -539,6 +543,8 @@ class FitResult[MiniType: MiniProtocol]:
             robust=robust,
             student_t_nu=student_t_nu,
             outlier_threshold=outlier_threshold,
+            trace=self.mini,
+            residual_likelihood=residual_likelihood,
         )
 
 
@@ -602,7 +608,11 @@ class MultiFitResult:
         from clophfit.fitting.models import binding_1site  # noqa: PLC0415
 
         bfunc = binding_1site if binding_function is None else binding_function
+        residual_likelihood: str | None = None
         if robust is None:
+            residual_likelihood = model_validation.robust_likelihood_from_trace(
+                self.trace
+            )
             robust, detected_nu = model_validation.robust_settings_from_trace(
                 self.trace
             )
@@ -617,6 +627,7 @@ class MultiFitResult:
             robust=robust,
             student_t_nu=student_t_nu,
             outlier_threshold=outlier_threshold,
+            residual_likelihood=residual_likelihood,
         )
 
 

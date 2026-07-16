@@ -1087,11 +1087,43 @@ def _posterior_dataset_or_none(trace: _t.Any) -> _t.Any | None:
         return None
 
 
-def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
-    """Infer ``(robust, student_t_nu)`` from a trace's posterior variables.
+def robust_likelihood_from_trace(trace: _t.Any) -> str:
+    """Infer the observation-likelihood family from a trace's posterior variables.
 
-    Detects an inferred Student-t (a ``student_t_nu`` deterministic) or a
-    contamination mixture (``pi_outlier_*`` / ``outlier_inflate``). Used by
+    Detects a contamination mixture (``pi_outlier_*`` / ``outlier_inflate``) or an
+    inferred/fixed Student-t (a ``student_t_nu`` deterministic); anything else is
+    a plain Normal.  Used to label the ``residual_likelihood`` column.
+
+    Parameters
+    ----------
+    trace : _t.Any
+        A PyMC trace (``xr.DataTree``) or ``None`` for classical fits.
+
+    Returns
+    -------
+    str
+        The observation-likelihood family: ``"normal"``, ``"student_t"``, or
+        ``"mixture"``.
+    """
+    post = _posterior_dataset_or_none(trace)
+    if post is None:
+        return "normal"
+    names = {str(n) for n in getattr(post, "data_vars", {})}
+    if any(n.startswith("pi_outlier") for n in names) or "outlier_inflate" in names:
+        return "mixture"
+    if "student_t_nu" in names:
+        return "student_t"
+    return "normal"
+
+
+def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
+    """Infer ``(apply_student_t_transform, student_t_nu)`` from a trace.
+
+    ``robust`` here means specifically "standardize ``std_res`` via the Student-t
+    probability-integral transform", which is correct **only** for a Student-t
+    likelihood.  A contamination mixture uses Normal components, so its residuals
+    are standardized as Normal (``robust=False``) and its outlier structure is
+    reported through ``p_outlier_per_point`` instead.  Used by
     ``FitResult.residuals`` / ``MultiFitResult.residuals`` so the residual table
     is standardized correctly without the caller re-supplying fit settings.
 
@@ -1103,27 +1135,24 @@ def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
     Returns
     -------
     tuple[bool, float]
-        Whether a robust likelihood was used and the Student-t nu to apply.
+        Whether to apply the Student-t transform, and the nu to use.
 
     Notes
     -----
-    A *fixed*-nu Student-t leaves no trace marker and is reported as non-robust;
-    only the Normal-score transform of ``std_res`` differs (``raw_res``/``yhat``/
-    ``likelihood_res`` are unaffected). Pass ``robust=`` to
-    ``residual_table`` to override.
+    A *fixed*-nu Student-t is detected via the ``student_t_nu`` deterministic
+    recorded by :func:`clophfit.fitting.bayes._student_t_nu_value`. Pass
+    ``robust=`` to ``residual_table`` to override.  See
+    :func:`robust_likelihood_from_trace` for the likelihood-family label.
     """
+    if robust_likelihood_from_trace(trace) != "student_t":
+        return False, STUDENT_T_NU
     post = _posterior_dataset_or_none(trace)
     if post is None:
-        return False, STUDENT_T_NU
-    names = {str(n) for n in getattr(post, "data_vars", {})}
-    if any(n.startswith("pi_outlier") for n in names) or "outlier_inflate" in names:
         return True, STUDENT_T_NU
-    if "student_t_nu" in names:
-        try:
-            return True, float(post["student_t_nu"].mean())
-        except Exception:
-            return True, STUDENT_T_NU
-    return False, STUDENT_T_NU
+    try:
+        return True, float(post["student_t_nu"].mean())
+    except Exception:
+        return True, STUDENT_T_NU
 
 
 def _fit_result_labels(fit: _t.Any) -> tuple[str, ...]:
@@ -1163,22 +1192,23 @@ def _posterior_mean_scalar(
 
 
 def x_axis_sanity(trace: _t.Any) -> dict[str, _t.Any]:
-    """Check pH/x-axis invariants for traces with ``x_per_well``.
+    """Check pH/x-axis invariants for per-well ``x_true`` traces.
 
     For per-well x models with a shared start pH, all wells at step 0 should be
     identical within each draw.  ``x_step0_max_abs_spread`` should therefore be
-    close to zero.
+    close to zero.  A global 1-D ``x_true`` (deterministic x-error) has no
+    ``well`` dimension and is skipped.
     """
     out: dict[str, _t.Any] = {}
     try:
         posterior = posterior_dataset(trace)
-        if "x_per_well" not in posterior:
+        if "x_true" not in posterior:
             return out
-        x = posterior["x_per_well"]
-        if "step" not in x.dims or "well" not in x.dims:
-            out["x_sanity_error"] = (
-                f"x_per_well dims are {x.dims!r}, expected step/well"
-            )
+        x = posterior["x_true"]
+        if "well" not in x.dims:
+            return out
+        if "step" not in x.dims:
+            out["x_sanity_error"] = f"x_true dims are {x.dims!r}, expected step/well"
             return out
         x0 = x.isel(step=0)
         x0_ref = x0.isel(well=0)
@@ -1226,9 +1256,7 @@ def trace_diagnostics(
             "K_ctr",
             "x_start",
             "x_true",
-            "x_per_well",
-            "acid_drop_global",
-            "acid_drop_well",
+            "x_step_global",
             "x_step",
             "ye_mag",
             "rel_error",
@@ -1604,6 +1632,7 @@ def residuals_from_multifit(  # noqa: PLR0913
     robust: bool = False,
     student_t_nu: float = STUDENT_T_NU,
     outlier_threshold: float = 3.0,
+    residual_likelihood: str | None = None,
 ) -> pd.DataFrame:
     """Build a long calibrated-residual table from a MultiFitResult.
 
@@ -1615,7 +1644,10 @@ def residuals_from_multifit(  # noqa: PLR0913
     ``likelihood_res`` is always ``(observed - predicted) / sigma``.  For
     Student-t robust fits, ``std_res`` is the equivalent standard-Normal score
     from the t CDF, suitable for Normal QQ plots and z-style outlier flags.
+    ``residual_likelihood`` labels the ``residual_likelihood`` column; when
+    ``None`` it defaults to ``"student_t"`` if *robust* else ``"normal"``.
     """
+    family = residual_likelihood or ("student_t" if robust else "normal")
     rows: list[dict[str, _t.Any]] = []
 
     for well, fr in multi.results.items():
@@ -1675,7 +1707,7 @@ def residuals_from_multifit(  # noqa: PLR0913
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
                     "p_outlier_per_point": float(p_outlier[j]),
-                    "residual_likelihood": "student_t" if robust else "normal",
+                    "residual_likelihood": family,
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),
                     "outlier_threshold": float(outlier_threshold),
@@ -1706,8 +1738,43 @@ def residuals_from_fit_results(  # noqa: PLR0913
     robust: bool = False,
     student_t_nu: float = STUDENT_T_NU,
     outlier_threshold: float = 3.0,
+    trace: _t.Any = None,
+    residual_likelihood: str | None = None,
 ) -> pd.DataFrame:
-    """Build a long calibrated residual table from classical FitResult objects."""
+    """Build a long calibrated residual table from classical FitResult objects.
+
+    Parameters
+    ----------
+    results : dict[str, _t.Any]
+        Mapping of well identifier to ``FitResult``-like object.
+    trace_id : str
+        Value placed in the ``trace_id`` column.
+    binding_function : _t.Callable[..., ArrayLike]
+        Model evaluated to obtain the prediction ``yhat``.
+    include_fit_params : bool
+        Append the ``K``/``S0_*``/``S1_*`` point estimates as extra columns.
+    robust : bool
+        Standardize ``std_res`` via the Student-t probability-integral transform.
+    student_t_nu : float
+        Degrees of freedom used for the robust standardization.
+    outlier_threshold : float
+        Threshold on ``|std_res|`` for the ``is_residual_outlier`` flag.
+    trace : _t.Any
+        Optional PyMC trace. When it carries ``outlier_probability_{label}``
+        deterministics (contamination-mixture fits), the per-point posterior
+        outlier probability is extracted into ``p_outlier_per_point``; otherwise
+        that column is ``NaN``. Mirrors :func:`residuals_from_multifit` so
+        single-well and multi-well tables share the full schema.
+    residual_likelihood : str | None
+        Label for the ``residual_likelihood`` column. When ``None`` it defaults
+        to ``"student_t"`` if *robust* else ``"normal"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        The canonical residual table with columns ``RESIDUAL_TABLE_COLUMNS``.
+    """
+    family = residual_likelihood or ("student_t" if robust else "normal")
     rows: list[dict[str, _t.Any]] = []
     for well, fr in results.items():
         if fr.dataset is None or fr.result is None:
@@ -1741,6 +1808,15 @@ def residuals_from_fit_results(  # noqa: PLR0913
                 robust=robust,
                 student_t_nu=student_t_nu,
             )
+            p_outlier = np.full(len(y), np.nan, dtype=float)
+            if trace is not None and _posterior_dataset_or_none(trace) is not None:
+                active = _outlier_probability_for_label_well(
+                    trace, lbl, str(well), mask, results
+                )
+                if mask.size == len(y) and active.size == int(mask.sum()):
+                    p_outlier[mask] = active
+                elif active.size == len(y):
+                    p_outlier = active
             for j in range(len(y)):
                 row = {
                     "trace_id": trace_id,
@@ -1755,7 +1831,8 @@ def residuals_from_fit_results(  # noqa: PLR0913
                     "raw_res": float(y[j] - yhat[j]),
                     "likelihood_res": float(likelihood_res[j]),
                     "std_res": float(std_res[j]),
-                    "residual_likelihood": "student_t" if robust else "normal",
+                    "p_outlier_per_point": float(p_outlier[j]),
+                    "residual_likelihood": family,
                     "student_t_nu": float(student_t_nu) if robust else np.nan,
                     "is_residual_outlier": bool(outlier[j]),
                     "outlier_threshold": float(outlier_threshold),
@@ -1767,10 +1844,13 @@ def residuals_from_fit_results(  # noqa: PLR0913
                 rows.append(row)
     df = pd.DataFrame(rows)
     if df.empty:
-        return df
-    return df.replace([np.inf, -np.inf], np.nan).dropna(
+        return pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(
         subset=["std_res", "x", "step", "label"]
     )
+    leading_cols = [col for col in RESIDUAL_TABLE_COLUMNS if col in df.columns]
+    extra_cols = [col for col in df.columns if col not in leading_cols]
+    return df.loc[:, [*leading_cols, *extra_cols]]
 
 
 def mad(x: pd.Series) -> float:
