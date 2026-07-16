@@ -870,7 +870,15 @@ def test_fit_binding_odr_multi(multi_dataset: Dataset) -> None:
 
 def test_fit_binding_pymc_ph(ph_dataset: Dataset) -> None:
     """Test PyMC Bayesian fitting on pH dataset."""
-    fr = fit_binding_pymc(ph_dataset, n_sd=1.0, sampler=SamplerConfig(n_samples=100))
+    # n_tune must be set explicitly: with n_samples=100 the default (n_samples//2
+    # = 50 warmup draws) under-tunes NUTS, biasing K high (~8, at the assertion
+    # boundary) and making the test platform-flaky. A fixed seed keeps it
+    # reproducible.
+    fr = fit_binding_pymc(
+        ph_dataset,
+        n_sd=1.0,
+        sampler=SamplerConfig(n_samples=200, n_tune=500, random_seed=42),
+    )
     assert fr.result is not None
     assert "K" in fr.result.params
     # Check K value is reasonable
