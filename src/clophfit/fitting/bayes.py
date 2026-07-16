@@ -3134,11 +3134,23 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
             # Fixed between-well scale — do not sample a variance parameter;
             # the centered funnel destroys sampler performance.
+            #
+            # Bound the per-well deviations 2.5 sigma below the mode, using the
+            # LARGER of the two per-step spreads: the shared-walk ``step_sigmas``
+            # and the between-well ``acid_drop_between_sigma``. The old bound
+            # (``min_drops`` = nominal - 2.5*step_sigmas) uses only step_sigmas,
+            # so when acid_drop_between_sigma is larger the wall sits ~1 sigma
+            # below the per-well mode and clips it; conversely a wall using only
+            # acid_drop_between_sigma would over-truncate the steps whose
+            # step_sigmas is larger. Taking the max keeps a genuine 2.5-sigma
+            # margin at every step. Floored at the physical ``min_x_step``.
+            per_well_sigma = np.maximum(step_sigmas, max(acid_drop_between_sigma, 1e-6))
+            per_well_lower = np.maximum(nominal_drop - 2.5 * per_well_sigma, min_x_step)
             x_step = pm.TruncatedNormal(
                 "x_step",
                 mu=x_step_global[:, None],
                 sigma=max(acid_drop_between_sigma, 1e-6),
-                lower=min_drops[:, None],
+                lower=per_well_lower[:, None],
                 shape=(n_steps - 1, n_wells),
                 dims=("step_diff", "well"),
             )

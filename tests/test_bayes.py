@@ -2122,6 +2122,64 @@ def test_fit_binding_pymc_multi_hierarchical_uses_denoised_sigmas(
     assert not np.allclose(global_sigma, old_quadrature)
 
 
+def test_hierarchical_per_well_x_step_bound_uses_larger_sigma(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-well x_step lower bound is nominal - 2.5*max(step_sigmas, between).
+
+    Reusing the shared-walk ``min_drops`` (which uses only ``step_sigmas``)
+    places the wall ~1 sigma below the wider per-well mode when
+    ``acid_drop_between_sigma`` exceeds ``step_sigmas``, clipping it. The bound
+    must scale with the larger of the two per-step spreads.
+    """
+    xc = np.array([8.92, 8.80, 8.40, 7.90, 7.30, 6.60, 6.00])
+    x_errc = np.array([0.067, 0.017, 0.015, 0.016, 0.014, 0.015, 0.013])
+    y1 = binding_1site(xc, 7.2, 2.0, 1.0, is_ph=True)
+    y2 = binding_1site(xc, 7.2, 0.1, 1.0, is_ph=True)
+    ds = Dataset(
+        {"1": DataArray(xc, y1, x_errc=x_errc), "2": DataArray(xc, y2, x_errc=x_errc)},
+        is_ph=True,
+    )
+    fr_init = fit_binding_glob(ds)
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    adb = 0.05  # deliberately > step_sigmas so max() differs from min_drops
+
+    _dir, _xs, nominal, step_sigmas, min_drops = bayes._pipetting_walk_params(  # noqa: SLF001
+        xc, x_errc, 1.0, min_x_step=0.2
+    )
+
+    captured: dict[str, object] = {}
+    orig_tn = pm.TruncatedNormal
+
+    def fake_tn(name: str, **kwargs: object) -> object:
+        if name == "x_step":
+            captured["lower"] = np.asarray(
+                cast("Any", kwargs["lower"]), dtype=float
+            ).ravel()
+            raise _StopBayesBuildError
+        return orig_tn(name, **kwargs)
+
+    monkeypatch.setattr(pm, "TruncatedNormal", fake_tn)
+
+    with pytest.raises(_StopBayesBuildError):
+        bayes.fit_binding_pymc_multi(
+            {"A01": fr_init, "A02": fr_init},
+            scheme,
+            n_xerr=1.0,
+            x_error_model="hierarchical_per_well",
+            acid_drop_between_sigma=adb,
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
+
+    lower = cast("np.ndarray", captured["lower"])
+    expected = np.maximum(nominal - 2.5 * np.maximum(step_sigmas, adb), 0.2)
+    np.testing.assert_allclose(lower, expected)
+    # With adb > step_sigmas the per-well wall drops below the old min_drops.
+    assert np.all(expected <= min_drops + 1e-9)
+    assert np.any(expected < min_drops - 1e-6)
+
+
 @pytest.mark.parametrize(("between", "expect_well"), [(0.0, False), (0.03, True)])
 def test_fit_binding_pymc_multi_x_start_between_sigma_opt_in(
     monkeypatch: pytest.MonkeyPatch,
