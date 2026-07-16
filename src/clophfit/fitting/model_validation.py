@@ -1256,7 +1256,6 @@ def trace_diagnostics(
             "K_ctr",
             "x_start",
             "x_true",
-            "x_step_global",
             "x_step",
             "ye_mag",
             "rel_error",

@@ -73,10 +73,9 @@ class SamplerConfig:
         Number of posterior draws per chain.
     nuts_sampler : str
         NUTS backend. Defaults to ``"nutpie"`` — its warmup/mass-matrix
-        adaptation handles the funnel geometry of the hierarchical latent-x
-        model, where the built-in ``"pymc"`` sampler diverges heavily and fails
-        to converge. ``"pymc"`` (built-in NUTS, Numba backend) is fine and
-        marginally faster on simple deterministic-x fits. ``"default"`` lets
+        adaptation is robust on the multi-well latent-x geometry. ``"pymc"``
+        (built-in NUTS, Numba backend) is fine and marginally faster on simple
+        deterministic-x fits. ``"default"`` lets
         PyMC auto-select whatever is installed; ``"numpyro"``/``"blackjax"``
         (JAX/GPU) request those explicitly but are unusable here (numpyro lacks
         an ``erfcx`` implementation; blackjax is incompatible with PyMC 6.1).
