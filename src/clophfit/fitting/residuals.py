@@ -27,6 +27,10 @@ OUTLIER_THRESHOLD_2SIGMA = 2.0
 OUTLIER_THRESHOLD_3SIGMA = 3.0
 OUTLIER_RATE_THRESHOLD = 0.05
 BIAS_P_VALUE_THRESHOLD = 0.01
+# Robust (modified) z-score cutoff, Iglewicz-Hoaglin convention. A threshold on
+# the residuals' own median/MAD scale, so a few points cannot mask themselves by
+# inflating the fitted noise scale (as a std-based flag on std_res can).
+ROBUST_Z_THRESHOLD = 3.5
 DW_LOWER_BOUND = 1.5
 DW_UPPER_BOUND = 2.5
 
@@ -259,7 +263,14 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Statistics by label: mean, std, median, mad, outlier_count
+        Statistics by label: mean, std, median, mad, outlier_count,
+        robust_outlier_count, n_points, outlier_rate, robust_outlier_rate.
+
+        ``outlier_count`` thresholds the model-standardized ``std_res`` (``> 2``);
+        a few points can hide by inflating the fitted scale.
+        ``robust_outlier_count`` uses each label's own median/MAD scale
+        (modified z-score ``> ROBUST_Z_THRESHOLD``), so masked points still
+        surface.
 
     Examples
     --------
@@ -278,8 +289,25 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     def outlier_count(x: ArrayF) -> int:
-        """Count points beyond ±2-sigma deviations."""
+        """Count points beyond ±2-sigma of the model-standardized residual."""
         return int((np.abs(x) > OUTLIER_THRESHOLD_2SIGMA).sum())
+
+    def robust_outlier_count(x: ArrayF) -> int:
+        """Count points beyond the robust (median/MAD) z-score cutoff.
+
+        The modified z-score ``(x - median) / (1.4826 * MAD)`` uses the group's
+        own scale, so points that inflate the fitted noise (and thus shrink
+        ``std_res``) cannot mask themselves the way ``outlier_count`` allows.
+        """
+        arr = np.asarray(x, dtype=float)
+        med = float(np.nanmedian(arr))
+        robust_sigma = float(
+            sp_stats.median_abs_deviation(arr, nan_policy="omit", scale="normal")
+        )
+        if not np.isfinite(robust_sigma) or robust_sigma <= 0.0:
+            return 0
+        z = (arr - med) / robust_sigma
+        return int(np.nansum(np.abs(z) > ROBUST_Z_THRESHOLD))
 
     # Use dict format for agg to avoid mypy issues with tuple format
     summary = df.groupby("label")["std_res"].agg(
@@ -288,12 +316,16 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
         median="median",
         mad=lambda x: sp_stats.median_abs_deviation(x, nan_policy="omit"),
         outlier_count=outlier_count,
+        robust_outlier_count=robust_outlier_count,
         n_points="count",
     )
 
     # Convert to DataFrame (agg returns DataFrame when grouping by one column)
     summary_df = typing.cast("pd.DataFrame", summary)
     summary_df["outlier_rate"] = summary_df["outlier_count"] / summary_df["n_points"]
+    summary_df["robust_outlier_rate"] = (
+        summary_df["robust_outlier_count"] / summary_df["n_points"]
+    )
 
     return summary_df
 
