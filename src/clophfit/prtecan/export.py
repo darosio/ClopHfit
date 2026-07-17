@@ -16,7 +16,6 @@ from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.model_validation import residuals_from_fit_results
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.pipeline import fit_plate
 from clophfit.fitting.residuals import (
     plot_residual_vs_predicted,
     plot_residual_vs_yerr,
@@ -175,13 +174,12 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
             ds_single = {
                 k: titration.create_ds(k, label=label) for k in titration.fit_keys
             }
-            fits = fit_plate(
-                ds_single,
-                method=titration.params.fit_method,
-                remove_outliers=titration.params.outlier,
-            )
             export_list.append(
-                TitrationResults(titration.scheme, titration.fit_keys, fits)
+                titration.fit_plate(
+                    ds_single,
+                    method=titration.params.fit_method,
+                    remove_outliers=titration.params.outlier,
+                )
             )
 
     method = (
@@ -191,22 +189,20 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
     )
     reweight = "irls" if titration.params.fit_method == "irls" else None
 
-    global_fits = fit_plate(
+    global_res = titration.fit_plate(
         datasets,
         method=method,
         reweight=reweight,
         remove_outliers=titration.params.outlier,
     )
-    global_res = TitrationResults(titration.scheme, titration.fit_keys, global_fits)
     export_list.append(global_res)
 
-    odr_fits = fit_plate(
+    odr_res = titration.fit_plate(
         datasets,
         method="odr",
         remove_outliers=titration.params.outlier,
         reweight=reweight,
     )
-    odr_res = TitrationResults(titration.scheme, titration.fit_keys, odr_fits)
     export_list.append(odr_res)
 
     mcmc_res = fit_single_mcmc(titration, datasets, outfit)

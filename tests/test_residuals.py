@@ -15,6 +15,7 @@ from clophfit.fitting.data_structures import (
     FitResult,
     NoiseModelParams,
     PlateNoiseModel,
+    ResidualsMixin,
 )
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
@@ -712,3 +713,23 @@ def test_fgls_plate_fit_workflow() -> None:
     assert noise_params["1"].sigma_floor == 1.0
     assert noise_params["1"].gain >= 0.0
     assert noise_params["1"].alpha >= 0.0
+
+
+def test_residuals_mixin_resolves_classical_fit_as_normal() -> None:
+    """A classical fit has no trace, so it standardizes as Normal."""
+    settings = ResidualsMixin._resolve_residual_settings(None)  # noqa: SLF001
+
+    assert settings.robust is False
+    assert settings.student_t_nu == 3.0
+    assert settings.residual_likelihood == "normal"
+
+
+def test_residuals_mixin_honours_explicit_robust() -> None:
+    """An explicit robust flag skips auto-detection and its likelihood label."""
+    settings = ResidualsMixin._resolve_residual_settings(  # noqa: SLF001
+        None, robust=True, student_t_nu=5.0
+    )
+
+    assert settings.robust is True
+    assert settings.student_t_nu == 5.0
+    assert settings.residual_likelihood is None

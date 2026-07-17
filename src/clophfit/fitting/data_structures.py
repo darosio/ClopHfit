@@ -15,7 +15,7 @@ from collections import UserDict
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast, runtime_checkable
+from typing import TYPE_CHECKING, NamedTuple, Protocol, TypeVar, cast, runtime_checkable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,6 +25,14 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 # Re-exported for back-compat: MiniT lives in the leaf ``clophfit_types`` module
 # so it stays out of the fitting-package import cycle (see its definition there).
 from clophfit.clophfit_types import MiniT as MiniT  # noqa: PLC0414
+from clophfit.fitting.model_validation import (
+    STUDENT_T_NU,
+    residuals_from_fit_results,
+    residuals_from_multifit,
+    robust_likelihood_from_trace,
+    robust_settings_from_trace,
+)
+from clophfit.fitting.models import binding_1site
 
 from .errors import InvalidDataError
 
@@ -486,8 +494,80 @@ class MiniProtocol(Protocol):
 MiniType = TypeVar("MiniType", bound=MiniProtocol)
 
 
+class _ResidualSettings(NamedTuple):
+    """Resolved settings for building a canonical residual table."""
+
+    binding_function: Callable[..., object]
+    robust: bool
+    student_t_nu: float
+    residual_likelihood: str | None
+
+
+class ResidualsMixin:
+    """Shared canonical-residual accessor for fit-result containers.
+
+    Subclasses must implement :meth:`residual_table`. They may add extra
+    keyword-only parameters to it (``FitResult`` adds ``well``).
+    """
+
+    @cached_property
+    def residuals(self) -> pd.DataFrame:
+        """Canonical per-observation residual table for this fit.
+
+        Lazily computed, cached, and returned in the schema shared across the
+        package (``clophfit.fitting.model_validation.RESIDUAL_TABLE_COLUMNS``:
+        ``raw_res``, ``yhat``, ``sigma``, ``std_res``, …). Robustness is
+        auto-detected. Use :meth:`residual_table` to override the model or the
+        robust settings.
+        """
+        return self.residual_table()
+
+    def residual_table(self) -> pd.DataFrame:
+        """Compute the canonical residual table. Implemented by subclasses."""
+        raise NotImplementedError
+
+    @staticmethod
+    def _resolve_residual_settings(
+        trace: object,
+        *,
+        binding_function: Callable[..., object] | None = None,
+        robust: bool | None = None,
+        student_t_nu: float | None = None,
+    ) -> _ResidualSettings:
+        """Resolve model and standardization settings for a residual table.
+
+        Parameters
+        ----------
+        trace : object
+            PyMC trace to auto-detect robustness from, or ``None`` for a
+            classical fit (which resolves to Normal standardization).
+        binding_function : Callable[..., object] | None
+            Model evaluated for ``yhat``; defaults to ``binding_1site``.
+        robust : bool | None
+            Force the Student-t standardization of ``std_res``. ``None``
+            auto-detects from *trace*.
+        student_t_nu : float | None
+            Student-t degrees of freedom. ``None`` uses the detected/default.
+
+        Returns
+        -------
+        _ResidualSettings
+            The resolved binding function, robust flag, nu, and likelihood label.
+        """
+        bfunc = binding_1site if binding_function is None else binding_function
+        residual_likelihood: str | None = None
+        if robust is None:
+            residual_likelihood = robust_likelihood_from_trace(trace)
+            robust, detected_nu = robust_settings_from_trace(trace)
+            if student_t_nu is None:
+                student_t_nu = detected_nu
+        if student_t_nu is None:
+            student_t_nu = STUDENT_T_NU
+        return _ResidualSettings(bfunc, robust, student_t_nu, residual_likelihood)
+
+
 @dataclass
-class FitResult[MiniType: MiniProtocol]:
+class FitResult[MiniType: MiniProtocol](ResidualsMixin):
     """Result container of a fitting procedure."""
 
     figure: Figure | None = None
@@ -522,18 +602,6 @@ class FitResult[MiniType: MiniProtocol]:
             and self.mini is not None
         )
 
-    @cached_property
-    def residuals(self) -> pd.DataFrame:
-        """Canonical per-observation residual table for this fit.
-
-        Lazily computed, cached, and returned in the schema shared across the
-        package (``clophfit.fitting.model_validation.RESIDUAL_TABLE_COLUMNS``:
-        ``raw_res``, ``yhat``, ``sigma``, ``std_res``, …). Works for both LMFit
-        and PyMC fits; robustness is auto-detected from the trace. Use
-        :meth:`residual_table` to override the model or robust settings.
-        """
-        return self.residual_table()
-
     def residual_table(
         self,
         *,
@@ -565,34 +633,26 @@ class FitResult[MiniType: MiniProtocol]:
         pd.DataFrame
             The canonical residual table (see :attr:`residuals`).
         """
-        from clophfit.fitting import model_validation  # noqa: PLC0415
-        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
-
-        bfunc = binding_1site if binding_function is None else binding_function
-        residual_likelihood: str | None = None
-        if robust is None:
-            residual_likelihood = model_validation.robust_likelihood_from_trace(
-                self.mini
-            )
-            robust, detected_nu = model_validation.robust_settings_from_trace(self.mini)
-            if student_t_nu is None:
-                student_t_nu = detected_nu
-        if student_t_nu is None:
-            student_t_nu = model_validation.STUDENT_T_NU
-        return model_validation.residuals_from_fit_results(
-            {well: self},
-            trace_id="",
-            binding_function=bfunc,
+        settings = self._resolve_residual_settings(
+            self.mini,
+            binding_function=binding_function,
             robust=robust,
             student_t_nu=student_t_nu,
+        )
+        return residuals_from_fit_results(
+            {well: self},
+            trace_id="",
+            binding_function=settings.binding_function,
+            robust=settings.robust,
+            student_t_nu=settings.student_t_nu,
             outlier_threshold=outlier_threshold,
             trace=self.mini,
-            residual_likelihood=residual_likelihood,
+            residual_likelihood=settings.residual_likelihood,
         )
 
 
 @dataclass
-class MultiFitResult:
+class MultiFitResult(ResidualsMixin):
     """Container for multi-well Bayesian results.
 
     Parameters
@@ -609,17 +669,6 @@ class MultiFitResult:
     def __getattr__(self, name: str) -> object:
         """Delegate trace attributes for convenient compatibility."""
         return getattr(self.trace, name)
-
-    @cached_property
-    def residuals(self) -> pd.DataFrame:
-        """Canonical per-observation residual table across all wells.
-
-        Lazily computed, cached, and returned in the shared schema
-        (``RESIDUAL_TABLE_COLUMNS``, including ``p_outlier`` extracted
-        from the trace). Robustness is auto-detected; use :meth:`residual_table`
-        to override.
-        """
-        return self.residual_table()
 
     def residual_table(
         self,
@@ -647,30 +696,20 @@ class MultiFitResult:
         pd.DataFrame
             The canonical residual table (see :attr:`residuals`).
         """
-        from clophfit.fitting import model_validation  # noqa: PLC0415
-        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
-
-        bfunc = binding_1site if binding_function is None else binding_function
-        residual_likelihood: str | None = None
-        if robust is None:
-            residual_likelihood = model_validation.robust_likelihood_from_trace(
-                self.trace
-            )
-            robust, detected_nu = model_validation.robust_settings_from_trace(
-                self.trace
-            )
-            if student_t_nu is None:
-                student_t_nu = detected_nu
-        if student_t_nu is None:
-            student_t_nu = model_validation.STUDENT_T_NU
-        return model_validation.residuals_from_multifit(
-            self,
-            trace_id="",
-            binding_function=bfunc,
+        settings = self._resolve_residual_settings(
+            self.trace,
+            binding_function=binding_function,
             robust=robust,
             student_t_nu=student_t_nu,
+        )
+        return residuals_from_multifit(
+            self,
+            trace_id="",
+            binding_function=settings.binding_function,
+            robust=settings.robust,
+            student_t_nu=settings.student_t_nu,
             outlier_threshold=outlier_threshold,
-            residual_likelihood=residual_likelihood,
+            residual_likelihood=settings.residual_likelihood,
         )
 
 

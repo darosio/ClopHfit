@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from clophfit.fitting import pipeline
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.errors import InsufficientDataError
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _dataset() -> Dataset:
@@ -52,68 +54,6 @@ def test_noise_model_building_and_convergence() -> None:
     assert not pipeline._noise_params_converged(  # noqa: SLF001
         old, missing, tol=1e-2
     )
-
-
-@pytest.mark.parametrize(
-    ("method", "target"),
-    [
-        ("", "lm"),
-        ("huber", "huber"),
-        ("odr", "odr"),
-        ("mcmc", "mcmc"),
-    ],
-)
-def test_fit_plate_routes_methods_and_preserves_well_keys(
-    monkeypatch: pytest.MonkeyPatch,
-    method: str,
-    target: str,
-) -> None:
-    """Plate fitting should dispatch each method to the intended backend."""
-    calls: list[tuple[str, str]] = []
-
-    def fake_glob(
-        ds: Dataset, *, method: str = "lm", **_kwargs: object
-    ) -> FitResult[Any]:
-        calls.append(("glob", method))
-        return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
-
-    def fake_odr(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
-        calls.append(("odr", "odr"))
-        return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
-
-    def fake_mcmc(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
-        calls.append(("mcmc", "mcmc"))
-        return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
-
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fake_glob)
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_odr", fake_odr)
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_pymc", fake_mcmc)
-
-    results = pipeline.fit_plate({"A01": _dataset(), "A02": _dataset()}, method=method)
-
-    assert set(results) == {"A01", "A02"}
-    assert all(fr.result is not None for fr in results.values())
-    assert calls == [(target if target in {"odr", "mcmc"} else "glob", target)] * 2
-
-
-@pytest.mark.parametrize("method", ["lm", "odr", "mcmc"])
-def test_fit_plate_turns_insufficient_data_into_empty_result(
-    monkeypatch: pytest.MonkeyPatch,
-    method: str,
-) -> None:
-    """Per-well insufficient-data failures should not abort the whole plate."""
-
-    def fail(*_args: object, **_kwargs: object) -> FitResult[Any]:
-        msg = "too few points"
-        raise InsufficientDataError(msg)
-
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fail)
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_odr", fail)
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_pymc", fail)
-
-    results = pipeline.fit_plate({"A01": _dataset()}, method=method)
-
-    assert results["A01"].result is None
 
 
 def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(

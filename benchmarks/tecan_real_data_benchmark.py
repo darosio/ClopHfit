@@ -340,10 +340,9 @@ def _fit_real_curve_with_titration(
     tit.scheme.names = {grp: keys for grp, keys in tit.scheme.names.items() if keys}
 
     if result_attr in ("result_multi_noise_mcmc", "result_multi_noise_xrw_mcmc", "result_multi_mcmc"):
-        from clophfit.fitting.pipeline import fit_plate
         from clophfit.fitting.bayes import fit_binding_pymc_multi, extract_fit
 
-        results = fit_plate(datasets, method=combination.prefit)
+        results = tit.fit_plate(datasets, method=combination.prefit).results
         x_error_model = "per_well" if "xrw" in result_attr else "deterministic"
         noise_model: PlateNoiseModel | None = None
         if "noise" in result_attr:
@@ -369,14 +368,13 @@ def _fit_real_curve_with_titration(
                 break
         return multi_result.results[requested_well]
     else:
-        from clophfit.fitting.pipeline import fit_plate
         method_map = {"result_global": "lm", "result_odr": "odr", "result_mcmc": "mcmc"}
         method = method_map.get(result_attr, combination.prefit)
 
         if method == "mcmc":
-            results = fit_plate(datasets, method="mcmc", n_samples=tit.params.n_mcmc_samples, n_tune=tit.params.n_mcmc_samples // 2)
+            results = tit.fit_plate(datasets, method="mcmc", n_samples=tit.params.n_mcmc_samples, n_tune=tit.params.n_mcmc_samples // 2)
         else:
-            results = fit_plate(datasets, method=method)
+            results = tit.fit_plate(datasets, method=method)
 
         return results[requested_well]
 

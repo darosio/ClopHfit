@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import typing
 from dataclasses import InitVar, dataclass, field
@@ -16,16 +17,26 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
+from clophfit.fitting.bayes import fit_binding_pymc
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
     FitResult,
     NoiseModelParams,
     PlateNoiseModel,
+    ResidualsMixin,
 )
-from clophfit.fitting.odr import format_estimate
+from clophfit.fitting.errors import InsufficientDataError
+from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
+from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.utils import apply_outlier_mask
+from clophfit.fitting.utils import (
+    apply_outlier_mask,
+    flag_trend_outliers,
+    roughness,
+    smoothness,
+)
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -51,6 +62,48 @@ logger = logging.getLogger(__name__)
 # pH K bounds as used by _build_params_1site in fitting/core.py
 _PH_K_MIN: float = 3.0
 _PH_K_MAX: float = 11.0
+
+
+def _fit_datasets(
+    datasets: dict[str, Dataset],
+    method: str,
+    **kwargs: typing.Any,  # noqa: ANN401
+) -> dict[str, FitResult[typing.Any]]:
+    """Fit each dataset, turning per-well failures into empty results.
+
+    Parameters
+    ----------
+    datasets : dict[str, Dataset]
+        Mapping of well keys to `Dataset` objects.
+    method : str
+        'lm', 'huber', 'odr', 'mcmc', or any method accepted by
+        :func:`clophfit.fitting.core.fit_binding_glob`.
+    **kwargs : typing.Any
+        Forwarded to the selected fitting function.
+
+    Returns
+    -------
+    dict[str, FitResult[typing.Any]]
+        One entry per input well; failed wells hold an empty `FitResult`.
+    """
+    fitter: Callable[..., FitResult[typing.Any]]
+    if method == "odr":
+        fitter, fit_kind = fit_binding_odr, "ODR fit"
+    elif method == "mcmc":
+        fitter, fit_kind = fit_binding_pymc, "MCMC fit"
+    else:
+        method = method or "lm"
+        fitter = functools.partial(fit_binding_glob, method=method)
+        fit_kind = "fit"
+
+    results: dict[str, FitResult[typing.Any]] = {}
+    for well, ds in datasets.items():
+        try:
+            results[well] = fitter(ds, **kwargs)
+        except InsufficientDataError:
+            logger.warning("Skip %s for well %s.", fit_kind, well)
+            results[well] = FitResult()
+    return results
 
 
 @dataclass
@@ -411,7 +464,7 @@ class Buffer:
 
 
 @dataclass
-class TitrationResults:
+class TitrationResults(ResidualsMixin):
     """Manage titration results with optional lazy computation.
 
     Provide either the small ``scheme`` + ``fit_keys`` directly, or a
@@ -435,6 +488,58 @@ class TitrationResults:
         if titration is not None:
             self.scheme = titration.scheme
             self.fit_keys = titration.fit_keys
+
+    def residual_table(
+        self,
+        *,
+        binding_function: Callable[..., object] | None = None,
+        robust: bool | None = None,
+        student_t_nu: float | None = None,
+        outlier_threshold: float = 3.0,
+    ) -> pd.DataFrame:
+        """Compute the canonical plate-wide residual table.
+
+        Delegates to each well's own :meth:`FitResult.residual_table`, so
+        robustness is auto-detected per well from that well's own ``mini``
+        (its lmfit ``Minimizer``, ODR output, or PyMC trace). A plate fitted
+        with ``method="mcmc"`` therefore standardizes each well against its
+        own trace, instead of being forced to Normal standardization.
+
+        Parameters
+        ----------
+        binding_function : Callable[..., object] | None
+            Model evaluated for ``yhat``; defaults to ``binding_1site``.
+            Forwarded unchanged to each well.
+        robust : bool | None
+            Force the Student-t standardization of ``std_res``. ``None``
+            auto-detects per well from that well's trace.
+        student_t_nu : float | None
+            Student-t degrees of freedom (``None`` uses detected/default).
+        outlier_threshold : float
+            Threshold for the ``is_residual_outlier`` flag.
+
+        Returns
+        -------
+        pd.DataFrame
+            The canonical residual table (see :attr:`residuals`), built by
+            concatenating each well's own table. Wells whose fit failed carry
+            no dataset or result and are skipped, so the table may cover
+            fewer wells than ``fit_keys``.
+        """
+        tables = [
+            fr.residual_table(
+                well=well,
+                binding_function=binding_function,
+                robust=robust,
+                student_t_nu=student_t_nu,
+                outlier_threshold=outlier_threshold,
+            )
+            for well, fr in self.results.items()
+            if fr.dataset is not None and fr.result is not None
+        ]
+        if not tables:
+            return pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)
+        return pd.concat(tables, ignore_index=True)
 
     @property
     def dataframe(self) -> pd.DataFrame:
@@ -689,12 +794,6 @@ class Titration(TecanfilesGroup):
         list[str]
             Newly discarded well keys.
         """
-        from clophfit.fitting.utils import (  # noqa: PLC0415
-            flag_trend_outliers,
-            roughness,
-            smoothness,
-        )
-
         first_label = next(iter(self.labelblocksgroups.keys()), None)
         if first_label is None:
             return []
@@ -1090,6 +1189,51 @@ class Titration(TecanfilesGroup):
                     ds, threshold=self.params.outlier_threshold
                 )
         return ds_dict
+
+    def fit_plate(
+        self,
+        datasets: dict[str, Dataset] | None = None,
+        method: str = "",
+        *,
+        label: str | None = None,
+        **kwargs: typing.Any,  # noqa: ANN401
+    ) -> TitrationResults:
+        """Run a single-pass fit on an entire plate of datasets.
+
+        Parameters
+        ----------
+        datasets : dict[str, Dataset] | None
+            Mapping of well keys (e.g. 'A01') to `Dataset` objects. When
+            ``None``, datasets are built with :meth:`create_dataset_dict`,
+            which also applies outlier masking when ``params.mask_outliers``
+            is set.
+        method : str
+            The fitting method: 'lm' (default), 'huber', 'odr', or 'mcmc'.
+            Other methods supported by
+            :func:`clophfit.fitting.core.fit_binding_glob` may also be used.
+        label : str | None
+            Build per-label datasets for this label instead of global ones.
+            Only valid when *datasets* is ``None``.
+        **kwargs : typing.Any
+            Additional keyword arguments passed to the fitting function.
+
+        Returns
+        -------
+        TitrationResults
+            Plate results carrying this titration's ``scheme`` and ``fit_keys``.
+
+        Raises
+        ------
+        ValueError
+            If both *datasets* and *label* are given.
+        """
+        if datasets is not None and label is not None:
+            msg = "Pass either `datasets` or `label`, not both."
+            raise ValueError(msg)
+        if datasets is None:
+            datasets = self.create_dataset_dict(label)
+        results = _fit_datasets(datasets, method, **kwargs)
+        return TitrationResults(self.scheme, self.fit_keys, results)
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups.
