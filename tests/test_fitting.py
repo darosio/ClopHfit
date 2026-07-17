@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
-from lmfit.minimizer import Minimizer, MinimizerResult  # type: ignore[import-untyped]
+from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 from matplotlib.figure import Figure
 
 from clophfit.fitting.bayes import (
@@ -657,7 +657,7 @@ def test_fit_binding_edge_cases() -> None:
 
 
 @pytest.fixture
-def mock_fit_result() -> FitResult[MinimizerResult]:
+def mock_fit_result() -> FitResult:
     """Mock a successful fit result."""
     result = MinimizerResult()
     result.success = True
@@ -668,7 +668,7 @@ def mock_fit_result() -> FitResult[MinimizerResult]:
     return FitResult(result=result)
 
 
-def test_plot_fit_with_mock(mock_fit_result: FitResult[MinimizerResult]) -> None:
+def test_plot_fit_with_mock(mock_fit_result: FitResult) -> None:
     """Test plotting with mocked fit result."""
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -739,7 +739,7 @@ def _create_synthetic_dataset(  # noqa: PLR0913
 
 def _fit_binding_glob_huber_outlier(
     ds: Dataset, *, threshold: float = 2.5
-) -> FitResult[Minimizer]:
+) -> FitResult:
     """Run the supported robust fit with z-score outlier removal."""
     return fit_binding_glob(
         ds,
@@ -1119,7 +1119,7 @@ def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
         },
         is_ph=True,
     )
-    fr: FitResult[xr.DataTree] = FitResult(dataset=ds)
+    fr: FitResult = FitResult(dataset=ds)
 
     sigma_df = extract_sigma_df(trace, {"A01": fr})
 
@@ -1129,9 +1129,7 @@ def test_extract_sigma_df_falls_back_to_ye_mag_without_az_summary() -> None:
     np.testing.assert_allclose(sigma_df["hdi_97%"].to_numpy(), np.array([39.4, 78.8]))
 
 
-def _make_direct_sigma_trace_and_results() -> tuple[
-    xr.DataTree, dict[str, FitResult[xr.DataTree]]
-]:
+def _make_direct_sigma_trace_and_results() -> tuple[xr.DataTree, dict[str, FitResult]]:
     posterior = xr.Dataset(
         data_vars={
             "sigma_obs_1_A01": (
@@ -1159,7 +1157,7 @@ def _make_direct_sigma_trace_and_results() -> tuple[
         {"1": DataArray(np.array([6.0, 7.0, 8.0]), np.array([9.0, 10.0, 11.0]))},
         is_ph=True,
     )
-    results: dict[str, FitResult[xr.DataTree]] = {
+    results: dict[str, FitResult] = {
         "A01": FitResult(dataset=ds_a01),
         "A02": FitResult(dataset=ds_a02),
     }

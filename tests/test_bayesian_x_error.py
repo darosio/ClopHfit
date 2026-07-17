@@ -60,7 +60,7 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     params.add("S0_test_sample", value=s0_true)
     params.add("S1_test_sample", value=s1_true)
 
-    fr: FitResult[_Result] = FitResult(dataset=ds, result=_Result(params))
+    fr: FitResult = FitResult(dataset=ds, result=_Result(params))
 
     # 2. Run Bayesian Fit with x-error modeling
     # n_xerr=1.0 enables x_true modeling. The x-true shift competes with the

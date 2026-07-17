@@ -65,7 +65,7 @@ def prepare_output_folder(titration: Titration, base_path: Path) -> Path:
 
 
 def export_residuals(
-    outfit: Path, fit_results: dict[str, FitResult[typing.Any]], index: int
+    outfit: Path, fit_results: dict[str, FitResult], index: int
 ) -> None:
     """Export fit residuals and their statistics to files."""
     try:

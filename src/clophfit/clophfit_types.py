@@ -3,21 +3,11 @@
 from collections.abc import Callable, Mapping
 
 import numpy as np
-import odrpack
-import xarray as xr
-from lmfit.minimizer import Minimizer  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 
 # Array types
 ArrayF = NDArray[np.float64]  # Generic float64 array
 ArrayMask = NDArray[np.bool_]
-
-# Minimizer/backend result union shared across fitting modules.
-# Defined here (a dependency-light leaf module) rather than in
-# ``fitting.data_structures`` so it is never pulled into the fitting-package
-# import cycle, which would otherwise demote this implicit alias to a plain
-# variable in mypy's eyes (``MiniT is not valid as a type``).
-MiniT = Minimizer | odrpack.OdrResult | xr.DataTree
 
 # Dictionary types
 ArrayDict = dict[

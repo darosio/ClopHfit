@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
     from clophfit.clophfit_types import ArrayF
-    from clophfit.fitting.data_structures import FitResult, MiniT
+    from clophfit.fitting.data_structures import FitResult
 
     from .data_structures import Dataset
 
@@ -659,7 +659,7 @@ def plot_spectra_distributed(
 
 def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
     trace: xr.DataTree | MultiFitResult,
-    results: Mapping[str, FitResult[MiniT]] | None = None,
+    results: Mapping[str, FitResult] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
     annotate_wells: list[str] | None = None,
     z_threshold: float = 3.0,
@@ -677,7 +677,7 @@ def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
     trace : xr.DataTree | MultiFitResult
         The PyMC inference trace containing `sigma_obs` deterministic nodes, or
         the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
-    results : Mapping[str, FitResult[MiniT]] | None, optional
+    results : Mapping[str, FitResult] | None, optional
         The dictionary of well results to derive fallback sigma values.
     figsize_per_label : tuple[float, float], optional
         Figure size allocated for each spectral band (label). Default is (5, 4).
@@ -1139,7 +1139,7 @@ def _summary_stats_from_scalar_var(
 
 def _extract_sigma_df(
     trace: xr.DataTree | MultiFitResult,
-    results: Mapping[str, FitResult[MiniT]] | None = None,
+    results: Mapping[str, FitResult] | None = None,
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma_obs parameters from a PyMC trace into a DataFrame."""
     if isinstance(trace, MultiFitResult):
@@ -1181,7 +1181,7 @@ def _extract_sigma_df(
 
 def extract_sigma_df(
     trace: xr.DataTree | MultiFitResult,
-    results: Mapping[str, FitResult[MiniT]] | None = None,
+    results: Mapping[str, FitResult] | None = None,
 ) -> pd.DataFrame:
     """Extract heteroscedastic sigma summaries from a PyMC trace."""
     return _extract_sigma_df(trace, results)
@@ -1189,7 +1189,7 @@ def extract_sigma_df(
 
 def plot_noise_vs_index(
     trace: xr.DataTree | MultiFitResult,
-    results: Mapping[str, FitResult[MiniT]] | None = None,
+    results: Mapping[str, FitResult] | None = None,
     wells: Sequence[str] | str | None = None,
     figsize_per_well: tuple[float, float] = (5, 4),
     max_cols: int = 4,
@@ -1201,7 +1201,7 @@ def plot_noise_vs_index(
     trace : xr.DataTree | MultiFitResult
         The PyMC inference trace containing `sigma_obs` deterministic nodes, or
         the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
-    results : Mapping[str, FitResult[MiniT]] | None, optional
+    results : Mapping[str, FitResult] | None, optional
         The dictionary of well results to derive fallback sigma values.
     wells : Sequence[str] | str | None, optional
         A specific well ID (e.g., 'A01'), a list of well IDs, or None to plot all
@@ -1273,7 +1273,7 @@ def plot_noise_vs_index(
 
 def plot_noise_vs_signal(
     trace: xr.DataTree | MultiFitResult,
-    results: Mapping[str, FitResult[MiniT]],
+    results: Mapping[str, FitResult],
     figsize_per_label: tuple[float, float] = (6, 5),
 ) -> Figure:
     """Plot inferred noise (sigma) versus observed signal across all wells.
@@ -1287,7 +1287,7 @@ def plot_noise_vs_signal(
     trace : xr.DataTree | MultiFitResult
         The PyMC inference trace containing the `sigma_obs` deterministic nodes,
         or the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
-    results : Mapping[str, FitResult[MiniT]]
+    results : Mapping[str, FitResult]
         The dictionary of well results containing datasets with `.y` arrays.
         Normally this is `tit.result_global.results`.
     figsize_per_label : tuple[float, float], optional

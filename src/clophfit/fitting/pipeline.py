@@ -1,7 +1,6 @@
 """Pipeline orchestrators for fitting multistage workflows (e.g., FGLS)."""
 
 import logging
-import typing
 
 import pandas as pd
 
@@ -124,7 +123,7 @@ def fgls_plate_fit(  # noqa: PLR0913
     second_pass_method: str = "lm",  # noqa: S107
     max_iter: int = 3,
     tol: float = 1e-3,
-) -> tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]:
+) -> tuple[dict[str, FitResult], PlateNoiseModel]:
     """Run iterative Feasible Generalized Least Squares (FGLS) on a plate.
 
     1. First-pass fit (robust) on each well with existing ``y_errc``.
@@ -150,12 +149,12 @@ def fgls_plate_fit(  # noqa: PLR0913
 
     Returns
     -------
-    tuple[dict[str, FitResult[typing.Any]], PlateNoiseModel]
+    tuple[dict[str, FitResult], PlateNoiseModel]
         Final fit results keyed by well, and the converged (or last)
         calibrated noise model.
     """
     noise_model: PlateNoiseModel | None = None
-    results: dict[str, FitResult[typing.Any]] = {}
+    results: dict[str, FitResult] = {}
 
     for iteration in range(max_iter):
         # Choose method

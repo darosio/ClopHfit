@@ -214,7 +214,7 @@ def weight_multi_ds_titration(ds: Dataset) -> None:
 
 def analyze_spectra(
     spectra: pd.DataFrame, *, is_ph: bool, band: tuple[int, int] | None = None
-) -> FitResult[Minimizer]:
+) -> FitResult:
     """Analyze spectra titration, fit the data, and plot the results.
 
     This function performs either Singular Value Decomposition (SVD) or
@@ -231,7 +231,7 @@ def analyze_spectra(
 
     Returns
     -------
-    FitResult[Minimizer]
+    FitResult
         An object containing the fit results and the summary plot.
 
     Raises
@@ -328,7 +328,7 @@ def analyze_spectra_glob(
 def _plot_spectra_glob_emcee(
     titration: dict[str, pd.DataFrame],
     ds: Dataset,
-    f_res: FitResult[Minimizer],
+    f_res: FitResult,
     dbands: dict[str, tuple[int, int]] | None = None,
 ) -> figure.Figure:
     fig, (ax1, ax2, ax3, ax4, ax5) = _create_spectra_canvas()
@@ -365,7 +365,7 @@ def fit_binding_glob(  # noqa: PLR0913
     max_iter: int = 15,
     tol: float = 0.01,
     scale_covar: bool = True,
-) -> FitResult[Minimizer]:
+) -> FitResult:
     r"""Analyze multi-label titration datasets and visualize the results.
 
     Unified fitting function that supports standard least-squares and robust
@@ -400,7 +400,7 @@ def fit_binding_glob(  # noqa: PLR0913
 
     Returns
     -------
-    FitResult[Minimizer]
+    FitResult
         An object containing the fit results, plot figure, minimizer, and
         dataset copy.
 

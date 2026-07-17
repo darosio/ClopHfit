@@ -15,16 +15,13 @@ from collections import UserDict
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, Protocol, TypeVar, cast, runtime_checkable
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-# Re-exported for back-compat: MiniT lives in the leaf ``clophfit_types`` module
-# so it stays out of the fitting-package import cycle (see its definition there).
-from clophfit.clophfit_types import MiniT as MiniT  # noqa: PLC0414
 from clophfit.fitting.model_validation import (
     STUDENT_T_NU,
     residuals_from_fit_results,
@@ -487,14 +484,6 @@ class _Result:
     success: bool = True
 
 
-@runtime_checkable
-class MiniProtocol(Protocol):
-    """A very small common interface for all minimizers / backends."""
-
-
-MiniType = TypeVar("MiniType", bound=MiniProtocol)
-
-
 class _ResidualSettings(NamedTuple):
     """Resolved settings for building a canonical residual table."""
 
@@ -568,7 +557,7 @@ class ResidualsMixin:
 
 
 @dataclass
-class FitResult[MiniType: MiniProtocol](ResidualsMixin):
+class FitResult(ResidualsMixin):
     """Result container of a fitting procedure."""
 
     figure: Figure | None = None
@@ -577,7 +566,7 @@ class FitResult[MiniType: MiniProtocol](ResidualsMixin):
     """Backend-agnostic fit result exposing a .params attribute along with
     residual, redchi, and success fields (as in lmfit). For lmfit this is a
     MinimizerResult."""
-    mini: MiniType | None = None
+    mini: Minimizer | None = None
     """The lmfit ``Minimizer`` object (for ``conf_interval``, ``emcee``,
     ``userargs``). ``None`` for non-lmfit backends."""
     trace: xr.DataTree | None = None
@@ -667,12 +656,12 @@ class MultiFitResult(ResidualsMixin):
     ----------
     trace : xr.DataTree
         Shared PyMC trace from the multi-well fit.
-    results : dict[str, FitResult[xr.DataTree]]
+    results : dict[str, FitResult]
         Per-well fit results reconstructed from the shared trace.
     """
 
     trace: xr.DataTree
-    results: dict[str, FitResult[xr.DataTree]]
+    results: dict[str, FitResult]
 
     def __getattr__(self, name: str) -> object:
         """Delegate trace attributes for convenient compatibility."""
@@ -725,13 +714,13 @@ class MultiFitResult(ResidualsMixin):
 class SpectraGlobResults:
     """A dataclass representing the results of both svd and bands fits."""
 
-    svd: FitResult[Minimizer] | None = field(default=None)
+    svd: FitResult | None = field(default=None)
     """The `FitResult` object representing the outcome of the concatenated svd
     fit, or `None` if the svd fit was not performed."""
-    gsvd: FitResult[Minimizer] | None = field(default=None)
+    gsvd: FitResult | None = field(default=None)
     """The `FitResult` object representing the outcome of the global svd fit,
     or `None` if the svd fit was not performed."""
-    bands: FitResult[Minimizer] | None = field(default=None)
+    bands: FitResult | None = field(default=None)
     """The `FitResult` object representing the outcome of the bands fit, or
     `None` if the bands fit was not performed."""
 

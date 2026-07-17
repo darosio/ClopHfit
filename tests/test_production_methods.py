@@ -1,6 +1,6 @@
 """Tests for supported production fitting methods."""
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import Dataset, FitResult
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-def _fit_huber_outlier(ds: Dataset) -> FitResult[Any]:
+def _fit_huber_outlier(ds: Dataset) -> FitResult:
     """Run the supported robust LM configuration with outlier removal."""
     return fit_binding_glob(ds, method="huber", remove_outliers="zscore:2.5:5")
 
@@ -64,7 +64,7 @@ def test_all_production_methods_converge(ph_dataset: Dataset) -> None:
     assert lm_result.result is not None
     assert lm_result.result.success, "LM failed"
 
-    odr_methods: list[tuple[str, Callable[[FitResult[Any]], FitResult[Any]]]] = [
+    odr_methods: list[tuple[str, Callable[[FitResult], FitResult]]] = [
         ("ODR-Recursive", lambda fr: fit_binding_odr(fr, reweight=True)),
         (
             "ODR-Recursive+Outlier",

@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from lmfit.minimizer import MinimizerResult  # type: ignore[import-untyped]
 
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
@@ -45,7 +44,7 @@ from clophfit.fitting.residuals import (
 
 
 @pytest.fixture
-def simple_fit_result() -> FitResult[MinimizerResult]:
+def simple_fit_result() -> FitResult:
     """Create a simple fit result for testing residuals."""
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     # Perfect fit data with K=7, adding tiny noise to avoid zero-division in lmfit
@@ -58,7 +57,7 @@ def simple_fit_result() -> FitResult[MinimizerResult]:
 
 
 @pytest.fixture
-def noisy_fit_result() -> FitResult[MinimizerResult]:
+def noisy_fit_result() -> FitResult:
     """Create a fit result with noisy data."""
     rng = np.random.default_rng(42)
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
@@ -71,7 +70,7 @@ def noisy_fit_result() -> FitResult[MinimizerResult]:
 
 
 @pytest.fixture
-def multi_label_fit_result() -> FitResult[MinimizerResult]:
+def multi_label_fit_result() -> FitResult:
     """Create a multi-label fit result."""
     x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
     y1 = binding_1site(x, K=7.0, S0=500.0, S1=1000.0, is_ph=True)
@@ -87,7 +86,7 @@ def multi_label_fit_result() -> FitResult[MinimizerResult]:
 
 
 @pytest.fixture
-def empty_fit_result() -> FitResult[MinimizerResult]:
+def empty_fit_result() -> FitResult:
     """Create a fit result with no result."""
     return FitResult(result=None, dataset=None)
 
@@ -146,7 +145,7 @@ class TestResidualPoint:
 class TestExtractResidualPoints:
     """Test the extract_residual_points function."""
 
-    def test_single_label(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_single_label(self, simple_fit_result: FitResult) -> None:
         """Test extraction from single-label fit."""
         points = extract_residual_points(simple_fit_result)
         assert len(points) == 5
@@ -154,9 +153,7 @@ class TestExtractResidualPoints:
         assert all(isinstance(p.std_res, float) for p in points)
         assert all(isinstance(p.raw_res, float) for p in points)
 
-    def test_multi_label(
-        self, multi_label_fit_result: FitResult[MinimizerResult]
-    ) -> None:
+    def test_multi_label(self, multi_label_fit_result: FitResult) -> None:
         """Test extraction from multi-label fit."""
         points = extract_residual_points(multi_label_fit_result)
         assert len(points) == 10  # 5 points * 2 labels
@@ -165,23 +162,19 @@ class TestExtractResidualPoints:
         assert len(y1_points) == 5
         assert len(y2_points) == 5
 
-    def test_empty_result(self, empty_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_empty_result(self, empty_fit_result: FitResult) -> None:
         """Test extraction from empty fit result."""
         points = extract_residual_points(empty_fit_result)
         assert points == []
 
-    def test_x_values_preserved(
-        self, simple_fit_result: FitResult[MinimizerResult]
-    ) -> None:
+    def test_x_values_preserved(self, simple_fit_result: FitResult) -> None:
         """Test that x values are preserved in residual points."""
         points = extract_residual_points(simple_fit_result)
         x_values = {p.x for p in points}
         expected_x = {9.0, 8.0, 7.0, 6.0, 5.0}
         assert x_values == expected_x
 
-    def test_raw_indices_sequential(
-        self, simple_fit_result: FitResult[MinimizerResult]
-    ) -> None:
+    def test_raw_indices_sequential(self, simple_fit_result: FitResult) -> None:
         """Test that raw indices are sequential when no masking is applied."""
         points = extract_residual_points(simple_fit_result)
         indices = [p.raw_i for p in points]
@@ -214,7 +207,7 @@ class TestExtractResidualPoints:
 class TestResidualDataframe:
     """Test the residual_dataframe function."""
 
-    def test_columns(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_columns(self, simple_fit_result: FitResult) -> None:
         """Test that DataFrame has correct columns."""
         df = residual_dataframe(simple_fit_result)
         expected_cols = {
@@ -230,12 +223,12 @@ class TestResidualDataframe:
         }
         assert set(df.columns) == expected_cols
 
-    def test_row_count(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_row_count(self, simple_fit_result: FitResult) -> None:
         """Test that DataFrame has correct number of rows."""
         df = residual_dataframe(simple_fit_result)
         assert len(df) == 5
 
-    def test_empty_result(self, empty_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_empty_result(self, empty_fit_result: FitResult) -> None:
         """Test DataFrame from empty fit result."""
         df = residual_dataframe(empty_fit_result)
         assert len(df) == 0
@@ -245,7 +238,7 @@ class TestResidualsEntryPoint:
     """The FitResult.residuals cached-property entry point."""
 
     def test_fitresult_residuals_canonical_and_cached(
-        self, simple_fit_result: FitResult[MinimizerResult]
+        self, simple_fit_result: FitResult
     ) -> None:
         """fr.residuals returns the canonical schema and is cached."""
         r = simple_fit_result.residuals
@@ -254,9 +247,7 @@ class TestResidualsEntryPoint:
         )
         assert simple_fit_result.residuals is r  # cached (same object)
 
-    def test_residual_table_override(
-        self, simple_fit_result: FitResult[MinimizerResult]
-    ) -> None:
+    def test_residual_table_override(self, simple_fit_result: FitResult) -> None:
         """residual_table(...) yields the same columns as the property."""
         table = simple_fit_result.residual_table(robust=False)
         assert list(table.columns) == list(simple_fit_result.residuals.columns)
@@ -285,7 +276,7 @@ class TestResidualsEntryPoint:
         assert robust_likelihood_from_trace(trace) == "student_t"
         assert robust_likelihood_from_trace(None) == "normal"
 
-    def test_dtypes(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_dtypes(self, simple_fit_result: FitResult) -> None:
         """Test DataFrame column dtypes."""
         df = residual_dataframe(simple_fit_result)
         assert pd.api.types.is_string_dtype(df["label"])
@@ -303,7 +294,7 @@ class TestResidualsEntryPoint:
 class TestResidualStatistics:
     """Test the residual_statistics function."""
 
-    def test_columns(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_columns(self, simple_fit_result: FitResult) -> None:
         """Test that statistics DataFrame has expected columns."""
         results = {"A01": simple_fit_result}
         df = residuals_from_fit_results(
@@ -321,9 +312,7 @@ class TestResidualStatistics:
         }
         assert expected_cols.issubset(set(stats.columns))
 
-    def test_grouped_by_label(
-        self, multi_label_fit_result: FitResult[MinimizerResult]
-    ) -> None:
+    def test_grouped_by_label(self, multi_label_fit_result: FitResult) -> None:
         """Test that statistics are grouped by label."""
         results = {"A01": multi_label_fit_result}
         df = residuals_from_fit_results(
@@ -491,7 +480,7 @@ class TestResidualDiagnosticsHelpers:
 class TestValidateResiduals:
     """Test ResidualAnalysis.validate residual-quality checks."""
 
-    def test_good_fit(self, simple_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_good_fit(self, simple_fit_result: FitResult) -> None:
         """Test validation of a good fit."""
         checks = ResidualAnalysis(simple_fit_result.residuals).validate(verbose=False)
         assert isinstance(checks, dict)
@@ -499,7 +488,7 @@ class TestValidateResiduals:
         assert "outliers_ok" in checks
         assert "correlation_ok" in checks
 
-    def test_empty_result(self, empty_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_empty_result(self, empty_fit_result: FitResult) -> None:
         """Test validation of empty fit result."""
         checks = ResidualAnalysis(empty_fit_result.residuals).validate(verbose=False)
         # All checks should pass (no data to fail on)
@@ -525,7 +514,7 @@ class TestValidateResiduals:
 
     def test_verbose_output(
         self,
-        noisy_fit_result: FitResult[MinimizerResult],
+        noisy_fit_result: FitResult,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Test that verbose mode produces output."""
@@ -534,7 +523,7 @@ class TestValidateResiduals:
         # Verbose mode should produce some output (may or may not warn)
         assert isinstance(captured.out, str)
 
-    def test_returns_dict(self, noisy_fit_result: FitResult[MinimizerResult]) -> None:
+    def test_returns_dict(self, noisy_fit_result: FitResult) -> None:
         """Test that function returns correct structure."""
         checks = ResidualAnalysis(noisy_fit_result.residuals).validate(verbose=False)
         assert set(checks.keys()) == {"bias_ok", "outliers_ok", "correlation_ok"}

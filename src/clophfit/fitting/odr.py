@@ -17,7 +17,7 @@ from clophfit.fitting.utils import identify_outliers_zscore, parse_remove_outlie
 from clophfit.utils import weights_from_sigma
 
 from .core import fit_binding_glob
-from .data_structures import Dataset, FitResult, MiniT, _Result
+from .data_structures import Dataset, FitResult, _Result
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask
@@ -115,18 +115,18 @@ def generalized_combined_model(
 
 
 def fit_binding_odr(  # noqa: C901, PLR0915
-    ds_or_fr: Dataset | FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult,
     *,
     reweight: bool = False,
     remove_outliers: str | None = None,
     max_iter: int = 15,
     tol: float = 0.1,
-) -> FitResult[odrpack.OdrResult]:
+) -> FitResult:
     """Analyze multi-label titration datasets using ODR.
 
     Parameters
     ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
+    ds_or_fr : Dataset | FitResult
         Either a Dataset (will run initial LS fit) or a FitResult with initial params.
     reweight : bool
         Whether to perform iterative reweighting (recursive ODR).
@@ -140,7 +140,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
 
     Returns
     -------
-    FitResult[odrpack.OdrResult]
+    FitResult
         ODR fitting results. Residuals are WEIGHTED by the ORIGINAL y_err
         (before ODR modified it), making them comparable to LM residuals.
     """
@@ -154,7 +154,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     if fr.result is None or fr.dataset is None:
         return FitResult()
 
-    def _single_odr_fit(current_fr: FitResult[MiniT]) -> FitResult[odrpack.OdrResult]:
+    def _single_odr_fit(current_fr: FitResult) -> FitResult:
         if current_fr.result is None or current_fr.dataset is None:
             return FitResult()
         params = current_fr.result.params

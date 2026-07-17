@@ -45,7 +45,6 @@ from .data_structures import (
     DataArray,
     Dataset,
     FitResult,
-    MiniT,
     MultiFitResult,
     NoiseModelParams,
     PlateNoiseModel,
@@ -501,7 +500,7 @@ def _fit_result_from_data_priors(  # noqa: PLR0913
     k_prior: DataKPrior,
     k_bounds: tuple[float, float] | None,
     k_sigma: float,
-) -> FitResult[xr.DataTree]:
+) -> FitResult:
     """Create an lmfit-like seed result using only data-derived priors."""
     params = Parameters()
     lo, hi = _resolve_data_prior_k_bounds(k_bounds, is_ph=ds.is_ph)
@@ -546,7 +545,7 @@ def _fit_result_from_data_priors(  # noqa: PLR0913
 
 
 def _normalize_fit_input(  # noqa: PLR0913
-    ds_or_fr: Dataset | FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult,
     *,
     init_strategy: InitStrategy = "lmfit",
     data_prior_edge_points: int = 2,
@@ -554,12 +553,12 @@ def _normalize_fit_input(  # noqa: PLR0913
     data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
     data_prior_k_bounds: tuple[float, float] | None = None,
     data_prior_k_sigma: float = 1.5,
-) -> tuple[FitResult[MiniT], bool]:
+) -> tuple[FitResult, bool]:
     """Normalize PyMC input to a copied preliminary fit result.
 
     Parameters
     ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
+    ds_or_fr : Dataset | FitResult
         Either a raw dataset or a pre-fit result used to seed the Bayesian
         model.
     init_strategy : InitStrategy
@@ -579,7 +578,7 @@ def _normalize_fit_input(  # noqa: PLR0913
 
     Returns
     -------
-    tuple[FitResult[MiniT], bool]
+    tuple[FitResult, bool]
         The normalized fit result and whether the caller explicitly supplied a
         pre-fit ``FitResult``.
     """
@@ -588,16 +587,13 @@ def _normalize_fit_input(  # noqa: PLR0913
         if ds is None:
             return FitResult(), False
         return (
-            typing.cast(
-                "FitResult[MiniT]",
-                _fit_result_from_data_priors(
-                    ds,
-                    edge_points=data_prior_edge_points,
-                    signal_sigma_scale=data_prior_signal_sigma_scale,
-                    k_prior=data_prior_k_prior,
-                    k_bounds=data_prior_k_bounds,
-                    k_sigma=data_prior_k_sigma,
-                ),
+            _fit_result_from_data_priors(
+                ds,
+                edge_points=data_prior_edge_points,
+                signal_sigma_scale=data_prior_signal_sigma_scale,
+                k_prior=data_prior_k_prior,
+                k_bounds=data_prior_k_bounds,
+                k_sigma=data_prior_k_sigma,
             ),
             False,
         )
@@ -607,7 +603,7 @@ def _normalize_fit_input(  # noqa: PLR0913
 
 
 def _normalize_fit_inputs(  # noqa: PLR0913
-    results: Mapping[str, Dataset | FitResult[MiniT]],
+    results: Mapping[str, Dataset | FitResult],
     *,
     init_strategy: InitStrategy = "lmfit",
     data_prior_edge_points: int = 2,
@@ -615,12 +611,12 @@ def _normalize_fit_inputs(  # noqa: PLR0913
     data_prior_k_prior: DataKPrior = "midpoint_truncnorm",
     data_prior_k_bounds: tuple[float, float] | None = None,
     data_prior_k_sigma: float = 1.5,
-) -> tuple[dict[str, FitResult[MiniT]], bool]:
+) -> tuple[dict[str, FitResult], bool]:
     """Normalize multi-well PyMC inputs to copied preliminary fit results.
 
     Parameters
     ----------
-    results : Mapping[str, Dataset | FitResult[MiniT]]
+    results : Mapping[str, Dataset | FitResult]
         Per-well raw datasets or pre-fit results.
     init_strategy : InitStrategy
         ``"lmfit"`` fits each raw dataset with LMFit; ``"data_priors"`` seeds
@@ -641,28 +637,25 @@ def _normalize_fit_inputs(  # noqa: PLR0913
 
     Returns
     -------
-    tuple[dict[str, FitResult[MiniT]], bool]
+    tuple[dict[str, FitResult], bool]
         Normalized per-well fit results and whether the centered-noise defaults
         should be preferred (every input already a ``FitResult`` and not using
         the data-prior strategy).
     """
-    normalized: dict[str, FitResult[MiniT]] = {}
+    normalized: dict[str, FitResult] = {}
     all_prefit = True
     for key, value in results.items():
         if init_strategy == "data_priors":
             ds = value.dataset if isinstance(value, FitResult) else value
             if ds is None:
                 continue
-            normalized[key] = typing.cast(
-                "FitResult[MiniT]",
-                _fit_result_from_data_priors(
-                    ds,
-                    edge_points=data_prior_edge_points,
-                    signal_sigma_scale=data_prior_signal_sigma_scale,
-                    k_prior=data_prior_k_prior,
-                    k_bounds=data_prior_k_bounds,
-                    k_sigma=data_prior_k_sigma,
-                ),
+            normalized[key] = _fit_result_from_data_priors(
+                ds,
+                edge_points=data_prior_edge_points,
+                signal_sigma_scale=data_prior_signal_sigma_scale,
+                k_prior=data_prior_k_prior,
+                k_bounds=data_prior_k_bounds,
+                k_sigma=data_prior_k_sigma,
             )
             all_prefit = False
         elif isinstance(value, Dataset):
@@ -849,7 +842,7 @@ def _log_scaled_ye_mag_mu(
 
 
 def _masked_obs_err_matrices(
-    fit_results: Mapping[str, FitResult[MiniT]],
+    fit_results: Mapping[str, FitResult],
     wells_list: Sequence[str],
     lbl: str,
     n_steps: int,
@@ -858,7 +851,7 @@ def _masked_obs_err_matrices(
 
     Parameters
     ----------
-    fit_results : Mapping[str, FitResult[MiniT]]
+    fit_results : Mapping[str, FitResult]
         Per-well fit results whose ``.dataset`` supplies the arrays.
     wells_list : Sequence[str]
         Well keys in the order they appear as columns.
@@ -1413,10 +1406,10 @@ def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
 class PymcResidualRefitResult:
     """Results from the robust residual-screening PyMC refit workflow."""
 
-    initial: FitResult[xr.DataTree]
+    initial: FitResult
     residuals: pd.DataFrame
     masked_dataset: Dataset
-    final: FitResult[xr.DataTree]
+    final: FitResult
 
 
 @dataclass
@@ -1505,7 +1498,7 @@ def _resolve_structured_noise_model(noise: NoiseConfig, ds: Dataset) -> PlateNoi
 
 def process_trace(
     trace: xr.DataTree, p_names: typing.Iterable[str], ds: Dataset
-) -> FitResult[xr.DataTree]:
+) -> FitResult:
     """Process the trace to extract parameter estimates and update datasets.
 
     Parameters
@@ -1519,7 +1512,7 @@ def process_trace(
 
     Returns
     -------
-    FitResult[xr.DataTree]
+    FitResult
         The updated fit result with extracted parameter values and datasets.
         Residuals are WEIGHTED (weight * (obs - pred)) where weight = 1/y_err,
         computed using posterior mean parameter estimates.
@@ -1564,7 +1557,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     *,
     raw_trace: xr.DataTree | None = None,
     global_p_names: typing.Iterable[str] = (),
-) -> FitResult[xr.DataTree]:
+) -> FitResult:
     """Compute individual dataset fit from a multi-well trace summary.
 
     Parameters
@@ -1592,7 +1585,7 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
 
     Returns
     -------
-    FitResult[xr.DataTree]
+    FitResult
         Fit result with figure, parameters, and dataset using posterior x.
     """
     trace_obj = trace_df.trace if isinstance(trace_df, MultiFitResult) else trace_df
@@ -1933,15 +1926,15 @@ def _update_dataset_yerr_from_sigma_obs(  # noqa: C901, PLR0912
 
 def _per_well_fit_results_from_trace(
     trace: xr.DataTree,
-    fit_results: Mapping[str, FitResult[MiniT]],
+    fit_results: Mapping[str, FitResult],
     scheme: PlateScheme,
     *,
     x_error_model: Literal["deterministic", "per_well"],
     global_p_names: typing.Iterable[str] = (),
-) -> dict[str, FitResult[xr.DataTree]]:
+) -> dict[str, FitResult]:
     """Reconstruct per-well fit results from a shared multi-well trace."""
     trace_df = _trace_summary_df(trace)
-    per_well_results: dict[str, FitResult[xr.DataTree]] = {}
+    per_well_results: dict[str, FitResult] = {}
     for key, fr in fit_results.items():
         if fr.dataset is None:
             continue
@@ -1968,7 +1961,7 @@ _DEFAULT_SAMPLER = SamplerConfig()
 
 
 def fit_binding_pymc(  # noqa: PLR0913, PLR0915
-    ds_or_fr: Dataset | FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult,
     *,
     n_sd: float = 10.0,
     n_xerr: float = 1.0,
@@ -1977,12 +1970,12 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
     robust: RobustConfig = _DEFAULT_ROBUST,
     init: InitConfig = _DEFAULT_INIT,
     sampler: SamplerConfig = _DEFAULT_SAMPLER,
-) -> FitResult[xr.DataTree]:
+) -> FitResult:
     """Analyze multi-label titration datasets using PyMC (single model).
 
     Parameters
     ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
+    ds_or_fr : Dataset | FitResult
         Either a ``Dataset`` (an initial LS fit is run) or a ``FitResult`` whose
         params seed the PyMC priors.
     n_sd : float
@@ -2007,7 +2000,7 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
 
     Returns
     -------
-    FitResult[xr.DataTree]
+    FitResult
         Bayesian fitting results.
     """
     robust_on = robust.enabled
@@ -2317,7 +2310,7 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
         min_allowed_tail_count=min_allowed_tail_count,
     )
     mask_source = initial.dataset if initial.dataset is not None else ds
-    holder = FitResult[xr.DataTree](dataset=copy.deepcopy(mask_source))
+    holder = FitResult(dataset=copy.deepcopy(mask_source))
     masked = model_validation.masked_datasets_from_residual_outliers(
         {"single": holder},
         residuals,
@@ -2351,7 +2344,7 @@ def fit_binding_pymc_residual_refit(  # noqa: PLR0913
 
 
 def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
-    results: Mapping[str, Dataset | FitResult[MiniT]],
+    results: Mapping[str, Dataset | FitResult],
     scheme: PlateScheme,
     *,
     noise_strategy: Literal["proportional", "ye_mag"] = "proportional",
@@ -2389,7 +2382,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
 
     Parameters
     ----------
-    results : Mapping[str, Dataset | FitResult[MiniT]]
+    results : Mapping[str, Dataset | FitResult]
         Per-well datasets or prefit results used as inputs to the screening
         pass.
     scheme : PlateScheme
@@ -2478,7 +2471,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
             )
         else:
             proportional_noise_model = noise_model
-        initial_inputs: Mapping[str, Dataset | FitResult[MiniT]] = results
+        initial_inputs: Mapping[str, Dataset | FitResult] = results
         noise_cfg = NoiseConfig.structured(
             noise_model=proportional_noise_model,
             floor_mode="centered",
@@ -2488,7 +2481,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
             shared_gain=False,
         )
     else:
-        unit_inputs: dict[str, Dataset | FitResult[MiniT]] = {}
+        unit_inputs: dict[str, Dataset | FitResult] = {}
         for key, item in results.items():
             if isinstance(item, FitResult):
                 copied = copy.deepcopy(item)
@@ -2536,7 +2529,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         allowed_tail_fraction=allowed_tail_fraction,
         min_allowed_tail_count=min_allowed_tail_count,
     )
-    initial_holders: dict[str, FitResult[xr.DataTree]] = {}
+    initial_holders: dict[str, FitResult] = {}
     for well, item in initial_inputs.items():
         if isinstance(item, FitResult):
             dataset = copy.deepcopy(item.dataset) if item.dataset is not None else None
@@ -2548,7 +2541,7 @@ def fit_binding_pymc_multi_residual_refit(  # noqa: C901, PLR0912, PLR0913
         residuals,
         min_keep=min_keep,
     )
-    final_inputs: dict[str, FitResult[xr.DataTree]] = {}
+    final_inputs: dict[str, FitResult] = {}
     for well, fit in initial.results.items():
         copied = copy.deepcopy(fit)
         if str(well) in masked:
@@ -2690,7 +2683,7 @@ def _build_ctr_k_params(  # noqa: PLR0913
 
 
 def _free_k_init(  # noqa: PLR0913
-    fit_results: dict[str, FitResult[MiniT]],
+    fit_results: dict[str, FitResult],
     wells_list: list[str],
     scheme: PlateScheme,
     ctr_ks: dict[str, tuple[float, float]],
@@ -2714,7 +2707,7 @@ def _free_k_init(  # noqa: PLR0913
 
     Parameters
     ----------
-    fit_results : dict[str, FitResult[MiniT]]
+    fit_results : dict[str, FitResult]
         Per-well preliminary fit results.
     wells_list : list[str]
         Ordered active well keys.
@@ -2827,7 +2820,7 @@ def _ph_at_mid_fluorescence(da: DataArray) -> float | None:
 
 
 def _well_k_init_from_results(
-    results: dict[str, FitResult[MiniT]],
+    results: dict[str, FitResult],
     scheme: PlateScheme,
     n_sd: float,
     fallback_sigma: float = 0.6,
@@ -2842,7 +2835,7 @@ def _well_k_init_from_results(
 
     Parameters
     ----------
-    results : dict[str, FitResult[MiniT]]
+    results : dict[str, FitResult]
         Preliminary fit results keyed by well name.
     scheme : PlateScheme
         Plate scheme; only wells listed in ``scheme.names`` are processed.
@@ -2897,7 +2890,7 @@ def _well_k_init_from_results(
 
 
 def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
-    results: Mapping[str, Dataset | FitResult[MiniT]],
+    results: Mapping[str, Dataset | FitResult],
     scheme: PlateScheme,
     *,
     n_sd: float = 5.0,
@@ -2922,7 +2915,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
 
     Parameters
     ----------
-    results : Mapping[str, Dataset | FitResult[MiniT]]
+    results : Mapping[str, Dataset | FitResult]
         Per-well datasets or initial fit results. Raw datasets are first fitted
         with :func:`fit_binding_glob` to seed the Bayesian model.
     scheme : PlateScheme
