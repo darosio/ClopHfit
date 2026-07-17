@@ -107,7 +107,7 @@ jobs:
       - name: Sync project with docs deps
         run: uv sync --locked --extra docs
       - name: Cache Jupyter-Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: docs/.jupyter_cache
           key: ${{ runner.os }}-jupyter-${{ hashFiles('**/*.md', '**/*.ipynb') }}
