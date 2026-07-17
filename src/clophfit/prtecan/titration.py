@@ -22,7 +22,9 @@ from clophfit.fitting.data_structures import (
     FitResult,
     NoiseModelParams,
     PlateNoiseModel,
+    ResidualsMixin,
 )
+from clophfit.fitting.model_validation import residuals_from_fit_results
 from clophfit.fitting.odr import format_estimate
 from clophfit.fitting.plotting import PlotParameters
 from clophfit.fitting.utils import apply_outlier_mask
@@ -411,7 +413,7 @@ class Buffer:
 
 
 @dataclass
-class TitrationResults:
+class TitrationResults(ResidualsMixin):
     """Manage titration results with optional lazy computation.
 
     Provide either the small ``scheme`` + ``fit_keys`` directly, or a
@@ -435,6 +437,51 @@ class TitrationResults:
         if titration is not None:
             self.scheme = titration.scheme
             self.fit_keys = titration.fit_keys
+
+    def residual_table(
+        self,
+        *,
+        binding_function: Callable[..., object] | None = None,
+        robust: bool | None = None,
+        student_t_nu: float | None = None,
+        outlier_threshold: float = 3.0,
+    ) -> pd.DataFrame:
+        """Compute the canonical plate-wide residual table.
+
+        Parameters
+        ----------
+        binding_function : Callable[..., object] | None
+            Model evaluated for ``yhat``; defaults to ``binding_1site``.
+        robust : bool | None
+            Force the Student-t standardization of ``std_res``. ``None``
+            auto-detects, which for a classical plate fit means Normal.
+        student_t_nu : float | None
+            Student-t degrees of freedom (``None`` uses detected/default).
+        outlier_threshold : float
+            Threshold for the ``is_residual_outlier`` flag.
+
+        Returns
+        -------
+        pd.DataFrame
+            The canonical residual table (see :attr:`residuals`). Wells whose
+            fit failed carry no dataset or result and are skipped, so the table
+            may cover fewer wells than ``fit_keys``.
+        """
+        settings = self._resolve_residual_settings(
+            None,
+            binding_function=binding_function,
+            robust=robust,
+            student_t_nu=student_t_nu,
+        )
+        return residuals_from_fit_results(
+            self.results,
+            trace_id="",
+            binding_function=settings.binding_function,
+            robust=settings.robust,
+            student_t_nu=settings.student_t_nu,
+            outlier_threshold=outlier_threshold,
+            residual_likelihood=settings.residual_likelihood,
+        )
 
     @property
     def dataframe(self) -> pd.DataFrame:

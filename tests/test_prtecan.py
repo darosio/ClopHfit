@@ -16,6 +16,7 @@ from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equ
 
 from clophfit import prtecan
 from clophfit.fitting.data_structures import FitResult
+from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
 from clophfit.fitting.pipeline import fit_plate
 from clophfit.prtecan import (
     Buffer,
@@ -1320,6 +1321,19 @@ class TestTitrationAnalysis:
         k_e02_glob = res_global["E02"].result.params["K"]
         assert k_e02_glob.value == pytest.approx(8.000, abs=1e-3)
         assert k_e02_glob.stderr == pytest.approx(0.031, abs=1e-3)
+
+    def test_titration_results_residuals(self, tit: Titration) -> None:
+        """Plate results expose the canonical residual table."""
+        ds = {k: tit.create_ds(k, label="2") for k in tit.fit_keys}
+        res = TitrationResults(tit.scheme, tit.fit_keys, fit_plate(ds, method="huber"))
+
+        table = res.residuals
+
+        assert list(table.columns) == RESIDUAL_TABLE_COLUMNS
+        assert not table.empty
+        # H02 fits on label 2; wells whose fit failed are skipped, not raised on.
+        assert "H02" in set(table["well"])
+        assert res.residuals is table  # cached
 
     def test_plot_buffer_with_title(self, tit: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
