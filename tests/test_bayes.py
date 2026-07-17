@@ -2303,7 +2303,7 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
         assert trace_obj is trace
         assert set(per_well_fit_results) == {"A01", "A02"}
         per_well_calls["count"] += 1
-        return {key: FitResult(mini=trace) for key in per_well_fit_results}
+        return {key: FitResult(trace=trace) for key in per_well_fit_results}
 
     def fake_pm_sample(*_unused_args: object, **_unused_kwargs: object) -> xr.DataTree:
         return trace

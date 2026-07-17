@@ -137,8 +137,8 @@ def test_residual_diagnostics_relative_well_scaled_and_trace_summary() -> None:
         is_ph=True,
     )
     results = {
-        "A01": FitResult(result=object(), mini=trace, dataset=dataset),
-        "A02": FitResult(result=object(), mini=trace, dataset=dataset),
+        "A01": FitResult(result=object(), trace=trace, dataset=dataset),
+        "A02": FitResult(result=object(), trace=trace, dataset=dataset),
     }
 
     diag = (
@@ -671,7 +671,7 @@ def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
         is_ph=True,
     )
     fr = FitResult(
-        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+        result=type("Result", (), {"params": params})(), trace=trace, dataset=ds
     )
     multi = MultiFitResult(trace=trace, results={"A01": fr})
 
@@ -703,7 +703,7 @@ def test_residuals_from_multifit_returns_convenient_schema() -> None:
         is_ph=True,
     )
     fr = FitResult(
-        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+        result=type("Result", (), {"params": params})(), trace=trace, dataset=ds
     )
     multi = MultiFitResult(trace=trace, results={"A01": fr})
 
@@ -746,7 +746,7 @@ def test_residuals_from_multifit_maps_outlier_probability_by_point() -> None:
         )
         return FitResult(
             result=type("Result", (), {"params": params})(),
-            mini=trace,
+            trace=trace,
             dataset=ds,
         )
 
