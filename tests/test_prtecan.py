@@ -17,7 +17,6 @@ from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equ
 from clophfit import prtecan
 from clophfit.fitting.data_structures import FitResult
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
-from clophfit.fitting.pipeline import fit_plate
 from clophfit.prtecan import (
     Buffer,
     BufferFit,
@@ -1288,12 +1287,12 @@ class TestTitrationAnalysis:
         """It fits each label separately."""
         # Test Label 1 for H02 (should be skipped because of OVER value or insufficient points)
         ds1 = {k: tit.create_ds(k, label="1") for k in tit.fit_keys}
-        res1 = fit_plate(ds1, method="huber")
+        res1 = tit.fit_plate(ds1, method="huber")
         assert not res1["H02"].is_valid()
 
         # Test Label 2 for H02
         ds2 = {k: tit.create_ds(k, label="2") for k in tit.fit_keys}
-        res2 = fit_plate(ds2, method="huber")
+        res2 = tit.fit_plate(ds2, method="huber")
         assert res2["H02"].is_valid()
 
         # Check 'K' and std error for 'H02' in the second fit result
@@ -1304,7 +1303,7 @@ class TestTitrationAnalysis:
 
         # Check 'K' and std error for 'H02' in global fit
         ds_global = {k: tit.create_global_ds(k) for k in tit.fit_keys}
-        res_global = fit_plate(ds_global, method="huber")
+        res_global = tit.fit_plate(ds_global, method="huber")
         assert res_global["H02"].result is not None
         k_h02_glob = res_global["H02"].result.params["K"]
         assert k_h02_glob.value == pytest.approx(7.899, abs=1e-3)
@@ -1325,7 +1324,7 @@ class TestTitrationAnalysis:
     def test_titration_results_residuals(self, tit: Titration) -> None:
         """Plate results expose the canonical residual table."""
         ds = {k: tit.create_ds(k, label="2") for k in tit.fit_keys}
-        res = TitrationResults(tit.scheme, tit.fit_keys, fit_plate(ds, method="huber"))
+        res = tit.fit_plate(ds, method="huber")
 
         table = res.residuals
 
