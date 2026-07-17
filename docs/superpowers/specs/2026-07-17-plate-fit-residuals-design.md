@@ -132,11 +132,35 @@ The mixin is applied to `FitResult`, `MultiFitResult`, and `TitrationResults`.
 
 `TitrationResults` (`prtecan/titration.py:414`) already carries
 `results: dict[str, FitResult]`, `scheme`, `fit_keys`, `dataframe`, `n_sd`, and
-`plot_k` (line 522). It gains `residuals` from the mixin and implements its own
-`residual_table()` in the §2 shape: resolve settings via
-`_resolve_residual_settings(trace=None, ...)` — classical plate fits have no
-trace, so this resolves to Normal standardization — then delegate to
-`residuals_from_fit_results(self.results, trace_id="", ...)`.
+`plot_k` (line 522). It gains `residuals` from the mixin, but **not** a
+plate-wide call into `_resolve_residual_settings`/`residuals_from_fit_results`.
+
+A plate can hold PyMC fits (`fit_plate(..., method="mcmc")` dispatches
+per-well to `fit_binding_pymc`), and each well's trace lives in that well's
+own `FitResult.mini` — there is no single plate-wide trace to resolve
+against. A single `trace=` kwarg on the plate's `residual_table` cannot
+represent 96 independent traces. So `TitrationResults.residual_table()`
+instead delegates to each well: for every `(well, fr)` in `self.results`
+where `fr.dataset is not None and fr.result is not None`, it calls
+`fr.residual_table(well=well, binding_function=..., robust=..., student_t_nu=..., outlier_threshold=...)`, forwarding its own parameters through unchanged, and
+concatenates the per-well frames with `pd.concat(..., ignore_index=True)`. Each
+`FitResult.residual_table` already resolves its own trace from `self.mini`
+(§2), so a classical well (`mini` is an lmfit `Minimizer` or ODR output)
+correctly resolves to Normal standardization, and an MCMC well (`mini` is an
+`xr.DataTree`) correctly resolves to Student-t/robust standardization from
+its own posterior — fixing the mislabeled `residual_likelihood` and all-NaN
+`p_outlier` that a single hard-coded `trace=None` produced for MCMC plates.
+When no wells survive, an empty `pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)`
+is returned so the schema stays stable.
+
+For a classical plate (`lm`/`huber`/`odr`), this is provably identical to the
+old single-call implementation: with no trace, each well's rows depend only
+on that well's own dataset and params, so per-well resolution and one
+plate-wide call over the same wells produce the same rows. Verified
+empirically against `tests/Tecan/140220/list.pH.csv` fitted with
+`method="huber"`: before and after tables are identical via
+`pandas.testing.assert_frame_equal` (shape `(1337, 17)`, 96 wells, including
+row order — the dict-iteration order is preserved either way).
 
 **Failed wells are skipped, not raised on.** `residuals_from_fit_results` already
 drops entries where `fr.dataset is None or fr.result is None`
@@ -281,3 +305,25 @@ synthetic unit tests.
 - Splitting `titration.py`.
 - Method-aware robust standardization for classical fits.
 - Any change to `RESIDUAL_TABLE_COLUMNS` or the residual builders themselves.
+
+### Follow-ups (future design context, not implemented here)
+
+`Titration.fit_plate` is ultimately intended to cover more plate-fitting
+strategies than it does today. Recorded here as roadmap context only:
+
+- **(a) Per-well PyMC.** Already supported today via `method="mcmc"`, and as
+  of this fix its residuals resolve correctly per well (see §3 above).
+- **(b) `pymc_multi`.** All wells fitted together in one hierarchical model.
+  This returns `MultiFitResult`, not `TitrationResults` — `MultiFitResult`
+  already has its own `residuals` via `residuals_from_multifit` over its
+  single shared trace (§4). Because it is a trace proxy over one posterior
+  rather than a plate of independent per-well fits, it does not fit
+  `Titration.fit_plate`'s current `-> TitrationResults` return type, and
+  reconciling the two return shapes is unresolved design work, not scoped
+  here.
+- **(c) FGLS.** Per-well huber fit, derive a noise model from the overall
+  residuals, apply it to the dataset dict — with outlier removal still to be
+  added — then rerun a final fit. This exists today as `fgls_plate_fit` in
+  `clophfit/fitting/pipeline.py`, orchestrated separately from
+  `Titration.fit_plate`; folding it into `fit_plate` (or vice versa) is
+  future work.

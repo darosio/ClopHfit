@@ -28,7 +28,7 @@ from clophfit.fitting.data_structures import (
     ResidualsMixin,
 )
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.model_validation import residuals_from_fit_results
+from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 from clophfit.fitting.utils import (
@@ -88,20 +88,20 @@ def _fit_datasets(
     """
     fitter: Callable[..., FitResult[typing.Any]]
     if method == "odr":
-        fitter, label = fit_binding_odr, "ODR fit"
+        fitter, fit_kind = fit_binding_odr, "ODR fit"
     elif method == "mcmc":
-        fitter, label = fit_binding_pymc, "MCMC fit"
+        fitter, fit_kind = fit_binding_pymc, "MCMC fit"
     else:
         method = method or "lm"
         fitter = functools.partial(fit_binding_glob, method=method)
-        label = "fit"
+        fit_kind = "fit"
 
     results: dict[str, FitResult[typing.Any]] = {}
     for well, ds in datasets.items():
         try:
             results[well] = fitter(ds, **kwargs)
         except InsufficientDataError:
-            logger.warning("Skip %s for well %s.", label, well)
+            logger.warning("Skip %s for well %s.", fit_kind, well)
             results[well] = FitResult()
     return results
 
@@ -499,13 +499,20 @@ class TitrationResults(ResidualsMixin):
     ) -> pd.DataFrame:
         """Compute the canonical plate-wide residual table.
 
+        Delegates to each well's own :meth:`FitResult.residual_table`, so
+        robustness is auto-detected per well from that well's own ``mini``
+        (its lmfit ``Minimizer``, ODR output, or PyMC trace). A plate fitted
+        with ``method="mcmc"`` therefore standardizes each well against its
+        own trace, instead of being forced to Normal standardization.
+
         Parameters
         ----------
         binding_function : Callable[..., object] | None
             Model evaluated for ``yhat``; defaults to ``binding_1site``.
+            Forwarded unchanged to each well.
         robust : bool | None
             Force the Student-t standardization of ``std_res``. ``None``
-            auto-detects, which for a classical plate fit means Normal.
+            auto-detects per well from that well's trace.
         student_t_nu : float | None
             Student-t degrees of freedom (``None`` uses detected/default).
         outlier_threshold : float
@@ -514,25 +521,25 @@ class TitrationResults(ResidualsMixin):
         Returns
         -------
         pd.DataFrame
-            The canonical residual table (see :attr:`residuals`). Wells whose
-            fit failed carry no dataset or result and are skipped, so the table
-            may cover fewer wells than ``fit_keys``.
+            The canonical residual table (see :attr:`residuals`), built by
+            concatenating each well's own table. Wells whose fit failed carry
+            no dataset or result and are skipped, so the table may cover
+            fewer wells than ``fit_keys``.
         """
-        settings = self._resolve_residual_settings(
-            None,
-            binding_function=binding_function,
-            robust=robust,
-            student_t_nu=student_t_nu,
-        )
-        return residuals_from_fit_results(
-            self.results,
-            trace_id="",
-            binding_function=settings.binding_function,
-            robust=settings.robust,
-            student_t_nu=settings.student_t_nu,
-            outlier_threshold=outlier_threshold,
-            residual_likelihood=settings.residual_likelihood,
-        )
+        tables = [
+            fr.residual_table(
+                well=well,
+                binding_function=binding_function,
+                robust=robust,
+                student_t_nu=student_t_nu,
+                outlier_threshold=outlier_threshold,
+            )
+            for well, fr in self.results.items()
+            if fr.dataset is not None and fr.result is not None
+        ]
+        if not tables:
+            return pd.DataFrame(columns=RESIDUAL_TABLE_COLUMNS)
+        return pd.concat(tables, ignore_index=True)
 
     @property
     def dataframe(self) -> pd.DataFrame:

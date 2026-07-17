@@ -1334,6 +1334,16 @@ class TestTitrationAnalysis:
         assert "H02" in set(table["well"])
         assert res.residuals is table  # cached
 
+    def test_titration_results_residuals_classical_plate(self, tit: Titration) -> None:
+        """A classical (non-MCMC) plate fit standardizes every well as Normal."""
+        res = tit.fit_plate(method="huber")
+
+        table = res.residuals
+
+        assert list(table.columns) == RESIDUAL_TABLE_COLUMNS
+        assert set(table["well"]) == tit.fit_keys
+        assert (table["residual_likelihood"] == "normal").all()
+
     def test_plot_buffer_with_title(self, tit: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
         g = tit.buffer.plot(title="Test Title")

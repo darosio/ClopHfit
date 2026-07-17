@@ -74,19 +74,26 @@ def test_fit_plate_routes_methods_and_preserves_well_keys(
 def test_fit_plate_turns_insufficient_data_into_empty_result(
     monkeypatch: pytest.MonkeyPatch, tit: Titration, method: str
 ) -> None:
-    """Per-well insufficient-data failures should not abort the whole plate."""
+    """One well's insufficient-data failure must not abort the other well's fit."""
 
-    def fail(*_args: object, **_kwargs: object) -> FitResult[Any]:
-        msg = "too few points"
-        raise InsufficientDataError(msg)
+    def backend(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
+        if len(ds["1"].y) < len(_dataset()["1"].y):
+            msg = "too few points"
+            raise InsufficientDataError(msg)
+        return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
-    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_glob", fail)
-    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_odr", fail)
-    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_pymc", fail)
+    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_glob", backend)
+    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_odr", backend)
+    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_pymc", backend)
 
-    results = tit.fit_plate({"A01": _dataset()}, method=method)
+    failing_ds = Dataset(
+        {"1": DataArray(np.array([6.0]), np.array([1.0]), y_errc=np.array([1.0]))},
+        is_ph=True,
+    )
+    results = tit.fit_plate({"A01": failing_ds, "A02": _dataset()}, method=method)
 
     assert results["A01"].result is None
+    assert results["A02"].result is not None
 
 
 def test_fit_plate_carries_plate_metadata(
