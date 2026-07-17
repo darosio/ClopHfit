@@ -77,6 +77,7 @@ exclude_patterns = [
     "Thumbs.db",
     ".DS_Store",
     "jupyter_execute",
+    "superpowers",  # internal design specs, not published documentation
     "**/.virtual_documents",
     "**/.ipynb_checkpoints",
 ]
