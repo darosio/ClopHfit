@@ -25,6 +25,14 @@ from uncertainties import ufloat  # type: ignore[import-untyped]
 # Re-exported for back-compat: MiniT lives in the leaf ``clophfit_types`` module
 # so it stays out of the fitting-package import cycle (see its definition there).
 from clophfit.clophfit_types import MiniT as MiniT  # noqa: PLC0414
+from clophfit.fitting.model_validation import (
+    STUDENT_T_NU,
+    residuals_from_fit_results,
+    residuals_from_multifit,
+    robust_likelihood_from_trace,
+    robust_settings_from_trace,
+)
+from clophfit.fitting.models import binding_1site
 
 from .errors import InvalidDataError
 
@@ -565,21 +573,16 @@ class FitResult[MiniType: MiniProtocol]:
         pd.DataFrame
             The canonical residual table (see :attr:`residuals`).
         """
-        from clophfit.fitting import model_validation  # noqa: PLC0415
-        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
-
         bfunc = binding_1site if binding_function is None else binding_function
         residual_likelihood: str | None = None
         if robust is None:
-            residual_likelihood = model_validation.robust_likelihood_from_trace(
-                self.mini
-            )
-            robust, detected_nu = model_validation.robust_settings_from_trace(self.mini)
+            residual_likelihood = robust_likelihood_from_trace(self.mini)
+            robust, detected_nu = robust_settings_from_trace(self.mini)
             if student_t_nu is None:
                 student_t_nu = detected_nu
         if student_t_nu is None:
-            student_t_nu = model_validation.STUDENT_T_NU
-        return model_validation.residuals_from_fit_results(
+            student_t_nu = STUDENT_T_NU
+        return residuals_from_fit_results(
             {well: self},
             trace_id="",
             binding_function=bfunc,
@@ -647,23 +650,16 @@ class MultiFitResult:
         pd.DataFrame
             The canonical residual table (see :attr:`residuals`).
         """
-        from clophfit.fitting import model_validation  # noqa: PLC0415
-        from clophfit.fitting.models import binding_1site  # noqa: PLC0415
-
         bfunc = binding_1site if binding_function is None else binding_function
         residual_likelihood: str | None = None
         if robust is None:
-            residual_likelihood = model_validation.robust_likelihood_from_trace(
-                self.trace
-            )
-            robust, detected_nu = model_validation.robust_settings_from_trace(
-                self.trace
-            )
+            residual_likelihood = robust_likelihood_from_trace(self.trace)
+            robust, detected_nu = robust_settings_from_trace(self.trace)
             if student_t_nu is None:
                 student_t_nu = detected_nu
         if student_t_nu is None:
-            student_t_nu = model_validation.STUDENT_T_NU
-        return model_validation.residuals_from_multifit(
+            student_t_nu = STUDENT_T_NU
+        return residuals_from_multifit(
             self,
             trace_id="",
             binding_function=bfunc,
