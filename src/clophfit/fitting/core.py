@@ -282,7 +282,7 @@ def analyze_spectra(
     fit_params = result.params if result else Parameters()
     plot_fit(ax4, ds, fit_params, nboot=N_BOOT, pp=PlotParameters(is_ph))
     ax4.set_ylabel(ylabel, color=ylabel_color)
-    return FitResult(fig, result, mini, ds)
+    return FitResult(fig, result, mini=mini, dataset=ds)
 
 
 def analyze_spectra_glob(
@@ -309,7 +309,7 @@ def analyze_spectra_glob(
         weight_multi_ds_titration(ds_svd)
         f_res = fit_binding_glob(ds_svd)
         fig = _plot_spectra_glob_emcee(titration, ds_svd, f_res)
-        gsvd = FitResult(fig, f_res.result, f_res.mini)
+        gsvd = FitResult(fig, f_res.result, mini=f_res.mini)
     else:
         svd, gsvd = None, None
 
@@ -318,7 +318,7 @@ def analyze_spectra_glob(
         weight_multi_ds_titration(ds_bands)
         f_res = fit_binding_glob(ds_bands)
         fig = _plot_spectra_glob_emcee(titration, ds_bands, f_res, dbands)
-        bands = FitResult(fig, f_res.result, f_res.mini)
+        bands = FitResult(fig, f_res.result, mini=f_res.mini)
     else:
         bands = None
 
@@ -490,7 +490,7 @@ def fit_binding_glob(  # noqa: PLR0913
     plot_fit(
         ax, ds_working, fit_params, nboot=N_BOOT, pp=PlotParameters(ds_working.is_ph)
     )
-    return FitResult(fig, result, mini, copy.deepcopy(ds_working))
+    return FitResult(fig, result, mini=mini, dataset=copy.deepcopy(ds_working))
 
 
 # ---- Legacy helper ----

@@ -141,6 +141,25 @@ def test_fit_binding_glob_multi(multi_dataset: Dataset) -> None:
     assert np.isclose(f_res.result.params["S1_2"].value, 0.0, atol=1e-4)
 
 
+def test_fitresult_routes_backend_to_named_field(ph_dataset: Dataset) -> None:
+    """Each backend object lands in its own field, the others stay None."""
+    lm = fit_binding_glob(ph_dataset, method="lm")
+    assert lm.mini is not None
+    assert lm.trace is None
+    assert lm.odr is None
+
+    odr = fit_binding_odr(ph_dataset)
+    assert odr.odr is not None
+    assert odr.mini is None
+    assert odr.trace is None
+
+
+def test_fitresult_is_valid_true_for_each_backend(ph_dataset: Dataset) -> None:
+    """is_valid() no longer requires the lmfit-specific mini field."""
+    assert fit_binding_glob(ph_dataset, method="lm").is_valid()
+    assert not FitResult().is_valid()
+
+
 def test_fit_binding_insufficient_data() -> None:
     """It raises InsufficientDataError when data points are too few."""
     x = np.array([7.0, 8.0])

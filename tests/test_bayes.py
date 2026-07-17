@@ -2450,15 +2450,15 @@ def test_single_and_multi_pymc_none_noise_model_estimate_similar_ye_mags(
             sampler=SamplerConfig(n_samples=150, n_tune=150),
         )
 
-        assert single.mini is not None
+        assert single.trace is not None
         if shared_ye_mags:
-            assert posterior_mean(single.mini, "ye_mag") == pytest.approx(
+            assert posterior_mean(single.trace, "ye_mag") == pytest.approx(
                 posterior_mean(multi.trace, "ye_mag"), abs=0.35
             )
         else:
             for lbl in ("1", "2"):
                 var_name = f"ye_mag_{lbl}"
-                assert posterior_mean(single.mini, var_name) == pytest.approx(
+                assert posterior_mean(single.trace, var_name) == pytest.approx(
                     posterior_mean(multi.trace, var_name), abs=0.35
                 )
 
@@ -2480,7 +2480,7 @@ def test_fit_binding_pymc_smoke_test(ph_dataset: Dataset) -> None:
         initial_fit, n_xerr=0, n_sd=10.0, sampler=SamplerConfig(n_samples=50)
     )
     # Check that we got a result
-    assert fit_result_pymc.mini is not None
+    assert fit_result_pymc.trace is not None
     assert fit_result_pymc.result is not None
     # Check that parameters are in the result
     assert "K" in fit_result_pymc.result.params
@@ -2823,7 +2823,10 @@ class TestYerrExtraction:
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
         fr: FitResult[MiniT] = FitResult(
-            None, type("Result", (), {"params": params})(), None, ph_dataset
+            None,
+            type("Result", (), {"params": params})(),
+            mini=None,
+            dataset=ph_dataset,
         )
 
         results = {"A01": fr}
@@ -2880,7 +2883,10 @@ class TestYerrExtraction:
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
         fr: FitResult[MiniT] = FitResult(
-            None, type("Result", (), {"params": params})(), None, ph_dataset
+            None,
+            type("Result", (), {"params": params})(),
+            mini=None,
+            dataset=ph_dataset,
         )
 
         results = {"A01": fr}

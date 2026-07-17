@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     )
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
+    from odrpack import OdrResult
 
     from clophfit.clophfit_types import ArrayF, ArrayMask
 
@@ -577,8 +578,13 @@ class FitResult[MiniType: MiniProtocol](ResidualsMixin):
     residual, redchi, and success fields (as in lmfit). For lmfit this is a
     MinimizerResult."""
     mini: MiniType | None = None
-    """The primary backend object (e.g., lmfit.Minimizer, odrpack.Output, or
-    xr.DataTree for PyMC)."""
+    """The lmfit ``Minimizer`` object (for ``conf_interval``, ``emcee``,
+    ``userargs``). ``None`` for non-lmfit backends."""
+    trace: xr.DataTree | None = None
+    """The PyMC posterior trace. ``None`` for non-PyMC backends."""
+    odr: OdrResult | None = None
+    """The odrpack output (``res_var``, outlier detection). ``None`` for
+    non-ODR backends."""
     dataset: Dataset | None = None
     """Dataset used for the fit (typically a deep copy of the input dataset)."""
 
@@ -595,11 +601,13 @@ class FitResult[MiniType: MiniProtocol](ResidualsMixin):
         return f"K = {k_val:.3g} (no uncertainty available)"
 
     def is_valid(self) -> bool:
-        """Whether figure, result, and minimizer exist."""
+        """Whether a figure, a result, and at least one backend object exist."""
         return (
             self.figure is not None
             and self.result is not None
-            and self.mini is not None
+            and (
+                self.mini is not None or self.trace is not None or self.odr is not None
+            )
         )
 
     def residual_table(
@@ -634,7 +642,7 @@ class FitResult[MiniType: MiniProtocol](ResidualsMixin):
             The canonical residual table (see :attr:`residuals`).
         """
         settings = self._resolve_residual_settings(
-            self.mini,
+            self.trace,
             binding_function=binding_function,
             robust=robust,
             student_t_nu=student_t_nu,
@@ -646,7 +654,7 @@ class FitResult[MiniType: MiniProtocol](ResidualsMixin):
             robust=settings.robust,
             student_t_nu=settings.student_t_nu,
             outlier_threshold=outlier_threshold,
-            trace=self.mini,
+            trace=self.trace,
             residual_likelihood=settings.residual_likelihood,
         )
 

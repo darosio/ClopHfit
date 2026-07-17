@@ -71,9 +71,9 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     fit_res = bayes.fit_binding_pymc(
         fr, n_xerr=1.0, sampler=SamplerConfig(n_samples=4000, random_seed=42)
     )
-    assert fit_res.mini is not None
-    assert hasattr(fit_res.mini, "posterior")
-    trace = fit_res.mini
+    assert fit_res.trace is not None
+    assert hasattr(fit_res.trace, "posterior")
+    trace = fit_res.trace
 
     # 3. Analyze Results
     # Keep full float precision: ``az.summary`` rounds to 2 decimals by default,

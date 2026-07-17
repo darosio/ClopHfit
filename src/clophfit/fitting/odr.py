@@ -215,7 +215,10 @@ def fit_binding_odr(  # noqa: C901, PLR0915
         ax = fig.add_subplot(111)
         plot_fit(ax, ds, params, nboot=20, pp=PlotParameters(ds.is_ph))
         return FitResult(
-            fig, _Result(params, residual=residuals, redchi=output.res_var), output, ds
+            fig,
+            _Result(params, residual=residuals, redchi=output.res_var),
+            odr=output,
+            dataset=ds,
         )
 
     # Initial fit
@@ -230,31 +233,31 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     if remove_outliers:
         _method, threshold, _min_keep = parse_remove_outliers(remove_outliers)
 
-    residual_variance = ro.mini.res_var if ro.mini else 0.0
+    residual_variance = ro.odr.res_var if ro.odr else 0.0
 
     for _ in range(max_iter):
-        if remove_outliers and ro.mini:
-            omask = outlier(ro.mini, threshold=threshold)
+        if remove_outliers and ro.odr:
+            omask = outlier(ro.odr, threshold=threshold)
             if omask.any() and ro.dataset:
                 # Apply mask to the starting FitResult's dataset to exclude points
                 fr.dataset.apply_mask(~omask)
 
         rn = _single_odr_fit(fr)
-        if rn.mini and rn.mini.res_var == 0:
+        if rn.odr and rn.odr.res_var == 0:
             rn = ro
             break
 
-        if rn.mini and residual_variance - rn.mini.res_var < tol:
+        if rn.odr and residual_variance - rn.odr.res_var < tol:
             if not remove_outliers:
                 break
             # If removing outliers, also require no new outliers to converge
             if remove_outliers:
-                omask_new = outlier(rn.mini, threshold=threshold)
+                omask_new = outlier(rn.odr, threshold=threshold)
                 if not omask_new.any():
                     ro = rn
                     break
 
-        residual_variance = rn.mini.res_var if rn.mini else 0.0
+        residual_variance = rn.odr.res_var if rn.odr else 0.0
         ro = rn
         fr = copy.deepcopy(ro)  # update starting point for next iteration
 

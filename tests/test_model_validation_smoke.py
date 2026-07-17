@@ -822,7 +822,7 @@ def _single_well_fit_result(mini: object) -> FitResult[Any]:
     y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, 40.0])
     ds = Dataset({"1": DataArray(x, y, y_errc=np.array([1.0, 1.0, 2.0]))}, is_ph=True)
     result = cast("Any", type("Result", (), {"params": params})())
-    return FitResult(result=result, dataset=ds, mini=cast("Any", mini))
+    return FitResult(result=result, dataset=ds, trace=cast("Any", mini))
 
 
 def test_single_well_residuals_extract_p_outlier_from_mixture_trace() -> None:

@@ -1552,7 +1552,7 @@ def process_trace(
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
 
     residuals = _compute_weighted_residuals(ds, rpars)
-    return FitResult(fig, _Result(rpars, residual=residuals), trace, ds)
+    return FitResult(fig, _Result(rpars, residual=residuals), trace=trace, dataset=ds)
 
 
 def extract_fit(  # noqa: PLR0913, C901, PLR0912
@@ -1647,8 +1647,8 @@ def extract_fit(  # noqa: PLR0913, C901, PLR0912
     ax = fig.add_subplot(111)
     plot_fit(ax, ds, rpars, nboot=N_BOOT, pp=PlotParameters(ds.is_ph))
     residuals = _compute_weighted_residuals(ds, rpars)
-    mini = trace_obj if isinstance(trace_obj, xr.DataTree) else xr.DataTree()
-    return FitResult(fig, _Result(rpars, residual=residuals), mini, ds)
+    trace = trace_obj if isinstance(trace_obj, xr.DataTree) else xr.DataTree()
+    return FitResult(fig, _Result(rpars, residual=residuals), trace=trace, dataset=ds)
 
 
 def _extract_x_true_from_trace_df(
@@ -1957,7 +1957,7 @@ def _per_well_fit_results_from_trace(
             raw_trace=trace,
             global_p_names=global_p_names,
         )
-        per_well_results[key].mini = trace
+        per_well_results[key].trace = trace
     return per_well_results
 
 
