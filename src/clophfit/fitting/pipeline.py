@@ -5,7 +5,6 @@ import typing
 
 import pandas as pd
 
-from clophfit.fitting.bayes import fit_binding_pymc
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
     Dataset,
@@ -16,7 +15,6 @@ from clophfit.fitting.data_structures import (
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.model_validation import residuals_from_fit_results
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.odr import fit_binding_odr
 from clophfit.fitting.utils import (
     compute_plate_slopes,
     fit_gain_from_residuals,
@@ -225,56 +223,3 @@ def fgls_plate_fit(  # noqa: PLR0913
         noise_model = new_noise
 
     return results, noise_model  # type: ignore[return-value]
-
-
-def fit_plate(
-    datasets: dict[str, Dataset],
-    method: str = "",
-    **kwargs: typing.Any,  # noqa: ANN401
-) -> dict[str, FitResult[typing.Any]]:
-    """Run a single-pass fit on an entire plate of datasets.
-
-    Parameters
-    ----------
-    datasets : dict[str, Dataset]
-        A mapping of well keys (e.g. 'A01') to `Dataset` objects.
-    method : str
-        The fitting method to use: 'lm' (default), 'huber', 'odr', or 'mcmc'.
-        Other methods supported by :func:`clophfit.fitting.core.fit_binding_glob`
-        may also be used.
-    **kwargs : typing.Any
-        Additional keyword arguments passed to the specific fitting function.
-
-    Returns
-    -------
-    dict[str, FitResult[typing.Any]]
-        A dictionary mapping well keys to their corresponding `FitResult`.
-    """
-    results: dict[str, FitResult[typing.Any]] = {}
-
-    if method == "odr":
-        for well, ds in datasets.items():
-            try:
-                results[well] = fit_binding_odr(ds, **kwargs)
-            except InsufficientDataError:
-                logger.warning("Skip ODR fit for well %s.", well)
-                results[well] = FitResult()
-    elif method == "mcmc":
-        for well, ds in datasets.items():
-            try:
-                results[well] = fit_binding_pymc(ds, **kwargs)
-            except InsufficientDataError:
-                logger.warning("Skip MCMC fit for well %s.", well)
-                results[well] = FitResult()
-    else:
-        if not method:
-            method = "lm"
-        print(method)
-        for well, ds in datasets.items():
-            try:
-                results[well] = fit_binding_glob(ds, method=method, **kwargs)
-            except InsufficientDataError:
-                logger.warning("Skip fit for well %s.", well)
-                results[well] = FitResult()
-
-    return results
