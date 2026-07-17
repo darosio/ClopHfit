@@ -86,7 +86,6 @@
         "dependencies",
         "optional"
       ],
-      "skipArtifactsUpdate": true,
       "commitMessagePrefix": "chore(dep):"
     },
     {
