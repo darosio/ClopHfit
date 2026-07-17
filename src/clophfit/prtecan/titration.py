@@ -31,7 +31,12 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.model_validation import residuals_from_fit_results
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
-from clophfit.fitting.utils import apply_outlier_mask
+from clophfit.fitting.utils import (
+    apply_outlier_mask,
+    flag_trend_outliers,
+    roughness,
+    smoothness,
+)
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
@@ -782,12 +787,6 @@ class Titration(TecanfilesGroup):
         list[str]
             Newly discarded well keys.
         """
-        from clophfit.fitting.utils import (  # noqa: PLC0415
-            flag_trend_outliers,
-            roughness,
-            smoothness,
-        )
-
         first_label = next(iter(self.labelblocksgroups.keys()), None)
         if first_label is None:
             return []
