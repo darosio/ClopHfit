@@ -68,7 +68,7 @@ def _fit_datasets(
     datasets: dict[str, Dataset],
     method: str,
     **kwargs: typing.Any,  # noqa: ANN401
-) -> dict[str, FitResult[typing.Any]]:
+) -> dict[str, FitResult]:
     """Fit each dataset, turning per-well failures into empty results.
 
     Parameters
@@ -83,10 +83,10 @@ def _fit_datasets(
 
     Returns
     -------
-    dict[str, FitResult[typing.Any]]
+    dict[str, FitResult]
         One entry per input well; failed wells hold an empty `FitResult`.
     """
-    fitter: Callable[..., FitResult[typing.Any]]
+    fitter: Callable[..., FitResult]
     if method == "odr":
         fitter, fit_kind = fit_binding_odr, "ODR fit"
     elif method == "mcmc":
@@ -96,7 +96,7 @@ def _fit_datasets(
         fitter = functools.partial(fit_binding_glob, method=method)
         fit_kind = "fit"
 
-    results: dict[str, FitResult[typing.Any]] = {}
+    results: dict[str, FitResult] = {}
     for well, ds in datasets.items():
         try:
             results[well] = fitter(ds, **kwargs)
@@ -479,7 +479,7 @@ class TitrationResults(ResidualsMixin):
 
     scheme: PlateScheme = field(default_factory=PlateScheme)
     fit_keys: set[str] = field(default_factory=set)
-    results: dict[str, FitResult[typing.Any]] = field(default_factory=dict)
+    results: dict[str, FitResult] = field(default_factory=dict)
     _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
     titration: InitVar[Titration | None] = None
 
@@ -565,7 +565,7 @@ class TitrationResults(ResidualsMixin):
         """Get or lazily compute a result for a given key."""
         return repr(self.results)
 
-    def __getitem__(self, key: str) -> FitResult[typing.Any]:
+    def __getitem__(self, key: str) -> FitResult:
         """Fetch result for a single key."""
         return self.results[key]
 

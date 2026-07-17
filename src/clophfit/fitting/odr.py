@@ -17,7 +17,7 @@ from clophfit.fitting.utils import identify_outliers_zscore, parse_remove_outlie
 from clophfit.utils import weights_from_sigma
 
 from .core import fit_binding_glob
-from .data_structures import Dataset, FitResult, MiniT, _Result
+from .data_structures import Dataset, FitResult, _Result
 
 if typing.TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF, ArrayMask
@@ -115,18 +115,18 @@ def generalized_combined_model(
 
 
 def fit_binding_odr(  # noqa: C901, PLR0915
-    ds_or_fr: Dataset | FitResult[MiniT],
+    ds_or_fr: Dataset | FitResult,
     *,
     reweight: bool = False,
     remove_outliers: str | None = None,
     max_iter: int = 15,
     tol: float = 0.1,
-) -> FitResult[odrpack.OdrResult]:
+) -> FitResult:
     """Analyze multi-label titration datasets using ODR.
 
     Parameters
     ----------
-    ds_or_fr : Dataset | FitResult[MiniT]
+    ds_or_fr : Dataset | FitResult
         Either a Dataset (will run initial LS fit) or a FitResult with initial params.
     reweight : bool
         Whether to perform iterative reweighting (recursive ODR).
@@ -140,7 +140,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
 
     Returns
     -------
-    FitResult[odrpack.OdrResult]
+    FitResult
         ODR fitting results. Residuals are WEIGHTED by the ORIGINAL y_err
         (before ODR modified it), making them comparable to LM residuals.
     """
@@ -154,7 +154,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     if fr.result is None or fr.dataset is None:
         return FitResult()
 
-    def _single_odr_fit(current_fr: FitResult[MiniT]) -> FitResult[odrpack.OdrResult]:
+    def _single_odr_fit(current_fr: FitResult) -> FitResult:
         if current_fr.result is None or current_fr.dataset is None:
             return FitResult()
         params = current_fr.result.params
@@ -215,7 +215,10 @@ def fit_binding_odr(  # noqa: C901, PLR0915
         ax = fig.add_subplot(111)
         plot_fit(ax, ds, params, nboot=20, pp=PlotParameters(ds.is_ph))
         return FitResult(
-            fig, _Result(params, residual=residuals, redchi=output.res_var), output, ds
+            fig,
+            _Result(params, residual=residuals, redchi=output.res_var),
+            odr=output,
+            dataset=ds,
         )
 
     # Initial fit
@@ -230,31 +233,31 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     if remove_outliers:
         _method, threshold, _min_keep = parse_remove_outliers(remove_outliers)
 
-    residual_variance = ro.mini.res_var if ro.mini else 0.0
+    residual_variance = ro.odr.res_var if ro.odr else 0.0
 
     for _ in range(max_iter):
-        if remove_outliers and ro.mini:
-            omask = outlier(ro.mini, threshold=threshold)
+        if remove_outliers and ro.odr:
+            omask = outlier(ro.odr, threshold=threshold)
             if omask.any() and ro.dataset:
                 # Apply mask to the starting FitResult's dataset to exclude points
                 fr.dataset.apply_mask(~omask)
 
         rn = _single_odr_fit(fr)
-        if rn.mini and rn.mini.res_var == 0:
+        if rn.odr and rn.odr.res_var == 0:
             rn = ro
             break
 
-        if rn.mini and residual_variance - rn.mini.res_var < tol:
+        if rn.odr and residual_variance - rn.odr.res_var < tol:
             if not remove_outliers:
                 break
             # If removing outliers, also require no new outliers to converge
             if remove_outliers:
-                omask_new = outlier(rn.mini, threshold=threshold)
+                omask_new = outlier(rn.odr, threshold=threshold)
                 if not omask_new.any():
                     ro = rn
                     break
 
-        residual_variance = rn.mini.res_var if rn.mini else 0.0
+        residual_variance = rn.odr.res_var if rn.odr else 0.0
         ro = rn
         fr = copy.deepcopy(ro)  # update starting point for next iteration
 

@@ -34,7 +34,6 @@ from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
     FitResult,
-    MiniT,
     MultiFitResult,
     NoiseModelParams,
     PlateNoiseModel,
@@ -383,7 +382,7 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
     """The data-prior strategy should not run the LMFit prefit."""
     pytest.importorskip("pymc")
 
-    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult:
         msg = "fit_binding_glob should not be called"
         raise AssertionError(msg)
 
@@ -430,7 +429,7 @@ def test_normalize_fit_inputs_data_priors_skips_lmfit(
 ) -> None:
     """Multi-well normalization should seed from data without calling LMFit."""
 
-    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult:
         msg = "fit_binding_glob should not be called"
         raise AssertionError(msg)
 
@@ -458,7 +457,7 @@ def test_normalize_fit_inputs_data_priors_ignores_prefit_result(
 ) -> None:
     """A supplied FitResult should be re-seeded from its dataset, not reused."""
 
-    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult:
         msg = "fit_binding_glob should not be called"
         raise AssertionError(msg)
 
@@ -489,7 +488,7 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
     scheme = PlateScheme()
     scheme.names = {"ctrl": {"A01", "A02"}}
 
-    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult[Any]:
+    def fail_lmfit(*_args: object, **_kwargs: object) -> FitResult:
         msg = "fit_binding_glob should not be called"
         raise AssertionError(msg)
 
@@ -1295,8 +1294,8 @@ def test_fit_binding_pymc_residual_refit_uses_requested_two_pass_settings(
     calls: list[dict[str, Any]] = []
 
     def fake_fit_binding_pymc(
-        ds_or_fr: Dataset | FitResult[MiniT], **kwargs: object
-    ) -> FitResult[MiniT]:
+        ds_or_fr: Dataset | FitResult, **kwargs: object
+    ) -> FitResult:
         ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
         assert ds is not None
         calls.append({
@@ -1347,8 +1346,8 @@ def test_fit_binding_pymc_residual_refit_masks_one_outlier_per_label_by_default(
     calls: list[Dataset] = []
 
     def fake_fit_binding_pymc(
-        ds_or_fr: Dataset | FitResult[MiniT], **_kwargs: object
-    ) -> FitResult[MiniT]:
+        ds_or_fr: Dataset | FitResult, **_kwargs: object
+    ) -> FitResult:
         ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
         assert ds is not None
         calls.append(ds.copy())
@@ -1398,8 +1397,8 @@ def test_fit_binding_pymc_residual_refit_proportional_noise_strategy(
     calls: list[dict[str, Any]] = []
 
     def fake_fit_binding_pymc(
-        ds_or_fr: Dataset | FitResult[MiniT], **kwargs: object
-    ) -> FitResult[MiniT]:
+        ds_or_fr: Dataset | FitResult, **kwargs: object
+    ) -> FitResult:
         ds = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
         assert ds is not None
         calls.append({
@@ -1453,13 +1452,13 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
     }
     calls: list[dict[str, Any]] = []
 
-    def input_label1_mask(value: Dataset | FitResult[MiniT]) -> list[bool]:
+    def input_label1_mask(value: Dataset | FitResult) -> list[bool]:
         dataset = value.dataset if isinstance(value, FitResult) else value
         assert dataset is not None
         return [bool(v) for v in dataset["1"].mask.copy().tolist()]
 
     def fake_fit_binding_pymc_multi(
-        fit_inputs: dict[str, Dataset | FitResult[MiniT]],
+        fit_inputs: dict[str, Dataset | FitResult],
         _scheme: PlateScheme,
         **kwargs: object,
     ) -> MultiFitResult:
@@ -1472,7 +1471,7 @@ def test_fit_binding_pymc_multi_residual_refit_uses_well_noise_scale(
             },
             **kwargs,
         })
-        fit_results: dict[str, FitResult[MiniT]] = {}
+        fit_results: dict[str, FitResult] = {}
         for well, item in fit_inputs.items():
             if isinstance(item, FitResult):
                 fit_results[well] = item
@@ -1545,12 +1544,12 @@ def test_fit_binding_pymc_multi_residual_refit_can_share_well_noise_scale(
     calls: list[dict[str, object]] = []
 
     def fake_fit_binding_pymc_multi(
-        fit_inputs: dict[str, Dataset | FitResult[MiniT]],
+        fit_inputs: dict[str, Dataset | FitResult],
         _scheme: PlateScheme,
         **kwargs: object,
     ) -> MultiFitResult:
         calls.append(kwargs)
-        fit_results: dict[str, FitResult[MiniT]] = {}
+        fit_results: dict[str, FitResult] = {}
         for well, item in fit_inputs.items():
             fit_results[well] = (
                 item if isinstance(item, FitResult) else fit_binding_glob(item)
@@ -2294,17 +2293,17 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
 
     def fake_per_well_fit_results_from_trace(
         trace_obj: xr.DataTree,
-        per_well_fit_results: dict[str, FitResult[MiniT]],
+        per_well_fit_results: dict[str, FitResult],
         per_well_scheme: PlateScheme,
         *,
         x_error_model: str,
         global_p_names: object = (),
-    ) -> dict[str, FitResult[xr.DataTree]]:
+    ) -> dict[str, FitResult]:
         del per_well_scheme, x_error_model, global_p_names
         assert trace_obj is trace
         assert set(per_well_fit_results) == {"A01", "A02"}
         per_well_calls["count"] += 1
-        return {key: FitResult(mini=trace) for key in per_well_fit_results}
+        return {key: FitResult(trace=trace) for key in per_well_fit_results}
 
     def fake_pm_sample(*_unused_args: object, **_unused_kwargs: object) -> xr.DataTree:
         return trace
@@ -2450,15 +2449,15 @@ def test_single_and_multi_pymc_none_noise_model_estimate_similar_ye_mags(
             sampler=SamplerConfig(n_samples=150, n_tune=150),
         )
 
-        assert single.mini is not None
+        assert single.trace is not None
         if shared_ye_mags:
-            assert posterior_mean(single.mini, "ye_mag") == pytest.approx(
+            assert posterior_mean(single.trace, "ye_mag") == pytest.approx(
                 posterior_mean(multi.trace, "ye_mag"), abs=0.35
             )
         else:
             for lbl in ("1", "2"):
                 var_name = f"ye_mag_{lbl}"
-                assert posterior_mean(single.mini, var_name) == pytest.approx(
+                assert posterior_mean(single.trace, var_name) == pytest.approx(
                     posterior_mean(multi.trace, var_name), abs=0.35
                 )
 
@@ -2480,7 +2479,7 @@ def test_fit_binding_pymc_smoke_test(ph_dataset: Dataset) -> None:
         initial_fit, n_xerr=0, n_sd=10.0, sampler=SamplerConfig(n_samples=50)
     )
     # Check that we got a result
-    assert fit_result_pymc.mini is not None
+    assert fit_result_pymc.trace is not None
     assert fit_result_pymc.result is not None
     # Check that parameters are in the result
     assert "K" in fit_result_pymc.result.params
@@ -2543,7 +2542,7 @@ def test_fit_binding_pymc_empty_result() -> None:
     """Test that fit_binding_pymc handles empty FitResult gracefully."""
     pytest.importorskip("pymc")
     # Create an empty FitResult
-    empty_result: FitResult[MiniT] = FitResult()
+    empty_result: FitResult = FitResult()
     # Should return empty result without crashing
     result = fit_binding_pymc(empty_result, sampler=SamplerConfig(n_samples=10))
     assert result.result is None or result.mini is None
@@ -2822,8 +2821,11 @@ class TestYerrExtraction:
         params[f"S0_{lbl}"].stderr = 1.0
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
-        fr: FitResult[MiniT] = FitResult(
-            None, type("Result", (), {"params": params})(), None, ph_dataset
+        fr: FitResult = FitResult(
+            None,
+            type("Result", (), {"params": params})(),
+            mini=None,
+            dataset=ph_dataset,
         )
 
         results = {"A01": fr}
@@ -2879,8 +2881,11 @@ class TestYerrExtraction:
         params[f"S0_{lbl}"].stderr = 1.0
         params.add(f"S1_{lbl}", value=0.0)
         params[f"S1_{lbl}"].stderr = 1.0
-        fr: FitResult[MiniT] = FitResult(
-            None, type("Result", (), {"params": params})(), None, ph_dataset
+        fr: FitResult = FitResult(
+            None,
+            type("Result", (), {"params": params})(),
+            mini=None,
+            dataset=ph_dataset,
         )
 
         results = {"A01": fr}

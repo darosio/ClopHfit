@@ -1023,9 +1023,7 @@ def trace_parameter_summary(results: _t.Mapping[str, _t.Any]) -> pd.DataFrame:
     """
     rows: list[dict[str, _t.Any]] = []
     for well, fit in results.items():
-        trace = getattr(fit, "mini", None)
-        if trace is None:
-            trace = getattr(fit, "trace", None)
+        trace = getattr(fit, "trace", None)
         if trace is None:
             continue
         posterior = _posterior_dataset_or_none(trace)

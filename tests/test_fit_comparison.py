@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 
 from clophfit.fitting.core import fit_binding_glob, weight_multi_ds_titration
-from clophfit.fitting.data_structures import DataArray, Dataset, FitResult, MiniT
+from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.models import binding_1site
 
 
@@ -90,7 +90,7 @@ def test_compare_lm_variants(
     assert fr_iter.result is not None
     assert fr_iter.result.success
 
-    def _metrics(fr: FitResult[MiniT]) -> tuple[float, float]:
+    def _metrics(fr: FitResult) -> tuple[float, float]:
         r = fr.result
         if r:
             return float(r.params["K"].value), float(getattr(r, "redchi", np.nan))

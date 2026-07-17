@@ -137,8 +137,8 @@ def test_residual_diagnostics_relative_well_scaled_and_trace_summary() -> None:
         is_ph=True,
     )
     results = {
-        "A01": FitResult(result=object(), mini=trace, dataset=dataset),
-        "A02": FitResult(result=object(), mini=trace, dataset=dataset),
+        "A01": FitResult(result=object(), trace=trace, dataset=dataset),
+        "A02": FitResult(result=object(), trace=trace, dataset=dataset),
     }
 
     diag = (
@@ -177,7 +177,7 @@ def test_residual_comparison_from_fit_results_and_value_switch() -> None:
     x = np.array([6.0, 7.0, 8.0])
     y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, -1.0])
     ds = Dataset({"1": DataArray(x, y, y_errc=np.ones_like(y))}, is_ph=True)
-    fr: FitResult[Any] = FitResult(
+    fr: FitResult = FitResult(
         result=type("Result", (), {"params": params})(), dataset=ds
     )
 
@@ -312,7 +312,7 @@ def test_masked_datasets_from_residual_outliers_masks_marked_rows() -> None:
         },
         is_ph=True,
     )
-    fr: FitResult[Any] = FitResult(result=object(), dataset=ds)
+    fr: FitResult = FitResult(result=object(), dataset=ds)
     residuals = pd.DataFrame({
         "well": ["A01"],
         "label": ["1"],
@@ -450,7 +450,7 @@ def test_pareto_k_table_maps_multiwell_likelihood_rows(
             is_ph=True,
         )
 
-    results: dict[str, FitResult[Any]] = {
+    results: dict[str, FitResult] = {
         "A01": FitResult(
             dataset=ds(
                 np.array([10.0, 11.0, 12.0]),
@@ -612,7 +612,7 @@ def test_ctr_summary_classical_rows_and_prior_widening() -> None:
         def __init__(self) -> None:
             self.names = {"ctrl": {"A01", "A02", "A03"}}
 
-    def fit_result(k: float, stderr: float | None) -> FitResult[Any]:
+    def fit_result(k: float, stderr: float | None) -> FitResult:
         params = Parameters()
         params.add("K", value=k)
         params["K"].stderr = stderr
@@ -671,7 +671,7 @@ def test_residuals_from_multifit_does_not_double_apply_ye_mag() -> None:
         is_ph=True,
     )
     fr = FitResult(
-        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+        result=type("Result", (), {"params": params})(), trace=trace, dataset=ds
     )
     multi = MultiFitResult(trace=trace, results={"A01": fr})
 
@@ -703,7 +703,7 @@ def test_residuals_from_multifit_returns_convenient_schema() -> None:
         is_ph=True,
     )
     fr = FitResult(
-        result=type("Result", (), {"params": params})(), mini=trace, dataset=ds
+        result=type("Result", (), {"params": params})(), trace=trace, dataset=ds
     )
     multi = MultiFitResult(trace=trace, results={"A01": fr})
 
@@ -739,14 +739,14 @@ def test_residuals_from_multifit_maps_outlier_probability_by_point() -> None:
     x = np.array([6.0, 7.0])
     y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True)
 
-    def fit_result() -> FitResult[xr.DataTree]:
+    def fit_result() -> FitResult:
         ds = Dataset(
             {"1": DataArray(x, y, y_errc=np.array([10.0, 20.0]))},
             is_ph=True,
         )
         return FitResult(
             result=type("Result", (), {"params": params})(),
-            mini=trace,
+            trace=trace,
             dataset=ds,
         )
 
@@ -792,7 +792,7 @@ def test_residuals_from_fit_results_robust_params_and_drop_invalid_sigma() -> No
         {"1": DataArray(x, y, y_errc=np.array([1.0, 0.0, 2.0]))},
         is_ph=True,
     )
-    fr: FitResult[Any] = FitResult(
+    fr: FitResult = FitResult(
         result=type("Result", (), {"params": params})(), dataset=ds
     )
 
@@ -812,7 +812,7 @@ def test_residuals_from_fit_results_robust_params_and_drop_invalid_sigma() -> No
     assert residuals["is_residual_outlier"].any()
 
 
-def _single_well_fit_result(mini: object) -> FitResult[Any]:
+def _single_well_fit_result(mini: object) -> FitResult:
     """Build a minimal single-well FitResult carrying *mini* as its trace."""
     params = Parameters()
     params.add("K", value=7.0)
@@ -822,7 +822,7 @@ def _single_well_fit_result(mini: object) -> FitResult[Any]:
     y = binding_1site(x, 7.0, 100.0, 200.0, is_ph=True) + np.array([1.0, 0.0, 40.0])
     ds = Dataset({"1": DataArray(x, y, y_errc=np.array([1.0, 1.0, 2.0]))}, is_ph=True)
     result = cast("Any", type("Result", (), {"params": params})())
-    return FitResult(result=result, dataset=ds, mini=cast("Any", mini))
+    return FitResult(result=result, dataset=ds, trace=cast("Any", mini))
 
 
 def test_single_well_residuals_extract_p_outlier_from_mixture_trace() -> None:

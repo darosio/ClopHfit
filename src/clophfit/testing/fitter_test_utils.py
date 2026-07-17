@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import product
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -21,7 +21,7 @@ from clophfit.testing.synthetic import TruthParams, make_simple_dataset
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from clophfit.fitting.data_structures import Dataset, FitResult, MiniT
+    from clophfit.fitting.data_structures import Dataset, FitResult
 
 
 # Re-export for backwards compatibility
@@ -60,7 +60,7 @@ def _fit_binding_glob_for_method(
     method: TecanFitMethod,
     *,
     remove_outliers: str | None = None,
-) -> FitResult[MiniT]:
+) -> FitResult:
     """Run the global fitter with the configured robustification mode."""
     method_map: dict[TecanFitMethod, tuple[str, str | None]] = {
         "lm": ("lm", None),
@@ -193,9 +193,7 @@ def build_tecan_fit_combinations(
     return combinations
 
 
-def apply_tecan_combination(
-    ds: Dataset, combination: TecanFitCombination
-) -> FitResult[MiniT]:
+def apply_tecan_combination(ds: Dataset, combination: TecanFitCombination) -> FitResult:
     """Execute one Tecan fit combination on a fresh dataset copy."""
     work_ds = ds.copy(keys=list(combination.channels))
     if combination.weighting == "auto":
@@ -227,7 +225,7 @@ def apply_tecan_combination(
             remove_outliers=combination.outlier_handling,
         )
     if final_stage == "odr":
-        return cast("FitResult[MiniT]", fit_binding_odr(prefit_result))
+        return fit_binding_odr(prefit_result)
     if final_stage == "mcmc_single":
         return fit_binding_pymc(
             prefit_result,
@@ -242,7 +240,7 @@ def apply_tecan_combination(
     raise NotImplementedError(msg)
 
 
-def k_from_result(fr: FitResult[MiniT]) -> tuple[float | None, float | None]:
+def k_from_result(fr: FitResult) -> tuple[float | None, float | None]:
     """Extract K value and stderr from fit result."""
     if fr.result is None or not hasattr(fr.result, "params"):
         return None, None
@@ -252,7 +250,7 @@ def k_from_result(fr: FitResult[MiniT]) -> tuple[float | None, float | None]:
     return (float(k) if k is not None else None, float(sk) if sk is not None else None)
 
 
-def s_from_result(fr: FitResult[MiniT], which: str) -> dict[str, float] | None:
+def s_from_result(fr: FitResult, which: str) -> dict[str, float] | None:
     """Extract S0 or S1 values per label if present in params."""
     if fr.result is None or not hasattr(fr.result, "params"):
         return None
@@ -274,7 +272,7 @@ def s_from_result(fr: FitResult[MiniT], which: str) -> dict[str, float] | None:
 def build_fitters(
     *,
     include_odr: bool = True,
-) -> dict[str, Callable[[Dataset], FitResult[MiniT]]]:
+) -> dict[str, Callable[[Dataset], FitResult]]:
     """Build dictionary of fitting methods for benchmarking.
 
     Returns a registry of named fitters using the unified ``fit_binding_glob``
@@ -287,10 +285,10 @@ def build_fitters(
 
     Returns
     -------
-    dict[str, Callable[[Dataset], FitResult[MiniT]]]
+    dict[str, Callable[[Dataset], FitResult]]
         Named fitters mapping.
     """
-    fitters: dict[str, Callable[[Dataset], FitResult[MiniT]]] = {
+    fitters: dict[str, Callable[[Dataset], FitResult]] = {
         # --- Standard WLS ---
         "glob_ls": fit_binding_glob,
         # --- Huber robust ---
@@ -311,11 +309,9 @@ def build_fitters(
 
     if include_odr:
 
-        def _odr(ds: Dataset) -> FitResult[MiniT]:
+        def _odr(ds: Dataset) -> FitResult:
             base = fit_binding_glob(ds)
-            return cast(
-                "FitResult[MiniT]", fit_binding_odr(base, remove_outliers="zscore:3.0")
-            )
+            return fit_binding_odr(base, remove_outliers="zscore:3.0")
 
         fitters["odr_recursive_outlier"] = _odr
 

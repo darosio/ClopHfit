@@ -83,12 +83,12 @@ class ResidualPoint:
     raw_i: int
 
 
-def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
+def extract_residual_points(fr: FitResult) -> list[ResidualPoint]:
     """Extract residual points from a fit result.
 
     Parameters
     ----------
-    fr : FitResult[Any]
+    fr : FitResult
         Fit result containing residuals and dataset
 
     Returns
@@ -172,12 +172,12 @@ def extract_residual_points(fr: FitResult[Any]) -> list[ResidualPoint]:
     return pts
 
 
-def residual_dataframe(fr: FitResult[Any]) -> pd.DataFrame:
+def residual_dataframe(fr: FitResult) -> pd.DataFrame:
     """Convert fit result residuals to a DataFrame.
 
     Parameters
     ----------
-    fr : FitResult[Any]
+    fr : FitResult
         Fit result to extract residuals from
 
     Returns

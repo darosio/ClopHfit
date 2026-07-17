@@ -49,7 +49,7 @@ from clophfit.prtecan import TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
-    from clophfit.fitting.data_structures import FitResult, MiniT
+    from clophfit.fitting.data_structures import FitResult
 
 
 class _FlexChoice(click.Choice):
@@ -574,7 +574,7 @@ def fit_enspire(  # noqa: C901,PLR0912
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
 
 
-def _print_result(fit_result: FitResult[MiniT], pdf_file: Path, band_str: str) -> None:
+def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:
     print(str(pdf_file))
     print(f"Best fit using '{band_str}' band:\n")
     ci = lmfit.conf_interval(fit_result.mini, fit_result.result)

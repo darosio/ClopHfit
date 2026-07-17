@@ -60,7 +60,7 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     params.add("S0_test_sample", value=s0_true)
     params.add("S1_test_sample", value=s1_true)
 
-    fr: FitResult[_Result] = FitResult(dataset=ds, result=_Result(params))
+    fr: FitResult = FitResult(dataset=ds, result=_Result(params))
 
     # 2. Run Bayesian Fit with x-error modeling
     # n_xerr=1.0 enables x_true modeling. The x-true shift competes with the
@@ -71,9 +71,9 @@ def test_fit_binding_pymc_x_error_adjustment() -> None:
     fit_res = bayes.fit_binding_pymc(
         fr, n_xerr=1.0, sampler=SamplerConfig(n_samples=4000, random_seed=42)
     )
-    assert fit_res.mini is not None
-    assert hasattr(fit_res.mini, "posterior")
-    trace = fit_res.mini
+    assert fit_res.trace is not None
+    assert hasattr(fit_res.trace, "posterior")
+    trace = fit_res.trace
 
     # 3. Analyze Results
     # Keep full float precision: ``az.summary`` rounds to 2 decimals by default,

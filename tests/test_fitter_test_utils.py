@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from dataclasses import dataclass
 
 import numpy as np
@@ -247,7 +246,7 @@ class TestResultExtraction:
         class MockResult:
             params: Parameters
 
-        fr: FitResult[typing.Any] = FitResult(result=MockResult(params))
+        fr: FitResult = FitResult(result=MockResult(params))
         k_val, k_err = k_from_result(fr)
 
         assert k_val == 7.5
@@ -263,7 +262,7 @@ class TestResultExtraction:
         class MockResult:
             params: Parameters
 
-        fr: FitResult[typing.Any] = FitResult(result=MockResult(params))
+        fr: FitResult = FitResult(result=MockResult(params))
         k_val, k_err = k_from_result(fr)
 
         assert k_val == 8.2
@@ -271,7 +270,7 @@ class TestResultExtraction:
 
     def test_k_from_result_invalid(self) -> None:
         """Test K extraction from invalid result."""
-        fr: FitResult[typing.Any] = FitResult()  # Empty result
+        fr: FitResult = FitResult()  # Empty result
         k_val, k_err = k_from_result(fr)
 
         assert k_val is None
@@ -294,7 +293,7 @@ class TestResultExtraction:
         class MockResult:
             params: Parameters
 
-        fr: FitResult[typing.Any] = FitResult(result=MockResult(params))
+        fr: FitResult = FitResult(result=MockResult(params))
         s0_vals = s_from_result(fr, "S0")
         s1_vals = s_from_result(fr, "S1")
 
@@ -548,7 +547,7 @@ class TestEdgeCases:
         class MockResult:
             params: Parameters
 
-        fr: FitResult[typing.Any] = FitResult(result=MockResult(params))
+        fr: FitResult = FitResult(result=MockResult(params))
         s0_vals = s_from_result(fr, "S0")
         s1_vals = s_from_result(fr, "S1")
 

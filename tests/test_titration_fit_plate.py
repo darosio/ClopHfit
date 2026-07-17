@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -44,17 +43,15 @@ def test_fit_plate_routes_methods_and_preserves_well_keys(
     """Plate fitting should dispatch each method to the intended backend."""
     calls: list[tuple[str, str]] = []
 
-    def fake_glob(
-        ds: Dataset, *, method: str = "lm", **_kwargs: object
-    ) -> FitResult[Any]:
+    def fake_glob(ds: Dataset, *, method: str = "lm", **_kwargs: object) -> FitResult:
         calls.append(("glob", method))
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
-    def fake_odr(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
+    def fake_odr(ds: Dataset, **_kwargs: object) -> FitResult:
         calls.append(("odr", "odr"))
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
-    def fake_mcmc(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
+    def fake_mcmc(ds: Dataset, **_kwargs: object) -> FitResult:
         calls.append(("mcmc", "mcmc"))
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
@@ -76,7 +73,7 @@ def test_fit_plate_turns_insufficient_data_into_empty_result(
 ) -> None:
     """One well's insufficient-data failure must not abort the other well's fit."""
 
-    def backend(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
+    def backend(ds: Dataset, **_kwargs: object) -> FitResult:
         if len(ds["1"].y) < len(_dataset()["1"].y):
             msg = "too few points"
             raise InsufficientDataError(msg)
@@ -101,7 +98,7 @@ def test_fit_plate_carries_plate_metadata(
 ) -> None:
     """The returned container carries this titration's scheme and fit_keys."""
 
-    def fake_glob(ds: Dataset, **_kwargs: object) -> FitResult[Any]:
+    def fake_glob(ds: Dataset, **_kwargs: object) -> FitResult:
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
     monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_glob", fake_glob)

@@ -87,7 +87,7 @@ def test_extract_params_reads_lmfit_value_and_stderr() -> None:
     params["K"].stderr = 0.15
     params.add("S0_a", value=100.0)
 
-    fr: FitResult[typing.Any] = FitResult(result=_ResultWithParams(params))
+    fr: FitResult = FitResult(result=_ResultWithParams(params))
 
     assert extract_params(fr, "K") == (7.2, 0.15)
     val, err = extract_params(fr, "S0_a")
@@ -100,9 +100,9 @@ def test_extract_params_returns_nan_for_missing_result_or_parameter() -> None:
     params = Parameters()
     params.add("K", value=7.2)
 
-    no_result: FitResult[typing.Any] = FitResult()
-    no_params: FitResult[typing.Any] = FitResult(result=object())
-    missing_param: FitResult[typing.Any] = FitResult(result=_ResultWithParams(params))
+    no_result: FitResult = FitResult()
+    no_params: FitResult = FitResult(result=object())
+    missing_param: FitResult = FitResult(result=_ResultWithParams(params))
 
     assert all(np.isnan(value) for value in extract_params(no_result, "K"))
     assert all(np.isnan(value) for value in extract_params(no_params, "K"))

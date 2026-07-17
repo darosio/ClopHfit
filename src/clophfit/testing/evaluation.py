@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from clophfit.clophfit_types import ArrayF
-    from clophfit.fitting.data_structures import FitResult, MiniT
+    from clophfit.fitting.data_structures import FitResult
 
 SIGNIFICANCE_LEVEL = 0.05
 
@@ -138,12 +138,12 @@ def evaluate_residuals(residuals: np.ndarray) -> dict[str, float]:
     }
 
 
-def extract_params(fr: FitResult[MiniT], param_name: str = "K") -> tuple[float, float]:
+def extract_params(fr: FitResult, param_name: str = "K") -> tuple[float, float]:
     """Extract parameter value and error from a FitResult.
 
     Parameters
     ----------
-    fr : FitResult[MiniT]
+    fr : FitResult
         The fit result object.
     param_name : str
         The name of the parameter to extract (default: "K").

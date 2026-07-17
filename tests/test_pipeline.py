@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -62,14 +62,12 @@ def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(
     """FGLS should continue with fixed floors when calibration raises."""
     methods: list[str] = []
 
-    def fake_fit(
-        ds: Dataset, *, method: str = "lm", **_kwargs: object
-    ) -> FitResult[Any]:
+    def fake_fit(ds: Dataset, *, method: str = "lm", **_kwargs: object) -> FitResult:
         methods.append(method)
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
     def fake_residuals(
-        results: dict[str, FitResult[Any]], *_args: object, **_kwargs: object
+        results: dict[str, FitResult], *_args: object, **_kwargs: object
     ) -> pd.DataFrame:
         assert "A01" in results
         return pd.DataFrame({
@@ -121,9 +119,7 @@ def test_fgls_plate_fit_converges_and_handles_failed_well(
     """FGLS should insert empty FitResult for failed wells."""
     calls = 0
 
-    def fake_fit(
-        ds: Dataset, *, method: str = "lm", **_kwargs: object
-    ) -> FitResult[Any]:
+    def fake_fit(ds: Dataset, *, method: str = "lm", **_kwargs: object) -> FitResult:
         nonlocal calls
         assert method in {"huber", "lm"}
         calls += 1
@@ -133,7 +129,7 @@ def test_fgls_plate_fit_converges_and_handles_failed_well(
         return FitResult(result=_Result(np.zeros(len(ds["1"].y))), dataset=ds)
 
     def fake_residuals(
-        _results: dict[str, FitResult[Any]], *_args: object, **_kwargs: object
+        _results: dict[str, FitResult], *_args: object, **_kwargs: object
     ) -> pd.DataFrame:
         return pd.DataFrame({
             "well": ["good"],
