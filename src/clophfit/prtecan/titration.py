@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import typing
 from dataclasses import InitVar, dataclass, field
@@ -16,6 +17,8 @@ import pandas as pd
 import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
+from clophfit.fitting.bayes import fit_binding_pymc
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
@@ -24,8 +27,9 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
     ResidualsMixin,
 )
+from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.model_validation import residuals_from_fit_results
-from clophfit.fitting.odr import format_estimate
+from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 from clophfit.fitting.utils import apply_outlier_mask
 from clophfit.utils import weights_from_sigma
@@ -53,6 +57,48 @@ logger = logging.getLogger(__name__)
 # pH K bounds as used by _build_params_1site in fitting/core.py
 _PH_K_MIN: float = 3.0
 _PH_K_MAX: float = 11.0
+
+
+def _fit_datasets(
+    datasets: dict[str, Dataset],
+    method: str,
+    **kwargs: typing.Any,  # noqa: ANN401
+) -> dict[str, FitResult[typing.Any]]:
+    """Fit each dataset, turning per-well failures into empty results.
+
+    Parameters
+    ----------
+    datasets : dict[str, Dataset]
+        Mapping of well keys to `Dataset` objects.
+    method : str
+        'lm', 'huber', 'odr', 'mcmc', or any method accepted by
+        :func:`clophfit.fitting.core.fit_binding_glob`.
+    **kwargs : typing.Any
+        Forwarded to the selected fitting function.
+
+    Returns
+    -------
+    dict[str, FitResult[typing.Any]]
+        One entry per input well; failed wells hold an empty `FitResult`.
+    """
+    fitter: Callable[..., FitResult[typing.Any]]
+    if method == "odr":
+        fitter, label = fit_binding_odr, "ODR fit"
+    elif method == "mcmc":
+        fitter, label = fit_binding_pymc, "MCMC fit"
+    else:
+        method = method or "lm"
+        fitter = functools.partial(fit_binding_glob, method=method)
+        label = "fit"
+
+    results: dict[str, FitResult[typing.Any]] = {}
+    for well, ds in datasets.items():
+        try:
+            results[well] = fitter(ds, **kwargs)
+        except InsufficientDataError:
+            logger.warning("Skip %s for well %s.", label, well)
+            results[well] = FitResult()
+    return results
 
 
 @dataclass
@@ -1137,6 +1183,51 @@ class Titration(TecanfilesGroup):
                     ds, threshold=self.params.outlier_threshold
                 )
         return ds_dict
+
+    def fit_plate(
+        self,
+        datasets: dict[str, Dataset] | None = None,
+        method: str = "",
+        *,
+        label: str | None = None,
+        **kwargs: typing.Any,  # noqa: ANN401
+    ) -> TitrationResults:
+        """Run a single-pass fit on an entire plate of datasets.
+
+        Parameters
+        ----------
+        datasets : dict[str, Dataset] | None
+            Mapping of well keys (e.g. 'A01') to `Dataset` objects. When
+            ``None``, datasets are built with :meth:`create_dataset_dict`,
+            which also applies outlier masking when ``params.mask_outliers``
+            is set.
+        method : str
+            The fitting method: 'lm' (default), 'huber', 'odr', or 'mcmc'.
+            Other methods supported by
+            :func:`clophfit.fitting.core.fit_binding_glob` may also be used.
+        label : str | None
+            Build per-label datasets for this label instead of global ones.
+            Only valid when *datasets* is ``None``.
+        **kwargs : typing.Any
+            Additional keyword arguments passed to the fitting function.
+
+        Returns
+        -------
+        TitrationResults
+            Plate results carrying this titration's ``scheme`` and ``fit_keys``.
+
+        Raises
+        ------
+        ValueError
+            If both *datasets* and *label* are given.
+        """
+        if datasets is not None and label is not None:
+            msg = "Pass either `datasets` or `label`, not both."
+            raise ValueError(msg)
+        if datasets is None:
+            datasets = self.create_dataset_dict(label)
+        results = _fit_datasets(datasets, method, **kwargs)
+        return TitrationResults(self.scheme, self.fit_keys, results)
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups.
