@@ -1416,9 +1416,11 @@ class TestTitrationAnalysis:
         # Capture the real signature before monkeypatching replaces
         # bayes.fit_binding_pymc below.
         real_sig = inspect.signature(bayes.fit_binding_pymc)
-        calls: list[dict[str, object]] = []
+        calls: list[dict[str, Any]] = []
 
-        def fake_fit_binding_pymc(ds_or_fr: object, **kwargs: object) -> FitResult:
+        def fake_fit_binding_pymc(
+            ds_or_fr: Dataset | FitResult, **kwargs: object
+        ) -> FitResult:
             calls.append({"_input": ds_or_fr, **kwargs})
             ds_for_fit = (
                 ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
@@ -1544,7 +1546,9 @@ def test_single_refit_two_pass_masks_clear_outlier(
 
     calls: list[object] = []
 
-    def fake_fit_binding_pymc(ds_or_fr: object, **_kwargs: object) -> FitResult:
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult, **_kwargs: object
+    ) -> FitResult:
         calls.append(ds_or_fr)
         ds_for_fit = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
         assert ds_for_fit is not None
