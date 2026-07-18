@@ -877,12 +877,14 @@ def masked_datasets_from_residual_outliers(
     return masked
 
 
-def mark_outlier_probability_outliers(
+def mark_outlier_probability_outliers(  # noqa: PLR0913
     residuals: _t.Any,
     *,
     probability_col: str = "p_outlier",
     threshold: float = 0.9,
     exclude_col: str = "exclude_outlier_probability",
+    residual_threshold: float | None = None,
+    residual_col: str = "std_res",
 ) -> pd.DataFrame:
     """Annotate rows with high posterior outlier probability.
 
@@ -897,6 +899,13 @@ def mark_outlier_probability_outliers(
         Probability cutoff above which a row is marked as an outlier.
     exclude_col : str, optional
         Boolean output column used to mark rows for exclusion.
+    residual_threshold : float | None, optional
+        When set, a row is marked only if it exceeds both *threshold* and this
+        absolute-residual cutoff on *residual_col*. ``None`` (the default)
+        applies the probability criterion alone.
+    residual_col : str, optional
+        Column holding the standardized residual compared against
+        *residual_threshold*.
 
     Returns
     -------
@@ -923,18 +932,29 @@ def mark_outlier_probability_outliers(
         else pd.Series(np.nan, index=out.index)
     )
     probabilities = pd.to_numeric(probability_values, errors="coerce")
-    out[exclude_col] = probabilities > threshold
+    marked = probabilities > threshold
+    if residual_threshold is not None:
+        residual_values = (
+            out[residual_col]
+            if residual_col in out.columns
+            else pd.Series(np.nan, index=out.index)
+        )
+        residual_magnitude = pd.to_numeric(residual_values, errors="coerce").abs()
+        marked &= residual_magnitude > residual_threshold
+    out[exclude_col] = marked
     out["residual_outlier_score"] = probabilities
     return out
 
 
-def masked_datasets_from_outlier_probabilities(
+def masked_datasets_from_outlier_probabilities(  # noqa: PLR0913
     results: _t.Mapping[str, _t.Any],
     residuals: _t.Any,
     *,
     probability_col: str = "p_outlier",
     threshold: float = 0.9,
     min_keep: int = 3,
+    residual_threshold: float | None = None,
+    residual_col: str = "std_res",
 ) -> dict[str, _t.Any]:
     """Mask datasets using posterior outlier probabilities.
 
@@ -951,6 +971,13 @@ def masked_datasets_from_outlier_probabilities(
         Probability cutoff above which a row is masked.
     min_keep : int, optional
         Minimum number of unmasked points retained per label.
+    residual_threshold : float | None, optional
+        When set, a row is masked only if it exceeds both *threshold* and this
+        absolute-residual cutoff on *residual_col*. ``None`` (the default)
+        applies the probability criterion alone.
+    residual_col : str, optional
+        Column holding the standardized residual compared against
+        *residual_threshold*.
 
     Returns
     -------
@@ -975,6 +1002,8 @@ def masked_datasets_from_outlier_probabilities(
         probability_col=probability_col,
         threshold=threshold,
         exclude_col=exclude_col,
+        residual_threshold=residual_threshold,
+        residual_col=residual_col,
     )
     return masked_datasets_from_residual_outliers(
         results,

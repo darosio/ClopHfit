@@ -1,6 +1,7 @@
 """Test cases for the clophfit.fitting.residuals module."""
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -18,12 +19,13 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
+    mark_outlier_probability_outliers,
+    masked_datasets_from_outlier_probabilities,
     residuals_from_fit_results,
     robust_likelihood_from_trace,
     robust_settings_from_trace,
 )
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.residuals import (
     BIAS_P_VALUE_THRESHOLD,
     DW_LOWER_BOUND,
@@ -37,6 +39,9 @@ from clophfit.fitting.residuals import (
     residual_dataframe,
     residual_statistics,
 )
+from clophfit.prtecan import Titration
+
+data_tests = Path(__file__).parent / "Tecan"
 
 ###############################################################################
 # Fixtures
@@ -550,6 +555,80 @@ class TestModuleConstants:
 
 
 ###############################################################################
+# Tests for mark_outlier_probability_outliers
+###############################################################################
+
+
+def test_mark_outlier_probability_requires_both_criteria() -> None:
+    """With residual_threshold set, a row must exceed probability AND residual."""
+    df = pd.DataFrame({
+        "label": ["1", "1", "1", "1"],
+        "p_outlier": [0.9, 0.9, 0.2, 0.2],
+        "std_res": [5.0, 1.0, 5.0, 1.0],
+    })
+    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
+    # Only the first row clears both cutoffs.
+    assert out["exclude_outlier_probability"].tolist() == [True, False, False, False]
+
+
+def test_mark_outlier_probability_default_is_probability_only() -> None:
+    """Omitting residual_threshold preserves the existing probability-only rule."""
+    df = pd.DataFrame({
+        "label": ["1", "1"],
+        "p_outlier": [0.9, 0.2],
+        "std_res": [0.1, 9.0],
+    })
+    out = mark_outlier_probability_outliers(df, threshold=0.7)
+    # std_res is ignored entirely when residual_threshold is None.
+    assert out["exclude_outlier_probability"].tolist() == [True, False]
+
+
+def test_mark_outlier_probability_missing_residual_column_marks_nothing() -> None:
+    """A requested residual column that is absent excludes no rows."""
+    df = pd.DataFrame({"label": ["1"], "p_outlier": [0.99]})
+    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
+    assert out["exclude_outlier_probability"].tolist() == [False]
+
+
+def test_masked_datasets_from_outlier_probabilities_forwards_residual_threshold() -> (
+    None
+):
+    """The wrapper must forward residual_threshold/residual_col to the mask.
+
+    A point with high posterior outlier probability but a small standardized
+    residual must not be masked once the conjunction rule is engaged, and
+    must be masked when ``residual_threshold`` is left at its default (the
+    probability-only rule).
+    """
+    ds = Dataset(
+        {
+            "1": DataArray(
+                np.array([6.0, 7.0, 8.0, 9.0]),
+                np.array([10.0, 11.0, 12.0, 13.0]),
+            )
+        },
+        is_ph=True,
+    )
+    residuals = pd.DataFrame({
+        "well": ["A01"],
+        "label": ["1"],
+        "step": [2],
+        "p_outlier": [0.95],
+        "std_res": [0.5],
+    })
+
+    masked_probability_only = masked_datasets_from_outlier_probabilities(
+        {"A01": ds}, residuals
+    )
+    assert not masked_probability_only["A01"]["1"].mask[2]
+
+    masked_conjunction = masked_datasets_from_outlier_probabilities(
+        {"A01": ds}, residuals, residual_threshold=3.0
+    )
+    assert masked_conjunction["A01"]["1"].mask[2]
+
+
+###############################################################################
 # Integration tests
 ###############################################################################
 
@@ -692,16 +771,17 @@ def test_fgls_plate_fit_workflow() -> None:
     datasets = {"well1": Dataset({"1": da}, is_ph=True)}
 
     sigma_floor = {"1": 1.0}
-    final_results, noise_params = fgls_plate_fit(datasets, sigma_floor)
+    titration = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    res = titration.fgls_fit_plate(datasets, sigma_floor=sigma_floor)
 
-    assert "well1" in final_results
-    assert final_results["well1"].result is not None
-    assert final_results["well1"].result.success
-    assert isinstance(noise_params, PlateNoiseModel)
-    assert "1" in noise_params
-    assert noise_params["1"].sigma_floor == 1.0
-    assert noise_params["1"].gain >= 0.0
-    assert noise_params["1"].alpha >= 0.0
+    assert "well1" in res.results
+    assert res.results["well1"].result is not None
+    assert res.results["well1"].result.success
+    assert isinstance(res.noise_model, PlateNoiseModel)
+    assert "1" in res.noise_model
+    assert res.noise_model["1"].sigma_floor == 1.0
+    assert res.noise_model["1"].gain >= 0.0
+    assert res.noise_model["1"].alpha >= 0.0
 
 
 def test_residuals_mixin_resolves_classical_fit_as_normal() -> None:

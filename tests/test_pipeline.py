@@ -3,17 +3,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from clophfit.fitting import pipeline
+from clophfit.fitting import noise_calibration
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.errors import InsufficientDataError
+from clophfit.prtecan import Titration
 
-if TYPE_CHECKING:
-    import pytest
+data_tests = Path(__file__).parent / "Tecan"
+
+
+@pytest.fixture(scope="module")
+def titration() -> Titration:
+    """Build a real Titration used only as the `self` for `fgls_fit_plate`.
+
+    The FGLS tests below pass `datasets` and `sigma_floor` explicitly, so
+    only `.scheme` and `.fit_keys` (used to build the returned
+    `TitrationResults`) need to be real attributes of a live plate.
+    """
+    return Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
 
 
 def _dataset() -> Dataset:
@@ -30,16 +42,16 @@ class _Result:
 
 def test_noise_model_building_and_convergence() -> None:
     """Noise-model helpers should compare gain and alpha per label."""
-    old = pipeline._plate_noise_model_from_nnls(  # noqa: SLF001
+    old = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
         {"1": 1.0}, {"1": 0.2}, {"1": 0.03}
     )
-    same = pipeline._plate_noise_model_from_nnls(  # noqa: SLF001
+    same = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
         {"1": 1.0}, {"1": 0.2001}, {"1": 0.03001}
     )
-    changed = pipeline._plate_noise_model_from_nnls(  # noqa: SLF001
+    changed = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
         {"1": 1.0}, {"1": 0.3}, {"1": 0.03}
     )
-    missing = pipeline._plate_noise_model_from_nnls(  # noqa: SLF001
+    missing = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
         {"1": 1.0, "2": 2.0},
         {"1": 0.2, "2": 0.0},
         {"1": 0.03, "2": 0.0},
@@ -47,16 +59,19 @@ def test_noise_model_building_and_convergence() -> None:
 
     assert old["1"].sigma_floor == 1.0
     assert old["1"].sigma_ph == 0.0
-    assert pipeline._noise_params_converged(old, same, tol=1e-2)  # noqa: SLF001
-    assert not pipeline._noise_params_converged(  # noqa: SLF001
+    assert noise_calibration._noise_params_converged(  # noqa: SLF001
+        old, same, tol=1e-2
+    )
+    assert not noise_calibration._noise_params_converged(  # noqa: SLF001
         old, changed, tol=1e-2
     )
-    assert not pipeline._noise_params_converged(  # noqa: SLF001
+    assert not noise_calibration._noise_params_converged(  # noqa: SLF001
         old, missing, tol=1e-2
     )
 
 
 def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(
+    titration: Titration,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """FGLS should continue with fixed floors when calibration raises."""
@@ -80,40 +95,42 @@ def test_fgls_plate_fit_uses_calibration_fallback_and_second_pass(
             "predicted": [2.0],
         })
 
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fake_fit)
+    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_glob", fake_fit)
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.residuals_from_fit_results", fake_residuals
+        "clophfit.prtecan.titration.residuals_from_fit_results", fake_residuals
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.fit_noise_model_nnls",
+        "clophfit.prtecan.titration.fit_noise_model_nnls",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("singular")),
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.compute_plate_slopes", lambda *_args: {}
+        "clophfit.prtecan.titration.compute_plate_slopes", lambda *_args: {}
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.fit_ph_slope_noise", lambda *_args: 0.05
+        "clophfit.prtecan.titration.fit_ph_slope_noise", lambda *_args: 0.05
     )
 
     first_method = "huber"
     second_method = "lm"
-    results, noise = pipeline.fgls_plate_fit(
+    res = titration.fgls_fit_plate(
         {"A01": _dataset()},
-        {"1": 1.0},
+        sigma_floor={"1": 1.0},
         first_pass_method=first_method,
         second_pass_method=second_method,
         max_iter=2,
     )
 
     assert methods == ["huber", "lm"]
-    assert results["A01"].result is not None
-    assert noise["1"].sigma_floor == 1.0
-    assert noise["1"].gain == 0.0
-    assert noise["1"].alpha == 0.0
-    assert noise["1"].sigma_ph == 0.05
+    assert res.results["A01"].result is not None
+    assert res.noise_model is not None
+    assert res.noise_model["1"].sigma_floor == 1.0
+    assert res.noise_model["1"].gain == 0.0
+    assert res.noise_model["1"].alpha == 0.0
+    assert res.noise_model["1"].sigma_ph == 0.05
 
 
 def test_fgls_plate_fit_converges_and_handles_failed_well(
+    titration: Titration,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """FGLS should insert empty FitResult for failed wells."""
@@ -142,27 +159,30 @@ def test_fgls_plate_fit_converges_and_handles_failed_well(
         })
 
     datasets = {"good": _dataset(), "bad": _dataset()}
-    monkeypatch.setattr("clophfit.fitting.pipeline.fit_binding_glob", fake_fit)
+    monkeypatch.setattr("clophfit.prtecan.titration.fit_binding_glob", fake_fit)
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.residuals_from_fit_results", fake_residuals
+        "clophfit.prtecan.titration.residuals_from_fit_results", fake_residuals
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.fit_noise_model_nnls",
+        "clophfit.prtecan.titration.fit_noise_model_nnls",
         lambda *_args, **_kwargs: ({"1": 1.0}, {"1": 0.2}, {"1": 0.03}),
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.compute_plate_slopes", lambda *_args: {}
+        "clophfit.prtecan.titration.compute_plate_slopes", lambda *_args: {}
     )
     monkeypatch.setattr(
-        "clophfit.fitting.pipeline.fit_ph_slope_noise", lambda *_args: 0.0
+        "clophfit.prtecan.titration.fit_ph_slope_noise", lambda *_args: 0.0
     )
 
-    results, noise = pipeline.fgls_plate_fit(datasets, {"1": 1.0}, max_iter=1, tol=1e-9)
+    res = titration.fgls_fit_plate(
+        datasets, sigma_floor={"1": 1.0}, max_iter=1, tol=1e-9
+    )
 
     assert calls == 2
-    assert results["good"].result is not None
-    assert results["bad"].result is None
-    assert noise["1"].gain == 0.2
+    assert res.results["good"].result is not None
+    assert res.results["bad"].result is None
+    assert res.noise_model is not None
+    assert res.noise_model["1"].gain == 0.2
 
 
 def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
@@ -178,9 +198,11 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
     df.loc[0, "raw_res"] = 1.0e4
     df.loc[0, "p_outlier"] = 0.99
 
-    screened = pipeline.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=0.9)
+    screened = noise_calibration.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=0.9)
     # p_threshold above 1.0 keeps every point (nothing screened).
-    unscreened = pipeline.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=2.0)
+    unscreened = noise_calibration.calibrate_noise_robust(
+        df, {"1": 1.0}, p_threshold=2.0
+    )
 
     assert screened["1"].sigma_floor == 1.0
     assert screened["1"].gain < unscreened["1"].gain
@@ -190,7 +212,7 @@ def test_calibrate_noise_robust_without_probability_column() -> None:
     """Without p_outlier, all points are used (no screening)."""
     y = np.linspace(50.0, 500.0, 80)
     df = pd.DataFrame({"label": "1", "raw_res": np.full(80, 2.0), "yhat": y})
-    model = pipeline.calibrate_noise_robust(df, {"1": 1.5})
+    model = noise_calibration.calibrate_noise_robust(df, {"1": 1.5})
     assert model["1"].sigma_floor == 1.5
     assert model["1"].gain >= 0.0
     assert model["1"].alpha >= 0.0

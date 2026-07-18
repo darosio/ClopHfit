@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from pathlib import Path
@@ -15,7 +16,15 @@ import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
-from clophfit.fitting.data_structures import FitResult
+from clophfit.fitting import bayes
+from clophfit.fitting.bayes_config import NoiseConfig, SamplerConfig
+from clophfit.fitting.core import fit_binding_glob
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    FitResult,
+    PlateNoiseModel,
+)
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
 from clophfit.prtecan import (
     Buffer,
@@ -32,6 +41,7 @@ from clophfit.prtecan import (
     TitrationResults,
     calculate_conc,
     dilution_correction,
+    export,
     extract_metadata,
     merge_md,
     strip_lines,
@@ -1344,6 +1354,20 @@ class TestTitrationAnalysis:
         assert set(table["well"]) == tit.fit_keys
         assert (table["residual_likelihood"] == "normal").all()
 
+    def test_fgls_fit_plate_returns_titration_results_with_noise_model(
+        self, tit: Titration
+    ) -> None:
+        """FGLS returns a TitrationResults carrying its calibrated noise model."""
+        res = tit.fgls_fit_plate(max_iter=1)
+
+        assert isinstance(res, TitrationResults)
+        assert isinstance(res.noise_model, PlateNoiseModel)
+        # Plate metadata is populated from the titration, like fit_plate.
+        assert res.scheme is tit.scheme
+        assert res.fit_keys == tit.fit_keys
+        # The unified residual accessor works, which the tuple return could not offer.
+        assert not res.residuals.empty
+
     def test_plot_buffer_with_title(self, tit: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
         g = tit.buffer.plot(title="Test Title")
@@ -1381,3 +1405,208 @@ class TestTitrationAnalysis:
 
         assert discards == expected
         assert set(expected).issubset(set(titan.scheme.discard))
+
+    def test_single_refit_two_pass_contract(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tit: Titration,
+        tmp_path: Path,
+    ) -> None:
+        """--mcmc single-refit runs a robust pass then an unrobust refit."""
+        # Capture the real signature before monkeypatching replaces
+        # bayes.fit_binding_pymc below.
+        real_sig = inspect.signature(bayes.fit_binding_pymc)
+        calls: list[dict[str, Any]] = []
+
+        def fake_fit_binding_pymc(
+            ds_or_fr: Dataset | FitResult, **kwargs: object
+        ) -> FitResult:
+            calls.append({"_input": ds_or_fr, **kwargs})
+            ds_for_fit = (
+                ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+            )
+            assert ds_for_fit is not None
+            return fit_binding_glob(ds_for_fit)
+
+        def fake_residuals_from_fit_results(
+            *_args: object, **_kwargs: object
+        ) -> pd.DataFrame:
+            # A single clear outlier at label "1"'s last titration point, so
+            # mask propagation into the refit is observable below.
+            return pd.DataFrame({
+                "trace_id": ["pymc_robust_unweighted"] * 14,
+                "well": ["single"] * 14,
+                "label": ["1"] * 7 + ["2"] * 7,
+                "step": [*range(7), *range(7)],
+                "x": [*tit.x, *tit.x],
+                "std_res": [0.0] * 6 + [50.0] + [0.0] * 7,
+            })
+
+        # Patch both lookup sites: the call happens inside export post-inlining,
+        # so patching export is what matters; the bayes patch is kept for
+        # provenance (it was needed pre-refactor) and is a harmless no-op now.
+        # This is a post-refactor regression test, not a before/after-inlining
+        # characterization test.
+        monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
+        monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+        # residuals_from_fit_results is imported by name into export.py (not
+        # accessed as `model_validation.<attr>`), so it must be patched there.
+        monkeypatch.setattr(
+            export, "residuals_from_fit_results", fake_residuals_from_fit_results
+        )
+
+        monkeypatch.setattr(tit.params, "mcmc", "single-refit")
+        monkeypatch.setattr(tit.params, "n_mcmc_samples", 7)
+        res = export.fit_single_mcmc(
+            tit,
+            {"A01": tit.create_global_ds("A01")},
+            tmp_path,
+        )
+
+        assert res is not None
+        assert len(calls) == 2
+        first, second = calls
+        # Pass 1 is robust; pass 2 is not.
+        assert first["robust"].enabled is True
+        assert second["robust"].enabled is False
+        # Both use the ye_mag noise strategy, unshared, lognormal.
+        assert first["noise"].kind == "ye_mag"
+        assert second["noise"].kind == "ye_mag"
+        assert first["noise"].shared_ye_mags is False
+        assert first["noise"].ye_mag_prior == "lognormal"
+        # The screening prior is centred on log(bg_noise * 3.6) per label.
+        expected_mu = {
+            label: pytest.approx(np.log(bg * 3.6)) for label, bg in tit.bg_noise.items()
+        }
+        assert first["noise"].ye_mag_mu == expected_mu
+        assert first["noise"].ye_mag_sigma == 0.5
+        # The refit's ye_mag prior is recentred on 0 with a tighter sigma.
+        assert second["noise"].ye_mag_mu == 0.0
+        assert second["noise"].ye_mag_sigma == 0.25
+        # Sampler settings come from titration params in both passes.
+        assert first["sampler"].n_samples == 7
+        assert second["sampler"].n_samples == 7
+
+        # The deleted fit_binding_pymc_residual_refit() passed n_sd=10.0,
+        # n_xerr=1.0, min_x_step=0.2 explicitly; the inlined helper relies on
+        # these being fit_binding_pymc's defaults instead, so neither call
+        # captures them as explicit kwargs. Read the effective defaults from
+        # the real (pre-monkeypatch) signature so a future default change in
+        # bayes.py is what makes this assertion fail.
+        default_n_sd = real_sig.parameters["n_sd"].default
+        default_n_xerr = real_sig.parameters["n_xerr"].default
+        default_min_x_step = real_sig.parameters["min_x_step"].default
+        for call in (first, second):
+            assert call.get("n_sd", default_n_sd) == default_n_sd == 10.0
+            assert call.get("n_xerr", default_n_xerr) == default_n_xerr == 1.0
+            assert (
+                call.get("min_x_step", default_min_x_step) == default_min_x_step == 0.2
+            )
+
+        # The screening pass receives a plain dataset whose y_err has been
+        # reset to one (required for the ye_mag multiplier to learn scale).
+        first_input = first["_input"]
+        assert isinstance(first_input, Dataset)
+        for da in first_input.values():
+            np.testing.assert_allclose(da.y_errc, np.ones_like(da.yc))
+
+        # The refit pass receives a FitResult (not a raw Dataset) whose
+        # dataset carries the outlier mask computed from the screening pass's
+        # residuals: label "1"'s last point was flagged and must be masked
+        # out before the refit; label "2" is untouched.
+        second_input = second["_input"]
+        assert isinstance(second_input, FitResult)
+        assert second_input.dataset is not None
+        assert second_input.dataset["1"].mask.tolist() == [
+            True,
+            True,
+            True,
+            True,
+            True,
+            True,
+            False,
+        ]
+        assert second_input.dataset["2"].mask.tolist() == [True] * 7
+
+
+def test_single_refit_two_pass_masks_clear_outlier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The screening pass's flagged outlier is masked out before the refit.
+
+    This restores the coverage retired with
+    ``fit_binding_pymc_residual_refit``'s deleted tests: it drives
+    ``_single_refit_two_pass``'s ``min_keep=3``/``allowed_tail_fraction=0.0``
+    literals through an actual masking decision, rather than merely checking
+    that the composition runs.
+    """
+    x = np.array([6.0, 7.0, 8.0, 9.0])
+    y = np.array([1.90909091, 1.5, 1.09090909, 1.00990099])
+    ds = Dataset({"default": DataArray(x, y)}, is_ph=True)
+
+    calls: list[object] = []
+
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult, **_kwargs: object
+    ) -> FitResult:
+        calls.append(ds_or_fr)
+        ds_for_fit = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        assert ds_for_fit is not None
+        return fit_binding_glob(ds_for_fit)
+
+    def fake_residuals_from_fit_results(
+        *_args: object, **_kwargs: object
+    ) -> pd.DataFrame:
+        # Four points, one clear outlier (step 3): with min_keep=3, exactly
+        # one point may be dropped from this label (4 kept -> 3 kept).
+        return pd.DataFrame({
+            "trace_id": ["pymc_robust_unweighted"] * 4,
+            "well": ["single"] * 4,
+            "label": ["default"] * 4,
+            "step": [0, 1, 2, 3],
+            "x": x,
+            "std_res": [0.0, 0.0, 0.0, 50.0],
+        })
+
+    monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+    monkeypatch.setattr(
+        export, "residuals_from_fit_results", fake_residuals_from_fit_results
+    )
+
+    sampler = SamplerConfig(n_samples=5, nuts_sampler="pymc")
+    final, _residuals = export._single_refit_two_pass(  # noqa: SLF001
+        ds,
+        screening_noise=export._ye_mag_screening_noise(0.1),  # noqa: SLF001
+        refit_noise=NoiseConfig.ye_mag(
+            shared=False, prior="lognormal", mu=0.0, sigma=0.25
+        ),
+        sampler=sampler,
+    )
+
+    assert final is not None
+    assert len(calls) == 2
+    seeded = calls[1]
+    assert isinstance(seeded, FitResult)
+    assert seeded.dataset is not None
+    assert seeded.dataset["default"].mask.tolist() == [True, True, True, False]
+
+
+def test_titration_results_noise_model_defaults_to_none() -> None:
+    """The noise_model field is optional and absent for a plain plate fit."""
+    assert TitrationResults().noise_model is None
+
+
+def test_titration_results_noise_model_is_last_positional() -> None:
+    """Appending noise_model must not shift any existing positional argument."""
+    scheme = PlateScheme()
+    fit_keys = {"A01"}
+    results: dict[str, FitResult] = {}
+    tr = TitrationResults(scheme, fit_keys, results)
+    # The three historical positional args still bind to their own fields.
+    assert tr.scheme is scheme
+    assert tr.fit_keys == fit_keys
+    assert tr.results is results
+    assert tr.noise_model is None
+    # And it is settable by keyword.
+    nm = PlateNoiseModel()
+    assert TitrationResults(scheme, fit_keys, results, noise_model=nm).noise_model is nm
