@@ -93,6 +93,32 @@ def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any
     return pm.TruncatedNormal(name, mu=mu, sigma=sigma, lower=0.0)
 
 
+def _gain_prior_sigma(mu_g: float, plate_gain_scale: float) -> float:
+    """Prior width for one gain hint.
+
+    Gain carries the units of the signal, so its width is always relative --
+    20% of this label's hint, or of the plate-wide scale when the hint is
+    exactly 0. An exact 0 comes from the NNLS boundary and means the collinear
+    alpha term won this label's decomposition, not that the Poisson term is
+    absent, so the width is borrowed rather than collapsed.
+
+    Parameters
+    ----------
+    mu_g : float
+        This label's calibrated gain hint.
+    plate_gain_scale : float
+        Mean of the positive gains on the plate, used when *mu_g* is 0. The
+        caller's ``has_gain`` gate guarantees this is non-zero whenever a
+        zero hint can reach here.
+
+    Returns
+    -------
+    float
+        Standard deviation for the gain prior.
+    """
+    return 0.2 * (mu_g if mu_g > 0.0 else plate_gain_scale)
+
+
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     noise_model: PlateNoiseModel,
     *,
@@ -152,9 +178,10 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     # "symmetrise" this gate — it is what guarantees plate_gain_scale > 0.
     has_gain = any(p.gain > 0 for p in noise_model.values())
     if has_gain or gain_mode == "free":
+        positive_gains = [p.gain for p in noise_model.values() if p.gain > 0]
+        plate_gain_scale = float(np.mean(positive_gains)) if positive_gains else 0.0
         if shared_gain:
-            gains = [p.gain for p in noise_model.values() if p.gain > 0]
-            mu_g = float(np.mean(gains)) if gains else 0.0
+            mu_g = plate_gain_scale
             if gain_mode == "fixed":
                 priors["gain"] = pt.as_tensor_variable(mu_g)
             elif gain_mode == "free":
@@ -164,7 +191,10 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 priors["gain"] = pm.Exponential("gain", lam=lam)
             else:  # centered
                 priors["gain"] = pm.TruncatedNormal(
-                    "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
+                    "gain",
+                    mu=mu_g,
+                    sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
+                    lower=0.0,
                 )
         else:
             priors["gain"] = {}
@@ -180,11 +210,18 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     priors["gain"][lbl] = pm.TruncatedNormal(
                         f"gain_{lbl}",
                         mu=mu_g,
-                        sigma=max(0.20 * mu_g, 0.01),
+                        sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
                         lower=0.0,
                     )
                 else:
-                    priors["gain"][lbl] = pt.as_tensor_variable(0.0)
+                    # Exact 0 from the NNLS boundary: alpha won this label's
+                    # decomposition. Keep the term estimable around 0 with a
+                    # width borrowed from the labels that did resolve a gain,
+                    # so the posterior can undo an arbitrary collinear split.
+                    priors["gain"][lbl] = pm.HalfNormal(
+                        f"gain_{lbl}",
+                        sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
+                    )
 
     # 3. Alpha (proportional error). "centered" and "free" always build a prior
     # so a calibrated alpha of 0 becomes a tight prior *around* 0, not a hard 0;

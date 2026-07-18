@@ -2760,3 +2760,73 @@ def test_gain_omitted_when_no_label_resolves_a_gain() -> None:
     # on, so it stays present even though every label calibrated to a positive
     # value here.
     assert "rel_error" in priors
+
+
+def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
+    """An exact-zero gain stays estimable, scaled by the labels that resolved one.
+
+    NNLS clamps the collinear y/y**2 basis, so gain=0.0 on one label means alpha
+    won that label's decomposition -- not that the Poisson term is absent. The
+    prior must let the posterior re-decide.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.6, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(nm, gain_mode="centered")
+        draws = pm.draw(priors["gain"]["1"], draws=8000, random_seed=0)
+    # Non-degenerate and non-negative: a sampled variable, not a hard constant.
+    assert float(draws.std()) > 0.0
+    assert float(draws.min()) >= 0.0
+    # HalfNormal(sigma=0.2 * 1.6 = 0.32); its mean is sigma * sqrt(2/pi).
+    assert float(draws.mean()) == pytest.approx(0.32 * np.sqrt(2 / np.pi), abs=0.02)
+
+
+def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:
+    """One hint gives one width, whether the gain is pooled or per-label.
+
+    The shared branch used to floor sigma at 0.1 and the per-label branch at
+    0.01 -- a 10x disagreement with no rationale.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({"1": NoiseModelParams(sigma_floor=1.0, gain=0.3)})
+    with pm.Model():
+        shared = bayes.build_pymc_noise_priors(
+            nm, shared_gain=True, gain_mode="centered"
+        )
+        shared_std = float(pm.draw(shared["gain"], draws=8000, random_seed=0).std())
+    with pm.Model():
+        per_label = bayes.build_pymc_noise_priors(
+            nm, shared_gain=False, gain_mode="centered"
+        )
+        per_std = float(
+            pm.draw(per_label["gain"]["1"], draws=8000, random_seed=0).std()
+        )
+    # Both are 0.2 * 0.3 = 0.06 now; previously 0.1 (shared) vs 0.06 (per-label).
+    assert shared_std == pytest.approx(per_std, rel=0.05)
+    assert shared_std == pytest.approx(0.06, abs=0.006)
+
+
+def test_fixed_mode_keeps_hard_constants_for_both_terms() -> None:
+    """Mode ``fixed`` is the one mode where a zero genuinely means absent.
+
+    The softening of zeroed gains must not leak into "fixed", which callers use
+    to pin or disable a term outright.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.6, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            nm, gain_mode="fixed", alpha_mode="fixed"
+        )
+    # Constants, not sampled variables: they evaluate to the hint exactly and
+    # carry no randomness.
+    assert float(priors["gain"]["1"].eval()) == 0.0
+    assert float(priors["gain"]["2"].eval()) == pytest.approx(1.6)
+    assert float(priors["rel_error"]["1"].eval()) == pytest.approx(0.02)
+    assert float(priors["rel_error"]["2"].eval()) == 0.0
