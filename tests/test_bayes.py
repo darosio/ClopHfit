@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
+import pytensor.tensor as pt
 import pytest
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
@@ -754,6 +755,57 @@ def test_centered_zero_alpha_is_prior_around_zero() -> None:
     assert "rel_error" not in fixed
 
 
+def test_shared_floor_pools_labels_into_one_variable() -> None:
+    """shared_floor pools per-label floors into a single plate-wide variable."""
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=2.0),
+        "2": NoiseModelParams(sigma_floor=4.0),
+    })
+    with pm.Model():
+        pooled = bayes.build_pymc_noise_priors(nm, shared_floor=True)
+        pooled_mean = float(pm.draw(pooled["floor"], draws=6000, random_seed=0).mean())
+    with pm.Model():
+        per_label = bayes.build_pymc_noise_priors(nm, shared_floor=False)
+        mean1 = float(
+            pm.draw(per_label["floor"]["1"], draws=6000, random_seed=0).mean()
+        )
+        mean2 = float(
+            pm.draw(per_label["floor"]["2"], draws=6000, random_seed=1).mean()
+        )
+    # Pooled: one variable, not a per-label dict, centered on the mean hint.
+    assert not isinstance(pooled["floor"], dict)
+    assert pooled_mean == pytest.approx(3.0, abs=0.1)
+    # Per-label keeps the two hints distinct.
+    assert isinstance(per_label["floor"], dict)
+    assert mean1 == pytest.approx(2.0, abs=0.1)
+    assert mean2 == pytest.approx(4.0, abs=0.1)
+
+
+def test_shared_floor_variance_is_per_point() -> None:
+    """get_pymc_variance accepts a pooled floor and still returns a per-point tensor."""
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=2.0),
+        "2": NoiseModelParams(sigma_floor=4.0),
+    })
+    mu = np.array([10.0, 20.0, 30.0])
+    with pm.Model():
+        # gain/alpha fixed at their zero hints so only the floor term survives.
+        priors = bayes.build_pymc_noise_priors(
+            nm,
+            shared_floor=True,
+            floor_mode="fixed",
+            gain_mode="fixed",
+            alpha_mode="fixed",
+        )
+        var = bayes.get_pymc_variance(pt.as_tensor_variable(mu), "1", nm, priors)
+        values = np.asarray(var.eval())
+    # Fixed pooled floor == mean hint (3.0); variance is floor**2 at every point.
+    assert values.shape == mu.shape
+    assert values == pytest.approx(np.full(3, 9.0))
+
+
 @pytest.mark.parametrize(
     ("value", "label", "expected"),
     [
@@ -1023,10 +1075,8 @@ def test_fit_binding_pymc_dataset_defaults_free_noise_modes(
         floor_mode: str = "centered",
         gain_mode: str = "centered",
         alpha_mode: str = "centered",
-        shared_alpha: bool = False,
-        shared_gain: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        del shared_alpha, shared_gain
         captured["floor"] = floor_mode
         captured["gain"] = gain_mode
         captured["alpha"] = alpha_mode
@@ -1061,10 +1111,8 @@ def test_fit_binding_pymc_fitresult_defaults_centered_noise_modes(
         floor_mode: str = "centered",
         gain_mode: str = "centered",
         alpha_mode: str = "centered",
-        shared_alpha: bool = False,
-        shared_gain: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        del shared_alpha, shared_gain
         captured["floor"] = floor_mode
         captured["gain"] = gain_mode
         captured["alpha"] = alpha_mode
@@ -1097,13 +1145,10 @@ def test_fit_binding_pymc_passes_shared_noise_flags(
     def fake_build_pymc_noise_priors(
         _noise_model: PlateNoiseModel,
         *,
-        floor_mode: str = "centered",
-        gain_mode: str = "centered",
-        alpha_mode: str = "centered",
         shared_alpha: bool = False,
         shared_gain: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        del floor_mode, gain_mode, alpha_mode
         captured["shared_alpha"] = shared_alpha
         captured["shared_gain"] = shared_gain
         raise _StopBayesBuildError
@@ -1121,6 +1166,39 @@ def test_fit_binding_pymc_passes_shared_noise_flags(
         )
 
     assert captured == {"shared_alpha": False, "shared_gain": True}
+
+
+def test_fit_binding_pymc_passes_shared_floor(
+    monkeypatch: pytest.MonkeyPatch,
+    multi_dataset: Dataset,
+) -> None:
+    """NoiseConfig.shared_floor should reach build_pymc_noise_priors."""
+    captured: dict[str, bool] = {}
+    noise_model = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0),
+        "2": NoiseModelParams(sigma_floor=2.0),
+    })
+
+    def fake_build_pymc_noise_priors(
+        _noise_model: PlateNoiseModel,
+        *,
+        shared_floor: bool = False,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        captured["shared_floor"] = shared_floor
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+
+    with pytest.raises(_StopBayesBuildError):
+        fit_binding_pymc(
+            multi_dataset,
+            n_xerr=0.0,
+            noise=NoiseConfig.structured(noise_model=noise_model, shared_floor=True),
+            sampler=SamplerConfig(n_samples=2, n_tune=1),
+        )
+
+    assert captured == {"shared_floor": True}
 
 
 def test_fit_binding_pymc_robust_uses_fixed_student_t_nu(
@@ -1595,10 +1673,8 @@ def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
         floor_mode: str = "centered",
         gain_mode: str = "centered",
         alpha_mode: str = "centered",
-        shared_alpha: bool = False,
-        shared_gain: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        del shared_alpha, shared_gain
         captured["floor"] = floor_mode
         captured["gain"] = gain_mode
         captured["alpha"] = alpha_mode
@@ -1638,10 +1714,8 @@ def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
         floor_mode: str = "centered",
         gain_mode: str = "centered",
         alpha_mode: str = "centered",
-        shared_alpha: bool = False,
-        shared_gain: bool = False,
+        **_kwargs: object,
     ) -> dict[str, object]:
-        del shared_alpha, shared_gain
         captured["floor"] = floor_mode
         captured["gain"] = gain_mode
         captured["alpha"] = alpha_mode
@@ -1677,15 +1751,8 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
     captured: dict[str, list[str]] = {}
 
     def fake_build_pymc_noise_priors(
-        _noise_model: PlateNoiseModel,
-        *,
-        floor_mode: str = "centered",
-        gain_mode: str = "centered",
-        alpha_mode: str = "centered",
-        shared_alpha: bool = False,
-        shared_gain: bool = False,
+        _noise_model: PlateNoiseModel, **_kwargs: object
     ) -> dict[str, object]:
-        del floor_mode, gain_mode, alpha_mode, shared_alpha, shared_gain
         captured["labels"] = list(_noise_model.keys())
         raise _StopBayesBuildError
 

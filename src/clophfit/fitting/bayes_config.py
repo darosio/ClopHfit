@@ -227,6 +227,7 @@ class NoiseConfig:
     alpha_mode: NoiseParamMode | None = None
     shared_alpha: bool = False
     shared_gain: bool = False
+    shared_floor: bool = False
     floor: float | Mapping[str, float] | None = None
     gain: float | Mapping[str, float] = 0.0
     alpha: float | Mapping[str, float] = 0.02
@@ -265,6 +266,7 @@ class NoiseConfig:
         alpha_mode: NoiseParamMode | None = None,
         shared_alpha: bool = False,
         shared_gain: bool = False,
+        shared_floor: bool = False,
         floor: float | Mapping[str, float] | None = None,
         gain: float | Mapping[str, float] = 0.0,
         alpha: float | Mapping[str, float] = 0.02,
@@ -293,6 +295,7 @@ class NoiseConfig:
             alpha_mode=alpha_mode,
             shared_alpha=shared_alpha,
             shared_gain=shared_gain,
+            shared_floor=shared_floor,
             floor=floor,
             gain=gain,
             alpha=alpha,

@@ -65,11 +65,42 @@ _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
 _MIN_NOISE_PRIOR_SCALE = 1e-3
 
 
+def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any:  # noqa: ANN401
+    """Build one floor prior from a hint, shared by the pooled and per-label paths.
+
+    Parameters
+    ----------
+    name : str
+        Name of the PyMC variable to create.
+    mu : float
+        Calibrated ``sigma_floor`` hint.
+    mode : NoiseParamMode
+        How to treat the floor parameter: "fixed", "free", or "centered".
+
+    Returns
+    -------
+    typing.Any
+        A PyMC random variable, or a constant tensor when *mode* is "fixed".
+    """
+    if mode == "fixed":
+        return pt.as_tensor_variable(mu)
+    if mode == "free":
+        # Uninformative prior, using mu only as a scale hint
+        return pm.HalfNormal(name, sigma=max(mu, 1.0))
+    # centered
+    n_pts = 7
+    dof = max(1, n_pts - 1)
+    rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
+    sigma = max(rel_sigma * mu, 0.01)
+    return pm.TruncatedNormal(name, mu=mu, sigma=sigma, lower=0.0)
+
+
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     noise_model: PlateNoiseModel,
     *,
     shared_alpha: bool = False,
     shared_gain: bool = False,
+    shared_floor: bool = False,
     floor_mode: NoiseParamMode = "centered",
     gain_mode: NoiseParamMode = "centered",
     alpha_mode: NoiseParamMode = "centered",
@@ -84,6 +115,8 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
         If ``True``, pool the proportional error into a single global variable.
     shared_gain : bool
         If ``True``, pool the photon gain into a single global variable.
+    shared_floor : bool
+        If ``True``, pool the noise floor into a single global variable.
     floor_mode : NoiseParamMode
         How to treat the floor parameter: "fixed", "free", or "centered".
     gain_mode : NoiseParamMode
@@ -101,21 +134,15 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     labels = list(noise_model.keys())
 
     # 1. Floor Priors
-    priors["floor"] = {}
-    for lbl in labels:
-        mu = noise_model[lbl].sigma_floor
-        if floor_mode == "fixed":
-            priors["floor"][lbl] = pt.as_tensor_variable(mu)
-        elif floor_mode == "free":
-            # Uninformative prior, using mu only as a scale hint
-            priors["floor"][lbl] = pm.HalfNormal(f"floor_{lbl}", sigma=max(mu, 1.0))
-        else:  # centered
-            n_pts = 7
-            dof = max(1, n_pts - 1)
-            rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
-            sigma = max(rel_sigma * mu, 0.01)
-            priors["floor"][lbl] = pm.TruncatedNormal(
-                f"floor_{lbl}", mu=mu, sigma=sigma, lower=0.0
+    if shared_floor:
+        floors = [p.sigma_floor for p in noise_model.values() if p.sigma_floor > 0]
+        mu_f = float(np.mean(floors)) if floors else 0.0
+        priors["floor"] = _build_floor_prior("floor", mu_f, floor_mode)
+    else:
+        priors["floor"] = {}
+        for lbl in labels:
+            priors["floor"][lbl] = _build_floor_prior(
+                f"floor_{lbl}", noise_model[lbl].sigma_floor, floor_mode
             )
 
     # 2. Gain (Poisson term)
@@ -251,9 +278,12 @@ def get_pymc_variance(
     """
     params = noise_model[label]
     y_pos = pm_math.maximum(1e-6, mu)
+    floor = (
+        priors["floor"][label] if isinstance(priors["floor"], dict) else priors["floor"]
+    )
     # Broadcast floor² to match y_pos shape so the result is always
     # per-point (never 0-d), even when gain and alpha are both absent.
-    var = priors["floor"][label] ** 2 * pt.ones_like(y_pos)  # type: ignore[no-untyped-call]
+    var = floor**2 * pt.ones_like(y_pos)  # type: ignore[no-untyped-call]
 
     if params.gain > 0 or "gain" in priors:
         gain = (
@@ -2009,6 +2039,7 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
     contamination_frac_prior = robust.contamination_frac_prior
     shared_alpha = noise.shared_alpha
     shared_gain = noise.shared_gain
+    shared_floor = noise.shared_floor
     learn_ye_mags = noise.learn_ye_mags
     shared_ye_mags = noise.shared_ye_mags
     ye_mag_prior = noise.ye_mag_prior
@@ -2098,6 +2129,7 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
                 active_noise_model,
                 shared_alpha=shared_alpha,
                 shared_gain=shared_gain,
+                shared_floor=shared_floor,
                 floor_mode=floor_mode,
                 gain_mode=gain_mode,
                 alpha_mode=alpha_mode,
@@ -2982,6 +3014,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     contamination_frac_prior = robust.contamination_frac_prior
     shared_alpha = noise.shared_alpha
     shared_gain = noise.shared_gain
+    shared_floor = noise.shared_floor
     learn_ye_mags = noise.learn_ye_mags
     shared_ye_mags = noise.shared_ye_mags
     ye_mag_prior = noise.ye_mag_prior
@@ -3196,6 +3229,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 active_noise_model,
                 shared_alpha=shared_alpha,
                 shared_gain=shared_gain,
+                shared_floor=shared_floor,
                 floor_mode=floor_mode,
                 gain_mode=gain_mode,
                 alpha_mode=alpha_mode,
