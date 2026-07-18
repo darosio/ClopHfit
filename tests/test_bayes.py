@@ -2796,16 +2796,21 @@ def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
 def test_zeroed_alpha_borrows_width_from_resolved_labels() -> None:
     """An exact-zero alpha stays estimable, scaled by the labels that resolved one.
 
-    Modelled on real plate L4: label "1" resolved alpha=0.106 (gain=4.93), and
-    label "2" landed on the NNLS alpha=0.0 boundary (gain=1.34) -- meaning gain
+    Shaped like real plate L4: label "1" resolves an alpha (gain=4.93), and
+    label "2" lands on the NNLS alpha=0.0 boundary (gain=1.34) -- meaning gain
     won label 2's decomposition, not that its proportional-error term is
     physically absent. Label 2's prior must borrow its width from label 1's
     resolved alpha (`plate_alpha_scale`), not collapse to a tight band around
     zero, so the posterior can re-decide the collinear split.
+
+    Label 1's alpha is deliberately set to 0.25 rather than L4's measured 0.106.
+    At 0.106 the borrowed width is too close to the `_ZERO_HINT_ALPHA_SCALE`
+    fallback of 0.1 for the assertion to tell them apart, so a regression that
+    dropped the borrow entirely would still pass. 0.25 separates the two.
     """
     pytest.importorskip("pymc")
     nm = PlateNoiseModel({
-        "1": NoiseModelParams(sigma_floor=1.0, gain=4.93, alpha=0.106),
+        "1": NoiseModelParams(sigma_floor=1.0, gain=4.93, alpha=0.25),
         "2": NoiseModelParams(sigma_floor=1.0, gain=1.34, alpha=0.0),
     })
     with pm.Model():
@@ -2815,9 +2820,11 @@ def test_zeroed_alpha_borrows_width_from_resolved_labels() -> None:
     assert float(draws.std()) > 0.0
     assert float(draws.min()) >= 0.0
     # An unresolved (zero) hint uses _ZERO_HINT_WIDTH * plate_alpha_scale
-    # (here plate_alpha_scale == 0.106, label 1's resolved alpha): HalfNormal
-    # (sigma=1.0 * 0.106 = 0.106); its mean is sigma * sqrt(2/pi) ~= 0.0846.
-    assert float(draws.mean()) == pytest.approx(0.106 * np.sqrt(2 / np.pi), abs=0.006)
+    # (here plate_alpha_scale == 0.25, label 1's resolved alpha): HalfNormal
+    # (sigma=1.0 * 0.25); its mean is sigma * sqrt(2/pi) ~= 0.1995. Falling
+    # back to _ZERO_HINT_ALPHA_SCALE=0.1 instead would give ~0.0798, far
+    # outside this tolerance.
+    assert float(draws.mean()) == pytest.approx(0.25 * np.sqrt(2 / np.pi), abs=0.006)
 
 
 def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:
@@ -2866,3 +2873,35 @@ def test_fixed_mode_keeps_hard_constants_for_both_terms() -> None:
     assert float(priors["gain"]["2"].eval()) == pytest.approx(1.6)
     assert float(priors["rel_error"]["1"].eval()) == pytest.approx(0.02)
     assert float(priors["rel_error"]["2"].eval()) == 0.0
+
+
+def test_shared_zeroed_alpha_matches_per_label_halfnormal() -> None:
+    """Pooled alpha with every hint zeroed spans the same width as per-label.
+
+    The shared branch reaches the zero-hint width through a different
+    distribution family -- ``TruncatedNormal(mu=0, sigma=s, lower=0)`` rather
+    than ``HalfNormal(sigma=s)``. Those are the same distribution, and this
+    pins that equivalence so the pooled path cannot drift from the per-label
+    one. With no label resolving a positive alpha, both fall back to
+    ``_ZERO_HINT_ALPHA_SCALE``.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=5.53, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=0.52, alpha=0.0),
+    })
+    with pm.Model():
+        pooled = bayes.build_pymc_noise_priors(
+            nm, shared_alpha=True, alpha_mode="centered"
+        )
+        pooled_draws = pm.draw(pooled["rel_error"], draws=8000, random_seed=0)
+    with pm.Model():
+        per_label = bayes.build_pymc_noise_priors(
+            nm, shared_alpha=False, alpha_mode="centered"
+        )
+        per_draws = pm.draw(per_label["rel_error"]["1"], draws=8000, random_seed=1)
+    # Both are the _ZERO_HINT_ALPHA_SCALE fallback of 0.1, mean 0.1*sqrt(2/pi).
+    expected = 0.1 * np.sqrt(2 / np.pi)
+    assert float(pooled_draws.mean()) == pytest.approx(expected, abs=0.005)
+    assert float(per_draws.mean()) == pytest.approx(expected, abs=0.005)
+    assert float(pooled_draws.min()) >= 0.0
