@@ -717,13 +717,14 @@ def test_free_noise_priors_scale_from_hints() -> None:
         alpha0_mean = float(
             pm.draw(priors0["rel_error"]["1"], draws=6000, random_seed=1).mean()
         )
-    # Hinted: Exponential mean == gain hint (0.5); HalfNormal mean == sigma*sqrt(2/pi).
+    # The hint is the prior *mean* for both terms: Exponential(lam=1/h) and
+    # HalfNormal(sigma=h*sqrt(pi/2)) both have mean h.
     assert gain_mean == pytest.approx(0.5, abs=0.05)
-    assert alpha_mean == pytest.approx(0.03 * np.sqrt(2 / np.pi), abs=0.005)
+    assert alpha_mean == pytest.approx(0.03, abs=0.005)
     # gain=0 / alpha=0 -> tightest around-zero priors (floored at 1e-3), so each
     # width is strictly *below* a small positive hint (monotonic in the hint).
     assert gain0_mean == pytest.approx(1e-3, abs=5e-4)
-    assert alpha0_mean == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert alpha0_mean == pytest.approx(1e-3, abs=5e-4)
     assert gain0_mean < gain_mean
     assert alpha0_mean < alpha_mean
 

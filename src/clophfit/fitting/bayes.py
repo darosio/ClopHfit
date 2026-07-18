@@ -226,7 +226,8 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
     # 3. Alpha (proportional error). "centered" and "free" always build a prior
     # so a calibrated alpha of 0 becomes a tight prior *around* 0, not a hard 0;
     # only "fixed" leaves the term truly absent when alpha is 0. The alpha hint
-    # is the prior scale (HalfNormal sigma / TruncatedNormal mean), floored at
+    # is the prior mean in every mode (HalfNormal sigma is scaled by sqrt(pi/2)
+    # to achieve that; TruncatedNormal takes it directly), floored at
     # _MIN_NOISE_PRIOR_SCALE so the width grows monotonically with the hint (the
     # weak 0.02 default lives in NoiseConfig.alpha, not here).
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
@@ -237,8 +238,12 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             if alpha_mode == "fixed":
                 priors["rel_error"] = pt.as_tensor_variable(mu_a)
             elif alpha_mode == "free":
+                # sqrt(pi/2) converts the hint from a scale to a mean, so the
+                # hint means the same thing here as it does for gain's
+                # Exponential (whose mean is exactly its hint).
                 priors["rel_error"] = pm.HalfNormal(
-                    "rel_error", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                    "rel_error",
+                    sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE) * np.sqrt(np.pi / 2),
                 )
             else:  # centered
                 priors["rel_error"] = pm.TruncatedNormal(
@@ -254,8 +259,10 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if alpha_mode == "fixed":
                     priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
                 elif alpha_mode == "free":
+                    # See the shared branch: sqrt(pi/2) makes the hint a mean.
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                        f"rel_error_{lbl}",
+                        sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE) * np.sqrt(np.pi / 2),
                     )
                 elif mu_a > 0.0:  # centered on a positive hint
                     priors["rel_error"][lbl] = pm.TruncatedNormal(
