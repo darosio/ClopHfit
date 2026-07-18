@@ -2736,3 +2736,27 @@ class TestYerrExtraction:
         assert len(sigma_means) == n_steps
         # All values must be far from the 1.0 fallback
         assert np.all(sigma_means > 5.0)
+
+
+def test_gain_omitted_when_no_label_resolves_a_gain() -> None:
+    """No positive gain anywhere -> the Poisson term is omitted, not invented.
+
+    Gain carries the units of the signal, so unlike alpha there is no
+    plate-independent around-zero width to fall back on. This invariant is what
+    guarantees the zeroed-gain branch never borrows a width of zero.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.03),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            nm, gain_mode="centered", alpha_mode="centered"
+        )
+    # Gain has nothing to borrow from, so it is absent.
+    assert "gain" not in priors
+    # Alpha is dimensionless and always has _MIN_NOISE_PRIOR_SCALE to fall back
+    # on, so it stays present even though every label calibrated to a positive
+    # value here.
+    assert "rel_error" in priors

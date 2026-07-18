@@ -143,7 +143,13 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 f"floor_{lbl}", noise_model[lbl].sigma_floor, floor_mode
             )
 
-    # 2. Gain (Poisson term)
+    # 2. Gain (Poisson term). The gate is deliberately narrower than alpha's
+    # below. Alpha is dimensionless, so _MIN_NOISE_PRIOR_SCALE is a meaningful
+    # universal around-zero width and alpha can always stay soft. Gain carries
+    # the units of the signal, so its around-zero width has to be borrowed from
+    # labels that did resolve a gain; when no label resolved one there is
+    # nothing to borrow, and omitting the term beats inventing a scale. Do not
+    # "symmetrise" this gate — it is what guarantees plate_gain_scale > 0.
     has_gain = any(p.gain > 0 for p in noise_model.values())
     if has_gain or gain_mode == "free":
         if shared_gain:
