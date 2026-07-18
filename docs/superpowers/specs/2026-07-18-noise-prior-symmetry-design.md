@@ -147,17 +147,36 @@ gain's gate is narrower than alpha's, so the asymmetry is not "fixed" later.
 ### 2. A zeroed gain becomes estimable
 
 `bayes.py:181` changes from a hard constant to a prior whose width is borrowed
-from the labels that *did* resolve a gain:
+from the labels that *did* resolve a gain. This requires two distinct width
+factors, not one reused constant, because a resolved hint and an unresolved
+(zero) hint mean fundamentally different things:
 
 ```python
+_ZERO_HINT_GAIN_WIDTH = 1.0  # module-level, alongside _MIN_NOISE_PRIOR_SCALE
+
 plate_gain_scale = mean(p.gain for p in noise_model.values() if p.gain > 0)
-priors["gain"][lbl] = pm.HalfNormal(f"gain_{lbl}", sigma=0.2 * plate_gain_scale)
+sigma = 0.2 * mu_g if mu_g > 0.0 else _ZERO_HINT_GAIN_WIDTH * plate_gain_scale
+priors["gain"][lbl] = pm.HalfNormal(f"gain_{lbl}", sigma=sigma)
 ```
 
-For the real-plate table, label 1's zeroed gain gets `sigma = 0.2 * 1.6 = 0.32`
-— the collinear partner supplies the scale. This is self-calibrating across
-plates and instruments, and introduces no new magic constant: `0.2` is the same
-relative width already used for positive hints at `bayes.py:161,177`.
+A *resolved* hint (`mu_g > 0`) is a real calibrated value, known to about 20%,
+so `0.2 * mu_g` is the right width — this is unchanged from the positive-hint
+branches at `bayes.py:161,177`. A hint of exactly `0.0` is not a measurement of
+zero: it means the collinear alpha term won this label's NNLS decomposition,
+so the true gain could plausibly be anywhere up to the plate's other gains.
+Reusing the same `0.2` factor there would make the prior far too tight — at
+`plate_gain_scale = 1.6`, `HalfNormal(sigma=0.2 * 1.6 = 0.32)` puts the value
+NNLS could equally have assigned this label (1.6) about five sigma out, with
+~6e-7 of the prior mass — the posterior cannot recover the split, defeating
+the point of making the term estimable at all. `_ZERO_HINT_GAIN_WIDTH = 1.0`
+instead spans the plate's gain scale directly: `sigma = 1.0 * 1.6 = 1.6`, wide
+enough that the posterior can genuinely re-decide the split. This does
+introduce one new module-level constant, alongside `_MIN_NOISE_PRIOR_SCALE`;
+that is the accepted cost of giving the two semantics their own knobs instead
+of overloading `0.2`.
+
+For the real-plate table, label 1's zeroed gain gets `sigma = 1.0 * 1.6 = 1.6`
+— the collinear partner supplies the scale.
 
 The structure now mirrors alpha exactly: `HalfNormal` at a zero hint,
 `TruncatedNormal` at a positive one.

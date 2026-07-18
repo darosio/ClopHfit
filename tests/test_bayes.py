@@ -2781,8 +2781,11 @@ def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
     # Non-degenerate and non-negative: a sampled variable, not a hard constant.
     assert float(draws.std()) > 0.0
     assert float(draws.min()) >= 0.0
-    # HalfNormal(sigma=0.2 * 1.6 = 0.32); its mean is sigma * sqrt(2/pi).
-    assert float(draws.mean()) == pytest.approx(0.32 * np.sqrt(2 / np.pi), abs=0.02)
+    # An unresolved (zero) hint uses _ZERO_HINT_GAIN_WIDTH * plate_gain_scale,
+    # not the 20% relative width used for resolved hints: HalfNormal(sigma=1.0
+    # * 1.6 = 1.6); its mean is sigma * sqrt(2/pi) ~= 1.2767. abs=0.08 is
+    # roughly 7 sampling standard errors at draws=8000.
+    assert float(draws.mean()) == pytest.approx(1.6 * np.sqrt(2 / np.pi), abs=0.08)
 
 
 def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:

@@ -19,7 +19,8 @@
 - Commits must follow Conventional Commit format — pre-commit enforces it.
 - Tests requiring PyMC must start with `pytest.importorskip("pymc")`, matching the existing tests in `tests/test_bayes.py`.
 - `_MIN_NOISE_PRIOR_SCALE = 1e-3` (`bayes.py:63`) stays the floor for **alpha** widths only. It must never be applied to gain — against a gain of ~1.6 it is 0.06%, a hard zero in disguise.
-- The relative width constant for gain is `0.2`, reused from the existing positive-hint branches. Do not introduce a new module-level constant for it.
+- Gain uses **two** width factors, not one reused constant: `0.2 * mu_g` for a *resolved* hint (known to about 20%), and a new module-level constant `_ZERO_HINT_GAIN_WIDTH = 1.0 * plate_gain_scale` for an *unresolved* (exactly-zero) hint. Reusing `0.2` for the zero-hint case makes the prior far too tight — `HalfNormal(sigma=0.2 * 1.6 = 0.32)` puts the value the collinear partner could equally have taken (1.6) about five sigma out, so the posterior cannot recover the split. **This supersedes the original constraint below, which forbade a new module-level constant for the gain width; that constraint was based on treating both cases as the same relative width, which is incorrect.**
+- ~~The relative width constant for gain is `0.2`, reused from the existing positive-hint branches. Do not introduce a new module-level constant for it.~~ (superseded, see above)
 
 ______________________________________________________________________
 
@@ -154,8 +155,11 @@ def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
     # Non-degenerate and non-negative: a sampled variable, not a hard constant.
     assert float(draws.std()) > 0.0
     assert float(draws.min()) >= 0.0
-    # HalfNormal(sigma=0.2 * 1.6 = 0.32); its mean is sigma * sqrt(2/pi).
-    assert float(draws.mean()) == pytest.approx(0.32 * np.sqrt(2 / np.pi), abs=0.02)
+    # An unresolved (zero) hint uses _ZERO_HINT_GAIN_WIDTH * plate_gain_scale,
+    # not the 20% relative width used for resolved hints:
+    # HalfNormal(sigma=1.0 * 1.6 = 1.6); its mean is sigma * sqrt(2/pi) ~= 1.2767.
+    # abs=0.08 is roughly 7 sampling standard errors at draws=8000.
+    assert float(draws.mean()) == pytest.approx(1.6 * np.sqrt(2 / np.pi), abs=0.08)
 
 
 def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:
@@ -221,14 +225,26 @@ Expected: two FAIL, one PASS.
 In `src/clophfit/fitting/bayes.py`, insert after `_build_floor_prior` ends (line 93) and before `build_pymc_noise_priors`:
 
 ```python
+# Width factor for a *zeroed* gain hint, in units of plate_gain_scale. A
+# resolved gain hint is known to about 20%, but a hint of exactly 0.0 is not a
+# measurement of zero -- it means the collinear alpha term won this label's
+# NNLS decomposition, so the width must span the plausible range of the
+# plate's gains rather than a tight band around zero.
+_ZERO_HINT_GAIN_WIDTH = 1.0
+
+
 def _gain_prior_sigma(mu_g: float, plate_gain_scale: float) -> float:
     """Prior width for one gain hint.
 
-    Gain carries the units of the signal, so its width is always relative --
-    20% of this label's hint, or of the plate-wide scale when the hint is
-    exactly 0. An exact 0 comes from the NNLS boundary and means the collinear
-    alpha term won this label's decomposition, not that the Poisson term is
-    absent, so the width is borrowed rather than collapsed.
+    Gain carries the units of the signal, so its width is always relative, but
+    the two cases mean different things and use different factors. A
+    *resolved* hint (``mu_g > 0``) is a real calibrated value known to about
+    20% (``0.2 * mu_g``). An *unresolved* hint (``mu_g == 0``) is not a
+    measurement of zero: it comes from the NNLS boundary and means the
+    collinear alpha term won this label's decomposition, so the width instead
+    has to span the plausible range of the plate's gains
+    (``_ZERO_HINT_GAIN_WIDTH * plate_gain_scale``) rather than being a tight
+    band around zero.
 
     Parameters
     ----------
@@ -244,7 +260,9 @@ def _gain_prior_sigma(mu_g: float, plate_gain_scale: float) -> float:
     float
         Standard deviation for the gain prior.
     """
-    return 0.2 * (mu_g if mu_g > 0.0 else plate_gain_scale)
+    if mu_g > 0.0:
+        return 0.2 * mu_g
+    return _ZERO_HINT_GAIN_WIDTH * plate_gain_scale
 ```
 
 - [ ] **Step 4: Rewrite the gain block**
@@ -264,6 +282,9 @@ In `src/clophfit/fitting/bayes.py`, replace the body of the gain block (the line
                 lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
                 priors["gain"] = pm.Exponential("gain", lam=lam)
             else:  # centered
+                # In the shared branch mu_g IS plate_gain_scale (set just
+                # above), so this can only ever take the resolved-hint arm of
+                # _gain_prior_sigma; the zero-hint fallback is per-label only.
                 priors["gain"] = pm.TruncatedNormal(
                     "gain",
                     mu=mu_g,
@@ -290,8 +311,9 @@ In `src/clophfit/fitting/bayes.py`, replace the body of the gain block (the line
                 else:
                     # Exact 0 from the NNLS boundary: alpha won this label's
                     # decomposition. Keep the term estimable around 0 with a
-                    # width borrowed from the labels that did resolve a gain,
-                    # so the posterior can undo an arbitrary collinear split.
+                    # width spanning the plate's gain scale (not a fraction of
+                    # it -- see _ZERO_HINT_GAIN_WIDTH), so the posterior can
+                    # undo an arbitrary collinear split.
                     priors["gain"][lbl] = pm.HalfNormal(
                         f"gain_{lbl}",
                         sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
@@ -511,7 +533,7 @@ print('gain_1 mean', d.mean(), 'std', d.std(), 'min', d.min())
 "
 ```
 
-Expected: a mean near `0.32 * sqrt(2/pi)` ~= 0.255, a non-zero std, and a min of 0.0 or above. A std of exactly 0 means the hard constant is still in place.
+Expected: a mean near `1.6 * sqrt(2/pi)` ~= 1.2767, a non-zero std, and a min of 0.0 or above. A std of exactly 0 means the hard constant is still in place.
 
 - [ ] **Step 4: Real-plate validation**
 
