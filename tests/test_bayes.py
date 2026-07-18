@@ -729,10 +729,15 @@ def test_free_noise_priors_scale_from_hints() -> None:
     assert alpha0_mean < alpha_mean
 
 
-def test_centered_zero_alpha_is_prior_around_zero() -> None:
-    """A calibrated alpha of 0 stays a prior around 0 in centered mode, not fixed.
+def test_centered_zero_alpha_spans_plate_alpha_scale() -> None:
+    """A calibrated alpha of 0 spans the plate's alpha scale in centered mode, not fixed.
 
-    Only "fixed" drops the alpha term when the whole plate has alpha == 0.
+    NNLS clamps the collinear y/y**2 basis, so alpha=0.0 on every label means
+    gain won each label's decomposition -- not that the proportional-error term
+    is physically absent. With no label resolving a positive alpha, the width
+    falls back to `_ZERO_HINT_ALPHA_SCALE` (0.1), the plate scale to assume
+    when nothing on the plate resolved a positive alpha. Only "fixed" drops the
+    alpha term when the whole plate has alpha == 0.
     """
     pytest.importorskip("pymc")
     nm = PlateNoiseModel({
@@ -744,12 +749,12 @@ def test_centered_zero_alpha_is_prior_around_zero() -> None:
             nm, gain_mode="centered", alpha_mode="centered"
         )
         draws = pm.draw(centered["rel_error"]["1"], draws=6000, random_seed=0)
-    # Term is present, strictly non-negative, non-degenerate, tight around 0
-    # (HalfNormal floored at 1e-3, not the legacy 0.02).
+    # Term is present, strictly non-negative, non-degenerate, and spans the
+    # plate's alpha scale (HalfNormal(sigma=0.1), not a tight band around 0).
     assert "rel_error" in centered
     assert float(draws.min()) >= 0.0
     assert float(draws.std()) > 0.0
-    assert float(draws.mean()) == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert float(draws.mean()) == pytest.approx(0.1 * np.sqrt(2 / np.pi), abs=0.005)
     with pm.Model():
         fixed = bayes.build_pymc_noise_priors(nm, gain_mode="fixed", alpha_mode="fixed")
     # "fixed" with an all-zero alpha leaves the term genuinely absent (hard 0).
@@ -2781,11 +2786,38 @@ def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
     # Non-degenerate and non-negative: a sampled variable, not a hard constant.
     assert float(draws.std()) > 0.0
     assert float(draws.min()) >= 0.0
-    # An unresolved (zero) hint uses _ZERO_HINT_GAIN_WIDTH * plate_gain_scale,
+    # An unresolved (zero) hint uses _ZERO_HINT_WIDTH * plate_gain_scale,
     # not the 20% relative width used for resolved hints: HalfNormal(sigma=1.0
     # * 1.6 = 1.6); its mean is sigma * sqrt(2/pi) ~= 1.2767. abs=0.08 is
     # roughly 7 sampling standard errors at draws=8000.
     assert float(draws.mean()) == pytest.approx(1.6 * np.sqrt(2 / np.pi), abs=0.08)
+
+
+def test_zeroed_alpha_borrows_width_from_resolved_labels() -> None:
+    """An exact-zero alpha stays estimable, scaled by the labels that resolved one.
+
+    Modelled on real plate L4: label "1" resolved alpha=0.106 (gain=4.93), and
+    label "2" landed on the NNLS alpha=0.0 boundary (gain=1.34) -- meaning gain
+    won label 2's decomposition, not that its proportional-error term is
+    physically absent. Label 2's prior must borrow its width from label 1's
+    resolved alpha (`plate_alpha_scale`), not collapse to a tight band around
+    zero, so the posterior can re-decide the collinear split.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=4.93, alpha=0.106),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.34, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(nm, alpha_mode="centered")
+        draws = pm.draw(priors["rel_error"]["2"], draws=8000, random_seed=0)
+    # Non-degenerate and non-negative: a sampled variable, not a hard constant.
+    assert float(draws.std()) > 0.0
+    assert float(draws.min()) >= 0.0
+    # An unresolved (zero) hint uses _ZERO_HINT_WIDTH * plate_alpha_scale
+    # (here plate_alpha_scale == 0.106, label 1's resolved alpha): HalfNormal
+    # (sigma=1.0 * 0.106 = 0.106); its mean is sigma * sqrt(2/pi) ~= 0.0846.
+    assert float(draws.mean()) == pytest.approx(0.106 * np.sqrt(2 / np.pi), abs=0.006)
 
 
 def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:
