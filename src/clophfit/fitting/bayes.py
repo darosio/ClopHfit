@@ -8,7 +8,6 @@ import os
 import re
 import typing
 from collections.abc import Mapping, Mapping as MappingABC
-from dataclasses import dataclass
 from typing import Literal
 
 import arviz as az  # type: ignore[import-untyped]
@@ -23,7 +22,6 @@ from pymc import math as pm_math
 from pytensor.tensor import as_tensor_variable
 from scipy.optimize import isotonic_regression
 
-from clophfit.fitting import model_validation
 from clophfit.fitting.bayes_config import (
     ChainMethod,
     ContaminationFracPrior,
@@ -307,7 +305,6 @@ def get_pymc_variance(
 __all__ = [
     "fit_binding_pymc",
     "fit_binding_pymc_multi",
-    "fit_binding_pymc_residual_refit",
     "process_trace",
 ]
 
@@ -1431,16 +1428,6 @@ def _compute_weighted_residuals(ds: Dataset, rpars: Parameters) -> np.ndarray:
     return np.concatenate(residuals_list)
 
 
-@dataclass
-class PymcResidualRefitResult:
-    """Results from the robust residual-screening PyMC refit workflow."""
-
-    initial: FitResult
-    residuals: pd.DataFrame
-    masked_dataset: Dataset
-    final: FitResult
-
-
 def dataset_with_unit_yerr(ds: Dataset) -> Dataset:
     """Return a deep-copied dataset with all observation errors set to one."""
     unit_ds = copy.deepcopy(ds)
@@ -2180,188 +2167,6 @@ def fit_binding_pymc(  # noqa: PLR0913, PLR0915
         p_names.extend([f"pi_outlier_{lbl}" for lbl in labels])
         p_names.append("outlier_inflate")
     return process_trace(trace, p_names, ds)
-
-
-def fit_binding_pymc_residual_refit(  # noqa: PLR0913
-    ds: Dataset,
-    *,
-    noise_strategy: Literal["ye_mag", "proportional"] = "ye_mag",
-    bg_noise: Mapping[str, float] | float = 1.0,
-    bg_noise_scale: float = 3.6,
-    bg_noise_log_sigma: float = 0.5,
-    proportional_alpha: float = 0.05,
-    noise_model: PlateNoiseModel | None = None,
-    n_sd: float = 10.0,
-    n_xerr: float = 1.0,
-    n_samples: int = 2000,
-    nuts_sampler: str = "nutpie",
-    n_tune: int | None = None,
-    target_accept: float | None = None,
-    max_treedepth: int | None = None,
-    shared_ye_mags: bool = False,
-    outlier_threshold: float = 3.0,
-    allowed_tail_fraction: float = 0.0,
-    min_allowed_tail_count: int = 0,
-    min_keep: int = 3,
-    min_x_step: float = 0.2,
-) -> PymcResidualRefitResult:
-    """Run robust PyMC, mask residual outliers, then refit.
-
-    ``noise_strategy="ye_mag"`` uses the legacy unweighted first pass with
-    LogNormal ``ye_mag`` priors. ``noise_strategy="proportional"`` uses a
-    floor-plus-proportional noise model with free label-specific alpha in both
-    passes and no ``ye_mag`` multiplier.
-
-    Parameters
-    ----------
-    ds : Dataset
-        Single-well multi-label titration dataset.
-    noise_strategy : Literal["ye_mag", "proportional"]
-        Noise model used during the robust screening pass and final refit.
-    bg_noise : Mapping[str, float] | float, optional
-        Background-noise hints used to initialize the screening noise model.
-    bg_noise_scale : float, optional
-        Multiplicative scale for ``ye_mag`` initialization when using the
-        ``"ye_mag"`` strategy.
-    bg_noise_log_sigma : float, optional
-        Log-scale prior sigma for screening ``ye_mag`` parameters.
-    proportional_alpha : float, optional
-        Initial proportional-noise alpha for the ``"proportional"`` strategy.
-    noise_model : PlateNoiseModel | None, optional
-        Explicit proportional noise model. If supplied, it overrides
-        ``bg_noise`` for the proportional strategy.
-    n_sd : float
-        Prior-width multiplier forwarded to :func:`fit_binding_pymc`.
-    n_xerr : float
-        X-error multiplier forwarded to :func:`fit_binding_pymc`.
-    n_samples : int
-        Number of posterior samples per chain.
-    nuts_sampler : str
-        NUTS sampler backend forwarded to :func:`fit_binding_pymc`.
-    n_tune : int | None
-        Number of tuning draws. If ``None``, the backend default is used.
-    target_accept : float | None
-        NUTS target acceptance probability.
-    max_treedepth : int | None
-        Maximum NUTS tree depth.
-    shared_ye_mags : bool, optional
-        Use one shared ``ye_mag`` parameter for all labels in the ``"ye_mag"``
-        screening pass.
-    outlier_threshold : float, optional
-        Calibrated residual threshold used to flag candidate outlier points.
-    allowed_tail_fraction : float, optional
-        Fraction of tail points allowed before residual rows are masked.
-    min_allowed_tail_count : int, optional
-        Minimum number of tail points allowed before masking.
-    min_keep : int, optional
-        Minimum number of unmasked observations retained per label.
-    min_x_step : float, optional
-        Minimum latent-x spacing forwarded to :func:`fit_binding_pymc`.
-
-    Returns
-    -------
-    PymcResidualRefitResult
-        Initial robust fit, residual table, masked dataset, and final refit.
-    """
-    use_proportional = noise_strategy == "proportional"
-    sampler = SamplerConfig(
-        n_samples=n_samples,
-        nuts_sampler=nuts_sampler,
-        n_tune=n_tune,
-        target_accept=target_accept,
-        max_treedepth=max_treedepth,
-    )
-    if use_proportional:
-        proportional_noise_model = noise_model or _plate_noise_from_bg(
-            bg_noise, ds.keys(), alpha=proportional_alpha
-        )
-        proportional_noise = NoiseConfig.structured(
-            noise_model=proportional_noise_model,
-            floor_mode="centered",
-            gain_mode="fixed",
-            alpha_mode="free",
-            shared_alpha=False,
-            shared_gain=False,
-        )
-        initial = fit_binding_pymc(
-            ds,
-            n_sd=n_sd,
-            n_xerr=n_xerr,
-            min_x_step=min_x_step,
-            robust=RobustConfig(enabled=True),
-            noise=proportional_noise,
-            sampler=sampler,
-        )
-    else:
-        bg_noise_scale = float(bg_noise_scale)
-        if not np.isfinite(bg_noise_scale) or bg_noise_scale <= 0.0:
-            bg_noise_scale = 1.0
-        if isinstance(bg_noise, MappingABC):
-            first_ye_mag_mu: float | dict[str, float] = {
-                str(label): float(np.log(max(float(value) * bg_noise_scale, 1e-6)))
-                for label, value in bg_noise.items()
-            }
-        else:
-            first_ye_mag_mu = float(np.log(max(float(bg_noise) * bg_noise_scale, 1e-6)))
-        initial = fit_binding_pymc(
-            dataset_with_unit_yerr(ds),
-            n_sd=n_sd,
-            n_xerr=n_xerr,
-            min_x_step=min_x_step,
-            robust=RobustConfig(enabled=True),
-            noise=NoiseConfig.ye_mag(
-                shared=shared_ye_mags,
-                prior="lognormal",
-                mu=first_ye_mag_mu,
-                sigma=bg_noise_log_sigma,
-            ),
-            sampler=sampler,
-        )
-    residuals = model_validation.residuals_from_fit_results(
-        {"single": initial},
-        "pymc_robust_unweighted",
-        binding_1site,
-        robust=True,
-        outlier_threshold=outlier_threshold,
-    )
-    residuals = model_validation.mark_excess_residual_outliers(
-        residuals,
-        threshold=outlier_threshold,
-        allowed_tail_fraction=allowed_tail_fraction,
-        min_allowed_tail_count=min_allowed_tail_count,
-    )
-    mask_source = initial.dataset if initial.dataset is not None else ds
-    holder = FitResult(dataset=copy.deepcopy(mask_source))
-    masked = model_validation.masked_datasets_from_residual_outliers(
-        {"single": holder},
-        residuals,
-        min_keep=min_keep,
-    ).get("single", copy.deepcopy(mask_source))
-    seeded_final_input = copy.deepcopy(initial)
-    seeded_final_input.dataset = masked
-    if use_proportional:
-        final = fit_binding_pymc(
-            seeded_final_input,
-            n_sd=n_sd,
-            n_xerr=n_xerr,
-            min_x_step=min_x_step,
-            robust=RobustConfig(enabled=False),
-            noise=proportional_noise,
-            sampler=sampler,
-        )
-    else:
-        final = fit_binding_pymc(
-            seeded_final_input,
-            n_sd=n_sd,
-            n_xerr=n_xerr,
-            min_x_step=min_x_step,
-            robust=RobustConfig(enabled=False),
-            noise=NoiseConfig.ye_mag(
-                shared=shared_ye_mags, prior="lognormal", mu=0.0, sigma=0.25
-            ),
-            sampler=sampler,
-        )
-    return PymcResidualRefitResult(initial, residuals, masked, final)
 
 
 # ------------------------------------------------------------------

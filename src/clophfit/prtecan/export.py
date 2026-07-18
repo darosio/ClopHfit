@@ -4,17 +4,22 @@ import copy
 import itertools
 import logging
 import typing
+from collections.abc import Mapping, Mapping as MappingABC
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from clophfit.clophfit_types import ArrayF
-from clophfit.fitting.bayes import fit_binding_pymc, fit_binding_pymc_residual_refit
-from clophfit.fitting.bayes_config import SamplerConfig
-from clophfit.fitting.data_structures import FitResult
+from clophfit.fitting.bayes import dataset_with_unit_yerr, fit_binding_pymc
+from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConfig
+from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
-from clophfit.fitting.model_validation import residuals_from_fit_results
+from clophfit.fitting.model_validation import (
+    mark_excess_residual_outliers,
+    masked_datasets_from_residual_outliers,
+    residuals_from_fit_results,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.residuals import (
     plot_residual_vs_predicted,
@@ -102,6 +107,102 @@ def run_pre_fit_detection(titration: Titration, subfolder: Path) -> None:
         )
 
 
+def _ye_mag_screening_noise(
+    bg_noise: Mapping[str, float] | float,
+) -> NoiseConfig:
+    """Build the legacy homoscedastic ``ye_mag`` screening noise config.
+
+    Parameters
+    ----------
+    bg_noise : Mapping[str, float] | float
+        Per-label background-noise hints seeding the LogNormal ``ye_mag`` prior.
+
+    Returns
+    -------
+    NoiseConfig
+        ``ye_mag`` config centred on ``log(bg_noise * 3.6)`` per label.
+    """
+    if isinstance(bg_noise, MappingABC):
+        first_mu: float | dict[str, float] = {
+            str(label): float(np.log(max(float(value) * 3.6, 1e-6)))
+            for label, value in bg_noise.items()
+        }
+    else:
+        first_mu = float(np.log(max(float(bg_noise) * 3.6, 1e-6)))
+    return NoiseConfig.ye_mag(shared=False, prior="lognormal", mu=first_mu, sigma=0.5)
+
+
+def _single_refit_two_pass(
+    ds: Dataset,
+    *,
+    screening_noise: NoiseConfig,
+    refit_noise: NoiseConfig,
+    sampler: SamplerConfig,
+    unit_yerr: bool = True,
+) -> tuple[FitResult, pd.DataFrame]:
+    """Screen residual outliers with a robust PyMC pass, then refit unrobustly.
+
+    The noise strategy is supplied by the caller so the two-pass sequence itself
+    is strategy-agnostic: swapping the homoscedastic ``ye_mag`` pair for a
+    heteroscedastic ``NoiseConfig.structured`` pair changes only the call site.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Single-well multi-label titration dataset.
+    screening_noise : NoiseConfig
+        Noise model for the robust screening pass.
+    refit_noise : NoiseConfig
+        Noise model for the unrobust refit.
+    sampler : SamplerConfig
+        Sampling controls used for both passes.
+    unit_yerr : bool
+        Reset observation errors to one before the screening pass. Required by
+        the ``ye_mag`` strategy, whose multiplier learns the scale; a structured
+        floor/gain/alpha model builds its own variance and must pass ``False``.
+
+    Returns
+    -------
+    tuple[FitResult, pd.DataFrame]
+        The refit result and the screening pass's residual table.
+    """
+    screening_input = dataset_with_unit_yerr(ds) if unit_yerr else ds
+    initial = fit_binding_pymc(
+        screening_input,
+        robust=RobustConfig(enabled=True),
+        noise=screening_noise,
+        sampler=sampler,
+    )
+    residuals = residuals_from_fit_results(
+        {"single": initial},
+        "pymc_robust_unweighted",
+        binding_1site,
+        robust=True,
+        outlier_threshold=3.0,
+    )
+    residuals = mark_excess_residual_outliers(
+        residuals,
+        threshold=3.0,
+        allowed_tail_fraction=0.0,
+        min_allowed_tail_count=0,
+    )
+    mask_source = initial.dataset if initial.dataset is not None else ds
+    holder = FitResult(dataset=copy.deepcopy(mask_source))
+    masked = masked_datasets_from_residual_outliers(
+        {"single": holder}, residuals, min_keep=3
+    ).get("single", copy.deepcopy(mask_source))
+    seeded = copy.deepcopy(initial)
+    seeded.dataset = masked
+
+    final = fit_binding_pymc(
+        seeded,
+        robust=RobustConfig(enabled=False),
+        noise=refit_noise,
+        sampler=sampler,
+    )
+    return final, residuals
+
+
 def fit_single_mcmc(
     titration: Titration,
     datasets: dict[str, typing.Any],
@@ -142,18 +243,24 @@ def fit_single_mcmc(
     if titration.params.mcmc != "single-refit":
         return None
 
+    sampler = SamplerConfig(
+        n_samples=titration.params.n_mcmc_samples,
+        nuts_sampler=titration.params.nuts_sampler,
+    )
     mcmc_fits = {}
     residual_rows = []
     for key, ds in datasets.items():
-        refit = fit_binding_pymc_residual_refit(
+        final, residuals = _single_refit_two_pass(
             ds,
-            bg_noise=titration.bg_noise,
-            n_samples=titration.params.n_mcmc_samples,
-            nuts_sampler=titration.params.nuts_sampler,
+            screening_noise=_ye_mag_screening_noise(titration.bg_noise),
+            refit_noise=NoiseConfig.ye_mag(
+                shared=False, prior="lognormal", mu=0.0, sigma=0.25
+            ),
+            sampler=sampler,
         )
-        mcmc_fits[key] = refit.final
-        if not refit.residuals.empty:
-            residual_rows.append(refit.residuals.assign(well=key))
+        mcmc_fits[key] = final
+        if not residuals.empty:
+            residual_rows.append(residuals.assign(well=key))
     if residual_rows:
         pd.concat(residual_rows, ignore_index=True).to_csv(
             outfit / "single_refit_initial_residual_outliers.csv", index=False
