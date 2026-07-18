@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from pathlib import Path
@@ -1412,6 +1413,9 @@ class TestTitrationAnalysis:
         tmp_path: Path,
     ) -> None:
         """--mcmc single-refit runs a robust pass then an unrobust refit."""
+        # Capture the real signature before monkeypatching replaces
+        # bayes.fit_binding_pymc below.
+        real_sig = inspect.signature(bayes.fit_binding_pymc)
         calls: list[dict[str, object]] = []
 
         def fake_fit_binding_pymc(ds_or_fr: object, **kwargs: object) -> FitResult:
@@ -1436,9 +1440,11 @@ class TestTitrationAnalysis:
                 "std_res": [0.0] * 6 + [50.0] + [0.0] * 7,
             })
 
-        # Patch BOTH lookup sites so this test is valid before and after the
-        # inlining: today the call happens inside bayes, afterwards inside
-        # export.
+        # Patch both lookup sites: the call happens inside export post-inlining,
+        # so patching export is what matters; the bayes patch is kept for
+        # provenance (it was needed pre-refactor) and is a harmless no-op now.
+        # This is a post-refactor regression test, not a before/after-inlining
+        # characterization test.
         monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
         monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
         # residuals_from_fit_results is imported by name into export.py (not
@@ -1478,6 +1484,22 @@ class TestTitrationAnalysis:
         # Sampler settings come from titration params in both passes.
         assert first["sampler"].n_samples == 7
         assert second["sampler"].n_samples == 7
+
+        # The deleted fit_binding_pymc_residual_refit() passed n_sd=10.0,
+        # n_xerr=1.0, min_x_step=0.2 explicitly; the inlined helper relies on
+        # these being fit_binding_pymc's defaults instead, so neither call
+        # captures them as explicit kwargs. Read the effective defaults from
+        # the real (pre-monkeypatch) signature so a future default change in
+        # bayes.py is what makes this assertion fail.
+        default_n_sd = real_sig.parameters["n_sd"].default
+        default_n_xerr = real_sig.parameters["n_xerr"].default
+        default_min_x_step = real_sig.parameters["min_x_step"].default
+        for call in (first, second):
+            assert call.get("n_sd", default_n_sd) == default_n_sd == 10.0
+            assert call.get("n_xerr", default_n_xerr) == default_n_xerr == 1.0
+            assert (
+                call.get("min_x_step", default_min_x_step) == default_min_x_step == 0.2
+            )
 
         # The screening pass receives a plain dataset whose y_err has been
         # reset to one (required for the ye_mag multiplier to learn scale).

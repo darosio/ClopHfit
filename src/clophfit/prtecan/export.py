@@ -4,7 +4,7 @@ import copy
 import itertools
 import logging
 import typing
-from collections.abc import Mapping, Mapping as MappingABC
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -122,7 +122,7 @@ def _ye_mag_screening_noise(
     NoiseConfig
         ``ye_mag`` config centred on ``log(bg_noise * 3.6)`` per label.
     """
-    if isinstance(bg_noise, MappingABC):
+    if isinstance(bg_noise, Mapping):
         first_mu: float | dict[str, float] = {
             str(label): float(np.log(max(float(value) * 3.6, 1e-6)))
             for label, value in bg_noise.items()

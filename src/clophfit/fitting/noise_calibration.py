@@ -70,8 +70,8 @@ def calibrate_noise_robust(
     Drops points whose posterior outlier probability exceeds *p_threshold*
     (from a PyMC mixture fit) and then estimates ``gain`` and ``alpha`` per
     label with the single-term moment estimators
-    (:func:`~clophfit.fitting.utils.fit_gain_from_residuals`,
-    :func:`~clophfit.fitting.utils.fit_rel_error_from_residuals`) on the
+    (:func:`~clophfit.fitting.noise_calibration.fit_gain_from_residuals`,
+    :func:`~clophfit.fitting.noise_calibration.fit_rel_error_from_residuals`) on the
     retained points. Screening with the mixture's ``p_outlier`` keeps
     outliers from inflating the estimate, while the two single-term estimators
     avoid the gain/alpha collinearity of the joint NNLS over narrow titration
