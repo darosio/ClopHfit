@@ -20,6 +20,7 @@ from clophfit.fitting.data_structures import (
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
     mark_outlier_probability_outliers,
+    masked_datasets_from_outlier_probabilities,
     residuals_from_fit_results,
     robust_likelihood_from_trace,
     robust_settings_from_trace,
@@ -587,6 +588,44 @@ def test_mark_outlier_probability_missing_residual_column_marks_nothing() -> Non
     df = pd.DataFrame({"label": ["1"], "p_outlier": [0.99]})
     out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
     assert out["exclude_outlier_probability"].tolist() == [False]
+
+
+def test_masked_datasets_from_outlier_probabilities_forwards_residual_threshold() -> (
+    None
+):
+    """The wrapper must forward residual_threshold/residual_col to the mask.
+
+    A point with high posterior outlier probability but a small standardized
+    residual must not be masked once the conjunction rule is engaged, and
+    must be masked when ``residual_threshold`` is left at its default (the
+    probability-only rule).
+    """
+    ds = Dataset(
+        {
+            "1": DataArray(
+                np.array([6.0, 7.0, 8.0, 9.0]),
+                np.array([10.0, 11.0, 12.0, 13.0]),
+            )
+        },
+        is_ph=True,
+    )
+    residuals = pd.DataFrame({
+        "well": ["A01"],
+        "label": ["1"],
+        "step": [2],
+        "p_outlier": [0.95],
+        "std_res": [0.5],
+    })
+
+    masked_probability_only = masked_datasets_from_outlier_probabilities(
+        {"A01": ds}, residuals
+    )
+    assert not masked_probability_only["A01"]["1"].mask[2]
+
+    masked_conjunction = masked_datasets_from_outlier_probabilities(
+        {"A01": ds}, residuals, residual_threshold=3.0
+    )
+    assert masked_conjunction["A01"]["1"].mask[2]
 
 
 ###############################################################################

@@ -946,13 +946,15 @@ def mark_outlier_probability_outliers(  # noqa: PLR0913
     return out
 
 
-def masked_datasets_from_outlier_probabilities(
+def masked_datasets_from_outlier_probabilities(  # noqa: PLR0913
     results: _t.Mapping[str, _t.Any],
     residuals: _t.Any,
     *,
     probability_col: str = "p_outlier",
     threshold: float = 0.9,
     min_keep: int = 3,
+    residual_threshold: float | None = None,
+    residual_col: str = "std_res",
 ) -> dict[str, _t.Any]:
     """Mask datasets using posterior outlier probabilities.
 
@@ -969,6 +971,13 @@ def masked_datasets_from_outlier_probabilities(
         Probability cutoff above which a row is masked.
     min_keep : int, optional
         Minimum number of unmasked points retained per label.
+    residual_threshold : float | None, optional
+        When set, a row is masked only if it exceeds both *threshold* and this
+        absolute-residual cutoff on *residual_col*. ``None`` (the default)
+        applies the probability criterion alone.
+    residual_col : str, optional
+        Column holding the standardized residual compared against
+        *residual_threshold*.
 
     Returns
     -------
@@ -993,6 +1002,8 @@ def masked_datasets_from_outlier_probabilities(
         probability_col=probability_col,
         threshold=threshold,
         exclude_col=exclude_col,
+        residual_threshold=residual_threshold,
+        residual_col=residual_col,
     )
     return masked_datasets_from_residual_outliers(
         results,
