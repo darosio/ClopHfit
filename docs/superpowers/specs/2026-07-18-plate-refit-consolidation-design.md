@@ -163,6 +163,13 @@ AND only. No configurable combine rule until something needs OR.
 - **No default threshold changes** anywhere, including whether `single-refit`
   should adopt the `student_t` + conjunction-screen pipeline. That is the
   benchmark's decision.
+- **Replacing `ye_mag` with a structured noise model.** `ye_mag` is
+  homoscedastic once `y_err` is flat, which misdescribes detector noise that
+  grows with signal (`floor² + gain·y + (alpha·y)²`). The expected replacement
+  for both the screening and refit passes is a heteroscedastic config such as
+  `NoiseConfig.structured(floor=tit.bg_noise, gain=0.5, alpha=0.02, floor_mode="centered", gain_mode="free", alpha_mode="free", shared_alpha=False, shared_gain=False, learn_ye_mags=False)` — optionally with
+  `shared_floor=True`. Gated on the benchmark; `export._single_refit_two_pass`
+  is parameterized so the swap is a call-site edit.
 - **The benchmark harness itself** — its own spec, built on this interface.
 - **`pymc_multi` / `MultiFitResult` return-shape reconciliation** — still
   unresolved, still deferred.

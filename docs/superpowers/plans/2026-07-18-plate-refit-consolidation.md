@@ -750,9 +750,28 @@ The characterization test comes first and must pass **before and after** the cha
 **Interfaces:**
 
 - Consumes: nothing from earlier tasks.
-- Produces: private `export._single_refit_two_pass(ds, bg_noise, sampler) -> tuple[FitResult, pd.DataFrame]` returning `(final_fit, initial_residuals)`.
+- Produces: private `export._ye_mag_screening_noise(bg_noise) -> NoiseConfig` and
+  private `export._single_refit_two_pass(ds, *, screening_noise, refit_noise, sampler, unit_yerr=True) -> tuple[FitResult, pd.DataFrame]`
+  returning `(final_fit, initial_residuals)`. The two-pass sequence is
+  strategy-agnostic; the caller chooses the noise model.
 
 **Note — deviation from the spec.** The spec estimated the inlining at "~6 lines". It is closer to 35, because the `ye_mag` strategy computes per-label log-scale priors before the first pass. Rather than inflate `fit_single_mcmc`, extract it as the private helper above, local to `export.py`. This still removes the frozen public API and keeps the composition explicit at the call site.
+
+**Note — why the noise strategy is a parameter.** `ye_mag` learns a single scalar
+multiplier on `y_err` per label, so with flat `y_err` the screening pass is
+homoscedastic. Real plate data is not: detector variance grows with signal as
+`floor² + gain·y + (alpha·y)²`, so a homoscedastic screen under-weights the
+low-signal end and over-weights the high end — biasing exactly the residuals the
+outlier rule then thresholds. The benchmark is therefore expected to prefer a
+`NoiseConfig.structured(...)` pair here.
+
+This task still ships the `ye_mag` behaviour unchanged — swapping the default is
+the benchmark's call, not this refactor's. But `screening_noise`, `refit_noise`
+and `unit_yerr` are parameters rather than literals so that swap is a call-site
+edit in `fit_single_mcmc`, not surgery inside the helper. The characterization
+test pins `kind == "ye_mag"` deliberately: when the strategy does change, that
+test must be updated, which is what makes the change visible in review rather
+than silent.
 
 - [ ] **Step 1: Write the characterization test**
 
@@ -840,26 +859,20 @@ already locked before anything moved.
 Insert above `fit_single_mcmc` (line 105):
 
 ```python
-def _single_refit_two_pass(
-    ds: Dataset,
+def _ye_mag_screening_noise(
     bg_noise: Mapping[str, float] | float,
-    sampler: SamplerConfig,
-) -> tuple[FitResult, pd.DataFrame]:
-    """Screen residual outliers with a robust PyMC pass, then refit unrobustly.
+) -> NoiseConfig:
+    """Build the legacy homoscedastic ``ye_mag`` screening noise config.
 
     Parameters
     ----------
-    ds : Dataset
-        Single-well multi-label titration dataset.
     bg_noise : Mapping[str, float] | float
-        Per-label background-noise hints seeding the screening ``ye_mag`` prior.
-    sampler : SamplerConfig
-        Sampling controls used for both passes.
+        Per-label background-noise hints seeding the LogNormal ``ye_mag`` prior.
 
     Returns
     -------
-    tuple[FitResult, pd.DataFrame]
-        The refit result and the screening pass's residual table.
+    NoiseConfig
+        ``ye_mag`` config centred on ``log(bg_noise * 3.6)`` per label.
     """
     if isinstance(bg_noise, MappingABC):
         first_mu: float | dict[str, float] = {
@@ -868,13 +881,46 @@ def _single_refit_two_pass(
         }
     else:
         first_mu = float(np.log(max(float(bg_noise) * 3.6, 1e-6)))
+    return NoiseConfig.ye_mag(
+        shared=False, prior="lognormal", mu=first_mu, sigma=0.5
+    )
 
+
+def _single_refit_two_pass(
+    ds: Dataset,
+    *,
+    screening_noise: NoiseConfig,
+    refit_noise: NoiseConfig,
+    sampler: SamplerConfig,
+    unit_yerr: bool = True,
+) -> tuple[FitResult, pd.DataFrame]:
+    """Screen residual outliers with a robust PyMC pass, then refit unrobustly.
+
+    The noise strategy is supplied by the caller so the two-pass sequence itself
+    is strategy-agnostic: swapping the homoscedastic ``ye_mag`` pair for a
+    heteroscedastic ``NoiseConfig.structured`` pair changes only the call site.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Single-well multi-label titration dataset.
+    screening_noise : NoiseConfig
+        Noise model for the robust screening pass.
+    refit_noise : NoiseConfig
+        Noise model for the unrobust refit.
+    sampler : SamplerConfig
+        Sampling controls used for both passes.
+
+    Returns
+    -------
+    tuple[FitResult, pd.DataFrame]
+        The refit result and the screening pass's residual table.
+    """
+    screening_input = dataset_with_unit_yerr(ds) if unit_yerr else ds
     initial = fit_binding_pymc(
-        dataset_with_unit_yerr(ds),
+        screening_input,
         robust=RobustConfig(enabled=True),
-        noise=NoiseConfig.ye_mag(
-            shared=False, prior="lognormal", mu=first_mu, sigma=0.5
-        ),
+        noise=screening_noise,
         sampler=sampler,
     )
     residuals = residuals_from_fit_results(
@@ -901,9 +947,7 @@ def _single_refit_two_pass(
     final = fit_binding_pymc(
         seeded,
         robust=RobustConfig(enabled=False),
-        noise=NoiseConfig.ye_mag(
-            shared=False, prior="lognormal", mu=0.0, sigma=0.25
-        ),
+        noise=refit_noise,
         sampler=sampler,
     )
     return final, residuals
@@ -912,6 +956,20 @@ def _single_refit_two_pass(
 The deleted function passed `n_sd=10.0`, `n_xerr=1.0` and `min_x_step=0.2`
 explicitly; those are already `fit_binding_pymc`'s defaults, so they are omitted
 here. Verify against `bayes.py:1996-1998` before dropping them.
+
+Add `unit_yerr: bool = True` to the signature, documented as:
+
+```
+    unit_yerr : bool
+        Reset observation errors to one before the screening pass. Required by
+        the ``ye_mag`` strategy, whose multiplier learns the scale; a structured
+        floor/gain/alpha model builds its own variance and must pass ``False``.
+```
+
+`dataset_with_unit_yerr` is strategy-specific in exactly the same way the noise
+config is — the deleted function called it on the `ye_mag` branch only, and
+passed `ds` untouched on the `proportional` branch (`bayes.py:2297` versus
+`:2318`). Parameterizing both is what makes the sequence strategy-agnostic.
 
 Update `export.py`'s imports (replacing line 13):
 
@@ -944,7 +1002,14 @@ Replace the body from `mcmc_fits = {}` (line 144) through the `return` at 161:
     mcmc_fits = {}
     residual_rows = []
     for key, ds in datasets.items():
-        final, residuals = _single_refit_two_pass(ds, titration.bg_noise, sampler)
+        final, residuals = _single_refit_two_pass(
+            ds,
+            screening_noise=_ye_mag_screening_noise(titration.bg_noise),
+            refit_noise=NoiseConfig.ye_mag(
+                shared=False, prior="lognormal", mu=0.0, sigma=0.25
+            ),
+            sampler=sampler,
+        )
         mcmc_fits[key] = final
         if not residuals.empty:
             residual_rows.append(residuals.assign(well=key))
@@ -1018,5 +1083,12 @@ final = tit.fit_plate(masked, method="mcmc", robust=RobustConfig(enabled=False),
 
 - Outlier removal inside the FGLS loop — the benchmark decides.
 - Whether `--mcmc single-refit` should adopt the `student_t` + conjunction pipeline.
+- **Replacing `ye_mag` with a structured noise model.** `ye_mag` is
+  homoscedastic once `y_err` is flat, which misdescribes detector noise that
+  grows with signal (`floor² + gain·y + (alpha·y)²`). The expected replacement
+  for both the screening and refit passes is a heteroscedastic config such as
+  `NoiseConfig.structured(floor=tit.bg_noise, gain=0.5, alpha=0.02, floor_mode="centered", gain_mode="free", alpha_mode="free", shared_alpha=False, shared_gain=False, learn_ye_mags=False)` — optionally with
+  `shared_floor=True`. Gated on the benchmark; `export._single_refit_two_pass`
+  is parameterized so the swap is a call-site edit.
 - The multi-plate benchmark harness — its own spec, built on this interface.
 - `pymc_multi` / `MultiFitResult` return-shape reconciliation.
