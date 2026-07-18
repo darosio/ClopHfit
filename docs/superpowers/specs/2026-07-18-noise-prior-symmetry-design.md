@@ -246,7 +246,8 @@ Unit tests in `tests/test_bayes.py`, each pinning one branch:
 
 - **Mixed plate** (`alpha=0.02/gain=0` and `alpha=0/gain=1.6`, centered mode):
   label 1's gain is a sampled `HalfNormal`, not a constant, with
-  `sigma == 0.2 * 1.6`. Guards section 2 and the dominant real case.
+  `sigma == _ZERO_HINT_GAIN_WIDTH * 1.6 == 1.6` — the unresolved-hint width,
+  not the 20% resolved-hint one. Guards section 2 and the dominant real case.
 - **Gain zero on every label, alpha positive**: `"gain"` is absent from `priors`
   and the variance carries only floor and alpha. Guards the retained `has_gain`
   gate and, critically, guards section 2 against ever seeing

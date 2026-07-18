@@ -284,9 +284,11 @@ class NoiseConfig:
         ``TruncatedNormal`` centre in ``"centered"`` mode, and in ``"free"``
         mode the ``HalfNormal`` sigma is scaled so the mean matches the hint.
         It defaults to ``0.02`` (a weak 2% prior);
-        pass ``alpha=0`` for the tightest around-zero prior *mean* (floored at
-        ``1e-3``; the corresponding "free"-mode sigma is ``1e-3 *
-        sqrt(pi/2)`` ~= ``1.253e-3``), a larger value to widen it, or
+        pass ``alpha=0`` for the tightest around-zero prior (the width is
+        floored at ``1e-3``; in ``"free"`` mode that gives a sigma of ``1e-3 *
+        sqrt(pi/2)`` ~= ``1.253e-3`` and a mean of ``1e-3``, while in
+        ``"centered"`` mode the term becomes ``HalfNormal(sigma=1e-3)`` whose
+        mean is ``~7.98e-4``), a larger value to widen it, or
         ``alpha_mode="fixed"`` to pin/disable the term.
         """
         return cls(
