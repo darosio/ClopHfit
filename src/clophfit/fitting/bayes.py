@@ -224,8 +224,9 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
             )
 
     # 2. Gain (Poisson term). The gate is deliberately narrower than alpha's
-    # below. Alpha is dimensionless, so _MIN_NOISE_PRIOR_SCALE is a meaningful
-    # universal around-zero width and alpha can always stay soft. Gain carries
+    # below. Alpha is dimensionless and empirically reaches about 0.1 at most,
+    # so _ZERO_HINT_ALPHA_SCALE is a meaningful universal around-zero width and
+    # alpha can always stay soft even with no positive hint. Gain carries
     # the units of the signal, so its around-zero width has to be borrowed from
     # labels that did resolve a gain; when no label resolved one there is
     # nothing to borrow, and omitting the term beats inventing a scale. Do not

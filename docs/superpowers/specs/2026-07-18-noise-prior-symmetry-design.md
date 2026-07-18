@@ -39,18 +39,30 @@ and clamps the other to the boundary. The active-set solver returns **exact**
 `0.0` there, so the surviving zeros are exact and the existing `> 0` predicates
 detect them correctly. No tolerance-based test is needed.
 
-The characteristic real-plate outcome is *anti-correlated across labels*:
-
-| label | alpha | gain |
-| ----- | ----- | ---- |
-| 1     | 0.02  | 0.0  |
-| 2     | 0.0   | 1.6  |
-
-Observed alpha is always below roughly 0.05–0.10; gain is O(1).
-
 **A zero therefore means "the collinear partner won this label's
 decomposition", not "this term is physically absent."** That reading drives
-every decision below.
+every decision below, and it survived validation. Which *term* zeroes did not.
+
+Measured on plates L2, L3 and L4 via `fgls_fit_plate`, floors fixed from
+`bg_noise`:
+
+| plate | label | gain   | alpha           |
+| ----- | ----- | ------ | --------------- |
+| L2    | 1     | 5.5349 | **exactly 0.0** |
+| L2    | 2     | 0.5155 | **exactly 0.0** |
+| L3    | 1     | 2.1095 | 0.008349        |
+| L3    | 2     | 0.4046 | **exactly 0.0** |
+| L4    | 1     | 4.9315 | 0.10593         |
+| L4    | 2     | 1.3413 | **exactly 0.0** |
+
+**Alpha is the term that lands on the boundary — 4 of 6 label-fits, always
+label 2 — and gain never does (0 of 6).** Alpha reaches ~0.106; gain is O(1)
+to O(5).
+
+An earlier draft of this spec asserted the opposite, from a remembered example:
+an *anti-correlated* pattern with label 1 at `alpha=0.02, gain=0.0` and label 2
+at `alpha=0.0, gain=1.6`. No such pattern occurs on any of the three plates.
+The consequence is recorded in section 6.
 
 Two further paths produce exact zeros for *both* terms at once: the calibration
 failure fallback (`titration.py:1344`) and the per-label short-circuit when
@@ -111,10 +123,15 @@ anywhere on the plate.
 written down. The asymmetry is forced by the two parameters having different
 dimensions.
 
-Alpha is dimensionless and empirically below ~0.05–0.10 on every plate, so
-`_MIN_NOISE_PRIOR_SCALE = 1e-3` is a meaningful *universal* around-zero width.
-Alpha can therefore always stay soft, even when no label resolved a positive
-value — there is a sensible prior to fall back on.
+Alpha is dimensionless and empirically below ~0.1 on every plate, so a
+*universal* fallback width exists and alpha can always stay soft, even when no
+label resolved a positive value.
+
+(As first drafted this section named `_MIN_NOISE_PRIOR_SCALE = 1e-3` as that
+width. Section 6 shows 1e-3 is far too tight — 100 sigma below a plausible
+alpha — and replaces it with `_ZERO_HINT_ALPHA_SCALE = 0.1`. The argument here
+is unaffected: what matters is that *some* defensible universal width exists
+for a dimensionless parameter, not which one.)
 
 Gain carries the units of the signal and ranges over orders of magnitude across
 instruments and plate types. No universal constant exists. Its around-zero width
@@ -127,7 +144,8 @@ originally narrowed alpha's gate to match gain's, on the premise that an
 all-zero term means calibration found no structure. That premise is false: a
 term is zero across every label whenever its collinear partner won *every*
 label's decomposition, which is a routine outcome, not a failure. The existing
-test `test_centered_zero_alpha_is_prior_around_zero` (`tests/test_bayes.py:731`)
+test `test_centered_zero_alpha_spans_plate_alpha_scale` (renamed in section 6;
+originally `test_centered_zero_alpha_is_prior_around_zero`)
 pins precisely that case — `alpha=0.0` on both labels with `gain` at 2.0 and 1.0
 — and asserts alpha stays estimable. The test is right; the original section 1
 would have broken it, and would have contradicted this spec's own guiding
@@ -152,10 +170,10 @@ factors, not one reused constant, because a resolved hint and an unresolved
 (zero) hint mean fundamentally different things:
 
 ```python
-_ZERO_HINT_GAIN_WIDTH = 1.0  # module-level, alongside _MIN_NOISE_PRIOR_SCALE
+_ZERO_HINT_WIDTH = 1.0  # module-level, alongside _MIN_NOISE_PRIOR_SCALE
 
 plate_gain_scale = mean(p.gain for p in noise_model.values() if p.gain > 0)
-sigma = 0.2 * mu_g if mu_g > 0.0 else _ZERO_HINT_GAIN_WIDTH * plate_gain_scale
+sigma = 0.2 * mu_g if mu_g > 0.0 else _ZERO_HINT_WIDTH * plate_gain_scale
 priors["gain"][lbl] = pm.HalfNormal(f"gain_{lbl}", sigma=sigma)
 ```
 
@@ -168,7 +186,7 @@ Reusing the same `0.2` factor there would make the prior far too tight — at
 `plate_gain_scale = 1.6`, `HalfNormal(sigma=0.2 * 1.6 = 0.32)` puts the value
 NNLS could equally have assigned this label (1.6) about five sigma out, with
 ~6e-7 of the prior mass — the posterior cannot recover the split, defeating
-the point of making the term estimable at all. `_ZERO_HINT_GAIN_WIDTH = 1.0`
+the point of making the term estimable at all. `_ZERO_HINT_WIDTH = 1.0`
 instead spans the plate's gain scale directly: `sigma = 1.0 * 1.6 = 1.6`, wide
 enough that the posterior can genuinely re-decide the split. This does
 introduce one new module-level constant, alongside `_MIN_NOISE_PRIOR_SCALE`;
@@ -240,14 +258,57 @@ The `shared_floor` filter is separately fine: floors are fixed from
 read-noise floor of exactly zero is not an attainable measurement, so treating
 it as missing is correct.
 
+### 6. A zeroed alpha spans the plate's alpha scale
+
+Added after implementation, once the measured data in "Where the zeros come
+from" showed that **alpha**, not gain, is the term that actually zeroes.
+
+The defect is the exact analogue of section 2, in the branch that fires on real
+plates. A calibrated alpha of `0.0` in centered mode built
+`HalfNormal(sigma=_MIN_NOISE_PRIOR_SCALE)` = `HalfNormal(1e-3)`. Against a
+plausible alpha of 0.1 that is **100 sigma** — an order of magnitude worse than
+the 5-sigma gain case section 2 was written to fix. On L2, where *both* labels
+zeroed, every alpha prior was that tight.
+
+The fix mirrors section 2 exactly:
+
+```python
+_ZERO_HINT_WIDTH = 1.0        # renamed from _ZERO_HINT_GAIN_WIDTH; now serves both
+_ZERO_HINT_ALPHA_SCALE = 0.1  # plate scale when NO label resolved a positive alpha
+
+positive_alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
+plate_alpha_scale = mean(positive_alphas) if positive_alphas else _ZERO_HINT_ALPHA_SCALE
+sigma = max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE) if mu_a > 0 else _ZERO_HINT_WIDTH * plate_alpha_scale
+```
+
+Alpha needs the `_ZERO_HINT_ALPHA_SCALE` fallback where gain needs none, and
+section 1 explains why: gain's `has_gain` gate omits the term entirely when no
+label resolved one, while alpha's gate keeps building a prior. `0.1` is chosen
+so the observed maximum (0.106) sits at about one sigma, mirroring how
+`_ZERO_HINT_WIDTH` places `plate_gain_scale` at one sigma for gain.
+
+Resolved-hint behaviour is unchanged in both terms.
+
+This is the change that actually moves posteriors on L2–L4. Section 2's gain
+path, though correct, is not reached on those plates.
+
 ## Testing
 
 Unit tests in `tests/test_bayes.py`, each pinning one branch:
 
 - **Mixed plate** (`alpha=0.02/gain=0` and `alpha=0/gain=1.6`, centered mode):
   label 1's gain is a sampled `HalfNormal`, not a constant, with
-  `sigma == _ZERO_HINT_GAIN_WIDTH * 1.6 == 1.6` — the unresolved-hint width,
-  not the 20% resolved-hint one. Guards section 2 and the dominant real case.
+  `sigma == _ZERO_HINT_WIDTH * 1.6 == 1.6` — the unresolved-hint width, not the
+  20% resolved-hint one. Guards section 2. Note this plate is **synthetic**: no
+  measured plate produces a zeroed gain, so the test pins the branch's
+  behaviour rather than a case seen in the data.
+- **Zeroed alpha borrows from a resolved label** (modelled on real L4:
+  `gain=4.93/alpha=0.106` and `gain=1.34/alpha=0.0`, centered mode): label 2's
+  alpha is a `HalfNormal` with `sigma == 0.106`, borrowed from label 1. Guards
+  section 6 and the case that actually occurs.
+- **Every alpha zeroed** (real L2's shape): each label's alpha spans
+  `_ZERO_HINT_ALPHA_SCALE == 0.1` rather than `1e-3`. This is the renamed
+  `test_centered_zero_alpha_spans_plate_alpha_scale`.
 - **Gain zero on every label, alpha positive**: `"gain"` is absent from `priors`
   and the variance carries only floor and alpha. Guards the retained `has_gain`
   gate and, critically, guards section 2 against ever seeing
@@ -267,18 +328,32 @@ Unit tests in `tests/test_bayes.py`, each pinning one branch:
 
 ## Validation
 
-`scripts/compare_methods.sh <plate> noise` on L1–L4, comparing posterior Kd and
-its 94% HDI before and after.
+**`scripts/compare_methods.sh` cannot validate any of this.** Its `noise` mode
+runs `--fit-method huber` with `--noise-alpha`/`--noise-gain`, the lmfit path,
+and even its `mcmc` mode reaches `NoiseConfig.ye_mag` — but
+`build_pymc_noise_priors` is only called when `noise.kind == "structured"`
+(`bayes.py:2171`). `NoiseConfig.structured` has **zero production callers**; it
+appears only in `tests/test_bayes.py` and `tests/test_fitting.py`. Everything
+in this spec is therefore library-API surface, not CLI pipeline behaviour. An
+earlier draft prescribed `compare_methods.sh <plate> noise` here, which would
+have burned hours of MCMC measuring nothing.
 
-Expected: section 2 is the only change that should move results on these plates,
-and it should move them toward **wider, more honest gain uncertainty** on
-zeroed labels, with Kd point estimates roughly stable. A large Kd shift is a
-signal to re-examine, not to accept.
+What *was* validated is the premise, via `fgls_fit_plate` on L2/L3/L4 — the
+live production path — yielding the table in "Where the zeros come from".
 
-Section 1 is documentation only and cannot move results. Section 3 should be
-inert here (`0.2 * 1.6 = 0.32` dominates both deleted floors). Section 4 shifts
-alpha's free-mode prior mean by 25%, which is well inside its own width, and
-only affects `free` mode — the FGLS path uses `centered`.
+Expected effect of each section on those plates:
+
+- Section 1 is documentation only and cannot move results.
+- Section 2 (zeroed gain) is **not reached**: gain is never exactly 0.0 on
+  L2–L4. Correct, but inert.
+- Section 3 should be inert: `0.2 * mu_g` dominates both deleted floors at the
+  observed gains of 0.4–5.5.
+- Section 4 affects `free` mode only; the FGLS path uses `centered`.
+- **Section 6 (zeroed alpha) is the change that actually moves posteriors**,
+  widening 4 of 6 label-fits from `HalfNormal(1e-3)` to a prior spanning the
+  plate's alpha scale. Expect wider, more honest alpha uncertainty on those
+  labels, with Kd point estimates roughly stable. A large Kd shift is a signal
+  to re-examine, not to accept.
 
 Two existing assertions in `test_free_noise_priors_scale_from_hints`
 (`tests/test_bayes.py:722,726`) encode the old scale semantics and must be

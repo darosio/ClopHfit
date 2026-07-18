@@ -2762,7 +2762,7 @@ def test_gain_omitted_when_no_label_resolves_a_gain() -> None:
         )
     # Gain has nothing to borrow from, so it is absent.
     assert "gain" not in priors
-    # Alpha is dimensionless and always has _MIN_NOISE_PRIOR_SCALE to fall back
+    # Alpha is dimensionless and always has _ZERO_HINT_ALPHA_SCALE to fall back
     # on, so it stays present even though every label calibrated to a positive
     # value here.
     assert "rel_error" in priors
