@@ -38,7 +38,9 @@ Gain is omitted entirely when no label resolved a positive gain; alpha is not. T
 
 - Produces: the invariant `"gain" in priors implies some label has gain > 0`, relied on by Task 2.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the characterization test**
+
+This test pins behaviour that already exists, so it passes immediately. That is intentional — it is a regression guard for Task 2's precondition, not a TDD red step.
 
 Append to `tests/test_bayes.py`:
 
@@ -127,7 +129,9 @@ This is the core change. It replaces the hard `pt.as_tensor_variable(0.0)` with 
 
 - Produces: `_gain_prior_sigma(mu_g: float, plate_gain_scale: float) -> float`, a module-private helper in `bayes.py`.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the tests**
+
+The first two are TDD red steps and must fail before Step 3. The third is a characterization test that passes immediately, guarding `fixed` mode against the change.
 
 Append to `tests/test_bayes.py`:
 
