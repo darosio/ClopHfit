@@ -1610,3 +1610,57 @@ def test_titration_results_noise_model_is_last_positional() -> None:
     # And it is settable by keyword.
     nm = PlateNoiseModel()
     assert TitrationResults(scheme, fit_keys, results, noise_model=nm).noise_model is nm
+
+
+class TestStructuredMcmcNoise:
+    """CLI-selectable structured noise for ``--mcmc single-refit``."""
+
+    @staticmethod
+    def _titration() -> Titration:
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    def test_no_hints_leaves_gain_and_alpha_free(self) -> None:
+        """With no --noise-gain/--noise-alpha, both terms are learned.
+
+        There is no hint to centre on or pin, so "free" is the only meaningful
+        mode; floors still come from the measured background noise.
+        """
+        titan = self._titration()
+        noise = export._structured_noise(titan)  # noqa: SLF001
+        assert noise.kind == "structured"
+        assert noise.gain_mode == "free"
+        assert noise.alpha_mode == "free"
+        assert isinstance(noise.floor, dict)
+        assert set(noise.floor) == set(titan.data)
+
+    def test_supplied_hints_take_the_configured_mode(self) -> None:
+        """A supplied value becomes a per-label hint under ``noise_mode``."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_gain = (4.93, 1.34)
+        titan.params.noise_alpha = (0.106, 0.0)
+        titan.params.noise_mode = "centered"
+        noise = export._structured_noise(titan)  # noqa: SLF001
+        assert noise.gain_mode == "centered"
+        assert noise.alpha_mode == "centered"
+        assert noise.gain == {labels[0]: 4.93, labels[1]: 1.34}
+        # Label 2's exact 0.0 is the NNLS-boundary case: it is kept as a hint,
+        # not dropped, so the prior can span the plate's alpha scale.
+        assert noise.alpha == {labels[0]: 0.106, labels[1]: 0.0}
+
+    def test_fixed_mode_is_honoured(self) -> None:
+        """``noise_mode="fixed"`` pins supplied hints instead of centring them."""
+        titan = self._titration()
+        titan.params.noise_alpha = (0.05, 0.02)
+        titan.params.noise_mode = "fixed"
+        noise = export._structured_noise(titan)  # noqa: SLF001
+        assert noise.alpha_mode == "fixed"
+        # Gain got no value, so it stays free regardless of noise_mode.
+        assert noise.gain_mode == "free"
+
+    def test_default_config_keeps_ye_mag(self) -> None:
+        """The structured family is opt-in; the default stays ye_mag."""
+        assert TitrationConfig().mcmc_noise == "ye_mag"
+        assert TitrationConfig().noise_mode == "centered"

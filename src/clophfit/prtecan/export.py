@@ -132,6 +132,44 @@ def _ye_mag_screening_noise(
     return NoiseConfig.ye_mag(shared=False, prior="lognormal", mu=first_mu, sigma=0.5)
 
 
+def _structured_noise(titration: Titration) -> NoiseConfig:
+    """Build the physical floor/gain/alpha noise config from titration params.
+
+    Floors always come from the measured ``bg_noise``. Gain and alpha are
+    ``"free"`` when no value was supplied -- there is no hint to centre on, so
+    the sampler learns them -- and otherwise take
+    ``titration.params.noise_mode`` (``"centered"`` or ``"fixed"``).
+
+    Parameters
+    ----------
+    titration : Titration
+        Titration whose ``bg_noise`` and ``params`` supply the hints.
+
+    Returns
+    -------
+    NoiseConfig
+        A ``structured`` config with per-label floor, gain and alpha hints.
+    """
+    labels = sorted(titration.data.keys())
+    supplied_mode = titration.params.noise_mode
+
+    def _per_label(values: tuple[float, ...]) -> dict[str, float]:
+        return {
+            lbl: float(values[i]) for i, lbl in enumerate(labels) if i < len(values)
+        }
+
+    gains = _per_label(titration.params.noise_gain)
+    alphas = _per_label(titration.params.noise_alpha)
+    floors = {str(lbl): float(v) for lbl, v in dict(titration.bg_noise).items()}
+    return NoiseConfig.structured(
+        floor=floors or None,
+        gain=gains or 0.0,
+        alpha=alphas or 0.0,
+        gain_mode=supplied_mode if gains else "free",  # type: ignore[arg-type]
+        alpha_mode=supplied_mode if alphas else "free",  # type: ignore[arg-type]
+    )
+
+
 def _single_refit_two_pass(
     ds: Dataset,
     *,
@@ -247,16 +285,30 @@ def fit_single_mcmc(
         n_samples=titration.params.n_mcmc_samples,
         nuts_sampler=titration.params.nuts_sampler,
     )
+    structured = titration.params.mcmc_noise == "structured"
+    if structured:
+        # One config for both passes: unlike ye_mag, whose refit prior is
+        # recentred on the screening pass's learned multiplier, the structured
+        # model's floor/gain/alpha hints do not shift between passes.
+        noise = _structured_noise(titration)
+        screening_noise, refit_noise = noise, noise
+    else:
+        screening_noise = _ye_mag_screening_noise(titration.bg_noise)
+        refit_noise = NoiseConfig.ye_mag(
+            shared=False, prior="lognormal", mu=0.0, sigma=0.25
+        )
     mcmc_fits = {}
     residual_rows = []
     for key, ds in datasets.items():
         final, residuals = _single_refit_two_pass(
             ds,
-            screening_noise=_ye_mag_screening_noise(titration.bg_noise),
-            refit_noise=NoiseConfig.ye_mag(
-                shared=False, prior="lognormal", mu=0.0, sigma=0.25
-            ),
+            screening_noise=screening_noise,
+            refit_noise=refit_noise,
             sampler=sampler,
+            # ye_mag's multiplier learns the scale from unit errors; the
+            # structured model builds its own variance and must keep the real
+            # y_err it was given.
+            unit_yerr=not structured,
         )
         mcmc_fits[key] = final
         if not residuals.empty:

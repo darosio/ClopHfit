@@ -159,6 +159,8 @@ def detect_bad_wells_cmd(
 @click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label. Adds proportional term to y_err variance. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label. Replaces hardcoded gain=1 in shot-noise term. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
+@click.option("--mcmc-noise", type=click.Choice(["ye_mag", "structured"], case_sensitive=False), default="ye_mag", show_default=True, help="Observation-noise family for --mcmc single-refit. ye_mag scales y_err by a learned multiplier; structured builds floor+gain*y+(alpha*y)^2 with floors from bg_noise and gain/alpha from --noise-gain/--noise-alpha.")  # fmt: skip
+@click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a supplied --noise-gain/--noise-alpha value is treated: centered (a hint the posterior may leave) or fixed (pinned). A parameter with no value supplied is always free.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
@@ -186,6 +188,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ctr_free_k: bool,
     noise_alpha: tuple[float, ...],
     noise_gain: tuple[float, ...],
+    mcmc_noise: str,
+    noise_mode: str,
     dry_run: bool,
     detect_bad: bool,
     mask_outliers: bool,
@@ -272,6 +276,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.ctr_free_k = ctr_free_k
     tit.params.noise_alpha = noise_alpha
     tit.params.noise_gain = noise_gain
+    tit.params.mcmc_noise = mcmc_noise
+    tit.params.noise_mode = noise_mode
     tit.params.mask_outliers = mask_outliers
     tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
