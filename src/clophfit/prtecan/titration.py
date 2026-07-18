@@ -475,12 +475,16 @@ class TitrationResults(ResidualsMixin):
 
     ``titration`` is an ``InitVar``: only ``scheme`` and ``fit_keys`` are copied
     off it, so the (potentially large) raw plate data is never retained.
+
+    ``noise_model`` carries the calibrated per-label noise model when the fit
+    produced one (``fgls_fit_plate``); it is ``None`` for plain ``fit_plate``.
     """
 
     scheme: PlateScheme = field(default_factory=PlateScheme)
     fit_keys: set[str] = field(default_factory=set)
     results: dict[str, FitResult] = field(default_factory=dict)
     _dataframe: pd.DataFrame = field(default_factory=pd.DataFrame)
+    noise_model: PlateNoiseModel | None = None
     titration: InitVar[Titration | None] = None
 
     def __post_init__(self, titration: Titration | None) -> None:

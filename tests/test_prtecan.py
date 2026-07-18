@@ -15,7 +15,7 @@ import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
-from clophfit.fitting.data_structures import FitResult
+from clophfit.fitting.data_structures import FitResult, PlateNoiseModel
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
 from clophfit.prtecan import (
     Buffer,
@@ -1381,3 +1381,24 @@ class TestTitrationAnalysis:
 
         assert discards == expected
         assert set(expected).issubset(set(titan.scheme.discard))
+
+
+def test_titration_results_noise_model_defaults_to_none() -> None:
+    """The noise_model field is optional and absent for a plain plate fit."""
+    assert TitrationResults().noise_model is None
+
+
+def test_titration_results_noise_model_is_last_positional() -> None:
+    """Appending noise_model must not shift any existing positional argument."""
+    scheme = PlateScheme()
+    fit_keys = {"A01"}
+    results: dict[str, FitResult] = {}
+    tr = TitrationResults(scheme, fit_keys, results)
+    # The three historical positional args still bind to their own fields.
+    assert tr.scheme is scheme
+    assert tr.fit_keys == fit_keys
+    assert tr.results is results
+    assert tr.noise_model is None
+    # And it is settable by keyword.
+    nm = PlateNoiseModel()
+    assert TitrationResults(scheme, fit_keys, results, noise_model=nm).noise_model is nm
