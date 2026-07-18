@@ -351,9 +351,44 @@ Expected effect of each section on those plates:
 - Section 4 affects `free` mode only; the FGLS path uses `centered`.
 - **Section 6 (zeroed alpha) is the change that actually moves posteriors**,
   widening 4 of 6 label-fits from `HalfNormal(1e-3)` to a prior spanning the
-  plate's alpha scale. Expect wider, more honest alpha uncertainty on those
-  labels, with Kd point estimates roughly stable. A large Kd shift is a signal
-  to re-examine, not to accept.
+  plate's alpha scale.
+
+### Measured outcome
+
+Run on L4, 8 wells, `fit_binding_pymc` with `NoiseConfig.structured` seeded
+from the plate's own FGLS-calibrated model, `alpha_mode="centered"`, 1000
+draws. "Before" reproduced by restoring `_alpha_prior_sigma`'s pre-fix
+formula, so only the zeroed-alpha width differs.
+
+The alpha posterior on the zeroed label is released from the prior:
+
+| well | `rel_error_2` before     | after                  |
+| ---- | ------------------------ | ---------------------- |
+| A01  | 0.00078, HDI [0, 0.0018] | 0.0866, HDI [0, 0.164] |
+| A02  | 0.00080, HDI [0, 0.0019] | 0.0452, HDI [0, 0.113] |
+
+**Kd credible intervals widen systematically: all 8 of 8 wells, ratio 1.10 to
+1.57, mean 1.20 (median 1.15).** Kd point estimates are stable — mean shift
+-0.005, largest 0.039 on A01, itself under 8% of that well's HDI width.
+
+So the fix does not move the answer; it widens the honest uncertainty around
+it by roughly 15–20%. That is material when reporting a pKa.
+
+**Caveat on identifiability.** A01's post-fix alpha posterior mean (0.0866)
+is essentially the prior mean (0.0846), so on that well the likelihood barely
+constrains alpha and the posterior largely reports the prior back. A02 (0.045)
+sits below the prior mean, so there the data does inform it. This is the
+gain/alpha identifiability problem listed under "Out of scope", now visible in
+the posterior instead of masked by a prior tight enough to hide it. Treat
+`rel_error` on such labels as an uncertainty statement, not a measurement.
+
+**Methodological note.** A first attempt at this comparison passed
+`NoiseConfig.structured(noise_model=calib)` without setting modes.
+`_resolve_noise_modes` resolves `None` to `"free"` for raw `Dataset` input,
+and section 6 only touches `"centered"`, so that run measured nothing and
+wrongly appeared to show no effect. The tell was `rel_error_2` returning
+exactly `0.00100` in both arms — `_MIN_NOISE_PRIOR_SCALE`, a value the fix
+should have eliminated. Any future comparison must set the mode explicitly.
 
 Two existing assertions in `test_free_noise_priors_scale_from_hints`
 (`tests/test_bayes.py:722,726`) encode the old scale semantics and must be
