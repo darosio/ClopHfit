@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting import pipeline
+from clophfit.fitting import noise_calibration, pipeline
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
 from clophfit.fitting.errors import InsufficientDataError
 
@@ -178,9 +178,11 @@ def test_calibrate_noise_robust_screens_high_p_outlier() -> None:
     df.loc[0, "raw_res"] = 1.0e4
     df.loc[0, "p_outlier"] = 0.99
 
-    screened = pipeline.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=0.9)
+    screened = noise_calibration.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=0.9)
     # p_threshold above 1.0 keeps every point (nothing screened).
-    unscreened = pipeline.calibrate_noise_robust(df, {"1": 1.0}, p_threshold=2.0)
+    unscreened = noise_calibration.calibrate_noise_robust(
+        df, {"1": 1.0}, p_threshold=2.0
+    )
 
     assert screened["1"].sigma_floor == 1.0
     assert screened["1"].gain < unscreened["1"].gain
@@ -190,7 +192,7 @@ def test_calibrate_noise_robust_without_probability_column() -> None:
     """Without p_outlier, all points are used (no screening)."""
     y = np.linspace(50.0, 500.0, 80)
     df = pd.DataFrame({"label": "1", "raw_res": np.full(80, 2.0), "yhat": y})
-    model = pipeline.calibrate_noise_robust(df, {"1": 1.5})
+    model = noise_calibration.calibrate_noise_robust(df, {"1": 1.5})
     assert model["1"].sigma_floor == 1.5
     assert model["1"].gain >= 0.0
     assert model["1"].alpha >= 0.0

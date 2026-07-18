@@ -8,10 +8,12 @@ from clophfit.fitting.data_structures import (
     Dataset,
     NoiseModelParams,
 )
-from clophfit.fitting.utils import (
-    apply_outlier_mask,
+from clophfit.fitting.noise_calibration import (
     fit_gain_from_residuals,
     fit_rel_error_from_residuals,
+)
+from clophfit.fitting.utils import (
+    apply_outlier_mask,
     outlier_scores_extended,
 )
 
