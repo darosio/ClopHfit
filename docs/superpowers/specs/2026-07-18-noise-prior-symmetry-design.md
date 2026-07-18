@@ -56,7 +56,10 @@ Two further paths produce exact zeros for *both* terms at once: the calibration
 failure fallback (`titration.py:1344`) and the per-label short-circuit when
 fewer than two residuals exceed the floor (`noise_calibration.py:274`).
 
-### The four asymmetries
+### The asymmetries
+
+Four were identified. One (the gates) turned out to be justified rather than
+defective; see design section 1.
 
 1. **A zeroed gain is unrecoverable; a zeroed alpha is not.** In centered mode
    the per-label gain branch emits `pt.as_tensor_variable(0.0)`
@@ -71,12 +74,12 @@ fewer than two residuals exceed the floor (`noise_calibration.py:274`).
    2's `gain=1.6` opens the gate, so label 1's exact zero reaches `bayes.py:181`
    and is frozen. The arbitrary side of a collinear split becomes permanent.
 
-1. **The gates differ.** Gain builds priors when
-   `has_gain or gain_mode == "free"` (`bayes.py:148`); alpha builds them when
-   `has_alpha or alpha_mode in {"free", "centered"}` (`bayes.py:190`). On an
-   all-zero plate in the default centered mode, gain vanishes from the variance
-   entirely (`bayes.py:286` gates on `"gain" in priors`) while alpha still
-   builds a `HalfNormal(1e-3)` that can only sit at zero.
+1. **The gates differ** — *and this one is correct as-is.* Gain builds priors
+   when `has_gain or gain_mode == "free"` (`bayes.py:148`); alpha builds them
+   when `has_alpha or alpha_mode in {"free", "centered"}` (`bayes.py:190`). So
+   a plate whose every label has `gain == 0.0` omits the gain term entirely,
+   while the same plate in alpha keeps a tight estimable prior. Design section 1
+   explains why this is forced rather than accidental, and leaves it unchanged.
 
 1. **Gain disagrees with itself on prior width.** The shared branch floors sigma
    at `0.1` (`bayes.py:161`), the per-label branch at `0.01` (`bayes.py:177`).
@@ -98,28 +101,48 @@ choice and are deliberately preserved.
 
 Guiding principle: **the calibrated point estimate is a hint, not a verdict.**
 Because the zeros are collinearity artifacts, the prior must let the posterior
-re-decide. Terms are switched off only when calibration found no structure
+re-decide. A term is switched off only when there is no way to give it a
+sensible prior width — which, per section 1, means gain with no positive gain
 anywhere on the plate.
 
-### 1. Gate symmetry — alpha narrows to match gain
+### 1. The gates stay as they are — documentation only
 
-Alpha's gate becomes `has_alpha or alpha_mode == "free"`, identical to gain's.
+**No code change.** Both gates are already correct, for a reason that was never
+written down. The asymmetry is forced by the two parameters having different
+dimensions.
 
-When no label has a positive value for either term, calibration found nothing,
-and the model falls back to homoscedastic floor-only noise. Today alpha instead
-builds a `HalfNormal(1e-3)` that is effectively off but still costs a sampler
-dimension and a divergence surface.
+Alpha is dimensionless and empirically below ~0.05–0.10 on every plate, so
+`_MIN_NOISE_PRIOR_SCALE = 1e-3` is a meaningful *universal* around-zero width.
+Alpha can therefore always stay soft, even when no label resolved a positive
+value — there is a sensible prior to fall back on.
 
-This resolves asymmetry 2 by making both terms behave identically, rather than
-by forcing both on. It inverts the direction implied by the original review,
-which proposed widening gain's gate to match alpha's.
+Gain carries the units of the signal and ranges over orders of magnitude across
+instruments and plate types. No universal constant exists. Its around-zero width
+must be *borrowed* from labels that did resolve a gain (section 2), so when no
+label resolved one there is nothing to borrow, and omitting the term is the only
+defensible option. `has_gain` expresses exactly that condition.
 
-The downstream gates at `bayes.py:286` and `bayes.py:294` need no change and
-stay safe: `has_X` is the `any()` over the same values, so `params.X > 0` can
+This corrects a mistake made when the spec was first drafted. Section 1
+originally narrowed alpha's gate to match gain's, on the premise that an
+all-zero term means calibration found no structure. That premise is false: a
+term is zero across every label whenever its collinear partner won *every*
+label's decomposition, which is a routine outcome, not a failure. The existing
+test `test_centered_zero_alpha_is_prior_around_zero` (`tests/test_bayes.py:731`)
+pins precisely that case — `alpha=0.0` on both labels with `gain` at 2.0 and 1.0
+— and asserts alpha stays estimable. The test is right; the original section 1
+would have broken it, and would have contradicted this spec's own guiding
+principle.
+
+Consequence for section 2: because the `has_gain` gate is retained, at least one
+label has a positive gain whenever the zeroed-gain branch runs, so the borrowed
+`plate_gain_scale` is guaranteed non-zero.
+
+The downstream gates at `bayes.py:286` and `bayes.py:294` are likewise unchanged
+and safe: `has_X` is the `any()` over the same values, so `params.X > 0` can
 never be true when the key is absent.
 
-Under the real-plate table both gates open regardless, so only genuine all-zero
-plates change behaviour.
+Deliverable for this section is a code comment at `bayes.py:148` recording why
+gain's gate is narrower than alpha's, so the asymmetry is not "fixed" later.
 
 ### 2. A zeroed gain becomes estimable
 
@@ -144,8 +167,11 @@ Mirroring alpha's *constant* would not work. `_MIN_NOISE_PRIOR_SCALE = 1e-3`
 against a gain of ~1.6 it is 0.06% — a hard zero in all but name. Gain needs a
 gain-scaled width.
 
-The gate from section 1 guarantees at least one positive gain exists whenever
-this branch runs, so `plate_gain_scale` is never zero and needs no fallback.
+The `has_gain` gate retained in section 1 guarantees at least one positive gain
+exists whenever this branch runs, so `plate_gain_scale` is never zero and needs
+no fallback. That guarantee is the reason section 1 must leave the gate alone —
+widening it would admit `plate_gain_scale == 0` and a degenerate zero-sigma
+`HalfNormal`.
 
 ### 3. The width floors dissolve
 
@@ -202,8 +228,15 @@ Unit tests in `tests/test_bayes.py`, each pinning one branch:
 - **Mixed plate** (`alpha=0.02/gain=0` and `alpha=0/gain=1.6`, centered mode):
   label 1's gain is a sampled `HalfNormal`, not a constant, with
   `sigma == 0.2 * 1.6`. Guards section 2 and the dominant real case.
-- **All-zero plate**: neither `"gain"` nor `"rel_error"` is in `priors`, and the
-  variance reduces to `floor**2` broadcast over `y`. Guards section 1.
+- **Gain zero on every label, alpha positive**: `"gain"` is absent from `priors`
+  and the variance carries only floor and alpha. Guards the retained `has_gain`
+  gate and, critically, guards section 2 against ever seeing
+  `plate_gain_scale == 0`.
+- **Alpha zero on every label, gain positive**: `"rel_error"` is present and
+  estimable. This is the existing
+  `test_centered_zero_alpha_is_prior_around_zero` (`tests/test_bayes.py:731`),
+  which must keep passing unchanged — it is the regression guard against
+  re-introducing the withdrawn section 1.
 - **Shared/per-label agreement**: for one label with a given positive hint, the
   shared and per-label branches produce the same sigma. Guards section 3 and
   would have caught the 0.1/0.01 divergence.
@@ -222,9 +255,15 @@ and it should move them toward **wider, more honest gain uncertainty** on
 zeroed labels, with Kd point estimates roughly stable. A large Kd shift is a
 signal to re-examine, not to accept.
 
-Sections 1 and 3 should be inert here (both gates open; `0.2 * 1.6` dominates
-the deleted floors). Section 4 shifts alpha's free-mode prior mean by 25%, which
-is well inside its own width.
+Section 1 is documentation only and cannot move results. Section 3 should be
+inert here (`0.2 * 1.6 = 0.32` dominates both deleted floors). Section 4 shifts
+alpha's free-mode prior mean by 25%, which is well inside its own width, and
+only affects `free` mode — the FGLS path uses `centered`.
+
+Two existing assertions in `test_free_noise_priors_scale_from_hints`
+(`tests/test_bayes.py:722,726`) encode the old scale semantics and must be
+updated to the new means as part of section 4. That is an intended contract
+change, not a regression.
 
 Watch for divergences: making a previously-frozen parameter estimable can
 surface funnel geometry that the hard zero was hiding.
