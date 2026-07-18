@@ -15,6 +15,8 @@ import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
+from clophfit.fitting import bayes
+from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import FitResult, PlateNoiseModel
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
 from clophfit.prtecan import (
@@ -32,6 +34,7 @@ from clophfit.prtecan import (
     TitrationResults,
     calculate_conc,
     dilution_correction,
+    export,
     extract_metadata,
     merge_md,
     strip_lines,
@@ -1395,6 +1398,51 @@ class TestTitrationAnalysis:
 
         assert discards == expected
         assert set(expected).issubset(set(titan.scheme.discard))
+
+    def test_single_refit_two_pass_contract(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tit: Titration,
+        tmp_path: Path,
+    ) -> None:
+        """--mcmc single-refit runs a robust pass then an unrobust refit."""
+        calls: list[dict[str, object]] = []
+
+        def fake_fit_binding_pymc(_ds_or_fr: object, **kwargs: object) -> FitResult:
+            calls.append(kwargs)
+            return fit_binding_glob(tit.create_global_ds("A01"))
+
+        # Patch BOTH lookup sites so this test is valid before and after the
+        # inlining: today the call happens inside bayes, afterwards inside
+        # export.
+        monkeypatch.setattr(bayes, "fit_binding_pymc", fake_fit_binding_pymc)
+        monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+
+        tit.params.mcmc = "single-refit"
+        tit.params.n_mcmc_samples = 7
+        res = export.fit_single_mcmc(
+            tit,
+            {"A01": tit.create_global_ds("A01")},
+            tmp_path,
+        )
+
+        assert res is not None
+        assert len(calls) == 2
+        first, second = calls
+        # Pass 1 is robust; pass 2 is not.
+        assert first["robust"].enabled is True
+        assert second["robust"].enabled is False
+        # Both use the ye_mag noise strategy, unshared, lognormal.
+        assert first["noise"].kind == "ye_mag"
+        assert second["noise"].kind == "ye_mag"
+        assert first["noise"].shared_ye_mags is False
+        assert first["noise"].ye_mag_prior == "lognormal"
+        # The refit's ye_mag prior is recentred on 0 with a tighter sigma.
+        assert second["noise"].ye_mag_mu == 0.0
+        assert second["noise"].ye_mag_sigma == 0.25
+        # Sampler settings come from titration params in both passes.
+        assert first["sampler"].n_samples == 7
+        assert second["sampler"].n_samples == 7
 
 
 def test_titration_results_noise_model_defaults_to_none() -> None:
