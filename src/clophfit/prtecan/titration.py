@@ -28,7 +28,18 @@ from clophfit.fitting.data_structures import (
     ResidualsMixin,
 )
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
+from clophfit.fitting.model_validation import (
+    RESIDUAL_TABLE_COLUMNS,
+    residuals_from_fit_results,
+)
+from clophfit.fitting.models import binding_1site
+from clophfit.fitting.noise_calibration import (
+    _noise_params_converged,
+    _plate_noise_model_from_nnls,
+    compute_plate_slopes,
+    fit_noise_model_nnls,
+    fit_ph_slope_noise,
+)
 from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 from clophfit.fitting.utils import (
@@ -707,7 +718,7 @@ class TitrationResults(ResidualsMixin):
         return xlim
 
 
-@dataclass  # Too many public methods - acceptable for complex classes
+@dataclass  # noqa: PLR0904 (acceptable for a complex class)
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
@@ -1238,6 +1249,132 @@ class Titration(TecanfilesGroup):
             datasets = self.create_dataset_dict(label)
         results = _fit_datasets(datasets, method, **kwargs)
         return TitrationResults(self.scheme, self.fit_keys, results)
+
+    def fgls_fit_plate(  # noqa: PLR0913
+        self,
+        datasets: dict[str, Dataset] | None = None,
+        *,
+        label: str | None = None,
+        sigma_floor: dict[str, float] | None = None,
+        first_pass_method: str = "huber",  # noqa: S107
+        second_pass_method: str = "lm",  # noqa: S107
+        max_iter: int = 3,
+        tol: float = 1e-3,
+    ) -> TitrationResults:
+        """Run iterative Feasible Generalized Least Squares (FGLS) on the plate.
+
+        Fits every well with *first_pass_method* using the existing ``y_errc``,
+        calibrates a per-label noise model from the plate-wide residuals with
+        the floor anchored to *sigma_floor*, re-applies the calibrated weights
+        and re-fits with *second_pass_method*, iterating until gain and alpha
+        converge or *max_iter* is reached.
+
+        Parameters
+        ----------
+        datasets : dict[str, Dataset] | None
+            Mapping of well keys to `Dataset` objects. When ``None``, datasets
+            are built with :meth:`create_dataset_dict`.
+        label : str | None
+            Build per-label datasets for this label instead of global ones.
+            Only valid when *datasets* is ``None``.
+        sigma_floor : dict[str, float] | None
+            Known read-noise floor per label. Defaults to :attr:`bg_noise`.
+        first_pass_method : str
+            Method for the first-pass fit.
+        second_pass_method : str
+            Method for subsequent passes.
+        max_iter : int
+            Maximum FGLS iterations.
+        tol : float
+            Relative tolerance for gain/alpha convergence.
+
+        Returns
+        -------
+        TitrationResults
+            Plate results carrying this titration's ``scheme`` and
+            ``fit_keys``, with ``noise_model`` set to the converged (or last)
+            calibration.
+
+        Raises
+        ------
+        ValueError
+            If both *datasets* and *label* are given.
+        """
+        if datasets is not None and label is not None:
+            msg = "Pass either `datasets` or `label`, not both."
+            raise ValueError(msg)
+        if datasets is None:
+            datasets = self.create_dataset_dict(label)
+        floors_in = dict(self.bg_noise) if sigma_floor is None else dict(sigma_floor)
+
+        noise_model: PlateNoiseModel | None = None
+        results: dict[str, FitResult] = {}
+
+        for iteration in range(max_iter):
+            method = first_pass_method if iteration == 0 else second_pass_method
+            if iteration == 0:
+                current_ds = datasets
+            else:
+                current_ds = noise_model.apply_to_plate(  # type: ignore[union-attr]
+                    datasets, compute_plate_slopes(results)
+                )
+            logger.info("FGLS iteration %d: %s fit", iteration + 1, method)
+
+            results = {}
+            for well, ds in current_ds.items():
+                try:
+                    results[well] = fit_binding_glob(ds, method=method)
+                except InsufficientDataError:
+                    logger.warning(
+                        "Skip FGLS fit for well %s (iteration %d).",
+                        well,
+                        iteration + 1,
+                    )
+                    results[well] = FitResult()
+
+            df_res = residuals_from_fit_results(
+                results, trace_id="", binding_function=binding_1site
+            )
+            try:
+                floors, gains, alphas = fit_noise_model_nnls(
+                    df_res, sigma_floor_fixed=floors_in
+                )
+            except ValueError as e:
+                logger.warning("FGLS calibration failed (%s).", e)
+                gains = dict.fromkeys(floors_in, 0.0)
+                alphas = dict.fromkeys(floors_in, 0.0)
+                floors = dict(floors_in)
+
+            plate_slopes = compute_plate_slopes(results)
+            tmp_noise = _plate_noise_model_from_nnls(floors, gains, alphas)
+            sigma_ph = fit_ph_slope_noise(df_res, tmp_noise, plate_slopes)
+            new_noise = _plate_noise_model_from_nnls(floors, gains, alphas, sigma_ph)
+
+            for lbl, params in new_noise.items():
+                logger.info(
+                    "Calibrated [%s] iter %d: sigma=%.2f, gain=%.3f, alpha=%.3f, "
+                    "sigma_ph=%.4f",
+                    lbl,
+                    iteration + 1,
+                    params.sigma_floor,
+                    params.gain,
+                    params.alpha,
+                    params.sigma_ph,
+                )
+
+            converged = iteration > 0 and _noise_params_converged(
+                noise_model,  # type: ignore[arg-type]
+                new_noise,
+                tol,
+            )
+            noise_model = new_noise
+            if converged:
+                logger.info("FGLS converged after %d iterations.", iteration + 1)
+                break
+
+        return TitrationResults(
+            self.scheme, self.fit_keys, results, noise_model=noise_model
+        )
 
     def plot_temperature(self, title: str = "") -> figure.Figure:
         """Plot temperatures of all labelblocksgroups.

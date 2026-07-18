@@ -1344,6 +1344,20 @@ class TestTitrationAnalysis:
         assert set(table["well"]) == tit.fit_keys
         assert (table["residual_likelihood"] == "normal").all()
 
+    def test_fgls_fit_plate_returns_titration_results_with_noise_model(
+        self, tit: Titration
+    ) -> None:
+        """FGLS returns a TitrationResults carrying its calibrated noise model."""
+        res = tit.fgls_fit_plate(max_iter=1)
+
+        assert isinstance(res, TitrationResults)
+        assert isinstance(res.noise_model, PlateNoiseModel)
+        # Plate metadata is populated from the titration, like fit_plate.
+        assert res.scheme is tit.scheme
+        assert res.fit_keys == tit.fit_keys
+        # The unified residual accessor works, which the tuple return could not offer.
+        assert not res.residuals.empty
+
     def test_plot_buffer_with_title(self, tit: Titration) -> None:
         """It plots buffers for 2 lbg with title."""
         g = tit.buffer.plot(title="Test Title")

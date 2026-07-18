@@ -1,6 +1,7 @@
 """Test cases for the clophfit.fitting.residuals module."""
 
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,7 +25,6 @@ from clophfit.fitting.model_validation import (
     robust_settings_from_trace,
 )
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.residuals import (
     BIAS_P_VALUE_THRESHOLD,
     DW_LOWER_BOUND,
@@ -38,6 +38,9 @@ from clophfit.fitting.residuals import (
     residual_dataframe,
     residual_statistics,
 )
+from clophfit.prtecan import Titration
+
+data_tests = Path(__file__).parent / "Tecan"
 
 ###############################################################################
 # Fixtures
@@ -729,16 +732,17 @@ def test_fgls_plate_fit_workflow() -> None:
     datasets = {"well1": Dataset({"1": da}, is_ph=True)}
 
     sigma_floor = {"1": 1.0}
-    final_results, noise_params = fgls_plate_fit(datasets, sigma_floor)
+    titration = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    res = titration.fgls_fit_plate(datasets, sigma_floor=sigma_floor)
 
-    assert "well1" in final_results
-    assert final_results["well1"].result is not None
-    assert final_results["well1"].result.success
-    assert isinstance(noise_params, PlateNoiseModel)
-    assert "1" in noise_params
-    assert noise_params["1"].sigma_floor == 1.0
-    assert noise_params["1"].gain >= 0.0
-    assert noise_params["1"].alpha >= 0.0
+    assert "well1" in res.results
+    assert res.results["well1"].result is not None
+    assert res.results["well1"].result.success
+    assert isinstance(res.noise_model, PlateNoiseModel)
+    assert "1" in res.noise_model
+    assert res.noise_model["1"].sigma_floor == 1.0
+    assert res.noise_model["1"].gain >= 0.0
+    assert res.noise_model["1"].alpha >= 0.0
 
 
 def test_residuals_mixin_resolves_classical_fit_as_normal() -> None:

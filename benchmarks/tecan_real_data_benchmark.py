@@ -48,7 +48,6 @@ import click
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting.pipeline import fgls_plate_fit
 from clophfit.fitting.data_structures import (
     Dataset,
     FitResult,
@@ -313,7 +312,7 @@ def _fit_real_curve_with_titration(
             arr = tit.bg_noise[lbl]
             sigma_floor[str(lbl)] = float(np.nanmean(arr)) if np.any(np.isfinite(arr)) else 0.0
 
-        _, noise_params = fgls_plate_fit(datasets, is_ph=tit.is_ph, sigma_floor=sigma_floor)
+        noise_params = tit.fgls_fit_plate(datasets, sigma_floor=sigma_floor).noise_model
         label_names = sorted(combination.channels)
         tit.params.noise_alpha = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[2] for label in label_names)
         tit.params.noise_gain = tuple(noise_params.get(label, (1.0, 0.0, 0.0))[1] for label in label_names)
