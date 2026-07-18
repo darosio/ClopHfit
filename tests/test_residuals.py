@@ -18,6 +18,7 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.model_validation import (
     ResidualAnalysis,
+    mark_outlier_probability_outliers,
     residuals_from_fit_results,
     robust_likelihood_from_trace,
     robust_settings_from_trace,
@@ -547,6 +548,42 @@ class TestModuleConstants:
         assert DW_LOWER_BOUND == 1.5
         assert DW_UPPER_BOUND == 2.5
         assert DW_LOWER_BOUND < DW_UPPER_BOUND
+
+
+###############################################################################
+# Tests for mark_outlier_probability_outliers
+###############################################################################
+
+
+def test_mark_outlier_probability_requires_both_criteria() -> None:
+    """With residual_threshold set, a row must exceed probability AND residual."""
+    df = pd.DataFrame({
+        "label": ["1", "1", "1", "1"],
+        "p_outlier": [0.9, 0.9, 0.2, 0.2],
+        "std_res": [5.0, 1.0, 5.0, 1.0],
+    })
+    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
+    # Only the first row clears both cutoffs.
+    assert out["exclude_outlier_probability"].tolist() == [True, False, False, False]
+
+
+def test_mark_outlier_probability_default_is_probability_only() -> None:
+    """Omitting residual_threshold preserves the existing probability-only rule."""
+    df = pd.DataFrame({
+        "label": ["1", "1"],
+        "p_outlier": [0.9, 0.2],
+        "std_res": [0.1, 9.0],
+    })
+    out = mark_outlier_probability_outliers(df, threshold=0.7)
+    # std_res is ignored entirely when residual_threshold is None.
+    assert out["exclude_outlier_probability"].tolist() == [True, False]
+
+
+def test_mark_outlier_probability_missing_residual_column_marks_nothing() -> None:
+    """A requested residual column that is absent excludes no rows."""
+    df = pd.DataFrame({"label": ["1"], "p_outlier": [0.99]})
+    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
+    assert out["exclude_outlier_probability"].tolist() == [False]
 
 
 ###############################################################################
