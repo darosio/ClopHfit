@@ -717,21 +717,27 @@ def test_free_noise_priors_scale_from_hints() -> None:
         alpha0_mean = float(
             pm.draw(priors0["rel_error"]["1"], draws=6000, random_seed=1).mean()
         )
-    # Hinted: Exponential mean == gain hint (0.5); HalfNormal mean == sigma*sqrt(2/pi).
+    # The hint is the prior *mean* for both terms: Exponential(lam=1/h) and
+    # HalfNormal(sigma=h*sqrt(pi/2)) both have mean h.
     assert gain_mean == pytest.approx(0.5, abs=0.05)
-    assert alpha_mean == pytest.approx(0.03 * np.sqrt(2 / np.pi), abs=0.005)
+    assert alpha_mean == pytest.approx(0.03, abs=0.005)
     # gain=0 / alpha=0 -> tightest around-zero priors (floored at 1e-3), so each
     # width is strictly *below* a small positive hint (monotonic in the hint).
     assert gain0_mean == pytest.approx(1e-3, abs=5e-4)
-    assert alpha0_mean == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert alpha0_mean == pytest.approx(1e-3, abs=5e-4)
     assert gain0_mean < gain_mean
     assert alpha0_mean < alpha_mean
 
 
-def test_centered_zero_alpha_is_prior_around_zero() -> None:
-    """A calibrated alpha of 0 stays a prior around 0 in centered mode, not fixed.
+def test_centered_zero_alpha_spans_plate_alpha_scale() -> None:
+    """A calibrated alpha of 0 spans the plate's alpha scale in centered mode, not fixed.
 
-    Only "fixed" drops the alpha term when the whole plate has alpha == 0.
+    NNLS clamps the collinear y/y**2 basis, so alpha=0.0 on every label means
+    gain won each label's decomposition -- not that the proportional-error term
+    is physically absent. With no label resolving a positive alpha, the width
+    falls back to `_ZERO_HINT_ALPHA_SCALE` (0.1), the plate scale to assume
+    when nothing on the plate resolved a positive alpha. Only "fixed" drops the
+    alpha term when the whole plate has alpha == 0.
     """
     pytest.importorskip("pymc")
     nm = PlateNoiseModel({
@@ -743,12 +749,12 @@ def test_centered_zero_alpha_is_prior_around_zero() -> None:
             nm, gain_mode="centered", alpha_mode="centered"
         )
         draws = pm.draw(centered["rel_error"]["1"], draws=6000, random_seed=0)
-    # Term is present, strictly non-negative, non-degenerate, tight around 0
-    # (HalfNormal floored at 1e-3, not the legacy 0.02).
+    # Term is present, strictly non-negative, non-degenerate, and spans the
+    # plate's alpha scale (HalfNormal(sigma=0.1), not a tight band around 0).
     assert "rel_error" in centered
     assert float(draws.min()) >= 0.0
     assert float(draws.std()) > 0.0
-    assert float(draws.mean()) == pytest.approx(1e-3 * np.sqrt(2 / np.pi), abs=5e-4)
+    assert float(draws.mean()) == pytest.approx(0.1 * np.sqrt(2 / np.pi), abs=0.005)
     with pm.Model():
         fixed = bayes.build_pymc_noise_priors(nm, gain_mode="fixed", alpha_mode="fixed")
     # "fixed" with an all-zero alpha leaves the term genuinely absent (hard 0).
@@ -2736,3 +2742,166 @@ class TestYerrExtraction:
         assert len(sigma_means) == n_steps
         # All values must be far from the 1.0 fallback
         assert np.all(sigma_means > 5.0)
+
+
+def test_gain_omitted_when_no_label_resolves_a_gain() -> None:
+    """No positive gain anywhere -> the Poisson term is omitted, not invented.
+
+    Gain carries the units of the signal, so unlike alpha there is no
+    plate-independent around-zero width to fall back on. This invariant is what
+    guarantees the zeroed-gain branch never borrows a width of zero.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.03),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            nm, gain_mode="centered", alpha_mode="centered"
+        )
+    # Gain has nothing to borrow from, so it is absent.
+    assert "gain" not in priors
+    # Alpha is dimensionless and always has _ZERO_HINT_ALPHA_SCALE to fall back
+    # on, so it stays present even though every label calibrated to a positive
+    # value here.
+    assert "rel_error" in priors
+
+
+def test_zeroed_gain_borrows_width_from_resolved_labels() -> None:
+    """An exact-zero gain stays estimable, scaled by the labels that resolved one.
+
+    NNLS clamps the collinear y/y**2 basis, so gain=0.0 on one label means alpha
+    won that label's decomposition -- not that the Poisson term is absent. The
+    prior must let the posterior re-decide.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.6, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(nm, gain_mode="centered")
+        draws = pm.draw(priors["gain"]["1"], draws=8000, random_seed=0)
+    # Non-degenerate and non-negative: a sampled variable, not a hard constant.
+    assert float(draws.std()) > 0.0
+    assert float(draws.min()) >= 0.0
+    # An unresolved (zero) hint uses _ZERO_HINT_WIDTH * plate_gain_scale,
+    # not the 20% relative width used for resolved hints: HalfNormal(sigma=1.0
+    # * 1.6 = 1.6); its mean is sigma * sqrt(2/pi) ~= 1.2767. abs=0.08 is
+    # roughly 7 sampling standard errors at draws=8000.
+    assert float(draws.mean()) == pytest.approx(1.6 * np.sqrt(2 / np.pi), abs=0.08)
+
+
+def test_zeroed_alpha_borrows_width_from_resolved_labels() -> None:
+    """An exact-zero alpha stays estimable, scaled by the labels that resolved one.
+
+    Shaped like real plate L4: label "1" resolves an alpha (gain=4.93), and
+    label "2" lands on the NNLS alpha=0.0 boundary (gain=1.34) -- meaning gain
+    won label 2's decomposition, not that its proportional-error term is
+    physically absent. Label 2's prior must borrow its width from label 1's
+    resolved alpha (`plate_alpha_scale`), not collapse to a tight band around
+    zero, so the posterior can re-decide the collinear split.
+
+    Label 1's alpha is deliberately set to 0.25 rather than L4's measured 0.106.
+    At 0.106 the borrowed width is too close to the `_ZERO_HINT_ALPHA_SCALE`
+    fallback of 0.1 for the assertion to tell them apart, so a regression that
+    dropped the borrow entirely would still pass. 0.25 separates the two.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=4.93, alpha=0.25),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.34, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(nm, alpha_mode="centered")
+        draws = pm.draw(priors["rel_error"]["2"], draws=8000, random_seed=0)
+    # Non-degenerate and non-negative: a sampled variable, not a hard constant.
+    assert float(draws.std()) > 0.0
+    assert float(draws.min()) >= 0.0
+    # An unresolved (zero) hint uses _ZERO_HINT_WIDTH * plate_alpha_scale
+    # (here plate_alpha_scale == 0.25, label 1's resolved alpha): HalfNormal
+    # (sigma=1.0 * 0.25); its mean is sigma * sqrt(2/pi) ~= 0.1995. Falling
+    # back to _ZERO_HINT_ALPHA_SCALE=0.1 instead would give ~0.0798, far
+    # outside this tolerance.
+    assert float(draws.mean()) == pytest.approx(0.25 * np.sqrt(2 / np.pi), abs=0.006)
+
+
+def test_gain_prior_width_agrees_between_shared_and_per_label() -> None:
+    """One hint gives one width, whether the gain is pooled or per-label.
+
+    The shared branch used to floor sigma at 0.1 and the per-label branch at
+    0.01 -- a 10x disagreement with no rationale.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({"1": NoiseModelParams(sigma_floor=1.0, gain=0.3)})
+    with pm.Model():
+        shared = bayes.build_pymc_noise_priors(
+            nm, shared_gain=True, gain_mode="centered"
+        )
+        shared_std = float(pm.draw(shared["gain"], draws=8000, random_seed=0).std())
+    with pm.Model():
+        per_label = bayes.build_pymc_noise_priors(
+            nm, shared_gain=False, gain_mode="centered"
+        )
+        per_std = float(
+            pm.draw(per_label["gain"]["1"], draws=8000, random_seed=0).std()
+        )
+    # Both are 0.2 * 0.3 = 0.06 now; previously 0.1 (shared) vs 0.06 (per-label).
+    assert shared_std == pytest.approx(per_std, rel=0.05)
+    assert shared_std == pytest.approx(0.06, abs=0.006)
+
+
+def test_fixed_mode_keeps_hard_constants_for_both_terms() -> None:
+    """Mode ``fixed`` is the one mode where a zero genuinely means absent.
+
+    The softening of zeroed gains must not leak into "fixed", which callers use
+    to pin or disable a term outright.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=0.0, alpha=0.02),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=1.6, alpha=0.0),
+    })
+    with pm.Model():
+        priors = bayes.build_pymc_noise_priors(
+            nm, gain_mode="fixed", alpha_mode="fixed"
+        )
+    # Constants, not sampled variables: they evaluate to the hint exactly and
+    # carry no randomness.
+    assert float(priors["gain"]["1"].eval()) == 0.0
+    assert float(priors["gain"]["2"].eval()) == pytest.approx(1.6)
+    assert float(priors["rel_error"]["1"].eval()) == pytest.approx(0.02)
+    assert float(priors["rel_error"]["2"].eval()) == 0.0
+
+
+def test_shared_zeroed_alpha_matches_per_label_halfnormal() -> None:
+    """Pooled alpha with every hint zeroed spans the same width as per-label.
+
+    The shared branch reaches the zero-hint width through a different
+    distribution family -- ``TruncatedNormal(mu=0, sigma=s, lower=0)`` rather
+    than ``HalfNormal(sigma=s)``. Those are the same distribution, and this
+    pins that equivalence so the pooled path cannot drift from the per-label
+    one. With no label resolving a positive alpha, both fall back to
+    ``_ZERO_HINT_ALPHA_SCALE``.
+    """
+    pytest.importorskip("pymc")
+    nm = PlateNoiseModel({
+        "1": NoiseModelParams(sigma_floor=1.0, gain=5.53, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=1.0, gain=0.52, alpha=0.0),
+    })
+    with pm.Model():
+        pooled = bayes.build_pymc_noise_priors(
+            nm, shared_alpha=True, alpha_mode="centered"
+        )
+        pooled_draws = pm.draw(pooled["rel_error"], draws=8000, random_seed=0)
+    with pm.Model():
+        per_label = bayes.build_pymc_noise_priors(
+            nm, shared_alpha=False, alpha_mode="centered"
+        )
+        per_draws = pm.draw(per_label["rel_error"]["1"], draws=8000, random_seed=1)
+    # Both are the _ZERO_HINT_ALPHA_SCALE fallback of 0.1, mean 0.1*sqrt(2/pi).
+    expected = 0.1 * np.sqrt(2 / np.pi)
+    assert float(pooled_draws.mean()) == pytest.approx(expected, abs=0.005)
+    assert float(per_draws.mean()) == pytest.approx(expected, abs=0.005)
+    assert float(pooled_draws.min()) >= 0.0

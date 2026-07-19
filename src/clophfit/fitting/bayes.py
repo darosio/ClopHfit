@@ -61,6 +61,23 @@ _X_TRUE_INDEX_RE = re.compile(r"^x_true\[(\d+)\]$")
 # tightest around-zero prior (never a degenerate 0) and the prior width grows
 # monotonically with the hint.
 _MIN_NOISE_PRIOR_SCALE = 1e-3
+# Width factor for any *unresolved* (exactly-zero) hint, in units of that
+# parameter's plate scale. A resolved hint is known to about 20% (see
+# _gain_prior_sigma / _alpha_prior_sigma), but a hint of exactly 0.0 is not a
+# measurement of zero -- it means the collinear partner (gain vs. alpha) won
+# this label's NNLS decomposition. The width therefore has to span the
+# plausible range of the plate's values for that parameter, not a tight band
+# around zero, so it gets its own factor rather than reusing the 20% relative
+# width.
+_ZERO_HINT_WIDTH = 1.0
+# Plate-wide alpha scale to assume when NO label resolved a positive alpha
+# (all NNLS fits landed on the alpha=0 boundary). Alpha is dimensionless, and
+# empirically reaches ~0.106 on real plates (see build_pymc_noise_priors), so
+# 0.1 places a plausible alpha at about one sigma of the resulting prior.
+# Gain needs no equivalent: build_pymc_noise_priors's has_gain gate omits the
+# gain term entirely when no label resolved a positive gain, whereas alpha's
+# gate there keeps building a prior even when every hint is 0.
+_ZERO_HINT_ALPHA_SCALE = 0.1
 
 
 def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any:  # noqa: ANN401
@@ -91,6 +108,69 @@ def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any
     rel_sigma = float(np.clip(1.0 / np.sqrt(2 * dof), 0.05, 0.5))
     sigma = max(rel_sigma * mu, 0.01)
     return pm.TruncatedNormal(name, mu=mu, sigma=sigma, lower=0.0)
+
+
+def _gain_prior_sigma(mu_g: float, plate_gain_scale: float) -> float:
+    """Prior width for one gain hint.
+
+    Gain carries the units of the signal, so its width is always relative, but
+    the two cases mean different things and use different factors. A
+    *resolved* hint (``mu_g > 0``) is a real calibrated value known to about
+    20% (``0.2 * mu_g``). An *unresolved* hint (``mu_g == 0``) is not a
+    measurement of zero: it comes from the NNLS boundary and means the
+    collinear alpha term won this label's decomposition, so the width instead
+    has to span the plausible range of the plate's gains
+    (``_ZERO_HINT_WIDTH * plate_gain_scale``) rather than being a tight
+    band around zero.
+
+    Parameters
+    ----------
+    mu_g : float
+        This label's calibrated gain hint.
+    plate_gain_scale : float
+        Mean of the positive gains on the plate, used when *mu_g* is 0. The
+        caller's ``has_gain`` gate guarantees this is non-zero whenever a
+        zero hint can reach here.
+
+    Returns
+    -------
+    float
+        Standard deviation for the gain prior.
+    """
+    if mu_g > 0.0:
+        return 0.2 * mu_g
+    return _ZERO_HINT_WIDTH * plate_gain_scale
+
+
+def _alpha_prior_sigma(mu_a: float, plate_alpha_scale: float) -> float:
+    """Prior width for one alpha hint.
+
+    Mirrors :func:`_gain_prior_sigma`: a *resolved* hint (``mu_a > 0``) is a
+    real calibrated value, so its width is a relative fraction of the hint
+    itself (``max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE)``, preserving the prior
+    resolved-hint behaviour). An *unresolved* hint (``mu_a == 0``) is not a
+    measurement of zero: it comes from the NNLS boundary and means the
+    collinear gain term won this label's decomposition, so the width instead
+    has to span the plausible range of the plate's alphas
+    (``_ZERO_HINT_WIDTH * plate_alpha_scale``) rather than being a tight band
+    around zero.
+
+    Parameters
+    ----------
+    mu_a : float
+        This label's calibrated alpha hint.
+    plate_alpha_scale : float
+        Mean of the positive alphas on the plate, or ``_ZERO_HINT_ALPHA_SCALE``
+        when no label resolved a positive alpha. Used when *mu_a* is 0.
+
+    Returns
+    -------
+    float
+        Standard deviation for the alpha prior.
+    """
+    if mu_a > 0.0:
+        return max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE)
+    return _ZERO_HINT_WIDTH * plate_alpha_scale
 
 
 def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -143,12 +223,20 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 f"floor_{lbl}", noise_model[lbl].sigma_floor, floor_mode
             )
 
-    # 2. Gain (Poisson term)
+    # 2. Gain (Poisson term). The gate is deliberately narrower than alpha's
+    # below. Alpha is dimensionless and empirically reaches about 0.1 at most,
+    # so _ZERO_HINT_ALPHA_SCALE is a meaningful universal around-zero width and
+    # alpha can always stay soft even with no positive hint. Gain carries
+    # the units of the signal, so its around-zero width has to be borrowed from
+    # labels that did resolve a gain; when no label resolved one there is
+    # nothing to borrow, and omitting the term beats inventing a scale. Do not
+    # "symmetrise" this gate — it is what guarantees plate_gain_scale > 0.
     has_gain = any(p.gain > 0 for p in noise_model.values())
     if has_gain or gain_mode == "free":
+        positive_gains = [p.gain for p in noise_model.values() if p.gain > 0]
+        plate_gain_scale = float(np.mean(positive_gains)) if positive_gains else 0.0
         if shared_gain:
-            gains = [p.gain for p in noise_model.values() if p.gain > 0]
-            mu_g = float(np.mean(gains)) if gains else 0.0
+            mu_g = plate_gain_scale
             if gain_mode == "fixed":
                 priors["gain"] = pt.as_tensor_variable(mu_g)
             elif gain_mode == "free":
@@ -157,8 +245,14 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 lam = 1.0 / max(mu_g, _MIN_NOISE_PRIOR_SCALE)
                 priors["gain"] = pm.Exponential("gain", lam=lam)
             else:  # centered
+                # In the shared branch mu_g IS plate_gain_scale (set just
+                # above), so this can only ever take the resolved-hint arm of
+                # _gain_prior_sigma; the zero-hint fallback is per-label only.
                 priors["gain"] = pm.TruncatedNormal(
-                    "gain", mu=mu_g, sigma=max(0.2 * mu_g, 0.1), lower=0.0
+                    "gain",
+                    mu=mu_g,
+                    sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
+                    lower=0.0,
                 )
         else:
             priors["gain"] = {}
@@ -174,34 +268,57 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                     priors["gain"][lbl] = pm.TruncatedNormal(
                         f"gain_{lbl}",
                         mu=mu_g,
-                        sigma=max(0.20 * mu_g, 0.01),
+                        sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
                         lower=0.0,
                     )
                 else:
-                    priors["gain"][lbl] = pt.as_tensor_variable(0.0)
+                    # Exact 0 from the NNLS boundary: alpha won this label's
+                    # decomposition. Keep the term estimable around 0 with a
+                    # width spanning the plate's gain scale (not a fraction of
+                    # it -- see _ZERO_HINT_WIDTH), so the posterior can
+                    # undo an arbitrary collinear split.
+                    priors["gain"][lbl] = pm.HalfNormal(
+                        f"gain_{lbl}",
+                        sigma=_gain_prior_sigma(mu_g, plate_gain_scale),
+                    )
 
     # 3. Alpha (proportional error). "centered" and "free" always build a prior
-    # so a calibrated alpha of 0 becomes a tight prior *around* 0, not a hard 0;
-    # only "fixed" leaves the term truly absent when alpha is 0. The alpha hint
-    # is the prior scale (HalfNormal sigma / TruncatedNormal mean), floored at
-    # _MIN_NOISE_PRIOR_SCALE so the width grows monotonically with the hint (the
-    # weak 0.02 default lives in NoiseConfig.alpha, not here).
+    # so a calibrated alpha of 0 becomes a prior spanning the plate's alpha
+    # scale, not a hard 0; only "fixed" leaves the term truly absent when
+    # alpha is 0. In "free" mode and in "centered" on a positive hint, the
+    # alpha hint is the prior mean (HalfNormal sigma is scaled by sqrt(pi/2)
+    # to achieve that; TruncatedNormal takes it directly), floored at
+    # _MIN_NOISE_PRIOR_SCALE so the width grows monotonically with the hint
+    # (the weak 0.02 default lives in NoiseConfig.alpha, not here). The one
+    # exception, centered mode with a zero hint, routes through
+    # _alpha_prior_sigma, whose zero-hint arm spans plate_alpha_scale rather
+    # than being a tight band around zero -- see _gain_prior_sigma for the
+    # analogous gain case.
     has_alpha = any(p.alpha > 0 for p in noise_model.values())
     if has_alpha or alpha_mode in {"free", "centered"}:
+        positive_alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
+        plate_alpha_scale = (
+            float(np.mean(positive_alphas))
+            if positive_alphas
+            else _ZERO_HINT_ALPHA_SCALE
+        )
         if shared_alpha:
-            alphas = [p.alpha for p in noise_model.values() if p.alpha > 0]
-            mu_a = float(np.mean(alphas)) if alphas else 0.0
+            mu_a = float(np.mean(positive_alphas)) if positive_alphas else 0.0
             if alpha_mode == "fixed":
                 priors["rel_error"] = pt.as_tensor_variable(mu_a)
             elif alpha_mode == "free":
+                # sqrt(pi/2) converts the hint from a scale to a mean, so the
+                # hint means the same thing here as it does for gain's
+                # Exponential (whose mean is exactly its hint).
                 priors["rel_error"] = pm.HalfNormal(
-                    "rel_error", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                    "rel_error",
+                    sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE) * np.sqrt(np.pi / 2),
                 )
             else:  # centered
                 priors["rel_error"] = pm.TruncatedNormal(
                     "rel_error",
                     mu=mu_a,
-                    sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
+                    sigma=_alpha_prior_sigma(mu_a, plate_alpha_scale),
                     lower=0.0,
                 )
         else:
@@ -211,19 +328,27 @@ def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 if alpha_mode == "fixed":
                     priors["rel_error"][lbl] = pt.as_tensor_variable(mu_a)
                 elif alpha_mode == "free":
+                    # See the shared branch: sqrt(pi/2) makes the hint a mean.
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE)
+                        f"rel_error_{lbl}",
+                        sigma=max(mu_a, _MIN_NOISE_PRIOR_SCALE) * np.sqrt(np.pi / 2),
                     )
                 elif mu_a > 0.0:  # centered on a positive hint
                     priors["rel_error"][lbl] = pm.TruncatedNormal(
                         f"rel_error_{lbl}",
                         mu=mu_a,
-                        sigma=max(0.25 * mu_a, _MIN_NOISE_PRIOR_SCALE),
+                        sigma=_alpha_prior_sigma(mu_a, plate_alpha_scale),
                         lower=0.0,
                     )
-                else:  # centered on 0 -> tight prior around 0
+                else:
+                    # Exact 0 from the NNLS boundary: gain won this label's
+                    # decomposition. Keep the term estimable around 0 with a
+                    # width spanning the plate's alpha scale (not a fraction
+                    # of it -- see _ZERO_HINT_WIDTH), so the posterior can
+                    # undo an arbitrary collinear split.
                     priors["rel_error"][lbl] = pm.HalfNormal(
-                        f"rel_error_{lbl}", sigma=_MIN_NOISE_PRIOR_SCALE
+                        f"rel_error_{lbl}",
+                        sigma=_alpha_prior_sigma(mu_a, plate_alpha_scale),
                     )
 
     return priors

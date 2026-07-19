@@ -280,12 +280,16 @@ class NoiseConfig:
         ``y_err`` scale), plus *gain* and *alpha*. Setting ``gain_mode="free"``
         or ``alpha_mode="free"`` activates those terms.
 
-        The *alpha* hint is the prior scale, not a hard value: in ``"free"``
-        mode it is the ``HalfNormal`` sigma and in ``"centered"`` mode the
-        ``TruncatedNormal`` mean. It defaults to ``0.02`` (a weak 2% prior);
-        pass ``alpha=0`` for the tightest around-zero prior (floored at
-        ``1e-3``), a larger value to widen it, or ``alpha_mode="fixed"`` to
-        pin/disable the term.
+        The *alpha* hint is the prior mean, not a hard value: it is the
+        ``TruncatedNormal`` centre in ``"centered"`` mode, and in ``"free"``
+        mode the ``HalfNormal`` sigma is scaled so the mean matches the hint.
+        It defaults to ``0.02`` (a weak 2% prior);
+        pass ``alpha=0`` for the tightest around-zero prior (the width is
+        floored at ``1e-3``; in ``"free"`` mode that gives a sigma of ``1e-3 *
+        sqrt(pi/2)`` ~= ``1.253e-3`` and a mean of ``1e-3``, while in
+        ``"centered"`` mode the term becomes ``HalfNormal(sigma=1e-3)`` whose
+        mean is ``~7.98e-4``), a larger value to widen it, or
+        ``alpha_mode="fixed"`` to pin/disable the term.
         """
         return cls(
             kind="structured",
