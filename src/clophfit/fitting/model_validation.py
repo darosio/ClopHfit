@@ -785,54 +785,236 @@ def excess_tail_outlier_mask(  # noqa: PLR0913
     return remove
 
 
-def mark_excess_residual_outliers(  # noqa: PLR0913
-    residuals: pd.DataFrame,
-    *,
-    residual_col: str = "std_res",
-    group_cols: tuple[str, ...] = ("trace_id", "label"),
-    threshold: float = 3.0,
-    allowed_tail_fraction: float = 0.01,
-    min_allowed_tail_count: int = 1,
-    exclude_col: str = "exclude_residual_outlier",
-) -> pd.DataFrame:
-    """Annotate residual rows to remove only excess calibrated tail outliers."""
-    out = residuals.copy()
-    out[exclude_col] = False
-    out["residual_outlier_score"] = np.nan
+# Boolean column written by mark_outliers() and read by apply_exclusions().
+EXCLUDE_COL = "exclude_outlier"
 
-    actual_group_cols = [col for col in group_cols if col in out.columns]
-    grouped: _t.Iterable[tuple[object, pd.DataFrame]]
-    if actual_group_cols:
-        grouped = out.groupby(actual_group_cols, observed=True, sort=False)
-    else:
-        grouped = [(None, out)]
+# Per-point severity written alongside EXCLUDE_COL, deciding which points to
+# give up first when min_keep binds.
+SCORE_COL = "residual_outlier_score"
 
-    for _key, group in grouped:
-        values = group[residual_col].to_numpy(dtype=float)
-        remove = excess_tail_outlier_mask(
-            values,
-            threshold=threshold,
-            allowed_tail_fraction=allowed_tail_fraction,
-            min_allowed_tail_count=min_allowed_tail_count,
+
+# Guards the easy mistake of passing the ``residuals`` *module* through a
+# shadowed import.
+_NOT_A_FRAME = (
+    "residuals must be a pandas DataFrame, such as the output of "
+    "residuals_from_multifit() or residuals_from_fit_results(); got {}"
+)
+
+
+class OutlierCriterion(_t.Protocol):
+    """What counts as an outlier, expressed as data rather than as a function.
+
+    Each criterion owns its own knobs, so adding one does not widen the
+    signature of :func:`mark_outliers`.
+    """
+
+    def evaluate(self, residuals: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        """Score every row and say which rows are outliers.
+
+        Parameters
+        ----------
+        residuals : pd.DataFrame
+            Canonical residual table.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series]
+            The per-row severity score, and the boolean exclusion flag.
+        """
+        ...  # pragma: no cover - structural typing only
+
+
+@dataclass(frozen=True)
+class ResidualTail:
+    """Flag only the *excess* points in the calibrated tail of the residuals.
+
+    A Normal sample of size *n* is expected to put a small fraction beyond any
+    threshold; this keeps that expected tail and flags only the surplus, per
+    group.
+
+    Parameters
+    ----------
+    residual_col : str
+        Column holding the standardized residual.
+    group_cols : tuple[str, ...]
+        Columns defining the groups scored independently. Missing columns are
+        ignored; if none are present the whole table is one group.
+    threshold : float
+        Standardized-residual cutoff defining the tail.
+    allowed_tail_fraction : float
+        Fraction of each group tolerated beyond *threshold* before any point is
+        flagged.
+    min_allowed_tail_count : int
+        Floor on the tolerated count, regardless of group size.
+    """
+
+    residual_col: str = "std_res"
+    group_cols: tuple[str, ...] = ("trace_id", "label")
+    threshold: float = 3.0
+    allowed_tail_fraction: float = 0.01
+    min_allowed_tail_count: int = 1
+
+    def evaluate(self, residuals: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        """Score by ``|residual|`` and flag the surplus tail of each group.
+
+        Parameters
+        ----------
+        residuals : pd.DataFrame
+            Canonical residual table.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series]
+            Absolute residuals, and the excess-tail exclusion flag.
+        """
+        score = pd.Series(np.nan, index=residuals.index, dtype=float)
+        flag = pd.Series(data=False, index=residuals.index, dtype=bool)
+
+        present = [col for col in self.group_cols if col in residuals.columns]
+        grouped: _t.Iterable[tuple[object, pd.DataFrame]]
+        grouped = (
+            residuals.groupby(present, observed=True, sort=False)
+            if present
+            else [(None, residuals)]
         )
-        out.loc[group.index, "residual_outlier_score"] = np.abs(values)
-        out.loc[group.index[remove], exclude_col] = True
+        for _key, group in grouped:
+            values = group[self.residual_col].to_numpy(dtype=float)
+            remove = excess_tail_outlier_mask(
+                values,
+                threshold=self.threshold,
+                allowed_tail_fraction=self.allowed_tail_fraction,
+                min_allowed_tail_count=self.min_allowed_tail_count,
+            )
+            score.loc[group.index] = np.abs(values)
+            flag.loc[group.index[remove]] = True
+        return score, flag
 
+
+@dataclass(frozen=True)
+class OutlierProbability:
+    """Flag points by posterior outlier probability from a mixture fit.
+
+    Parameters
+    ----------
+    probability_col : str
+        Column of per-point posterior outlier probabilities.
+    threshold : float
+        Probability above which a point is flagged.
+    residual_threshold : float | None
+        When set, a point must *also* exceed this absolute residual to be
+        flagged. ``None`` applies the probability criterion alone.
+    residual_col : str
+        Column compared against *residual_threshold*.
+    """
+
+    probability_col: str = "p_outlier"
+    threshold: float = 0.9
+    residual_threshold: float | None = None
+    residual_col: str = "std_res"
+
+    @staticmethod
+    def _column(residuals: pd.DataFrame, name: str) -> pd.Series:
+        values = (
+            residuals[name]
+            if name in residuals.columns
+            else pd.Series(np.nan, index=residuals.index)
+        )
+        return pd.to_numeric(values, errors="coerce")
+
+    def evaluate(self, residuals: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        """Score by posterior probability and flag rows above the cutoff.
+
+        Parameters
+        ----------
+        residuals : pd.DataFrame
+            Canonical residual table.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series]
+            Posterior outlier probabilities, and the exclusion flag.
+        """
+        probabilities = self._column(residuals, self.probability_col)
+        flag = probabilities > self.threshold
+        if self.residual_threshold is not None:
+            magnitude = self._column(residuals, self.residual_col).abs()
+            flag &= magnitude > self.residual_threshold
+        return probabilities, flag
+
+
+def mark_outliers(
+    residuals: pd.DataFrame,
+    criterion: OutlierCriterion | None = None,
+    *,
+    exclude_col: str = EXCLUDE_COL,
+) -> pd.DataFrame:
+    """Annotate a residual table with a single exclusion column.
+
+    Parameters
+    ----------
+    residuals : pd.DataFrame
+        Canonical residual table, e.g. from :func:`residuals_from_multifit` or
+        :func:`residuals_from_fit_results`.
+    criterion : OutlierCriterion | None
+        What counts as an outlier. Defaults to :class:`ResidualTail`.
+    exclude_col : str
+        Name of the boolean column to write.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *residuals* with *exclude_col* and :data:`SCORE_COL` added.
+
+    Raises
+    ------
+    TypeError
+        If *residuals* is not a pandas DataFrame.
+    """
+    if not isinstance(residuals, pd.DataFrame):
+        raise TypeError(_NOT_A_FRAME.format(type(residuals).__name__))
+    out = residuals.copy()
+    score, flag = (criterion or ResidualTail()).evaluate(out)
+    out[exclude_col] = flag
+    out[SCORE_COL] = score
     return out
 
 
-def masked_datasets_from_residual_outliers(
+def apply_exclusions(
     results: _t.Mapping[str, _t.Any],
     residuals: pd.DataFrame,
     *,
-    exclude_col: str = "exclude_residual_outlier",
+    exclude_col: str = EXCLUDE_COL,
     min_keep: int = 3,
 ) -> dict[str, _t.Any]:
-    """Return datasets with residual rows marked by *exclude_col* masked out.
+    """Mask out the rows :func:`mark_outliers` flagged, worst first.
 
-    This is intended for the second pass of a sensitivity analysis: fit once,
-    compute residuals, annotate excess-tail outliers, mask those rows, then refit.
+    Intended for the second pass of a refit: fit once, compute residuals, mark,
+    apply, refit. Points are dropped in decreasing :data:`SCORE_COL` order, so
+    when *min_keep* binds it is the mildest points that survive.
+
+    Parameters
+    ----------
+    results : _t.Mapping[str, _t.Any]
+        Well identifiers mapped to datasets, or to objects carrying one.
+    residuals : pd.DataFrame
+        Residual table already annotated by :func:`mark_outliers`.
+    exclude_col : str
+        Boolean column naming the rows to mask.
+    min_keep : int
+        Minimum unmasked points retained per label.
+
+    Returns
+    -------
+    dict[str, _t.Any]
+        Deep-copied datasets with the flagged rows masked out.
+
+    Raises
+    ------
+    TypeError
+        If *residuals* is not a pandas DataFrame.
     """
+    if not isinstance(residuals, pd.DataFrame):
+        raise TypeError(_NOT_A_FRAME.format(type(residuals).__name__))
     masked: dict[str, _t.Any] = {}
     for well, fr in results.items():
         dataset = getattr(fr, "dataset", None)
@@ -848,11 +1030,11 @@ def masked_datasets_from_residual_outliers(
     if drop_rows.empty:
         return masked
 
-    if "residual_outlier_score" not in drop_rows.columns:
-        drop_rows["residual_outlier_score"] = np.abs(
+    if SCORE_COL not in drop_rows.columns:
+        drop_rows[SCORE_COL] = np.abs(
             drop_rows.get("std_res", pd.Series(np.nan, index=drop_rows.index))
         )
-    drop_rows = drop_rows.sort_values("residual_outlier_score", ascending=False)
+    drop_rows = drop_rows.sort_values(SCORE_COL, ascending=False)
 
     for row in drop_rows.itertuples(index=False):
         well = str(row.well)
@@ -875,142 +1057,6 @@ def masked_datasets_from_residual_outliers(
             da.mask[idx] = False
 
     return masked
-
-
-def mark_outlier_probability_outliers(  # noqa: PLR0913
-    residuals: _t.Any,
-    *,
-    probability_col: str = "p_outlier",
-    threshold: float = 0.9,
-    exclude_col: str = "exclude_outlier_probability",
-    residual_threshold: float | None = None,
-    residual_col: str = "std_res",
-) -> pd.DataFrame:
-    """Annotate rows with high posterior outlier probability.
-
-    Parameters
-    ----------
-    residuals : _t.Any
-        Residual table, usually returned by :func:`residuals_from_multifit` or
-        :func:`residuals_from_fit_results`.
-    probability_col : str, optional
-        Column containing per-point posterior outlier probabilities.
-    threshold : float, optional
-        Probability cutoff above which a row is marked as an outlier.
-    exclude_col : str, optional
-        Boolean output column used to mark rows for exclusion.
-    residual_threshold : float | None, optional
-        When set, a row is marked only if it exceeds both *threshold* and this
-        absolute-residual cutoff on *residual_col*. ``None`` (the default)
-        applies the probability criterion alone.
-    residual_col : str, optional
-        Column holding the standardized residual compared against
-        *residual_threshold*.
-
-    Returns
-    -------
-    pd.DataFrame
-        Copy of ``residuals`` with ``exclude_col`` and
-        ``residual_outlier_score`` columns added.
-
-    Raises
-    ------
-    TypeError
-        If ``residuals`` is not a pandas DataFrame.
-    """
-    if not isinstance(residuals, pd.DataFrame):
-        msg = (
-            "residuals must be a pandas DataFrame, such as the output of "
-            "residuals_from_multifit() or residuals_from_fit_results(); got "
-            f"{type(residuals).__name__}"
-        )
-        raise TypeError(msg)
-    out = residuals.copy()
-    probability_values = (
-        out[probability_col]
-        if probability_col in out.columns
-        else pd.Series(np.nan, index=out.index)
-    )
-    probabilities = pd.to_numeric(probability_values, errors="coerce")
-    marked = probabilities > threshold
-    if residual_threshold is not None:
-        residual_values = (
-            out[residual_col]
-            if residual_col in out.columns
-            else pd.Series(np.nan, index=out.index)
-        )
-        residual_magnitude = pd.to_numeric(residual_values, errors="coerce").abs()
-        marked &= residual_magnitude > residual_threshold
-    out[exclude_col] = marked
-    out["residual_outlier_score"] = probabilities
-    return out
-
-
-def masked_datasets_from_outlier_probabilities(  # noqa: PLR0913
-    results: _t.Mapping[str, _t.Any],
-    residuals: _t.Any,
-    *,
-    probability_col: str = "p_outlier",
-    threshold: float = 0.9,
-    min_keep: int = 3,
-    residual_threshold: float | None = None,
-    residual_col: str = "std_res",
-) -> dict[str, _t.Any]:
-    """Mask datasets using posterior outlier probabilities.
-
-    Parameters
-    ----------
-    results : _t.Mapping[str, _t.Any]
-        Mapping from well identifiers to datasets or fit-result-like objects
-        containing datasets.
-    residuals : _t.Any
-        Residual table with pointwise posterior outlier probabilities.
-    probability_col : str, optional
-        Column containing per-point posterior outlier probabilities.
-    threshold : float, optional
-        Probability cutoff above which a row is masked.
-    min_keep : int, optional
-        Minimum number of unmasked points retained per label.
-    residual_threshold : float | None, optional
-        When set, a row is masked only if it exceeds both *threshold* and this
-        absolute-residual cutoff on *residual_col*. ``None`` (the default)
-        applies the probability criterion alone.
-    residual_col : str, optional
-        Column holding the standardized residual compared against
-        *residual_threshold*.
-
-    Returns
-    -------
-    dict[str, _t.Any]
-        Deep-copied datasets with high-probability outlier rows masked.
-
-    Raises
-    ------
-    TypeError
-        If ``residuals`` is not a pandas DataFrame.
-    """
-    if not isinstance(residuals, pd.DataFrame):
-        msg = (
-            "residuals must be a pandas DataFrame, such as the output of "
-            "residuals_from_multifit() or residuals_from_fit_results(); got "
-            f"{type(residuals).__name__}"
-        )
-        raise TypeError(msg)
-    exclude_col = "exclude_outlier_probability"
-    marked = mark_outlier_probability_outliers(
-        residuals,
-        probability_col=probability_col,
-        threshold=threshold,
-        exclude_col=exclude_col,
-        residual_threshold=residual_threshold,
-        residual_col=residual_col,
-    )
-    return masked_datasets_from_residual_outliers(
-        results,
-        marked,
-        exclude_col=exclude_col,
-        min_keep=min_keep,
-    )
 
 
 def posterior_dataset(trace: _t.Any) -> _t.Any:

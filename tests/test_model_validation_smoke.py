@@ -32,13 +32,13 @@ from clophfit.fitting.data_structures import (
 )
 from clophfit.fitting.model_validation import (
     RESIDUAL_TABLE_COLUMNS,
+    OutlierProbability,
     ResidualComparison,
     ResidualDiagnostics,
+    ResidualTail,
+    apply_exclusions,
     excess_tail_outlier_mask,
-    mark_excess_residual_outliers,
-    mark_outlier_probability_outliers,
-    masked_datasets_from_outlier_probabilities,
-    masked_datasets_from_residual_outliers,
+    mark_outliers,
     merge_log_likelihoods,
     model_residual_score_table,
     pareto_k_summary,
@@ -293,15 +293,15 @@ def test_mark_excess_residual_outliers_groups_by_trace_label() -> None:
         + [3.1, 3.2, 3.3, 4.0, 5.0, 6.0],
     })
 
-    marked = mark_excess_residual_outliers(df, allowed_tail_fraction=0.01)
+    marked = mark_outliers(df, ResidualTail(allowed_tail_fraction=0.01))
 
-    assert marked["exclude_residual_outlier"].sum() == 9
-    assert not bool(marked.loc[95, "exclude_residual_outlier"])
-    assert bool(marked.loc[99, "exclude_residual_outlier"])
-    assert bool(marked.loc[199, "exclude_residual_outlier"])
+    assert marked["exclude_outlier"].sum() == 9
+    assert not bool(marked.loc[95, "exclude_outlier"])
+    assert bool(marked.loc[99, "exclude_outlier"])
+    assert bool(marked.loc[199, "exclude_outlier"])
 
 
-def test_masked_datasets_from_residual_outliers_masks_marked_rows() -> None:
+def test_apply_exclusions_masks_marked_rows() -> None:
     """Marked residual rows should become masked inputs for a second fit."""
     ds = Dataset(
         {
@@ -317,16 +317,16 @@ def test_masked_datasets_from_residual_outliers_masks_marked_rows() -> None:
         "well": ["A01"],
         "label": ["1"],
         "raw_i": [2],
-        "exclude_residual_outlier": [True],
+        "exclude_outlier": [True],
     })
 
-    masked = masked_datasets_from_residual_outliers({"A01": fr}, residuals)
+    masked = apply_exclusions({"A01": fr}, residuals)
 
     assert np.array_equal(masked["A01"]["1"].mask, np.array([True, True, False, True]))
     assert np.all(ds["1"].mask)
 
 
-def test_masked_datasets_from_outlier_probabilities_accepts_ds_dict() -> None:
+def test_apply_exclusions_accepts_ds_dict() -> None:
     """Posterior outlier probabilities should mask matching raw ds_dict rows."""
     ds = Dataset(
         {
@@ -344,10 +344,12 @@ def test_masked_datasets_from_outlier_probabilities_accepts_ds_dict() -> None:
         "p_outlier": [0.9, 0.95],
     })
 
-    masked = masked_datasets_from_outlier_probabilities({"A01": ds}, residuals)
-    marked = mark_outlier_probability_outliers(residuals)
+    masked = apply_exclusions(
+        {"A01": ds}, mark_outliers(residuals, OutlierProbability())
+    )
+    marked = mark_outliers(residuals, OutlierProbability())
 
-    assert marked["exclude_outlier_probability"].to_list() == [False, True]
+    assert marked["exclude_outlier"].to_list() == [False, True]
     assert np.array_equal(masked["A01"]["1"].mask, np.array([True, True, False, True]))
     assert np.all(ds["1"].mask)
 
@@ -355,10 +357,10 @@ def test_masked_datasets_from_outlier_probabilities_accepts_ds_dict() -> None:
 def test_outlier_probability_helpers_reject_residuals_module() -> None:
     """A shadowed residuals import should fail with a clear DataFrame hint."""
     with pytest.raises(TypeError, match="residuals must be a pandas DataFrame"):
-        mark_outlier_probability_outliers(cast("pd.DataFrame", residuals_module))
+        mark_outliers(cast("pd.DataFrame", residuals_module), OutlierProbability())
 
     with pytest.raises(TypeError, match="residuals must be a pandas DataFrame"):
-        masked_datasets_from_outlier_probabilities(
+        apply_exclusions(
             {},
             cast("pd.DataFrame", residuals_module),
         )

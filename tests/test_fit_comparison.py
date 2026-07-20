@@ -86,7 +86,7 @@ def test_compare_lm_variants(
     assert fr_robust.result is not None
     assert fr_robust.result.success
 
-    fr_iter = fit_binding_glob(ds, reweight="irls", remove_outliers="zscore:3.0:0")
+    fr_iter = fit_binding_glob(ds, reweight="irls", remove_outliers="mad:3.5:0")
     assert fr_iter.result is not None
     assert fr_iter.result.success
 
@@ -134,7 +134,7 @@ def test_iterative_outlier_removal_is_stable(csv_name: str) -> None:
     ds = Dataset({"1": DataArray(xc=x, yc=y, x_errc=x_err)}, is_ph=True)
     weight_multi_ds_titration(ds)
 
-    fr = fit_binding_glob(ds, reweight="irls", remove_outliers="zscore:2.5:0")
+    fr = fit_binding_glob(ds, reweight="irls", remove_outliers="mad:3.5:0")
     assert fr.result is not None
     assert fr.result.success
     # K should remain within a reasonable band

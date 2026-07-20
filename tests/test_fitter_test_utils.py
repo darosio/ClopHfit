@@ -399,34 +399,34 @@ class TestTecanFitCombinations:
             prefits=("huber",),
             final_stages=("huber", "odr", "mcmc_single"),
             weightings=("auto", "none"),
-            outlier_handlings=(None, "zscore:2.5:5"),
+            outlier_handlings=(None, "mad:3.5:5"),
         )
 
         assert set(combinations) == {
             "1_huber_auto",
-            "1_huber_auto_outlier_zscore-2.5-5",
+            "1_huber_auto_outlier_mad-3.5-5",
             "1_huber_none",
-            "1_huber_none_outlier_zscore-2.5-5",
+            "1_huber_none_outlier_mad-3.5-5",
             "1_odr_from_huber_auto",
-            "1_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "1_odr_from_huber_auto_outlier_mad-3.5-5",
             "1_odr_from_huber_none",
-            "1_odr_from_huber_none_outlier_zscore-2.5-5",
+            "1_odr_from_huber_none_outlier_mad-3.5-5",
             "1_mcmc_single_from_huber_auto",
-            "1_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "1_mcmc_single_from_huber_auto_outlier_mad-3.5-5",
             "1_mcmc_single_from_huber_none",
-            "1_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+            "1_mcmc_single_from_huber_none_outlier_mad-3.5-5",
             "12_huber_auto",
-            "12_huber_auto_outlier_zscore-2.5-5",
+            "12_huber_auto_outlier_mad-3.5-5",
             "12_huber_none",
-            "12_huber_none_outlier_zscore-2.5-5",
+            "12_huber_none_outlier_mad-3.5-5",
             "12_odr_from_huber_auto",
-            "12_odr_from_huber_auto_outlier_zscore-2.5-5",
+            "12_odr_from_huber_auto_outlier_mad-3.5-5",
             "12_odr_from_huber_none",
-            "12_odr_from_huber_none_outlier_zscore-2.5-5",
+            "12_odr_from_huber_none_outlier_mad-3.5-5",
             "12_mcmc_single_from_huber_auto",
-            "12_mcmc_single_from_huber_auto_outlier_zscore-2.5-5",
+            "12_mcmc_single_from_huber_auto_outlier_mad-3.5-5",
             "12_mcmc_single_from_huber_none",
-            "12_mcmc_single_from_huber_none_outlier_zscore-2.5-5",
+            "12_mcmc_single_from_huber_none_outlier_mad-3.5-5",
         }
         assert combinations["1_huber_none"].weighting == "none"
         assert combinations["1_odr_from_huber_auto"].final_stage == "odr"
@@ -435,8 +435,8 @@ class TestTecanFitCombinations:
         )
         assert combinations["12_odr_from_huber_auto"].prefit == "huber"
         assert (
-            combinations["12_odr_from_huber_auto_outlier_zscore-2.5-5"].outlier_handling
-            == "zscore:2.5:5"
+            combinations["12_odr_from_huber_auto_outlier_mad-3.5-5"].outlier_handling
+            == "mad:3.5:5"
         )
 
     def test_build_factorized_tecan_fit_combinations_keeps_single_channel_odr_and_mcmc(

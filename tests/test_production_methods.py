@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 def _fit_huber_outlier(ds: Dataset) -> FitResult:
     """Run the supported robust LM configuration with outlier removal."""
-    return fit_binding_glob(ds, method="huber", remove_outliers="zscore:2.5:5")
+    return fit_binding_glob(ds, method="huber", remove_outliers="mad:3.5:5")
 
 
 def test_odr_recursive_basic_convergence(ph_dataset: Dataset) -> None:
@@ -35,7 +35,7 @@ def test_odr_recursive_outlier_basic_convergence(ph_dataset: Dataset) -> None:
     assert lm_result.result is not None
     assert lm_result.result.success, "LM fit failed"
 
-    odr_result = fit_binding_odr(lm_result, remove_outliers="zscore:2.0")
+    odr_result = fit_binding_odr(lm_result, remove_outliers="mad:3.5")
     assert odr_result.result is not None
     assert odr_result.result.success, "ODR recursive+outlier fit failed"
     assert "K" in odr_result.result.params, "Missing K parameter"
@@ -68,7 +68,7 @@ def test_all_production_methods_converge(ph_dataset: Dataset) -> None:
         ("ODR-Recursive", lambda fr: fit_binding_odr(fr, reweight=True)),
         (
             "ODR-Recursive+Outlier",
-            lambda fr: fit_binding_odr(fr, remove_outliers="zscore:2.0"),
+            lambda fr: fit_binding_odr(fr, remove_outliers="mad:3.5"),
         ),
     ]
 

@@ -51,7 +51,7 @@ from clophfit.fitting.utils import (
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from clophfit.clophfit_types import ArrayF
 
@@ -598,6 +598,15 @@ class TitrationResults(ResidualsMixin):
     def __getitem__(self, key: str) -> FitResult:
         """Fetch result for a single key."""
         return self.results[key]
+
+    def __iter__(self) -> Iterator[str]:
+        """Iterate over well keys, like the mapping this wraps.
+
+        Defining this stops Python falling back to the legacy iteration
+        protocol, which would call ``__getitem__(0)`` and raise a confusing
+        ``KeyError: 0`` on, for example, an attempt to tuple-unpack the result.
+        """
+        return iter(self.results)
 
     def __bool__(self) -> bool:
         """Return True if there are any computed results, trigger full computation."""

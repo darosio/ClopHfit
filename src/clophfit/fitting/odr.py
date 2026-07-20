@@ -13,7 +13,11 @@ from matplotlib import figure
 
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
-from clophfit.fitting.utils import identify_outliers_zscore, parse_remove_outliers
+from clophfit.fitting.utils import (
+    identify_outliers_mad,
+    parse_remove_outliers,
+    robust_z_scores,
+)
 from clophfit.utils import weights_from_sigma
 
 from .core import fit_binding_glob
@@ -131,7 +135,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
     reweight : bool
         Whether to perform iterative reweighting (recursive ODR).
     remove_outliers : str | None
-        Outlier removal configuration, e.g., "zscore:2.5" or "zscore:2.5:5".
+        Outlier removal configuration, e.g., "mad:3.5" or "mad:3.5:5".
         If set, performs recursive ODR and masks outliers iteratively.
     max_iter : int
         Maximum number of iterations for recursive ODR.
@@ -229,7 +233,7 @@ def fit_binding_odr(  # noqa: C901, PLR0915
         return ro
 
     # Parse outlier config if present
-    threshold = 2.0
+    threshold = 3.5
     if remove_outliers:
         _method, threshold, _min_keep = parse_remove_outliers(remove_outliers)
 
@@ -265,17 +269,17 @@ def fit_binding_odr(  # noqa: C901, PLR0915
 
 
 def outlier(
-    output: odrpack.OdrResult, *, threshold: float = 2.0, plot_z_scores: bool = False
+    output: odrpack.OdrResult, *, threshold: float = 3.5, plot_z_scores: bool = False
 ) -> ArrayMask:
-    """Identify outliers."""
+    """Identify outliers from the radial ODR residuals by robust z-score."""
     residuals_x = output.delta
     residuals_y = output.eps
     residuals = np.sqrt(residuals_x**2 + residuals_y**2)
 
     if plot_z_scores:
-        z_scores = np.abs((residuals - np.mean(residuals)) / np.std(residuals))
+        z_scores = robust_z_scores(residuals)
         plt.scatter(range(len(z_scores)), z_scores)
         plt.axhline(y=threshold, color="r", linestyle="-")
-        plt.title("Z-scores")
+        plt.title("Robust z-scores")
 
-    return identify_outliers_zscore(residuals, threshold=threshold)
+    return identify_outliers_mad(residuals, threshold=threshold)
