@@ -737,6 +737,11 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     return Dataset({"1": da1, "2": da2}, is_ph=True)
 
 
+def _drawable_excluded(da: DataArray) -> np.ndarray:
+    """X of points a plot should mark: excluded from the fit but with finite y."""
+    return da.xc[~da.mask & np.isfinite(da.yc)]
+
+
 def _fit_binding_glob_huber_outlier(
     ds: Dataset, *, threshold: float = 2.5
 ) -> FitResult:
@@ -787,6 +792,65 @@ class TestFitBindingGlobOutlierRemoval:
 
         assert fr.dataset is not None
         assert len(fr.dataset["2"].y) < 7
+
+    def test_excluded_points_retained_for_plotting(self) -> None:
+        """Points dropped from the fit stay in the arrays for plotting."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
+
+        assert fr.dataset is not None
+        da = fr.dataset["1"]
+        # The excluded point is absent from the fit but kept in the arrays.
+        x_exc = _drawable_excluded(da)
+        assert x_exc.size == 7 - da.x.size > 0
+        assert not np.intersect1d(da.x, x_exc).size
+        # Original arrays are untouched; only the mask moved.
+        assert da.xc.size == da.yc.size == 7
+
+    def test_excluded_points_marked_in_figure(self) -> None:
+        """The figure shows excluded points under a dedicated legend entry."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
+
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert "excluded (not fitted)" in [t.get_text() for t in legend.get_texts()]
+
+    def test_no_excluded_legend_on_clean_data(self) -> None:
+        """Clean data produces no excluded marker or legend entry."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=3.0)
+
+        assert fr.dataset is not None
+        assert _drawable_excluded(fr.dataset["1"]).size == 0
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert "excluded (not fitted)" not in [t.get_text() for t in legend.get_texts()]
+
+    def test_manually_masked_steps_are_shown(self) -> None:
+        """Points excluded via `mask_steps` are drawn too, not just outliers."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        ds["1"].mask_steps([0, 6])
+        fr = fit_binding_glob(ds, method="huber")
+
+        assert fr.dataset is not None
+        assert _drawable_excluded(fr.dataset["1"]).size == 2
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert "excluded (not fitted)" in [t.get_text() for t in legend.get_texts()]
+
+    def test_nan_points_are_not_drawn(self) -> None:
+        """NaN points are masked but have nothing to draw, so they stay hidden."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        ds["1"].yc[2] = np.nan
+        da = DataArray(ds["1"].xc, ds["1"].yc)
+
+        assert not da.mask[2]
+        assert _drawable_excluded(da).size == 0
 
     def test_no_false_positives_clean_data(self) -> None:
         """Should not remove points from clean data."""

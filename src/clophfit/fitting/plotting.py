@@ -46,7 +46,7 @@ from matplotlib import cm, colormaps, colors
 from matplotlib.figure import Figure
 from uncertainties import ufloat  # type: ignore[import-untyped]
 
-from clophfit.fitting.data_structures import Dataset, MultiFitResult
+from clophfit.fitting.data_structures import DataArray, Dataset, MultiFitResult
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
@@ -63,6 +63,19 @@ if TYPE_CHECKING:
     from .data_structures import Dataset
 
 COLOR_MAP = colormaps["Set1"]  # To color PCA components and LM fit.
+_EXCLUDED_LABEL = "excluded (not fitted)"
+
+
+def _excluded_points(da: DataArray) -> tuple[ArrayF, ArrayF]:
+    """Return x, y of the points a DataArray excludes from the fit.
+
+    Covers every exclusion route -- outlier removal, `mask_steps`, manual
+    masking -- but skips NaN points, which have no y value to draw.
+    """
+    drawable = ~da.mask & np.isfinite(da.yc)
+    return da.xc[drawable], da.yc[drawable]
+
+
 N_AUTOVALS = 4
 
 
@@ -779,9 +792,13 @@ def plot_fit(
     stretch = 0.05
     colors = [COLOR_MAP(i) for i in range(len(ds))]
 
+    excluded = {lbl: _excluded_points(da) for lbl, da in ds.items()}
+    # Span the fitted curve over excluded points too, so they are not drawn
+    # beside a curve that stops short of them.
+    xspan = {lbl: np.concatenate([da.x, excluded[lbl][0]]) for lbl, da in ds.items()}
     xfit = {
-        k: np.linspace(da.x.min() * (1 - stretch), da.x.max() * (1 + stretch), 100)
-        for k, da in ds.items()
+        lbl: np.linspace(x.min() * (1 - stretch), x.max() * (1 + stretch), 100)
+        for lbl, x in xspan.items()
     }
     # Compute y-fit using the model directly to avoid circular imports
     yfit = {
@@ -796,6 +813,7 @@ def plot_fit(
     }
     # Create a color cycle
     colors = [COLOR_MAP(i) for i in range(len(ds))]
+    excluded_labelled = False
     for (lbl, da), clr in zip(ds.items(), colors, strict=False):
         # Make sure a label will be displayed.
         label = lbl if (da.y_err.size == 0 and nboot == 0) else None
@@ -814,6 +832,36 @@ def plot_fit(
             )
         else:
             ax.plot(da.x, da.y, "o", color=clr, label=label)
+        # Show points excluded from the fit: hollow marker in the series color,
+        # struck through with a cross. Labelled once for the whole axes.
+        x_exc, y_exc = excluded[lbl]
+        if x_exc.size:
+            excluded_label = None if excluded_labelled else _EXCLUDED_LABEL
+            excluded_labelled = True
+            ax.scatter(
+                x_exc,
+                y_exc,
+                s=99,
+                facecolors="none",
+                edgecolors=clr,
+                linewidths=1.5,
+                alpha=0.8,
+                zorder=4,
+            )
+            # White halo under the cross keeps it legible on any palette.
+            ax.scatter(
+                x_exc, y_exc, s=70, marker="x", c="white", linewidths=4.0, zorder=5
+            )
+            ax.scatter(
+                x_exc,
+                y_exc,
+                s=70,
+                marker="x",
+                c="black",
+                linewidths=1.8,
+                label=excluded_label,
+                zorder=6,
+            )
         # Plot fitting.
         ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         # Display label in error bar plot.
