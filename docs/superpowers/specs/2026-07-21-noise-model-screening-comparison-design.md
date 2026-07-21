@@ -63,10 +63,19 @@ not just A².
 ## Piece 1 — `ye_mag` parameterizations (code change in `bayes.py`)
 
 Add one opt-in keyword to `fit_binding_pymc_multi`,
-`ye_mag_parameterization: Literal["centered", "noncentered", "hierarchical"] = "centered"`, subsuming both new model forms. It applies only on the per-well
-LogNormal `ye_mag` path (`per_well_ye_mags=True`, `prior="lognormal"`); for the
-shared, scalar, or HalfNormal paths it is a no-op falling back to the current
-centered construction. `"centered"` reproduces today's behaviour exactly.
+`ye_mag_parameterization: Literal["centered", "noncentered", "hierarchical"] = "centered"`, subsuming both new model forms. It applies to the per-well `ye_mag`
+multiplier (`per_well_ye_mags=True`) in **both** noise modes; for the shared or
+scalar (non-per-well) paths it is a no-op falling back to the current centered
+construction. `"centered"` reproduces today's behaviour exactly.
+
+To make the parameterization well-defined and confound-free under
+`structured` noise, the structured `learn_ye_mags` multiplier — currently
+`HalfNormal(sigma=5.0)` (`bayes.py:2936`) — is switched to the same per-well
+**LogNormal** `ye_mag` builder used by `ye_mag`-noise mode, for **all three**
+parameterizations including `"centered"`. This changes the structured
+`learn_ye_mags` prior (a research-harness path, not a shipped default), but keeps
+`structured`-centered vs `structured`-noncentered differing only in geometry,
+not prior — which is required for the pwym comparison to be valid.
 
 **`"noncentered"`** — same prior, same parameter count, different geometry:
 
