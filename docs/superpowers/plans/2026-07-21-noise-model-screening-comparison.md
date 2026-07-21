@@ -13,7 +13,7 @@
 - Design doc: `docs/superpowers/specs/2026-07-21-noise-model-screening-comparison-design.md`.
 - Type hints on all public functions, mypy-compatible; numpy-style docstrings on public API.
 - `make type` (mypy over `src tests docs/conf.py`) and `make lint` (pre-commit) must pass before each commit. **`ruff check` auto-fixes on write** (`pyproject.toml` `fix = true`); use `ruff check --no-fix` when only inspecting, and never let it mass-rewrite `# noqa:` comments in unrelated files — stage only intended changes.
-- The new `ye_mag_parameterization` keyword is **opt-in, default `"centered"`**, and must not change any existing behaviour.
+- The new `ye_mag_parameterization` keyword is **opt-in, default `"centered"`**. On the `ye_mag`-noise path the default reproduces existing behaviour exactly. The **one deliberate, spec-approved exception** (see the design doc, Piece 1): the structured `learn_ye_mags` multiplier switches `HalfNormal(5.0)` → `LogNormal(0, 1.5)` for all parameterizations including `"centered"`, so the parameterization applies to structured noise without a prior/geometry confound. This is intended, not a regression.
 - Real data lives at `/home/dati/arslanbaeva/data/raw/{L2,L3,L4}` (each has `list.pH.csv`, `additions.pH`, `scheme.txt`).
 - Production sampler for the grid: `nutpie`, `target_accept=0.98`, `n_tune=1000`, `n_samples=10000`, `compute_log_likelihood=True`.
 - Work on branch `noise-model-screening-comparison` (already created). Commit after each task.
