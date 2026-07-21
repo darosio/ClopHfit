@@ -18,9 +18,10 @@ from clophfit.fitting.data_structures import (
     ResidualsMixin,
 )
 from clophfit.fitting.model_validation import (
+    OutlierProbability,
     ResidualAnalysis,
-    mark_outlier_probability_outliers,
-    masked_datasets_from_outlier_probabilities,
+    apply_exclusions,
+    mark_outliers,
     residuals_from_fit_results,
     robust_likelihood_from_trace,
     robust_settings_from_trace,
@@ -555,7 +556,7 @@ class TestModuleConstants:
 
 
 ###############################################################################
-# Tests for mark_outlier_probability_outliers
+# Tests for mark_outliers(OutlierProbability)
 ###############################################################################
 
 
@@ -566,9 +567,9 @@ def test_mark_outlier_probability_requires_both_criteria() -> None:
         "p_outlier": [0.9, 0.9, 0.2, 0.2],
         "std_res": [5.0, 1.0, 5.0, 1.0],
     })
-    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
+    out = mark_outliers(df, OutlierProbability(threshold=0.7, residual_threshold=3.0))
     # Only the first row clears both cutoffs.
-    assert out["exclude_outlier_probability"].tolist() == [True, False, False, False]
+    assert out["exclude_outlier"].tolist() == [True, False, False, False]
 
 
 def test_mark_outlier_probability_default_is_probability_only() -> None:
@@ -578,27 +579,24 @@ def test_mark_outlier_probability_default_is_probability_only() -> None:
         "p_outlier": [0.9, 0.2],
         "std_res": [0.1, 9.0],
     })
-    out = mark_outlier_probability_outliers(df, threshold=0.7)
+    out = mark_outliers(df, OutlierProbability(threshold=0.7))
     # std_res is ignored entirely when residual_threshold is None.
-    assert out["exclude_outlier_probability"].tolist() == [True, False]
+    assert out["exclude_outlier"].tolist() == [True, False]
 
 
 def test_mark_outlier_probability_missing_residual_column_marks_nothing() -> None:
     """A requested residual column that is absent excludes no rows."""
     df = pd.DataFrame({"label": ["1"], "p_outlier": [0.99]})
-    out = mark_outlier_probability_outliers(df, threshold=0.7, residual_threshold=3.0)
-    assert out["exclude_outlier_probability"].tolist() == [False]
+    out = mark_outliers(df, OutlierProbability(threshold=0.7, residual_threshold=3.0))
+    assert out["exclude_outlier"].tolist() == [False]
 
 
-def test_masked_datasets_from_outlier_probabilities_forwards_residual_threshold() -> (
-    None
-):
-    """The wrapper must forward residual_threshold/residual_col to the mask.
+def test_apply_exclusions_honours_the_criterion_conjunction() -> None:
+    """The criterion carries the conjunction rule through to the mask.
 
     A point with high posterior outlier probability but a small standardized
     residual must not be masked once the conjunction rule is engaged, and
-    must be masked when ``residual_threshold`` is left at its default (the
-    probability-only rule).
+    must be masked under the probability-only rule.
     """
     ds = Dataset(
         {
@@ -617,13 +615,14 @@ def test_masked_datasets_from_outlier_probabilities_forwards_residual_threshold(
         "std_res": [0.5],
     })
 
-    masked_probability_only = masked_datasets_from_outlier_probabilities(
-        {"A01": ds}, residuals
+    masked_probability_only = apply_exclusions(
+        {"A01": ds}, mark_outliers(residuals, OutlierProbability())
     )
     assert not masked_probability_only["A01"]["1"].mask[2]
 
-    masked_conjunction = masked_datasets_from_outlier_probabilities(
-        {"A01": ds}, residuals, residual_threshold=3.0
+    masked_conjunction = apply_exclusions(
+        {"A01": ds},
+        mark_outliers(residuals, OutlierProbability(residual_threshold=3.0)),
     )
     assert masked_conjunction["A01"]["1"].mask[2]
 

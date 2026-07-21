@@ -45,6 +45,16 @@ from clophfit.fitting.plotting import (
     qc_flag_bad_wells,
     qc_flag_bad_wells_titration,
 )
+from clophfit.fitting.utils import (
+    add_robust_scores,
+    bonferroni_threshold,
+    cap_by_min_keep,
+    identify_outliers_mad,
+    parse_remove_outliers,
+    robust_scale,
+    robust_z_scores,
+    studentized_scores,
+)
 from clophfit.prtecan import PlateScheme
 
 ###############################################################################
@@ -737,6 +747,11 @@ def _create_synthetic_dataset(  # noqa: PLR0913
     return Dataset({"1": da1, "2": da2}, is_ph=True)
 
 
+def _drawable_excluded(da: DataArray) -> np.ndarray:
+    """X of points a plot should mark: excluded from the fit but with finite y."""
+    return da.xc[~da.mask & np.isfinite(da.yc)]
+
+
 def _fit_binding_glob_huber_outlier(
     ds: Dataset, *, threshold: float = 2.5
 ) -> FitResult:
@@ -744,7 +759,7 @@ def _fit_binding_glob_huber_outlier(
     return fit_binding_glob(
         ds,
         method="huber",
-        remove_outliers=f"zscore:{threshold}:5",
+        remove_outliers=f"mad:{threshold}:5",
     )
 
 
@@ -788,14 +803,94 @@ class TestFitBindingGlobOutlierRemoval:
         assert fr.dataset is not None
         assert len(fr.dataset["2"].y) < 7
 
-    def test_no_false_positives_clean_data(self) -> None:
-        """Should not remove points from clean data."""
+    def test_excluded_points_retained_for_plotting(self) -> None:
+        """Points dropped from the fit stay in the arrays for plotting."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
+
+        assert fr.dataset is not None
+        da = fr.dataset["1"]
+        # The excluded point is absent from the fit but kept in the arrays.
+        x_exc = _drawable_excluded(da)
+        assert x_exc.size == 7 - da.x.size > 0
+        assert not np.intersect1d(da.x, x_exc).size
+        # Original arrays are untouched; only the mask moved.
+        assert da.xc.size == da.yc.size == 7
+
+    def test_excluded_points_marked_in_figure(self) -> None:
+        """The figure shows excluded points under a dedicated legend entry."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = _fit_binding_glob_huber_outlier(ds, threshold=2.0)
+
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert legend is not None
+        assert "excluded (not fitted)" in [t.get_text() for t in legend.get_texts()]
+
+    def test_no_excluded_legend_on_clean_data(self) -> None:
+        """Clean data produces no excluded marker or legend entry.
+
+        Uses the studentized screen, the one that actually controls the
+        false-positive rate; see `test_mad_over_flags_clean_data`.
+        """
         ds = _create_synthetic_dataset(add_outlier=False, seed=42)
-        fr = _fit_binding_glob_huber_outlier(ds, threshold=3.0)
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="studentized:0.05:5")
+
+        assert fr.dataset is not None
+        assert _drawable_excluded(fr.dataset["1"]).size == 0
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert legend is not None
+        assert "excluded (not fitted)" not in [t.get_text() for t in legend.get_texts()]
+
+    def test_manually_masked_steps_are_shown(self) -> None:
+        """Points excluded via `mask_steps` are drawn too, not just outliers."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        ds["1"].mask_steps([0, 6])
+        fr = fit_binding_glob(ds, method="huber")
+
+        assert fr.dataset is not None
+        assert _drawable_excluded(fr.dataset["1"]).size == 2
+        assert fr.figure is not None
+        legend = fr.figure.axes[0].get_legend()
+        assert legend is not None
+        assert "excluded (not fitted)" in [t.get_text() for t in legend.get_texts()]
+
+    def test_nan_points_are_not_drawn(self) -> None:
+        """NaN points are masked but have nothing to draw, so they stay hidden."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        ds["1"].yc[2] = np.nan
+        da = DataArray(ds["1"].xc, ds["1"].yc)
+
+        assert not da.mask[2]
+        assert _drawable_excluded(da).size == 0
+
+    def test_no_false_positives_clean_data(self) -> None:
+        """The studentized screen removes nothing from clean data."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="studentized:0.05:5")
 
         assert fr.dataset is not None
         assert len(fr.dataset["1"].y) == 7
         assert len(fr.dataset["2"].y) == 7
+
+    def test_mad_over_flags_clean_data(self) -> None:
+        """Known limitation: the MAD screen has a real false-positive rate.
+
+        With only 7 points per label the MAD is a noisy scale estimate, and
+        residuals are further deflated by leverage, so ordinary points score
+        above the cutoff. Measured on the L2 + L4 plates this reaches ~10% of
+        all points, against ~2.5% for the studentized screen.
+        """
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="mad:3.5:5")
+
+        assert fr.dataset is not None
+        assert len(fr.dataset["2"].y) < 7  # points dropped though none are bad
 
     def test_correct_residual_slicing(self) -> None:
         """Residuals should be correctly sliced for each label."""
@@ -878,7 +973,7 @@ def test_fit_binding_odr_reweight_ph(ph_dataset: Dataset) -> None:
 
 def test_fit_binding_odr_outlier_ph(ph_dataset: Dataset) -> None:
     """Test ODR fitting with outlier removal."""
-    fr = fit_binding_odr(ph_dataset, remove_outliers="zscore:3.0")
+    fr = fit_binding_odr(ph_dataset, remove_outliers="mad:3.5")
     assert fr.result is not None
     assert "K" in fr.result.params
 
@@ -1414,3 +1509,287 @@ def test_fit_result_attributes(ph_dataset: Dataset) -> None:
     # Parameters should be accessible
     assert "K" in fr.result.params
     assert fr.result.params["K"].value is not None
+
+
+###############################################################################
+# Robust (MAD) outlier identification
+###############################################################################
+
+
+class TestRobustOutlierIdentification:
+    """Tests for the median/MAD robust z-score and its wiring."""
+
+    def test_robust_score_beats_the_zscore_ceiling(self) -> None:
+        """A mean/std z-score saturates at sqrt(n - 1); the robust one does not."""
+        r = np.array([0.1, -0.2, 0.15, -0.05, 0.3, -0.1, 100.0])
+        plain = np.abs((r - r.mean()) / r.std())
+        assert plain.max() < np.sqrt(6)  # pinned under the ceiling
+        assert robust_z_scores(r).max() > 100  # no ceiling
+        assert identify_outliers_mad(r, threshold=3.5)[6]
+
+    def test_robust_z_has_no_ceiling(self) -> None:
+        """The robust score grows with the outlier instead of saturating."""
+        r = np.array([0.0, 1.0, -1.0, 0.5, -0.5, 0.2, 100.0])
+        assert robust_z_scores(r).max() > 50
+
+    def test_robust_z_survives_zero_mad(self) -> None:
+        """A collapsed MAD falls back to another scale instead of dividing by 0."""
+        r = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 9.0])  # MAD == 0
+        z = robust_z_scores(r)
+        assert np.all(np.isfinite(z))
+        assert z.argmax() == 5
+
+    def test_robust_z_all_identical_flags_nothing(self) -> None:
+        """No positive scale of any kind means no outliers, not a crash."""
+        r = np.full(6, 2.5)
+        assert np.all(robust_z_scores(r) == 0.0)
+        assert not identify_outliers_mad(r).any()
+
+    def test_robust_scale_is_normal_consistent(self) -> None:
+        """The scale estimates sigma itself, not the bare (0.67x smaller) MAD."""
+        rng = np.random.default_rng(0)
+        assert abs(robust_scale(rng.normal(0.0, 5.0, 4000)) - 5.0) < 0.3
+
+    def test_robust_z_accepts_a_pooled_scale(self) -> None:
+        """A supplied sigma overrides the per-sample estimate."""
+        r = np.array([0.0, 1.0, 2.0, 30.0])
+        assert robust_z_scores(r, sigma=10.0)[3] < robust_z_scores(r)[3]
+
+    def test_cap_by_min_keep_retains_worst(self) -> None:
+        """Capping keeps the highest-scoring flags and honours min_keep."""
+        flagged = np.array([True, True, True, False, False])
+        scores = np.array([9.0, 3.0, 5.0, 0.1, 0.2])
+        capped = cap_by_min_keep(flagged, scores, min_keep=4)
+        assert capped.tolist() == [True, False, False, False, False]
+
+    def test_cap_by_min_keep_noop_when_within_budget(self) -> None:
+        """Flags below the budget pass through untouched."""
+        flagged = np.array([True, False, False, False, False])
+        scores = np.array([9.0, 0.1, 0.2, 0.3, 0.4])
+        assert cap_by_min_keep(flagged, scores, min_keep=3).tolist() == flagged.tolist()
+
+    def test_default_thresholds(self) -> None:
+        """`mad` defaults to 3.5; `studentized` defaults to alpha = 0.05."""
+        assert parse_remove_outliers("mad") == ("mad", 3.5, 1)
+        assert parse_remove_outliers("studentized") == ("studentized", 0.05, 1)
+        assert parse_remove_outliers("mad:4.5:5") == ("mad", 4.5, 5)
+
+    def test_unknown_method_raises(self) -> None:
+        """An unsupported method is an error, not a silent no-op."""
+        ds = _create_synthetic_dataset()
+        with pytest.raises(ValueError, match="Unknown outlier method"):
+            fit_binding_glob(ds, remove_outliers="mixture:0.9")
+
+    def test_mad_removes_planted_outlier(self) -> None:
+        """The wired `mad` method drops a large planted outlier."""
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=1, outlier_magnitude=10.0
+        )
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="mad:3.0")
+        assert fr.dataset is not None
+        assert not fr.dataset["1"].mask[1]
+
+    def test_robust_score_scales_where_zscore_saturates(self) -> None:
+        """The robust score tracks outlier size; the z-score pins to its ceiling."""
+        robust, plain = [], []
+        for mag in (5.0, 10.0, 20.0):
+            ds = _create_synthetic_dataset(
+                add_outlier=True,
+                outlier_label="1",
+                outlier_idx=1,
+                outlier_magnitude=mag,
+            )
+            fr = fit_binding_glob(ds, method="huber")
+            assert fr.result is not None
+            assert fr.dataset is not None
+            da = fr.dataset["1"]
+            pars = fr.result.params
+            raw = da.y - binding_1site(
+                da.x,
+                pars["K"].value,
+                pars["S0_1"].value,
+                pars["S1_1"].value,
+                is_ph=True,
+            )
+            n1 = len(da.y)
+            w = fr.result.residual[:n1]
+            robust.append(robust_z_scores(raw)[1])
+            plain.append(float(np.abs((w - w.mean()) / w.std())[1]))
+        # Robust score roughly doubles with the outlier; the z-score cannot.
+        assert robust[2] > 2 * robust[1]
+        assert robust[1] > 2 * robust[0]
+        assert plain[2] < np.sqrt(7 - 1)  # pinned to the ceiling
+        assert plain[2] - plain[1] < 0.2
+
+    def test_mad_misses_high_leverage_midpoint_outlier(self) -> None:
+        """Known limitation: a midpoint outlier corrupts the fit that exposes it.
+
+        The midpoint carries most of the information about K, so an outlier
+        there drags the whole curve; the remaining residuals grow, the MAD with
+        them, and the outlier's own score stays under threshold. Neither this
+        screen nor the plain z-score accounts for leverage.
+        """
+        ds = _create_synthetic_dataset(
+            add_outlier=True, outlier_label="1", outlier_idx=3, outlier_magnitude=10.0
+        )
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="mad:3.0")
+        assert fr.dataset is not None
+        assert fr.dataset["1"].mask[3]  # not removed
+
+    def test_min_keep_is_enforced(self) -> None:
+        """min_keep bounds how much of a label can be removed."""
+        ds = _create_synthetic_dataset(n_points=7)
+        # A threshold of 0 flags essentially everything.
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="mad:0.0:6")
+        assert fr.dataset is not None
+        for da in fr.dataset.values():
+            assert da.x.size >= 6
+
+
+class TestStudentizedOutlierIdentification:
+    """Tests for leverage-aware studentized residuals with Bonferroni cutoff."""
+
+    def test_leverage_shrinks_raw_residual(self) -> None:
+        """A high-leverage point has its residual shrunk; studentizing undoes it."""
+        rng = np.random.default_rng(0)
+        n = 12
+        x = np.concatenate([np.linspace(0, 1, n - 1), [8.0]])  # last = high leverage
+        jac = np.column_stack([np.ones(n), x])
+        r = rng.normal(0, 1, n)
+        scores, dof = studentized_scores(r, jac)
+        assert dof == n - 2 - 1
+        q, _ = np.linalg.qr(jac)
+        h = np.einsum("ij,ij->i", q, q)
+        assert h[-1] > 0.8  # the design point really is high leverage
+        assert scores[-1] > abs(r[-1]) / np.std(r)  # inflated back up
+
+    def test_bonferroni_threshold_tightens_with_n(self) -> None:
+        """Testing more points simultaneously demands a larger cutoff."""
+        t10 = bonferroni_threshold(10, dof=20)
+        t100 = bonferroni_threshold(100, dof=20)
+        assert t100 > t10 > 2.0
+        assert np.isinf(bonferroni_threshold(10, dof=0))
+
+    def test_studentized_catches_midpoint_outlier_mad_misses(self) -> None:
+        """The leverage-aware screen catches what the MAD screen cannot.
+
+        This is the same midpoint case pinned in
+        `test_mad_misses_high_leverage_midpoint_outlier`.
+        """
+
+        def build() -> Dataset:
+            return _create_synthetic_dataset(
+                add_outlier=True,
+                outlier_label="1",
+                outlier_idx=3,
+                outlier_magnitude=10.0,
+            )
+
+        fr_mad = fit_binding_glob(build(), method="huber", remove_outliers="mad:3.5")
+        fr_stu = fit_binding_glob(
+            build(), method="huber", remove_outliers="studentized:0.05"
+        )
+        assert fr_mad.dataset is not None
+        assert fr_stu.dataset is not None
+        assert fr_mad.dataset["1"].mask[3]  # MAD misses it
+        assert not fr_stu.dataset["1"].mask[3]  # studentized catches it
+
+    def test_studentized_leaves_clean_data_alone(self) -> None:
+        """Bonferroni control means clean plates are essentially untouched."""
+        ds = _create_synthetic_dataset(add_outlier=False, seed=42)
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="studentized:0.05")
+        assert fr.dataset is not None
+        for da in fr.dataset.values():
+            assert da.x.size == 7
+
+    def test_studentized_respects_min_keep(self) -> None:
+        """An absurd alpha still cannot strip a label past min_keep."""
+        ds = _create_synthetic_dataset()
+        fr = fit_binding_glob(ds, method="huber", remove_outliers="studentized:0.999:6")
+        assert fr.dataset is not None
+        for da in fr.dataset.values():
+            assert da.x.size >= 6
+
+
+class TestAddRobustScores:
+    """Tests for multi-level robust scale/score annotation."""
+
+    @staticmethod
+    def _frame(n_wells: int = 6, seed: int = 0) -> pd.DataFrame:
+        rng = np.random.default_rng(seed)
+        wells = [f"A{i:02d}" for i in range(n_wells)]
+        df = pd.DataFrame({
+            "well": np.repeat(wells, 14),
+            "label": np.tile(np.repeat(["1", "2"], 7), n_wells),
+            "raw_res": rng.normal(0, 1, 14 * n_wells),
+        })
+        df.loc[df.well == wells[0], "raw_res"] *= 5.0  # one noisy well
+        return df
+
+    def test_adds_all_levels(self) -> None:
+        """Each requested level yields a sigma and a z column."""
+        out = add_robust_scores(self._frame())
+        for level in ("well_label", "well", "label", "global"):
+            assert f"robust_sigma_{level}" in out.columns
+            assert f"robust_z_{level}" in out.columns
+        assert "ye_mag_est" in out.columns
+
+    def test_ye_mag_est_tracks_noisy_well(self) -> None:
+        """The scale ratio flags the well whose noise was inflated."""
+        out = add_robust_scores(self._frame())
+        per_well = out.groupby("well")["ye_mag_est"].first()
+        assert per_well.idxmax() == "A00"
+        assert per_well["A00"] > 1.5 * per_well.drop("A00").max()
+
+    def test_pooled_scale_is_shared(self) -> None:
+        """A pooled level gives one scale per group, not one per well."""
+        out = add_robust_scores(self._frame())
+        for _lbl, grp in out.groupby("label"):
+            assert grp["robust_sigma_label"].std() == pytest.approx(0, abs=1e-9)
+        assert out["robust_sigma_global"].std() == pytest.approx(0, abs=1e-9)
+        for _key, grp in out.groupby(["well", "label"]):
+            assert grp["robust_sigma_well_label"].std() == pytest.approx(0, abs=1e-9)
+
+    def test_single_well_marks_degenerate_levels(self) -> None:
+        """Unidentifiable levels are NaN and recorded, not silently duplicated."""
+        one = self._frame()
+        one = one[one.well == "A00"].copy()
+        out = add_robust_scores(one)
+        assert out.attrs["robust_score_degenerate_levels"] == ["label"]
+        assert out["robust_sigma_label"].isna().all()
+        assert out["robust_sigma_well_label"].notna().all()
+
+    def test_well_level_mixes_unequal_label_scales(self) -> None:
+        """Known caveat: pooling labels of unequal scale miscalibrates both.
+
+        On real plates a bright and a dim band differ by an order of magnitude,
+        so the pooled per-well scale sits between them -- too small for the
+        noisy label, too large for the quiet one.
+        """
+        df = self._frame()
+        df.loc[df.label == "1", "raw_res"] *= 20.0  # bright band
+        out = add_robust_scores(df)
+        per_label = out.groupby("label")[
+            ["robust_sigma_well_label", "robust_sigma_well"]
+        ].median()
+        # The pooled scale is far too small for label 1 and far too big for 2.
+        pooled = per_label["robust_sigma_well"].to_dict()
+        own = per_label["robust_sigma_well_label"].to_dict()
+        assert pooled["1"] < 0.75 * own["1"]
+        assert pooled["2"] > 2 * own["2"]
+
+    def test_single_label_marks_well_level_degenerate(self) -> None:
+        """With one label, the per-well level collapses onto well_label."""
+        df = self._frame()
+        df = df[df.label == "1"].copy()
+        out = add_robust_scores(df)
+        assert "well" in out.attrs["robust_score_degenerate_levels"]
+        assert out["robust_sigma_well"].isna().all()
+
+    def test_rejects_unknown_level_and_column(self) -> None:
+        """Bad input fails loudly rather than silently doing nothing."""
+        df = self._frame()
+        with pytest.raises(ValueError, match="Unknown level"):
+            add_robust_scores(df, levels=("per_plate",))
+        with pytest.raises(ValueError, match="no column"):
+            add_robust_scores(df, residual_col="nope")

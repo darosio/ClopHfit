@@ -76,15 +76,21 @@ from clophfit.fitting.plotting import (
     plot_spectra_distributed,
 )
 from clophfit.fitting.utils import (
-    identify_outliers_zscore,
+    OUTLIER_METHODS,
+    bonferroni_threshold,
+    cap_by_min_keep,
     parse_remove_outliers,
     reweight_from_residuals,
+    robust_z_scores,
+    studentized_scores,
 )
 
 from .data_structures import FitResult, SpectraGlobResults
 
 if typing.TYPE_CHECKING:
-    from clophfit.clophfit_types import ArrayF
+    from lmfit.minimizer import MinimizerResult
+
+    from clophfit.clophfit_types import ArrayF, ArrayMask
 
 
 # --- Globals ---
@@ -120,6 +126,109 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
         residuals_list.append(weight * (da.y - model))
 
     return np.concatenate(residuals_list)
+
+
+def _outlier_keep_mask(
+    ds: Dataset, result: MinimizerResult, remove_outliers: str
+) -> ArrayMask:
+    """Score residuals and return the keep-mask for the whole dataset.
+
+    Parameters
+    ----------
+    ds : Dataset
+        The dataset that was fitted, in the same order as ``result.residual``.
+    result : MinimizerResult
+        The fit to screen, supplying residuals and (for ``studentized``) the
+        Jacobian.
+    remove_outliers : str
+        Spec of the form ``"method:threshold:min_keep"``.
+
+    Returns
+    -------
+    ArrayMask
+        Boolean mask over the concatenated points, False where a point is
+        rejected.
+
+    Raises
+    ------
+    ValueError
+        If the spec names a method outside :data:`OUTLIER_METHODS`.
+    """
+    method_name, threshold, min_keep = parse_remove_outliers(remove_outliers)
+    if method_name not in OUTLIER_METHODS:
+        msg = (
+            f"Unknown outlier method {method_name!r}; "
+            f"expected one of {sorted(OUTLIER_METHODS)}."
+        )
+        raise ValueError(msg)
+    keep = np.ones(sum(len(da.y) for da in ds.values()), dtype=bool)
+
+    if method_name == "studentized":
+        # Leverage is a property of the whole design, so this is scored once
+        # over the full residual vector rather than per label.
+        jac = getattr(result, "jac", None)
+        if jac is None:
+            jac = _residual_jacobian(ds, result.params)
+        scores, dof = studentized_scores(result.residual, jac)
+        cutoff = bonferroni_threshold(len(scores), dof, alpha=threshold)
+        start_idx = 0
+        for da in ds.values():
+            end_idx = start_idx + len(da.y)
+            sl = slice(start_idx, end_idx)
+            keep[sl] &= ~cap_by_min_keep(scores[sl] > cutoff, scores[sl], min_keep)
+            start_idx = end_idx
+        return keep
+
+    # MAD: raw residuals, scored per label since the scale differs by channel.
+    raw_residuals = _raw_residuals_by_label(ds, result.params)
+    start_idx = 0
+    for lbl, da in ds.items():
+        end_idx = start_idx + len(da.y)
+        scores = robust_z_scores(raw_residuals[lbl])
+        keep[start_idx:end_idx] &= ~cap_by_min_keep(
+            scores > threshold, scores, min_keep
+        )
+        start_idx = end_idx
+    return keep
+
+
+def _residual_jacobian(ds: Dataset, params: Parameters) -> ArrayF:
+    """Finite-difference Jacobian of the weighted residuals w.r.t. varying params.
+
+    ``MinimizerResult.jac`` is only populated when the least-squares solver
+    converges, so this recomputes it when that attribute is missing.
+    """
+    names = [name for name, par in params.items() if par.vary]
+    base = _binding_1site_residuals(params, ds)
+    jac = np.empty((base.size, len(names)), dtype=float)
+    for j, name in enumerate(names):
+        shifted = params.copy()
+        value = shifted[name].value
+        step = 1e-6 * max(abs(value), 1.0)
+        shifted[name].set(value=value + step)
+        jac[:, j] = (_binding_1site_residuals(shifted, ds) - base) / step
+    return jac
+
+
+def _raw_residuals_by_label(ds: Dataset, params: Parameters) -> dict[str, ArrayF]:
+    """Compute unweighted ``y - model`` residuals, keyed by label.
+
+    Outlier screening uses these rather than the weighted residuals lmfit
+    minimizes, so that the scale is estimated from the data itself instead of
+    from the assumed ``y_err``.
+    """
+    k = params["K"].value
+    return {
+        lbl: da.y
+        - binding_1site(
+            da.x,
+            k,
+            params[f"S0_{lbl}"].value,
+            params[f"S1_{lbl}"].value,
+            is_ph=ds.is_ph,
+        )
+        for lbl, da in ds.items()
+    }
 
 
 def _build_params_1site(ds: Dataset) -> Parameters:
@@ -386,9 +495,19 @@ def fit_binding_glob(  # noqa: PLR0913
 
         Default is ``None`` (no reweighting).
     remove_outliers : str | None, optional
-        Outlier-removal specification of the form ``"zscore:threshold:min_keep"``
-        where *threshold* is the z-score cutoff and *min_keep* is the minimum
-        number of points required per label.  Default is ``None``.
+        Outlier-removal specification of the form ``"method:threshold:min_keep"``,
+        where *min_keep* is the minimum number of points to retain per label.
+        Two methods are available:
+
+        * ``"mad"`` - robust z-score from the median and MAD of the raw
+          residuals, scored per label (default threshold 3.5).
+        * ``"studentized"`` - externally studentized residuals with a
+          Bonferroni-corrected Student-t cutoff, scored over the whole design
+          so that leverage is accounted for.  Here *threshold* is the
+          family-wise alpha (default 0.05), not a score cutoff.
+
+        The two numbers are on different scales and are not interchangeable.
+        Default is ``None``.
     max_iter : int, optional
         Maximum number of iterations for iterative procedures (reweighting).
         Default is 15.
@@ -461,17 +580,7 @@ def fit_binding_glob(  # noqa: PLR0913
 
     # Outlier masking
     if remove_outliers is not None and result is not None:
-        method_name, z_threshold, _min_keep = parse_remove_outliers(remove_outliers)
-        current_len = sum(len(da.y) for da in ds_working.values())
-        combined_mask = np.ones(current_len, dtype=bool)
-        start_idx = 0
-        for da in ds_working.values():
-            end_idx = start_idx + len(da.y)
-            dr = result.residual[start_idx:end_idx]
-            if method_name == "zscore":
-                outliers = identify_outliers_zscore(dr, threshold=z_threshold)
-                combined_mask[start_idx:end_idx] &= ~outliers
-            start_idx = end_idx
+        combined_mask = _outlier_keep_mask(ds_working, result, remove_outliers)
         ds_filtered = copy.deepcopy(ds_working)
         ds_filtered.apply_mask(combined_mask)
         ds_working = ds_filtered

@@ -16,8 +16,9 @@ from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConf
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.model_validation import (
-    mark_excess_residual_outliers,
-    masked_datasets_from_residual_outliers,
+    ResidualTail,
+    apply_exclusions,
+    mark_outliers,
     residuals_from_fit_results,
 )
 from clophfit.fitting.models import binding_1site
@@ -218,17 +219,17 @@ def _single_refit_two_pass(
         robust=True,
         outlier_threshold=3.0,
     )
-    residuals = mark_excess_residual_outliers(
+    residuals = mark_outliers(
         residuals,
-        threshold=3.0,
-        allowed_tail_fraction=0.0,
-        min_allowed_tail_count=0,
+        ResidualTail(
+            threshold=3.0, allowed_tail_fraction=0.0, min_allowed_tail_count=0
+        ),
     )
     mask_source = initial.dataset if initial.dataset is not None else ds
     holder = FitResult(dataset=copy.deepcopy(mask_source))
-    masked = masked_datasets_from_residual_outliers(
-        {"single": holder}, residuals, min_keep=3
-    ).get("single", copy.deepcopy(mask_source))
+    masked = apply_exclusions({"single": holder}, residuals, min_keep=3).get(
+        "single", copy.deepcopy(mask_source)
+    )
     seeded = copy.deepcopy(initial)
     seeded.dataset = masked
 

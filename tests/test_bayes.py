@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -1505,7 +1505,7 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
     fr_init = fit_binding_glob(multi_dataset)
     captured: dict[str, bool] = {}
 
-    def fake_build_multi_ye_mag_priors(
+    def fake_build_multi_ye_mag_priors(  # noqa: PLR0913
         _labels: list[str],
         *,
         per_well: bool = False,
@@ -1513,8 +1513,9 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
         prior: str = "lognormal",
         mu: float | dict[str, float] = 0.0,
         sigma: float | dict[str, float] = 1.5,
+        parameterization: str = "centered",
     ) -> dict[str, object]:
-        del _labels, shared_ye_mags, prior, mu, sigma
+        del _labels, shared_ye_mags, prior, mu, sigma, parameterization
         captured["per_well"] = per_well
         raise _StopBayesBuildError
 
@@ -2905,3 +2906,50 @@ def test_shared_zeroed_alpha_matches_per_label_halfnormal() -> None:
     assert float(pooled_draws.mean()) == pytest.approx(expected, abs=0.005)
     assert float(per_draws.mean()) == pytest.approx(expected, abs=0.005)
     assert float(pooled_draws.min()) >= 0.0
+
+
+def test_ye_mag_hierarchical_correlates_labels_at_prior() -> None:
+    """Shared per-well factor induces positive cross-label prior correlation."""
+    coords = {"well": [f"w{i}" for i in range(30)]}
+    with pm.Model(coords=coords):
+        bayes._build_multi_ye_mag_priors(  # noqa: SLF001
+            ["1", "2"], per_well=True, parameterization="hierarchical"
+        )
+        pr = pm.sample_prior_predictive(
+            400, var_names=["ye_mag_1", "ye_mag_2", "ye_mag_tau_delta"]
+        ).prior
+
+    a = np.log(np.asarray(pr["ye_mag_1"]).reshape(-1, 30)).mean(axis=0)
+    b = np.log(np.asarray(pr["ye_mag_2"]).reshape(-1, 30)).mean(axis=0)
+    assert np.corrcoef(a, b)[0, 1] > 0.5
+    assert float(np.asarray(pr["ye_mag_tau_delta"]).min()) >= 0.0
+
+
+@pytest.mark.parametrize("param", ["centered", "hierarchical"])
+def test_fit_binding_pymc_multi_accepts_parameterization(param: str) -> None:
+    """Each ye_mag parameterization builds and prior-samples with pwym on."""
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.5, 8.5, 7)
+    dsd = {}
+    for w in ("A01", "A02", "A03", "A04"):
+        y1 = binding_1site(x, 7.0, 600.0, 50.0, is_ph=True) + rng.normal(0, 20, 7)
+        y2 = binding_1site(x, 7.0, 40.0, 500.0, is_ph=True) + rng.normal(0, 8, 7)
+        dsd[w] = Dataset(
+            {
+                "1": DataArray(x, y1, y_errc=np.full(7, 20.0)),
+                "2": DataArray(x, y2, y_errc=np.full(7, 8.0)),
+            },
+            is_ph=True,
+        )
+    fit = bayes.fit_binding_pymc_multi(
+        dsd,
+        PlateScheme(),
+        per_well_ye_mags=True,
+        ye_mag_parameterization=cast('Literal["centered", "hierarchical"]', param),
+        sampler=SamplerConfig(
+            nuts_sampler="pymc", n_tune=20, n_samples=20, chains=2, cores=1
+        ),
+    )
+    assert "ye_mag_1" in fit.trace.posterior
+    if param == "hierarchical":
+        assert "ye_mag_tau_delta" in fit.trace.posterior

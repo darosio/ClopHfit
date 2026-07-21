@@ -152,7 +152,7 @@ def detect_bad_wells_cmd(
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
-@click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'zscore:3.0:4' (method:threshold:min_keep).")  # fmt: skip
+@click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=_FlexChoice(["None", "multi", "multi-noise", "multi-noise-xrw", "single", "single-refit"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single, single-refit.")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip

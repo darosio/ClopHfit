@@ -9,6 +9,14 @@ from scipy import stats
 from clophfit.clophfit_types import ArrayMask
 from clophfit.fitting.data_structures import Dataset
 
+# Per-method default thresholds. They are not interchangeable: for "mad" the
+# number is a robust z cutoff, for "studentized" it is the family-wise alpha
+# from which a Bonferroni-corrected Student-t cutoff is derived.
+DEFAULT_OUTLIER_THRESHOLD = {"mad": 3.5, "studentized": 0.05}
+
+# Outlier-screening methods accepted in a ``remove_outliers`` spec.
+OUTLIER_METHODS = frozenset(DEFAULT_OUTLIER_THRESHOLD)
+
 
 def parse_remove_outliers(spec: str) -> tuple[str, float, int]:
     """Parse outlier specification ``"method:threshold:min_keep"``.
@@ -25,45 +33,208 @@ def parse_remove_outliers(spec: str) -> tuple[str, float, int]:
 
     Examples
     --------
-    - ``"zscore:2.5:5"`` -> ("zscore", 2.5, 5)
-    - ``"method"`` -> ("method", 2.0, 1)
+    - ``"mad:4.0:5"`` -> ("mad", 4.0, 5)
+    - ``"mad"`` -> ("mad", 3.5, 1)
+    - ``"studentized"`` -> ("studentized", 0.05, 1)
     """
     n_threshold_parts = 1
     n_min_keep_parts = 2
     parts = spec.split(":")
     method = parts[0]
-    threshold = float(parts[1]) if len(parts) > n_threshold_parts else 2.0
+    default_threshold = DEFAULT_OUTLIER_THRESHOLD.get(method, 3.5)
+    threshold = float(parts[1]) if len(parts) > n_threshold_parts else default_threshold
     min_keep = int(parts[2]) if len(parts) > n_min_keep_parts else 1
     return method, threshold, min_keep
 
 
-def identify_outliers_zscore(
-    residuals: np.ndarray, threshold: float = 2.0
-) -> ArrayMask:
-    """Identify outliers using the Z-score method on a 1D array of residuals.
+def robust_scale(residuals: np.ndarray) -> float:
+    """Estimate a robust standard deviation from residuals via the MAD.
+
+    The MAD is scaled to be a consistent estimator of the standard deviation
+    under normality. It collapses to zero when more than half the residuals are
+    identical, so the scale falls back to a normal-consistent IQR and then to
+    the (non-robust) standard deviation.
 
     Parameters
     ----------
     residuals : np.ndarray
-        The residuals to analyze.
+        The residuals to estimate a scale from. NaNs are ignored.
+
+    Returns
+    -------
+    float
+        A positive scale, or ``0.0`` if no positive scale can be found.
+    """
+    if len(residuals) == 0:
+        return 0.0
+    sigma = float(
+        stats.median_abs_deviation(residuals, nan_policy="omit", scale="normal")
+    )
+    if not np.isfinite(sigma) or sigma <= 0:
+        q25, q75 = np.nanpercentile(residuals, [25, 75])
+        sigma = float((q75 - q25) / 1.349)
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = float(np.nanstd(residuals))
+    return sigma if np.isfinite(sigma) and sigma > 0 else 0.0
+
+
+def robust_z_scores(residuals: np.ndarray, sigma: float | None = None) -> np.ndarray:
+    """Score residuals by a robust z built on the median and the MAD.
+
+    A mean/standard-deviation z-score is inflated by the very outlier it is
+    meant to expose, which caps the attainable score at ``sqrt(n - 1)``: at
+    ``n = 7`` nothing can score above 2.45, and the score saturates rather than
+    growing with the outlier. The median and MAD do not respond to the outlier,
+    so this score has no such ceiling.
+
+    Parameters
+    ----------
+    residuals : np.ndarray
+        The residuals to score. NaNs are ignored when locating the centre and
+        scale, and score as NaN.
+    sigma : float | None
+        Scale to divide by. ``None`` estimates it from *residuals* themselves.
+        Pass a pooled scale (e.g. estimated plate-wide) when the per-fit sample
+        is too small for a stable MAD.
+
+    Returns
+    -------
+    np.ndarray
+        Absolute robust z-scores, all zeros if no positive scale is available.
+    """
+    if len(residuals) == 0:
+        return np.zeros(0, dtype=float)
+    scale = robust_scale(residuals) if sigma is None else sigma
+    if not np.isfinite(scale) or scale <= 0:
+        return np.zeros(len(residuals), dtype=float)
+    med = float(np.nanmedian(residuals))
+    return np.abs((np.asarray(residuals, dtype=float) - med) / scale)
+
+
+def studentized_scores(
+    residuals: np.ndarray, jacobian: np.ndarray
+) -> tuple[np.ndarray, int]:
+    r"""Score residuals by the externally studentized (deleted) residual.
+
+    Ordinary residuals are not comparable across points: a high-leverage point
+    pulls the fit towards itself, so its residual is shrunk by
+    :math:`\sqrt{1 - h_{ii}}` and it can hide from any test applied to raw
+    residuals. This score divides that shrinkage out and rescales by a
+    leave-one-out variance, so the point under test contributes nothing to the
+    scale used to judge it:
+
+    .. math::
+        t_i = \frac{r_i}{s_{(i)}\sqrt{1 - h_{ii}}}
+
+    Under the null it follows a Student-t with :math:`n - p - 1` degrees of
+    freedom, which makes a calibrated threshold possible (see
+    :func:`bonferroni_threshold`) rather than a hand-picked constant.
+
+    Parameters
+    ----------
+    residuals : np.ndarray
+        Residual vector actually minimized (weighted, if the fit was weighted),
+        so that it is homoscedastic and matches *jacobian*.
+    jacobian : np.ndarray
+        The ``(n, p)`` Jacobian of those residuals at the solution.
+
+    Returns
+    -------
+    tuple[np.ndarray, int]
+        Absolute studentized residuals, and the degrees of freedom
+        ``n - p - 1``. Scores are zeros when there is no residual freedom left.
+    """
+    r = np.asarray(residuals, dtype=float)
+    n = r.size
+    p = int(np.asarray(jacobian).shape[1])
+    dof = n - p - 1
+    if dof <= 0 or n == 0:
+        return np.zeros(n, dtype=float), max(dof, 0)
+
+    # Leverage from the hat matrix H = J (J'J)^-1 J', via a pivoted QR for
+    # stability: h_ii is the row-wise squared norm of Q.
+    q, _ = np.linalg.qr(np.asarray(jacobian, dtype=float))
+    h = np.clip(np.einsum("ij,ij->i", q, q), 0.0, 1.0 - 1e-12)
+
+    sse = float(r @ r)
+    # Leave-one-out variance, in closed form (no refits needed).
+    s2_i = (sse - r**2 / (1.0 - h)) / dof
+    s2_i = np.where(s2_i > 0, s2_i, np.nan)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t = r / np.sqrt(s2_i * (1.0 - h))
+    return np.abs(np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)), dof
+
+
+def bonferroni_threshold(n: int, dof: int, alpha: float = 0.05) -> float:
+    """Two-sided Student-t cutoff, Bonferroni-corrected for testing *n* points.
+
+    Testing every point for outlyingness is *n* simultaneous tests, so the
+    per-test level is ``alpha / n``. Without the correction, a plate of 90
+    wells would flag points at the nominal rate by chance alone.
+
+    Parameters
+    ----------
+    n : int
+        Number of points being tested simultaneously.
+    dof : int
+        Degrees of freedom of the studentized residual (``n - p - 1``).
+    alpha : float
+        Family-wise error rate. Default 0.05.
+
+    Returns
+    -------
+    float
+        The cutoff, or ``inf`` when there is no residual freedom to test with.
+    """
+    if n <= 0 or dof <= 0:
+        return float("inf")
+    return float(stats.t.ppf(1.0 - alpha / (2.0 * n), dof))
+
+
+def identify_outliers_mad(residuals: np.ndarray, threshold: float = 3.5) -> ArrayMask:
+    """Identify outliers by robust z-score, using the median and the MAD.
+
+    Parameters
+    ----------
+    residuals : np.ndarray
+        The residuals to analyze. Use raw (unweighted) residuals, so that the
+        scale is estimated from the data rather than from ``y_err``.
     threshold : float
-        The Z-score threshold beyond which a point is considered an outlier.
+        The robust z-score beyond which a point is considered an outlier.
 
     Returns
     -------
     ArrayMask
         A boolean mask where True indicates an outlier.
     """
-    if len(residuals) == 0:
-        return np.zeros(0, dtype=bool)
+    return np.asarray(robust_z_scores(residuals) > threshold, dtype=bool)
 
-    mean_r = float(np.mean(residuals))
-    std_r = float(np.std(residuals))
 
-    if std_r > 0:
-        z = np.abs((residuals - mean_r) / std_r)
-        return z > threshold
-    return np.zeros(len(residuals), dtype=bool)
+def cap_by_min_keep(flagged: ArrayMask, scores: np.ndarray, min_keep: int) -> ArrayMask:
+    """Drop the weakest flags until at least `min_keep` points survive.
+
+    Parameters
+    ----------
+    flagged : ArrayMask
+        Boolean mask, True where a point is a candidate for removal.
+    scores : np.ndarray
+        Per-point outlier scores used to rank candidates worst-first.
+    min_keep : int
+        Minimum number of points that must remain unflagged.
+
+    Returns
+    -------
+    ArrayMask
+        A mask flagging at most ``len(flagged) - min_keep`` of the worst points.
+    """
+    allowed = max(len(flagged) - max(min_keep, 0), 0)
+    if int(flagged.sum()) <= allowed:
+        return flagged
+    capped = np.zeros_like(flagged)
+    if allowed:
+        ranked = np.argsort(np.where(flagged, scores, -np.inf))[::-1][:allowed]
+        capped[ranked] = True
+    return capped
 
 
 def reweight_from_residuals(ds: Dataset, residuals: np.ndarray) -> Dataset:
@@ -327,3 +498,144 @@ def apply_outlier_mask(
             worst_global = unmasked[worst_local]
             da.mask[worst_global] = False
     return result
+
+
+# Pooling levels for add_robust_scores, finest grouping first.
+ROBUST_SCORE_LEVELS: dict[str, tuple[str, ...]] = {
+    "well_label": ("well", "label"),
+    "well": ("well",),
+    "label": ("label",),
+    "global": (),
+}
+
+
+def _level_is_degenerate(level: str, *, n_wells: int, n_labels: int) -> bool:
+    """Say whether a pooling level collapses onto a finer one.
+
+    A pooled level is only meaningful when it actually pools something the
+    finer level does not: pooling wells needs more than one well, pooling
+    labels more than one label.
+
+    Parameters
+    ----------
+    level : str
+        One of the keys of :data:`ROBUST_SCORE_LEVELS`.
+    n_wells : int
+        Distinct wells present.
+    n_labels : int
+        Distinct labels present.
+
+    Returns
+    -------
+    bool
+        True when the level carries no information beyond a finer one.
+    """
+    min_groups = 2
+    if level == "well":
+        return n_labels < min_groups
+    if level == "label":
+        return n_wells < min_groups
+    if level == "global":
+        return n_wells < min_groups and n_labels < min_groups
+    return False
+
+
+def add_robust_scores(
+    residuals: pd.DataFrame,
+    *,
+    levels: tuple[str, ...] = ("well_label", "well", "label", "global"),
+    residual_col: str = "raw_res",
+) -> pd.DataFrame:
+    """Add robust scale and z-score columns at several pooling levels.
+
+    For each requested level this adds ``robust_sigma_{level}`` (a
+    normal-consistent MAD estimate of the noise scale over that grouping) and
+    ``robust_z_{level}`` (``|r - median| / sigma``, the median always taken
+    per well and label, so only the *scale* is pooled).
+
+    When ``"well_label"`` and ``"label"`` are both present it also adds
+    ``ye_mag_est``, their scale ratio. That is a classical, sampler-free
+    estimate of the per-well noise inflation the hierarchical model learns as
+    ``ye_mag_{lbl}``, useful for cross-checking it cheaply.
+
+    A level that is not identifiable from *residuals* -- a pooled level on a
+    single-well table, say -- yields all-NaN columns rather than a silently
+    degenerate duplicate of a finer level. Which levels those were is recorded
+    in ``df.attrs["robust_score_degenerate_levels"]``.
+
+    Parameters
+    ----------
+    residuals : pd.DataFrame
+        Canonical residual table carrying ``well``, ``label`` and
+        *residual_col*.
+    levels : tuple[str, ...]
+        Any of ``"well_label"``, ``"well"``, ``"label"``, ``"global"``.
+        ``"well"`` pools the labels of one well, so it only means something
+        when the labels share a noise scale; on plates where they do not (a
+        bright band and a dim one, say) its scale is dominated by the noisier
+        label and ``"well_label"`` is the one to use.
+    residual_col : str
+        Residual column to score. Defaults to the raw (unweighted) residual, so
+        the scale is estimated from the data rather than from an assumed
+        ``y_err``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *residuals* with the added columns.
+
+    Raises
+    ------
+    ValueError
+        If *levels* names an unknown level, or *residual_col* is missing.
+    """
+    unknown = set(levels) - set(ROBUST_SCORE_LEVELS)
+    if unknown:
+        msg = f"Unknown level(s) {sorted(unknown)}; expected {sorted(ROBUST_SCORE_LEVELS)}."
+        raise ValueError(msg)
+    if residual_col not in residuals.columns:
+        msg = f"residuals has no column {residual_col!r}."
+        raise ValueError(msg)
+
+    out = residuals.copy()
+    n_wells = out["well"].nunique() if "well" in out.columns else 1
+    n_labels = out["label"].nunique() if "label" in out.columns else 1
+    degenerate: list[str] = []
+
+    # Centre per well and label always: pooling is about scale, not location.
+    centre_keys = [k for k in ("well", "label") if k in out.columns]
+    centre = (
+        out.groupby(centre_keys, observed=True)[residual_col].transform("median")
+        if centre_keys
+        else out[residual_col].median()
+    )
+
+    for level in levels:
+        keys = [k for k in ROBUST_SCORE_LEVELS[level] if k in out.columns]
+        # A pooled level needs something to pool over that the finer level lacks.
+        if _level_is_degenerate(level, n_wells=n_wells, n_labels=n_labels):
+            out[f"robust_sigma_{level}"] = np.nan
+            out[f"robust_z_{level}"] = np.nan
+            degenerate.append(level)
+            continue
+        if keys:
+            sigma = out.groupby(keys, observed=True)[residual_col].transform(
+                lambda s: robust_scale(s.to_numpy(dtype=float))
+            )
+        else:
+            sigma = pd.Series(
+                robust_scale(out[residual_col].to_numpy(dtype=float)), index=out.index
+            )
+        sigma = sigma.astype(float)
+        out[f"robust_sigma_{level}"] = sigma
+        out[f"robust_z_{level}"] = np.where(
+            sigma > 0, (out[residual_col] - centre).abs() / sigma, np.nan
+        )
+
+    if {"well_label", "label"} <= set(levels) and "label" not in degenerate:
+        denom = out["robust_sigma_label"]
+        out["ye_mag_est"] = np.where(
+            denom > 0, out["robust_sigma_well_label"] / denom, np.nan
+        )
+    out.attrs["robust_score_degenerate_levels"] = degenerate
+    return out

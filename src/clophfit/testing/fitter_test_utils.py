@@ -295,7 +295,7 @@ def build_fitters(
         "glob_huber": lambda ds: fit_binding_glob(ds, method="huber"),
         # --- Huber + outlier removal ---
         "glob_huber_outlier": lambda ds: fit_binding_glob(
-            ds, method="huber", remove_outliers="zscore:2.5:5"
+            ds, method="huber", remove_outliers="mad:3.5:5"
         ),
         # --- IRLS reweighting ---
         "glob_irls": lambda ds: fit_binding_glob(ds, reweight="irls"),
@@ -303,7 +303,7 @@ def build_fitters(
         "glob_iterative": lambda ds: fit_binding_glob(ds, reweight="iterative"),
         # --- Iterative + outlier removal ---
         "glob_iterative_outlier": lambda ds: fit_binding_glob(
-            ds, reweight="iterative", remove_outliers="zscore:3.0:5"
+            ds, reweight="iterative", remove_outliers="mad:3.5:5"
         ),
     }
 
@@ -311,7 +311,7 @@ def build_fitters(
 
         def _odr(ds: Dataset) -> FitResult:
             base = fit_binding_glob(ds)
-            return fit_binding_odr(base, remove_outliers="zscore:3.0")
+            return fit_binding_odr(base, remove_outliers="mad:3.5")
 
         fitters["odr_recursive_outlier"] = _odr
 

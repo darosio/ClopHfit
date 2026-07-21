@@ -30,7 +30,7 @@ def test_summarize_factor_effects_aggregates_by_factor_level() -> None:
         "prefit": ["huber", "lm", "huber", "lm"],
         "final_stage": ["odr", "huber", "odr", "huber"],
         "weighting": ["auto", "none", "auto", "none"],
-        "outlier_handling": ["none", "none", "zscore:2.5:5", "zscore:2.5:5"],
+        "outlier_handling": ["none", "none", "mad:3.5:5", "mad:3.5:5"],
         "success_rate": [1.0, 0.5, 0.75, 0.25],
         "finite_fit_rate": [1.0, 0.5, 0.5, 0.25],
         "mean_bias": [0.1, 0.3, 0.2, 0.4],
@@ -62,7 +62,7 @@ def test_summarize_results_retains_factor_columns() -> None:
         "prefit": ["huber", "huber", "lm"],
         "final_stage": ["odr", "odr", "lm"],
         "weighting": ["auto", "auto", "none"],
-        "outlier_handling": ["zscore:2.5:5", "zscore:2.5:5", "none"],
+        "outlier_handling": ["mad:3.5:5", "mad:3.5:5", "none"],
         "truth_k": [7.0, 7.0, 7.0],
         "estimated_k": [7.1, 6.9, 7.2],
         "k_error": [0.2, 0.2, 0.1],
@@ -81,7 +81,7 @@ def test_summarize_results_retains_factor_columns() -> None:
     assert row_a["prefit"] == "huber"
     assert row_a["final_stage"] == "odr"
     assert row_a["weighting"] == "auto"
-    assert row_a["outlier_handling"] == "zscore:2.5:5"
+    assert row_a["outlier_handling"] == "mad:3.5:5"
     assert row_b["channels"] == "1"
     assert row_b["weighting"] == "none"
 

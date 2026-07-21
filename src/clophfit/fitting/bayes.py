@@ -875,8 +875,16 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
     prior: Literal["halfnormal", "lognormal"] = "lognormal",
     mu: float | Mapping[str, float] = 0.0,
     sigma: float | Mapping[str, float] = 1.5,
+    parameterization: Literal["centered", "hierarchical"] = "centered",
 ) -> dict[str, typing.Any]:
-    """Build label-indexed ye_mag priors for multi-well models."""
+    """Build label-indexed ye_mag priors for multi-well models.
+
+    ``parameterization`` only affects the per-well, non-shared, LogNormal branch:
+    ``"centered"`` reproduces the historical independent-per-well construction;
+    ``"hierarchical"`` shares a per-well factor across labels with a learned
+    deviation scale (partial pooling; see
+    :func:`_build_hierarchical_ye_mag_priors`).
+    """
     if not per_well:
         return _build_ye_mag_priors(
             labels,
@@ -904,6 +912,8 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
             )
             for lbl in labels
         }
+    if parameterization == "hierarchical":
+        return _build_hierarchical_ye_mag_priors(labels, mu=mu, sigma=sigma)
     return {
         lbl: pm.LogNormal(
             f"ye_mag_{lbl}",
@@ -913,6 +923,45 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
         )
         for lbl in labels
     }
+
+
+def _build_hierarchical_ye_mag_priors(
+    labels: Sequence[str],
+    *,
+    mu: float | Mapping[str, float],
+    sigma: float | Mapping[str, float],
+) -> dict[str, typing.Any]:
+    """Hierarchical per-well ye_mag: shared factor x learned label deviation.
+
+    ``log ye_mag_lbl[w] = (mu + sigma * z_w[w]) + tau_delta * z_delta_lbl[w]``,
+    with ``tau_delta ~ HalfNormal(0.5)`` learned and everything non-centered. The
+    shared ``z_w`` factor partially pools the labels' per-well multipliers; the
+    mean-zero deviation priors keep the common level in the shared factor.
+
+    Parameters
+    ----------
+    labels : Sequence[str]
+        Emission labels.
+    mu : float | Mapping[str, float]
+        Log-scale location of the shared per-well factor.
+    sigma : float | Mapping[str, float]
+        Log-scale scale of the shared per-well factor.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        Label -> per-well ``ye_mag`` tensor (dims ``"well"``).
+    """
+    tau_delta = pm.HalfNormal("ye_mag_tau_delta", sigma=0.5)
+    z_w = pm.Normal("ye_mag_z_well", 0.0, 1.0, dims="well")
+    log_w = _shared_ye_mag_value(mu) + _shared_ye_mag_sigma(sigma) * z_w
+    out: dict[str, typing.Any] = {}
+    for lbl in labels:
+        z_d = pm.Normal(f"ye_mag_z_delta_{lbl}", 0.0, 1.0, dims="well")
+        out[lbl] = pm.Deterministic(
+            f"ye_mag_{lbl}", pm.math.exp(log_w + tau_delta * z_d), dims="well"
+        )
+    return out
 
 
 def _ye_mag_value(value: float | Mapping[str, float], label: str) -> float:
@@ -2627,6 +2676,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
+    ye_mag_parameterization: Literal["centered", "hierarchical"] = "centered",
     well_noise_scale: bool = False,
     shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
@@ -2670,6 +2720,12 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     per_well_ye_mags : bool | None
         Learn per-well (not just per-label) ``ye_mag`` factors. ``None`` follows
         the noise config's ``learn_ye_mags`` when a structured model is supplied.
+    ye_mag_parameterization : Literal["centered", "hierarchical"]
+        Parameterization of the per-well ``ye_mag`` prior. ``"centered"`` (default)
+        reproduces the historical independent-per-well construction;
+        ``"hierarchical"`` partially pools the labels' per-well factors with a
+        learned deviation scale (the only per-well form that samples reliably).
+        Applies in both noise modes; a no-op for shared or non-per-well ``ye_mag``.
     well_noise_scale : bool
         Enable a per-well multiplicative noise scale.
     shared_well_noise_scale : bool
@@ -2929,12 +2985,16 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 alpha_mode=alpha_mode,
             )
             if learn_ye_mags:
+                # LogNormal (not HalfNormal) so ye_mag_parameterization applies
+                # uniformly across noise modes without a prior/geometry confound.
                 ye_mags = _build_multi_ye_mag_priors(
                     labels,
                     per_well=use_per_well_ye_mags,
                     shared_ye_mags=shared_ye_mags,
-                    prior="halfnormal",
-                    sigma=5.0,
+                    prior="lognormal",
+                    mu=0.0,
+                    sigma=1.5,
+                    parameterization=ye_mag_parameterization,
                 )
         else:
             noise_priors = {}
@@ -2945,6 +3005,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
                 prior=ye_mag_prior,
                 mu=ye_mag_mu,
                 sigma=ye_mag_sigma,
+                parameterization=ye_mag_parameterization,
             )
         if well_noise_scale:
             label_scale_sigma = max(float(label_noise_scale_sigma), 1e-6)
