@@ -1055,7 +1055,7 @@ def print_emcee(result_emcee: MinimizerResult) -> None:
 
 def _sample_dims_from_posterior_var(da: xr.DataArray) -> list[str]:
     """Infer sample dimensions for a posterior variable."""
-    sample_dims = [d for d in ("chain", "draw") if d in da.dims]
+    sample_dims: list[str] = [d for d in ("chain", "draw") if d in da.dims]
     if sample_dims:
         return sample_dims
     return [str(d) for d in da.dims[: min(2, da.ndim)]]
