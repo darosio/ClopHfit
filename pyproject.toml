@@ -104,6 +104,12 @@ Documentation = "https://clophfit.readthedocs.io"
 "Github releases" = "https://github.com/darosio/ClopHfit/releases"
 Homepage = "https://github.com/darosio/ClopHfit"
 
+[tool.uv]
+# pytensor caps numba at <=0.65.1 and every stable numba in that range pins
+# numpy<2.5; without this, uv falls back to the numba 0.63.0b1 prerelease, whose
+# metadata drops that bound but whose code still calls the removed np.row_stack.
+prerelease = "disallow"
+
 [tool.pytest.ini_options]
 markers = [
   "slow: marks tests as slow (deselect with '-m \"not slow\"')",

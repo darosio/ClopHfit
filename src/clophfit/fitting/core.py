@@ -364,7 +364,7 @@ def analyze_spectra(
         spectra = spectra.dropna(axis=1, thresh=threshold)
         spectra = spectra.dropna(axis=0)
         ddf = spectra.sub(spectra.iloc[:, 0], axis=0)
-        u, s, v = np.linalg.svd(ddf)
+        u, s, v = np.linalg.svd(ddf.to_numpy(dtype=np.float64))
         ds = Dataset({"default": DataArray(x, v[0, :] + y_offset)}, is_ph=is_ph)
         plot_autovectors(ax2, spectra.index, u)
         plot_autovalues(ax3, s[:])  # don't plot last auto-values?
