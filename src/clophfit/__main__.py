@@ -144,6 +144,7 @@ def detect_bad_wells_cmd(
 @click.option("--bg-adj", is_flag=True, help="Heuristically adjust negative buffer values (implies --bg).")  # fmt: skip
 @click.option("--bg-mth", default="mean", show_default=True, type=click.Choice(["mean", "fit", "meansd"]), help="Buffer calculation method.")  # fmt: skip
 @click.option("--nrm", is_flag=True, help="Normalize using label metadata.")
+@click.option("--raw-dir", type=cPath(exists=True, file_okay=False), help="Folder holding the Tecan .xls files, when they are not next to LIST_FILE.")  # fmt: skip
 @click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
 @click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions); enables dilution correction.")  # fmt: skip
 @click.option("--all", "comb", is_flag=True, help="Export all bg/dil/nrm data combinations.")  # fmt: skip
@@ -173,6 +174,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     bg_adj: bool,
     nrm: bool,
     bg_mth: str,
+    raw_dir: str | None,
     sch: str | None,
     add: str | None,
     comb: bool,
@@ -228,7 +230,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     # Dry run mode: validate inputs and exit
     if dry_run:
         click.echo("🔍 Dry run mode: Validating inputs...\n")
-        _dry_run_validation(list_file, sch, add, cl, out_fp)
+        _dry_run_validation(_DryRunInputs(list_file, sch, add, cl, out_fp, raw_dir))
         click.echo("\n✅ Validation successful! All inputs are valid.")
         click.echo("   Remove --dry-run flag to process data.")
         return
@@ -242,11 +244,13 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     logger.info("%s", tecan_config)
 
     try:
-        tit = Titration.fromlistfile(list_fp, is_ph=not cl)
+        tit = Titration.fromlistfile(list_fp, is_ph=not cl, base_dir=raw_dir)
     except FileNotFoundError as e:
+        # LIST_FILE existence is enforced by click, so this is a listed .xls.
         msg = (
-            f"List file not found: {list_fp}\n"
-            f"Please check that the file exists and the path is correct."
+            f"Tecan file listed in {list_fp} not found: {e}\n"
+            f"Files are looked up in {raw_dir or list_fp.parent}; "
+            f"use --raw-dir to point at the folder holding the .xls files."
         )
         raise click.ClickException(msg) from e
     except (pd.errors.EmptyDataError, pd.errors.ParserError) as e:
@@ -416,39 +420,40 @@ def _validate_tecan_options(  # noqa: PLR0913
         )
 
 
-def _dry_run_validation(
-    list_file: str,
-    sch: str | None,
-    add: str | None,
-    cl: float | None,
-    out_fp: Path,
-) -> None:
+_MAX_MISSING_FILES_PREVIEW = 3
+
+
+class _DryRunInputs(NamedTuple):
+    """Grouped CLI inputs validated by :func:`_dry_run_validation`."""
+
+    list_file: str
+    sch: str | None
+    add: str | None
+    cl: float | None
+    out_fp: Path
+    raw_dir: str | None = None
+
+
+def _dry_run_validation(inputs: _DryRunInputs) -> None:
     """Perform dry-run validation of input files.
 
     Parameters
     ----------
-    list_file : str
-        Path to list file.
-    sch : str | None
-        Path to scheme file.
-    add : str | None
-        Path to additions file.
-    cl : float | None
-        Chloride concentration.
-    out_fp : Path
-        Output directory.
+    inputs : _DryRunInputs
+        Grouped list, scheme, additions, chloride, output, and raw-dir inputs.
 
     Raises
     ------
     click.ClickException
         If validation fails.
     """
+    list_file, sch, add, cl, out_fp, raw_dir = inputs
     list_fp = Path(list_file)
 
     # Validate list file
     click.echo(f"✓ List file exists: {list_fp}")
     try:
-        df = pd.read_csv(list_fp)
+        df = pd.read_csv(list_fp, names=["filenames", "x", "x_err"])
         click.echo(f"  - Contains {len(df)} entries")
         if len(df) == 0:
             msg = "List file is empty"
@@ -458,6 +463,19 @@ def _dry_run_validation(
     except Exception as e:
         msg = f"Error reading list file: {e}"
         raise click.ClickException(msg) from e
+
+    # Validate the Tecan files the list file points to
+    root = Path(raw_dir) if raw_dir else list_fp.parent
+    missing = [f for f in df["filenames"] if not (root / f).is_file()]
+    if missing:
+        msg = (
+            f"{len(missing)} of {len(df)} Tecan files not found in {root}: "
+            f"{', '.join(map(str, missing[:_MAX_MISSING_FILES_PREVIEW]))}"
+            f"{' ...' if len(missing) > _MAX_MISSING_FILES_PREVIEW else ''}\n"
+            f"Use --raw-dir to point at the folder holding the .xls files."
+        )
+        raise click.ClickException(msg)
+    click.echo(f"✓ Tecan files found: {len(df)} in {root}")
 
     # Validate scheme file
     if sch:

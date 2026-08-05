@@ -1152,6 +1152,21 @@ class TestTitrationAdvanced:
         with pytest.raises(FileNotFoundError, match="Cannot find: aax"):
             Titration.fromlistfile(Path("aax"), is_ph=True)
 
+    def test_fromlistfile_base_dir(self, tmp_path: Path) -> None:
+        """It resolves Tecan files against base_dir when the list file is elsewhere."""
+        data_dir = data_tests / "140220"
+        listfile = tmp_path / "list.pH.csv"
+        listfile.write_text((data_dir / "list.pH.csv").read_text())
+        tit = Titration.fromlistfile(listfile, is_ph=True, base_dir=data_dir)
+        assert [tf.path.parent for tf in tit.tecanfiles] == [data_dir] * 7
+
+    def test_fromlistfile_base_dir_missing_file(self, tmp_path: Path) -> None:
+        """It names the missing Tecan file, not the list file, when base_dir is wrong."""
+        listfile = tmp_path / "list.pH.csv"
+        listfile.write_text((data_tests / "140220" / "list.pH.csv").read_text())
+        with pytest.raises(FileNotFoundError, match=r"pH9\.1_200214\.xls"):
+            Titration.fromlistfile(listfile, is_ph=True, base_dir=tmp_path / "nowhere")
+
     def test_bad_listfile(self) -> None:
         """It raises Exception when list.xx file is ill-shaped."""
         with pytest.raises(ValueError, match=r"Check format .* for listfile: .*"):

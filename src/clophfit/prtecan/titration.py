@@ -999,7 +999,9 @@ class Titration(TecanfilesGroup):
         )
 
     @classmethod
-    def fromlistfile(cls, list_file: Path | str, *, is_ph: bool) -> Titration:
+    def fromlistfile(
+        cls, list_file: Path | str, *, is_ph: bool, base_dir: Path | str | None = None
+    ) -> Titration:
         """Build `Titration` from a list[.pH|.Cl] file.
 
         Parameters
@@ -1008,17 +1010,26 @@ class Titration(TecanfilesGroup):
             Path to the list file containing [filenames x x_err].
         is_ph : bool
             Whether x values represent pH (True) or concentrations (False).
+        base_dir : Path | str | None
+            Directory holding the Tecan files. Relative filenames in the list
+            file are resolved against it; defaults to the list file's own
+            directory. Use it when list files and `.xls` files are kept in
+            separate trees (e.g. `data/processed/` and `data/raw/`).
 
         Returns
         -------
         Titration
             The constructed Titration object.
         """
-        tecanfiles, x, x_err = cls._listfile(Path(list_file))
+        tecanfiles, x, x_err = cls._listfile(
+            Path(list_file), None if base_dir is None else Path(base_dir)
+        )
         return cls(tecanfiles, x, is_ph, x_err=x_err)
 
     @staticmethod
-    def _listfile(listfile: Path) -> tuple[list[Tecanfile], ArrayF, ArrayF]:
+    def _listfile(
+        listfile: Path, base_dir: Path | None = None
+    ) -> tuple[list[Tecanfile], ArrayF, ArrayF]:
         """Help construction from list file."""
         try:
             table = pd.read_csv(listfile, names=["filenames", "x", "x_err"])
@@ -1030,7 +1041,8 @@ class Titration(TecanfilesGroup):
         if table["filenames"].count() != table["x"].count():
             msg = f"Check format [filenames x x_err] for listfile: {listfile}"
             raise ValueError(msg)
-        tecanfiles = [Tecanfile(listfile.parent / f) for f in table["filenames"]]
+        root = listfile.parent if base_dir is None else base_dir
+        tecanfiles = [Tecanfile(root / f) for f in table["filenames"]]
         x = table["x"].to_numpy().astype(float)
         x_err = table["x_err"].to_numpy().astype(float)
         return tecanfiles, x, x_err

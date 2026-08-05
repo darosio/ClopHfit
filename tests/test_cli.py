@@ -125,6 +125,30 @@ def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     assert result.exit_code == 0
 
 
+def test_prtecan_raw_dir(tmp_path: Path, runner: CliRunner) -> None:
+    """It finds Tecan files via --raw-dir when they are not next to the list file."""
+    data_dir = tpath / "Tecan" / "140220"
+    list_f = tmp_path / "list.pH.csv"
+    list_f.write_text((data_dir / "list.pH.csv").read_text())
+    args = ["--out", str(tmp_path / "out"), "tecan", str(list_f), "--dry-run"]
+    result = runner.invoke(ppr, [*args, "--raw-dir", str(data_dir)])
+    assert result.exit_code == 0
+    assert f"✓ Tecan files found: 7 in {data_dir}" in result.output
+
+
+def test_prtecan_missing_tecan_files(tmp_path: Path, runner: CliRunner) -> None:
+    """It blames the missing Tecan files, not the list file, and suggests --raw-dir."""
+    list_f = tmp_path / "list.pH.csv"
+    list_f.write_text((tpath / "Tecan" / "140220" / "list.pH.csv").read_text())
+    args = ["--out", str(tmp_path / "out"), "tecan", str(list_f)]
+    for extra in ([], ["--dry-run"]):
+        result = runner.invoke(ppr, [*args, *extra])
+        assert result.exit_code != 0
+        assert "pH9.1_200214.xls" in result.output
+        assert "--raw-dir" in result.output
+        assert "List file not found" not in result.output
+
+
 @pytest.mark.slow
 def test_prtecan_cl(tmp_path: Path) -> None:
     """Test prtecan command with actual data."""
