@@ -917,23 +917,8 @@ class Titration(TecanfilesGroup):
         return sorted(new_discards)
 
     def _reset_data_and_results(self) -> None:
+        """Discard derived data so the next access recomputes it."""
         self._data = {}
-        cached_results = (
-            "results",
-            "result_global",
-            "result_odr",
-            "result_mcmc",
-            "result_multi_trace",
-            "result_multi_trace2",
-            "result_multi_noise",
-            "result_multi_noise_xrw",
-            "result_multi_mcmc",
-            "result_multi_noise_mcmc",
-            "result_multi_noise_xrw_mcmc",
-            "fit_pipeline",
-        )
-        for attr in cached_results:
-            self.__dict__.pop(attr, None)
 
     def _reset_data_results_and_bg(self) -> None:
         self._reset_data_and_results()

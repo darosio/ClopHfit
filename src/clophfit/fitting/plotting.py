@@ -1337,7 +1337,7 @@ def plot_noise_vs_signal(
         or the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
     results : Mapping[str, FitResult]
         The dictionary of well results containing datasets with `.y` arrays.
-        Normally this is `tit.result_global.results`.
+        Normally this is the ``results`` mapping of a ``TitrationResults``.
     figsize_per_label : tuple[float, float], optional
         The width and height to allocate per band/label in the final figure.
 

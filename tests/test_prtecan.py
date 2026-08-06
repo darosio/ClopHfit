@@ -1679,3 +1679,20 @@ class TestStructuredMcmcNoise:
         """The structured family is opt-in; the default stays ye_mag."""
         assert TitrationConfig().mcmc_noise == "ye_mag"
         assert TitrationConfig().noise_mode == "centered"
+
+
+def test_params_change_resets_derived_data() -> None:
+    """Setting any surviving params field discards the derived data cache.
+
+    Asserts the effect, not a list of attribute names: a name list is exactly
+    what rotted into twelve dead entries after 01735f12.
+    """
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "140220" / "scheme.txt")
+    assert tit.data  # populate the lazily-built cache
+    assert tit._data != {}  # noqa: SLF001
+
+    tit.params.nrm = not tit.params.nrm
+
+    # Do not touch tit.data here — reading it would refill the cache.
+    assert tit._data == {}  # noqa: SLF001
