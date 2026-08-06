@@ -1470,12 +1470,14 @@ class TestTitrationAnalysis:
             export, "residuals_from_fit_results", fake_residuals_from_fit_results
         )
 
-        monkeypatch.setattr(tit.params, "mcmc", "single-refit")
-        monkeypatch.setattr(tit.params, "n_mcmc_samples", 7)
+        spec = prtecan.McmcSpec(
+            model="single-refit", sampler=SamplerConfig(n_samples=7)
+        )
         res = export.fit_single_mcmc(
             tit,
             {"A01": tit.create_global_ds("A01")},
             tmp_path,
+            spec,
         )
 
         assert res is not None
@@ -1725,3 +1727,11 @@ def test_structured_noise_takes_mode_as_argument() -> None:
     cfg = _structured_noise(tit, noise_mode="fixed")
 
     assert cfg.gain_mode == "fixed"
+
+
+def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
+    """No spec means no sampling, regardless of what params says."""
+    from clophfit.prtecan.export import fit_single_mcmc  # noqa: PLC0415
+
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    assert fit_single_mcmc(tit, {}, tmp_path, None) is None

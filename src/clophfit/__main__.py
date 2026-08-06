@@ -7,7 +7,7 @@ import logging
 import os
 import pprint
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 import click
 import lmfit  # type: ignore[import-untyped]
@@ -39,13 +39,14 @@ from clophfit import (
     configure_logging,
     fitting,
 )
+from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import (
     DataValidationError,
     MissingDependencyError,
 )
 from clophfit.prenspire import EnspireFile, Note
-from clophfit.prtecan import TecanConfig, Titration, calculate_conc
+from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
@@ -272,13 +273,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.bg_mth = bg_mth
     tit.params.fit_method = fit_method
     tit.params.outlier = outlier
-    tit.params.mcmc = mcmc
-    tit.params.nuts_sampler = nuts_sampler
-    tit.params.n_mcmc_samples = mcmc_samples
     tit.params.noise_alpha = noise_alpha
     tit.params.noise_gain = noise_gain
-    tit.params.mcmc_noise = mcmc_noise
-    tit.params.noise_mode = noise_mode
     tit.params.mask_outliers = mask_outliers
     tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
@@ -352,8 +348,18 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
         raise click.ClickException(msg) from e
 
     # Output and export with error handling
+    mcmc_spec = (
+        None
+        if mcmc == "None"
+        else McmcSpec(
+            model=cast('Literal["single", "single-refit"]', mcmc),
+            sampler=SamplerConfig(n_samples=mcmc_samples, nuts_sampler=nuts_sampler),
+            structured_noise=mcmc_noise == "structured",
+            noise_mode=cast('Literal["centered", "fixed"]', noise_mode),
+        )
+    )
     try:
-        export_data_fit(tit, tecan_config)
+        export_data_fit(tit, tecan_config, mcmc_spec)
     except Exception as e:
         msg = (
             f"Error during data export and fitting: {e}\n"

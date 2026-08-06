@@ -28,7 +28,12 @@ from clophfit.fitting.residuals import (
     plot_residual_vs_yerr,
     residual_statistics,
 )
-from clophfit.prtecan.titration import TecanConfig, Titration, TitrationResults
+from clophfit.prtecan.titration import (
+    McmcSpec,
+    TecanConfig,
+    Titration,
+    TitrationResults,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -252,55 +257,46 @@ def fit_single_mcmc(
     titration: Titration,
     datasets: dict[str, typing.Any],
     outfit: Path,
+    spec: McmcSpec | None,
 ) -> TitrationResults | None:
     """Run optional per-well single PyMC fits for export.
 
     Parameters
     ----------
     titration : Titration
-        Titration object containing the plate scheme, fit keys, background
-        noise, and MCMC configuration.
+        Titration object containing the plate scheme, fit keys, and
+        background noise.
     datasets : dict[str, typing.Any]
         Mapping from well identifiers to datasets to fit.
     outfit : Path
         Output directory used for residual-refit diagnostic CSV files.
+    spec : McmcSpec | None
+        Sampling request deciding whether and how to run per-well MCMC.
+        ``None`` disables single-well MCMC export.
 
     Returns
     -------
     TitrationResults | None
-        Per-well PyMC fit results when ``titration.params.mcmc`` is
-        ``"single"`` or ``"single-refit"``. Returns ``None`` when single-well
-        MCMC export is disabled.
+        Per-well PyMC fit results when *spec* is provided. Returns ``None``
+        when *spec* is ``None``.
     """
-    if titration.params.mcmc == "single":
+    if spec is None:
+        return None
+
+    if spec.model == "single":
         mcmc_fits = {
-            key: fit_binding_pymc(
-                ds,
-                sampler=SamplerConfig(
-                    n_samples=titration.params.n_mcmc_samples,
-                    nuts_sampler=titration.params.nuts_sampler,
-                ),
-            )
+            key: fit_binding_pymc(ds, sampler=spec.sampler)
             for key, ds in datasets.items()
         }
         return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
 
-    if titration.params.mcmc != "single-refit":
-        return None
-
-    sampler = SamplerConfig(
-        n_samples=titration.params.n_mcmc_samples,
-        nuts_sampler=titration.params.nuts_sampler,
-    )
-    structured = titration.params.mcmc_noise == "structured"
+    sampler = spec.sampler
+    structured = spec.structured_noise
     if structured:
         # One config for both passes: unlike ye_mag, whose refit prior is
         # recentred on the screening pass's learned multiplier, the structured
         # model's floor/gain/alpha hints do not shift between passes.
-        noise = _structured_noise(
-            titration,
-            noise_mode=titration.params.noise_mode,  # type: ignore[arg-type]
-        )
+        noise = _structured_noise(titration, noise_mode=spec.noise_mode)
         screening_noise, refit_noise = noise, noise
     else:
         screening_noise = _ye_mag_screening_noise(titration.bg_noise)
@@ -330,7 +326,12 @@ def fit_single_mcmc(
     return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
 
 
-def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> None:
+def export_fit(
+    titration: Titration,
+    subfolder: Path,
+    config: TecanConfig,
+    spec: McmcSpec | None = None,
+) -> None:
     """Export all fitted parameters, plots, and data files."""
     outfit = subfolder / "fit"
     outfit.mkdir(parents=True, exist_ok=True)
@@ -374,7 +375,7 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
     )
     export_list.append(odr_res)
 
-    mcmc_res = fit_single_mcmc(titration, datasets, outfit)
+    mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)
     if mcmc_res is not None:
         export_list.append(mcmc_res)
 
@@ -401,7 +402,11 @@ def export_fit(titration: Titration, subfolder: Path, config: TecanConfig) -> No
         export_bad_wells(outfit, global_res)
 
 
-def export_data_fit(titration: Titration, tecan_config: TecanConfig) -> None:
+def export_data_fit(
+    titration: Titration,
+    tecan_config: TecanConfig,
+    mcmc: McmcSpec | None = None,
+) -> None:
     """Export dat files [x,y1,..,yN] from copy of titration.data."""
 
     def write(x: ArrayF, data: dict[str, dict[str, ArrayF]], out_folder: Path) -> None:
@@ -424,7 +429,7 @@ def export_data_fit(titration: Titration, tecan_config: TecanConfig) -> None:
             if tecan_config.fit:
                 if tecan_config.detect_bad:
                     run_pre_fit_detection(titration, subfolder)
-                export_fit(titration, subfolder, tecan_config)
+                export_fit(titration, subfolder, tecan_config, mcmc)
         titration.params = saved_p
     else:
         subfolder = prepare_output_folder(titration, tecan_config.out_fp)
@@ -432,4 +437,4 @@ def export_data_fit(titration: Titration, tecan_config: TecanConfig) -> None:
         if tecan_config.fit:
             if tecan_config.detect_bad:
                 run_pre_fit_detection(titration, subfolder)
-            export_fit(titration, subfolder, tecan_config)
+            export_fit(titration, subfolder, tecan_config, mcmc)
