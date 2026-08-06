@@ -39,6 +39,7 @@ from .parsers import (
 from .titration import (
     Buffer,
     BufferFit,
+    McmcSpec,
     TecanConfig,
     Titration,
     TitrationConfig,
@@ -50,6 +51,7 @@ __all__ = [
     "BufferFit",
     "Labelblock",
     "LabelblocksGroup",
+    "McmcSpec",
     "Metadata",
     "PlateScheme",
     "TecanConfig",

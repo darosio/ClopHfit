@@ -1696,3 +1696,13 @@ def test_params_change_resets_derived_data() -> None:
 
     # Do not touch tit.data here — reading it would refill the cache.
     assert tit._data == {}  # noqa: SLF001
+
+
+def test_mcmc_spec_defaults() -> None:
+    """McmcSpec carries the sampling decision without touching TitrationConfig."""
+    spec = prtecan.McmcSpec(model="single", sampler=SamplerConfig(n_samples=8))
+    assert spec.model == "single"
+    assert spec.sampler.n_samples == 8
+    assert spec.structured_noise is False
+    assert spec.noise_mode == "centered"
+    assert not hasattr(spec, "ctr_free_k")

@@ -8,7 +8,7 @@ import typing
 from dataclasses import InitVar, dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from clophfit.clophfit_types import ArrayF
+    from clophfit.fitting.bayes_config import SamplerConfig
 
 # TODO: Add tqdm progress bar
 # TODO: sort before computing to have outlier output sorted
@@ -1471,3 +1472,29 @@ class TecanConfig:
     png: bool
     detect_bad: bool = True
     """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""
+
+
+@dataclass(frozen=True)
+class McmcSpec:
+    """A per-well MCMC request, decided by the caller rather than parsed downstream.
+
+    Parameters
+    ----------
+    model : Literal["single", "single-refit"]
+        Which per-well fit to run. ``"single"`` samples each well once;
+        ``"single-refit"`` runs the robust screening pass then refits.
+    sampler : SamplerConfig
+        NUTS controls forwarded to ``pm.sample``.
+    structured_noise : bool
+        Build the physical ``floor + gain * y + (alpha * y) ** 2`` observation
+        noise instead of scaling ``y_err`` by a learned ``ye_mag`` multiplier.
+    noise_mode : Literal["centered", "fixed"]
+        How a supplied gain/alpha hint is treated when *structured_noise* is
+        set: centred on (a hint the posterior may leave) or pinned to it. A
+        parameter with no supplied value is always free.
+    """
+
+    model: Literal["single", "single-refit"]
+    sampler: SamplerConfig
+    structured_noise: bool = False
+    noise_mode: Literal["centered", "fixed"] = "centered"
