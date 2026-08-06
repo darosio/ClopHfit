@@ -1681,6 +1681,24 @@ class TestStructuredMcmcNoise:
         # Gain got no value, so it stays free regardless of noise_mode.
         assert noise.gain_mode == "free"
 
+    def test_structured_noise_takes_mode_as_argument(self) -> None:
+        """The mode is passed in, not read off titration.params.
+
+        ``gain_mode`` and ``alpha_mode`` are independent ternaries in
+        ``_structured_noise``; ``test_fixed_mode_is_honoured`` above only
+        supplies ``noise_alpha`` and so only pins ``alpha_mode``, leaving
+        ``gain_mode`` at its untouched "free" default. This test supplies
+        ``noise_gain`` instead, so a bug that corrupts ``gain_mode`` alone
+        (e.g. hardcoding it, or crossing the ``gains``/``alphas`` variables)
+        would be caught here.
+        """
+        titan = self._titration()
+        titan.params.noise_gain = (1.0, 1.0)
+        noise = export._structured_noise(  # noqa: SLF001
+            titan, noise_mode="fixed"
+        )
+        assert noise.gain_mode == "fixed"
+
 
 def test_params_change_resets_derived_data() -> None:
     """Setting any surviving params field discards the derived data cache.
@@ -1716,8 +1734,9 @@ def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
     assert fit_single_mcmc(tit, {}, tmp_path, None) is None
 
 
+@pytest.mark.parametrize("comb", [False, True])
 def test_export_data_fit_with_mcmc_spec_samples(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, comb: bool
 ) -> None:
     """A real McmcSpec threaded into export_data_fit reaches the sampler.
 
@@ -1726,6 +1745,15 @@ def test_export_data_fit_with_mcmc_spec_samples(
     this one shows a non-``None`` spec passed to ``export_data_fit`` actually
     drives a call into the sampler, through ``export_fit``. The sampler is
     patched so the assertion is "was it called", not a real MCMC run.
+
+    Parametrised over ``comb`` because ``export_data_fit`` has two call sites
+    for ``export_fit`` -- the ``comb=False`` ``else`` branch and the
+    ``comb=True`` branch backing ``--all`` -- and only the former was
+    previously pinned; a dropped ``spec`` argument on the ``comb=True``
+    branch alone was invisible to the suite. ``generate_combinations`` is
+    trimmed to a single combination for ``comb=True`` so the (unpatched)
+    classical fits it also triggers stay cheap; the seam under test does not
+    depend on which combination runs.
     """
     calls: list[Dataset] = []
 
@@ -1734,6 +1762,12 @@ def test_export_data_fit_with_mcmc_spec_samples(
         return fit_binding_glob(ds)
 
     monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+    if comb:
+        monkeypatch.setattr(
+            export,
+            "generate_combinations",
+            lambda: [((False, False, False, False), "fit")],
+        )
 
     tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     tit.load_additions(data_tests / "140220/additions.pH")
@@ -1741,7 +1775,7 @@ def test_export_data_fit_with_mcmc_spec_samples(
 
     config = TecanConfig(
         out_fp=tmp_path,
-        comb=False,
+        comb=comb,
         lim=None,
         title="Test",
         fit=True,
