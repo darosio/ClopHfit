@@ -142,9 +142,10 @@ def _ye_mag_screening_noise(
 def _structured_noise(
     titration: Titration, *, noise_mode: Literal["centered", "fixed"]
 ) -> NoiseConfig:
-    """Build the physical floor/gain/alpha noise config from titration params.
+    """Build the physical floor/gain/alpha noise config from titration.
 
-    Floors always come from the measured ``bg_noise``. Gain and alpha are
+    Floors always come from the measured ``bg_noise``; gain and alpha come
+    from ``titration.params``. Gain and alpha are
     ``"free"`` when no value was supplied -- there is no hint to centre on, so
     the sampler learns them -- and otherwise take ``noise_mode`` (``"centered"``
     or ``"fixed"``).
@@ -152,7 +153,8 @@ def _structured_noise(
     Parameters
     ----------
     titration : Titration
-        Titration whose ``bg_noise`` and ``params`` supply the hints.
+        Titration whose ``bg_noise`` and ``params.noise_gain``/
+        ``params.noise_alpha`` supply the hints.
     noise_mode : Literal["centered", "fixed"]
         How a supplied ``noise_gain``/``noise_alpha`` value is treated by the
         sampler.
@@ -163,7 +165,6 @@ def _structured_noise(
         A ``structured`` config with per-label floor, gain and alpha hints.
     """
     labels = sorted(titration.data.keys())
-    supplied_mode = noise_mode
 
     def _per_label(values: tuple[float, ...]) -> dict[str, float]:
         return {
@@ -177,8 +178,8 @@ def _structured_noise(
         floor=floors or None,
         gain=gains or 0.0,
         alpha=alphas or 0.0,
-        gain_mode=supplied_mode if gains else "free",
-        alpha_mode=supplied_mode if alphas else "free",
+        gain_mode=noise_mode if gains else "free",
+        alpha_mode=noise_mode if alphas else "free",
     )
 
 

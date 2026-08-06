@@ -20,7 +20,7 @@ PPR="${PPR_CMD:-ppr}"
 SAMPLES="${BENCH_SAMPLES:-400}"
 
 SAMPLERS=(default nutpie numpyro blackjax)
-MODES=(single multi multi-noise multi-noise-xrw)
+MODES=(single single-refit)
 
 OUTFILE="${BASE}/sampler_benchmark_results.tsv"
 printf "plate\tmode\tsampler\tstatus\ttime_s\n" > "$OUTFILE"

@@ -100,7 +100,7 @@ run_mcmc_modes() {
   local sch
   sch=$(scheme_for "$dir")
   echo "=== MCMC-mode comparison: $dir (scheme=${sch}) ==="
-  for mcmc in single multi multi-noise multi-noise-xrw; do
+  for mcmc in single single-refit; do
     outdir="compare/mcmc_${mcmc//-/_}"
     echo "  → mcmc=${mcmc}  sampler=${NUTS_SAMPLER}  samples=${MCMC_SAMPLES}  out=${outdir}"
     "$PPR" -o "${outdir}" tecan list.pH.csv \
@@ -111,16 +111,6 @@ run_mcmc_modes() {
       2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
     echo "    done"
   done
-  # multi-noise-xrw with per-well independent K (hierarchical partial pooling per CTR)
-  outdir="compare/mcmc_multi_noise_xrw_free_ctr"
-  echo "  → mcmc=multi-noise-xrw --ctr-free-k  sampler=${NUTS_SAMPLER}  samples=${MCMC_SAMPLES}  out=${outdir}"
-  "$PPR" -o "${outdir}" tecan list.pH.csv \
-    --bg-adj --nrm --sch "${sch}" --add additions.pH \
-    --fit-method huber --mcmc multi-noise-xrw --ctr-free-k \
-    --nuts-sampler "${NUTS_SAMPLER}" \
-    --mcmc-samples "${MCMC_SAMPLES}" \
-    2>&1 | grep -E "ERROR|WARNING|CRITICAL" || true
-  echo "    done"
 }
 
 PLATES=("$L1_DIR" "$L2_DIR" "$L3_DIR" "$L4_DIR")

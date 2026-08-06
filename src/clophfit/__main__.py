@@ -358,6 +358,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
             noise_mode=cast('Literal["centered", "fixed"]', noise_mode),
         )
     )
+    logger.info("mcmc: %s", mcmc_spec)
     try:
         export_data_fit(tit, tecan_config, mcmc_spec)
     except Exception as e:

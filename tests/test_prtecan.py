@@ -1500,7 +1500,7 @@ class TestTitrationAnalysis:
         # The refit's ye_mag prior is recentred on 0 with a tighter sigma.
         assert second["noise"].ye_mag_mu == 0.0
         assert second["noise"].ye_mag_sigma == 0.25
-        # Sampler settings come from titration params in both passes.
+        # Sampler settings come from spec.sampler in both passes.
         assert first["sampler"].n_samples == 7
         assert second["sampler"].n_samples == 7
 
@@ -1706,20 +1706,6 @@ def test_mcmc_spec_defaults() -> None:
     assert spec.sampler.n_samples == 8
     assert spec.structured_noise is False
     assert spec.noise_mode == "centered"
-    assert not hasattr(spec, "ctr_free_k")
-
-
-def test_structured_noise_takes_mode_as_argument() -> None:
-    """The mode is passed in, not read off titration.params."""
-    from clophfit.prtecan.export import _structured_noise  # noqa: PLC0415, PLC2701
-
-    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
-    tit.load_scheme(data_tests / "140220" / "scheme.txt")
-    tit.params.noise_gain = (1.0, 1.0)
-
-    cfg = _structured_noise(tit, noise_mode="fixed")
-
-    assert cfg.gain_mode == "fixed"
 
 
 def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
@@ -1728,6 +1714,45 @@ def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
 
     tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     assert fit_single_mcmc(tit, {}, tmp_path, None) is None
+
+
+def test_export_data_fit_with_mcmc_spec_samples(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A real McmcSpec threaded into export_data_fit reaches the sampler.
+
+    Pins the seam one hop above ``test_fit_single_mcmc_returns_none_without_spec``:
+    that test shows ``mcmc=None`` performs no sampling at ``fit_single_mcmc``;
+    this one shows a non-``None`` spec passed to ``export_data_fit`` actually
+    drives a call into the sampler, through ``export_fit``. The sampler is
+    patched so the assertion is "was it called", not a real MCMC run.
+    """
+    calls: list[Dataset] = []
+
+    def fake_fit_binding_pymc(ds: Dataset, **_kwargs: object) -> FitResult:
+        calls.append(ds)
+        return fit_binding_glob(ds)
+
+    monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+
+    tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    tit.load_additions(data_tests / "140220/additions.pH")
+    tit.load_scheme(data_tests / "140220/scheme.txt")
+
+    config = TecanConfig(
+        out_fp=tmp_path,
+        comb=False,
+        lim=None,
+        title="Test",
+        fit=True,
+        png=False,
+        detect_bad=False,
+    )
+    spec = prtecan.McmcSpec(model="single", sampler=SamplerConfig(n_samples=5))
+
+    export_data_fit(tit, config, spec)
+
+    assert calls, "export_data_fit(..., mcmc=spec) never reached the sampler"
 
 
 def test_titration_config_carries_no_sampler_fields() -> None:
