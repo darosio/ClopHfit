@@ -154,10 +154,9 @@ def detect_bad_wells_cmd(
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
-@click.option("--mcmc", type=_FlexChoice(["None", "multi", "multi-noise", "multi-noise-xrw", "single", "single-refit"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, multi, multi-noise (learned noise), multi-noise-xrw (noise+per-well pH random walk), single, single-refit.")  # fmt: skip
+@click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit"], case_sensitive=False), default="None", show_default=True, help="Per-well MCMC sampling: None, single, single-refit (robust screening pass then refit).")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
-@click.option("--ctr-free-k", is_flag=True, help="Hierarchical CTR K: each replicate well gets its own K drawn from Normal(K_mu, K_tau). The spread of posteriors quantifies between-replicate accuracy.")  # fmt: skip
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label. Adds proportional term to y_err variance. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label. Replaces hardcoded gain=1 in shot-noise term. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--mcmc-noise", type=click.Choice(["ye_mag", "structured"], case_sensitive=False), default="ye_mag", show_default=True, help="Observation-noise family for --mcmc single-refit. ye_mag scales y_err by a learned multiplier; structured builds floor+gain*y+(alpha*y)^2 with floors from bg_noise and gain/alpha from --noise-gain/--noise-alpha.")  # fmt: skip
@@ -187,7 +186,6 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     mcmc: str,
     nuts_sampler: str,
     mcmc_samples: int,
-    ctr_free_k: bool,
     noise_alpha: tuple[float, ...],
     noise_gain: tuple[float, ...],
     mcmc_noise: str,
@@ -277,7 +275,6 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     tit.params.mcmc = mcmc
     tit.params.nuts_sampler = nuts_sampler
     tit.params.n_mcmc_samples = mcmc_samples
-    tit.params.ctr_free_k = ctr_free_k
     tit.params.noise_alpha = noise_alpha
     tit.params.noise_gain = noise_gain
     tit.params.mcmc_noise = mcmc_noise

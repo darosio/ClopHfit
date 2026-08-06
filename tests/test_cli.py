@@ -230,3 +230,34 @@ def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> 
     # delete the png files
     for file in pngs:
         file.unlink()
+
+
+def test_prtecan_rejects_retired_mcmc_modes(tmp_path: Path, runner: CliRunner) -> None:
+    """The multi modes were no-ops after 01735f12; they must not be offered."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+    for mode in ("multi", "multi-noise", "multi-noise-xrw"):
+        result = runner.invoke(
+            ppr,
+            [
+                "--out",
+                str(tmp_path / "out"),
+                "tecan",
+                list_f,
+                "--mcmc",
+                mode,
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0, f"{mode} was accepted"
+        assert "single-refit" in result.output
+
+
+def test_prtecan_rejects_retired_ctr_free_k(tmp_path: Path, runner: CliRunner) -> None:
+    """--ctr-free-k was written to params and read by nobody; it must not be offered."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+    result = runner.invoke(
+        ppr,
+        ["--out", str(tmp_path / "out"), "tecan", list_f, "--ctr-free-k", "--dry-run"],
+    )
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
