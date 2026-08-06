@@ -1643,7 +1643,9 @@ class TestStructuredMcmcNoise:
         mode; floors still come from the measured background noise.
         """
         titan = self._titration()
-        noise = export._structured_noise(titan)  # noqa: SLF001
+        noise = export._structured_noise(  # noqa: SLF001
+            titan, noise_mode=titan.params.noise_mode
+        )
         assert noise.kind == "structured"
         assert noise.gain_mode == "free"
         assert noise.alpha_mode == "free"
@@ -1657,7 +1659,9 @@ class TestStructuredMcmcNoise:
         titan.params.noise_gain = (4.93, 1.34)
         titan.params.noise_alpha = (0.106, 0.0)
         titan.params.noise_mode = "centered"
-        noise = export._structured_noise(titan)  # noqa: SLF001
+        noise = export._structured_noise(  # noqa: SLF001
+            titan, noise_mode=titan.params.noise_mode
+        )
         assert noise.gain_mode == "centered"
         assert noise.alpha_mode == "centered"
         assert noise.gain == {labels[0]: 4.93, labels[1]: 1.34}
@@ -1670,7 +1674,9 @@ class TestStructuredMcmcNoise:
         titan = self._titration()
         titan.params.noise_alpha = (0.05, 0.02)
         titan.params.noise_mode = "fixed"
-        noise = export._structured_noise(titan)  # noqa: SLF001
+        noise = export._structured_noise(  # noqa: SLF001
+            titan, noise_mode=titan.params.noise_mode
+        )
         assert noise.alpha_mode == "fixed"
         # Gain got no value, so it stays free regardless of noise_mode.
         assert noise.gain_mode == "free"
@@ -1706,3 +1712,16 @@ def test_mcmc_spec_defaults() -> None:
     assert spec.structured_noise is False
     assert spec.noise_mode == "centered"
     assert not hasattr(spec, "ctr_free_k")
+
+
+def test_structured_noise_takes_mode_as_argument() -> None:
+    """The mode is passed in, not read off titration.params."""
+    from clophfit.prtecan.export import _structured_noise  # noqa: PLC0415, PLC2701
+
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "140220" / "scheme.txt")
+    tit.params.noise_gain = (1.0, 1.0)
+
+    cfg = _structured_noise(tit, noise_mode="fixed")
+
+    assert cfg.gain_mode == "fixed"

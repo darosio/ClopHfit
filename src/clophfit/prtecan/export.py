@@ -6,6 +6,7 @@ import logging
 import typing
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -133,18 +134,23 @@ def _ye_mag_screening_noise(
     return NoiseConfig.ye_mag(shared=False, prior="lognormal", mu=first_mu, sigma=0.5)
 
 
-def _structured_noise(titration: Titration) -> NoiseConfig:
+def _structured_noise(
+    titration: Titration, *, noise_mode: Literal["centered", "fixed"]
+) -> NoiseConfig:
     """Build the physical floor/gain/alpha noise config from titration params.
 
     Floors always come from the measured ``bg_noise``. Gain and alpha are
     ``"free"`` when no value was supplied -- there is no hint to centre on, so
-    the sampler learns them -- and otherwise take
-    ``titration.params.noise_mode`` (``"centered"`` or ``"fixed"``).
+    the sampler learns them -- and otherwise take ``noise_mode`` (``"centered"``
+    or ``"fixed"``).
 
     Parameters
     ----------
     titration : Titration
         Titration whose ``bg_noise`` and ``params`` supply the hints.
+    noise_mode : Literal["centered", "fixed"]
+        How a supplied ``noise_gain``/``noise_alpha`` value is treated by the
+        sampler.
 
     Returns
     -------
@@ -152,7 +158,7 @@ def _structured_noise(titration: Titration) -> NoiseConfig:
         A ``structured`` config with per-label floor, gain and alpha hints.
     """
     labels = sorted(titration.data.keys())
-    supplied_mode = titration.params.noise_mode
+    supplied_mode = noise_mode
 
     def _per_label(values: tuple[float, ...]) -> dict[str, float]:
         return {
@@ -166,8 +172,8 @@ def _structured_noise(titration: Titration) -> NoiseConfig:
         floor=floors or None,
         gain=gains or 0.0,
         alpha=alphas or 0.0,
-        gain_mode=supplied_mode if gains else "free",  # type: ignore[arg-type]
-        alpha_mode=supplied_mode if alphas else "free",  # type: ignore[arg-type]
+        gain_mode=supplied_mode if gains else "free",
+        alpha_mode=supplied_mode if alphas else "free",
     )
 
 
@@ -291,7 +297,10 @@ def fit_single_mcmc(
         # One config for both passes: unlike ye_mag, whose refit prior is
         # recentred on the screening pass's learned multiplier, the structured
         # model's floor/gain/alpha hints do not shift between passes.
-        noise = _structured_noise(titration)
+        noise = _structured_noise(
+            titration,
+            noise_mode=titration.params.noise_mode,  # type: ignore[arg-type]
+        )
         screening_noise, refit_noise = noise, noise
     else:
         screening_noise = _ye_mag_screening_noise(titration.bg_noise)
