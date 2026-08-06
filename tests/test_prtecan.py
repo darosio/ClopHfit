@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import logging
 import re
@@ -548,7 +549,6 @@ class TestTitrationConfig:
         assert config.bg_mth == "mean"
         assert config.fit_method == "huber"
         assert config.outlier is None
-        assert config.ctr_free_k is False
 
     def test_callback(self) -> None:
         """It triggers callback on parameter change."""
@@ -1646,7 +1646,7 @@ class TestStructuredMcmcNoise:
         """
         titan = self._titration()
         noise = export._structured_noise(  # noqa: SLF001
-            titan, noise_mode=titan.params.noise_mode
+            titan, noise_mode="centered"
         )
         assert noise.kind == "structured"
         assert noise.gain_mode == "free"
@@ -1660,9 +1660,8 @@ class TestStructuredMcmcNoise:
         labels = sorted(titan.data)
         titan.params.noise_gain = (4.93, 1.34)
         titan.params.noise_alpha = (0.106, 0.0)
-        titan.params.noise_mode = "centered"
         noise = export._structured_noise(  # noqa: SLF001
-            titan, noise_mode=titan.params.noise_mode
+            titan, noise_mode="centered"
         )
         assert noise.gain_mode == "centered"
         assert noise.alpha_mode == "centered"
@@ -1675,18 +1674,12 @@ class TestStructuredMcmcNoise:
         """``noise_mode="fixed"`` pins supplied hints instead of centring them."""
         titan = self._titration()
         titan.params.noise_alpha = (0.05, 0.02)
-        titan.params.noise_mode = "fixed"
         noise = export._structured_noise(  # noqa: SLF001
-            titan, noise_mode=titan.params.noise_mode
+            titan, noise_mode="fixed"
         )
         assert noise.alpha_mode == "fixed"
         # Gain got no value, so it stays free regardless of noise_mode.
         assert noise.gain_mode == "free"
-
-    def test_default_config_keeps_ye_mag(self) -> None:
-        """The structured family is opt-in; the default stays ye_mag."""
-        assert TitrationConfig().mcmc_noise == "ye_mag"
-        assert TitrationConfig().noise_mode == "centered"
 
 
 def test_params_change_resets_derived_data() -> None:
@@ -1735,3 +1728,18 @@ def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
 
     tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     assert fit_single_mcmc(tit, {}, tmp_path, None) is None
+
+
+def test_titration_config_carries_no_sampler_fields() -> None:
+    """Sampling choices belong to the call that samples, not to the plate."""
+    names = {f.name for f in dataclasses.fields(prtecan.TitrationConfig)}
+    retired = {
+        "mcmc",
+        "nuts_sampler",
+        "n_mcmc_samples",
+        "ctr_free_k",
+        "mcmc_noise",
+        "noise_mode",
+    }
+    assert names & retired == set()
+    assert {"noise_alpha", "noise_gain"} <= names

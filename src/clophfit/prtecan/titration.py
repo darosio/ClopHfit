@@ -129,10 +129,6 @@ class TitrationConfig:
     bg_mth: str = "mean"
     fit_method: str = "huber"
     outlier: str | None = None
-    mcmc: str = "None"
-    nuts_sampler: str = "default"
-    n_mcmc_samples: int = 2000
-    ctr_free_k: bool = False
     noise_alpha: tuple[float, ...] = ()
     """Proportional noise coefficients per label.
 
@@ -151,21 +147,6 @@ class TitrationConfig:
 
     Values typically from MCMC multi-noise shared_noise_params.csv.
     Empty tuple keeps gain=1 (legacy behaviour).
-    """
-    mcmc_noise: str = "ye_mag"
-    """Observation-noise family for ``--mcmc single-refit``.
-
-    ``"ye_mag"`` (default) scales each label's ``y_err`` by a learned
-    multiplier. ``"structured"`` builds the physical
-    ``floor + gain * y + (alpha * y)^2`` model instead, taking floors from the
-    measured ``bg_noise`` and gain/alpha from ``noise_gain``/``noise_alpha``.
-    """
-    noise_mode: str = "centered"
-    """How ``structured`` treats a supplied ``noise_gain``/``noise_alpha`` value.
-
-    ``"centered"`` treats it as a hint the posterior may move away from;
-    ``"fixed"`` pins it. A parameter with no value supplied is ``"free"``
-    regardless, since there is no hint to centre on or pin.
     """
 
     mask_outliers: bool = field(default=False)
