@@ -1953,7 +1953,9 @@ def test_fit_binding_pymc_multi_x_start_between_sigma_opt_in(
         )
 
     assert "x_start" in normal_names
-    assert ("x_start_well" in normal_names) is expect_well
+    # Non-centered: the per-well term enters as a standardized offset, and
+    # x_start_well is the Deterministic rescaling of it.
+    assert ("x_start_well_offset" in normal_names) is expect_well
 
 
 def test_fit_binding_pymc_multi_rejects_removed_hierarchical_model() -> None:

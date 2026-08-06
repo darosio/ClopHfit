@@ -1286,10 +1286,17 @@ def _build_multi_x_start(
     x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
     if x_start_between_sigma <= 0:
         return x_start
-    return pm.Normal(
+    # Non-centered: sample the standardized offset and rescale, rather than
+    # centering the per-well location on x_start. The prior is identical, but the
+    # sampler no longer has to traverse a funnel whose neck narrows with
+    # x_start_between_sigma. The centered form left x_start_well and the x_true
+    # it feeds at r-hat > 3 across the 2026-08-05 multi-well grid.
+    x_start_well_offset = pm.Normal(
+        "x_start_well_offset", mu=0.0, sigma=1.0, dims="well"
+    )
+    return pm.Deterministic(
         "x_start_well",
-        mu=x_start,
-        sigma=x_start_between_sigma,
+        x_start + x_start_between_sigma * x_start_well_offset,
         dims="well",
     )
 
