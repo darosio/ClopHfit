@@ -6,6 +6,7 @@ with the committed example plate and 20-draw PyMC smoke fits.
 
 from __future__ import annotations
 
+import types
 from typing import Any, cast
 
 import numpy as np
@@ -389,6 +390,28 @@ def test_ctr_holdout_scheme_uses_sets() -> None:
     assert s2.names == {"ctrl": {"A02", "A03"}}
     tasks = list(iter_ctr_holdouts(s, min_remaining=1))
     assert len(tasks) == 3
+
+
+def test_iter_ctr_holdouts_excludes_unfitted_wells() -> None:
+    """A control dropped by bad-well detection must not appear as heldout nor remaining."""
+    scheme = types.SimpleNamespace(names={"ctrl": {"A01", "A02", "A03", "G12"}})
+
+    # Without fitted_wells the scheme is taken at face value: G12 still appears.
+    plain = list(iter_ctr_holdouts(scheme, min_remaining=1))
+    assert len(plain) == 4
+    assert any("G12" in t["remaining_ctr_wells"] for t in plain)
+
+    fitted = list(
+        iter_ctr_holdouts(scheme, min_remaining=1, fitted_wells={"A01", "A02", "A03"})
+    )
+    assert [t["heldout_well"] for t in fitted] == ["A01", "A02", "A03"]
+    assert all("G12" not in t["remaining_ctr_wells"] for t in fitted)
+    assert all(t["n_remaining_ctr"] == 2 for t in fitted)
+
+    # min_remaining is judged on the surviving wells, not the designed group.
+    assert not list(
+        iter_ctr_holdouts(scheme, min_remaining=2, fitted_wells={"A01", "A02"})
+    )
 
 
 def test_merge_log_likelihoods_builds_single_obs_variable() -> None:

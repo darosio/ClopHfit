@@ -11,6 +11,9 @@ import pandas as pd
 
 from .model_validation import posterior_dataset
 
+if _t.TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 def ctr_param_name(group_name: str) -> str:
     """Return the shared-control K parameter name used by Bayesian multi-fit."""
@@ -69,12 +72,41 @@ def make_ctr_holdout_scheme(
 
 
 def iter_ctr_holdouts(
-    scheme: _t.Any, *, min_remaining: int = 1
-) -> _t.Iterator[dict[str, _t.Any]]:
-    """Yield holdout tasks from all named control groups."""
+    scheme: _t.Any,
+    *,
+    min_remaining: int = 1,
+    fitted_wells: _t.Collection[str] | None = None,
+) -> Iterator[dict[str, _t.Any]]:
+    """Yield holdout tasks from all named control groups.
+
+    Parameters
+    ----------
+    scheme : _t.Any
+        Plate scheme whose ``names`` maps each control group to its wells.
+    min_remaining : int
+        Skip a group unless more than this many wells are available.
+    fitted_wells : _t.Collection[str] | None
+        Wells that were actually fitted.  When given, group members missing from
+        it are dropped before enumeration, so a control removed by
+        ``detect_and_discard_bad_wells`` is neither held out nor reported as a
+        remaining control.  The scheme alone cannot express that: it records the
+        plate as designed, not as fitted.  Leaving a discarded well in the
+        remaining list overstates the reference under ``reference_mode="shared"``
+        and raises ``KeyError`` under ``"weighted_mean"``, which looks its ``K``
+        variable up by name.  ``None`` keeps every scheme member.
+
+    Yields
+    ------
+    dict[str, _t.Any]
+        One task per heldout well, with the group name, the heldout well, and
+        the remaining controls and their count.
+    """
+    available = None if fitted_wells is None else {str(w) for w in fitted_wells}
     for group_name, wells in scheme.names.items():
         group_name = str(group_name)
         wells = sorted(str(w) for w in wells)
+        if available is not None:
+            wells = [w for w in wells if w in available]
         if len(wells) <= min_remaining:
             continue
         for heldout_well in wells:
