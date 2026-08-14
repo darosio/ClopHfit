@@ -1475,9 +1475,23 @@ class McmcSpec:
         How a supplied gain/alpha hint is treated when *structured_noise* is
         set: centred on (a hint the posterior may leave) or pinned to it. A
         parameter with no supplied value is always free.
+    per_well_ye_mags : bool | None
+        Whether the ye_mag multiplier is per well rather than per label.
+        ``None`` leaves the library to resolve it from the noise family, which
+        couples the two; pass a bool to keep them independent. Only meaningful
+        for ``model="multi"``, since a single-well fit has one well.
+    ye_mag_parameterization : Literal["centered", "hierarchical", "separable"]
+        How per-well ye_mags are structured: independent per label
+        (``"centered"``), a shared well factor with per-label deviations
+        (``"hierarchical"``), or a per-label level plus one shared well factor
+        (``"separable"``).
     """
 
     model: Literal["single", "single-refit", "multi"]
     sampler: SamplerConfig
     structured_noise: bool = False
     noise_mode: Literal["centered", "fixed"] = "centered"
+    per_well_ye_mags: bool | None = None
+    ye_mag_parameterization: Literal["centered", "hierarchical", "separable"] = (
+        "centered"
+    )

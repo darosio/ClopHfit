@@ -256,6 +256,56 @@ def test_prtecan_accepts_multi_mcmc(tmp_path: Path, runner: CliRunner) -> None:
     assert "not a valid choice" not in result.output.lower()
 
 
+def test_prtecan_offers_odr_and_ye_mag_knobs(runner: CliRunner) -> None:
+    """The axes the science actually varies must be reachable from the CLI.
+
+    ODR is the best classical arm on held-out controls, and the per-well
+    ye_mag structure is what the noise factorial turned on; neither could be
+    expressed here before.
+    """
+    out = runner.invoke(ppr, ["tecan", "--help"]).output
+    assert "[lm|huber|irls|odr]" in out
+    assert "--per-well-ye-mags" in out
+    assert "[centered|hierarchical|separable]" in out
+
+
+def test_odr_reaches_the_global_fit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, runner: CliRunner
+) -> None:
+    """--fit-method odr must select ODR, not fall through to lm.
+
+    The mapping from params.fit_method to the plate fit used to collapse
+    anything unrecognised to "lm", so a newly offered method would be accepted
+    and silently ignored - the failure that left --mcmc multi a no-op for
+    months. This captures the method the plate fit actually receives, rather
+    than asserting the flag parses.
+    """
+    from clophfit.prtecan.titration import Titration  # noqa: PLC0415
+
+    methods: list[str] = []
+    real = Titration.fit_plate
+
+    def spy(self: Titration, *args: object, **kwargs: object) -> object:
+        methods.append(str(kwargs.get("method", "")))
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Titration, "fit_plate", spy)
+    runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(tmp_path / "out"),
+            "tecan",
+            str(tpath / "Tecan" / "140220" / "list.pH.csv"),
+            "--fit-method",
+            "odr",
+            "--no-png",
+        ],
+    )
+    assert methods, "the plate fit was never reached"
+    assert "odr" in methods, f"odr never reached the plate fit; saw {set(methods)}"
+
+
 def test_prtecan_rejects_retired_mcmc_modes(tmp_path: Path, runner: CliRunner) -> None:
     """The multi-noise modes were no-ops after 01735f12; they stay unoffered."""
     list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")

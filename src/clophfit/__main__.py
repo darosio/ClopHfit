@@ -153,7 +153,7 @@ def detect_bad_wells_cmd(
 @click.option("--title", "-t", type=str, default="", help="Title for plots.")
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
-@click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
+@click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls", "odr"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting), odr (orthogonal distance regression, x-aware).")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit", "multi"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, single, single-refit (robust screening pass then refit), multi (all wells jointly, control K shared per group).")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
@@ -162,6 +162,8 @@ def detect_bad_wells_cmd(
 @click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label. Replaces hardcoded gain=1 in shot-noise term. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--mcmc-noise", type=click.Choice(["ye_mag", "structured"], case_sensitive=False), default="ye_mag", show_default=True, help="Observation-noise family for --mcmc single-refit. ye_mag scales y_err by a learned multiplier; structured builds floor+gain*y+(alpha*y)^2 with floors from bg_noise and gain/alpha from --noise-gain/--noise-alpha.")  # fmt: skip
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a supplied --noise-gain/--noise-alpha value is treated: centered (a hint the posterior may leave) or fixed (pinned). A parameter with no value supplied is always free.")  # fmt: skip
+@click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
+@click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), or a per-label level plus one shared well factor (separable).")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
@@ -190,6 +192,8 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     noise_alpha: tuple[float, ...],
     noise_gain: tuple[float, ...],
     mcmc_noise: str,
+    per_well_ye_mags: bool | None,
+    ye_mag_parameterization: str,
     noise_mode: str,
     dry_run: bool,
     detect_bad: bool,
@@ -355,6 +359,11 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
             model=cast('Literal["single", "single-refit", "multi"]', mcmc),
             sampler=SamplerConfig(n_samples=mcmc_samples, nuts_sampler=nuts_sampler),
             structured_noise=mcmc_noise == "structured",
+            per_well_ye_mags=per_well_ye_mags,
+            ye_mag_parameterization=cast(
+                'Literal["centered", "hierarchical", "separable"]',
+                ye_mag_parameterization,
+            ),
             noise_mode=cast('Literal["centered", "fixed"]', noise_mode),
         )
     )

@@ -293,7 +293,13 @@ def fit_single_mcmc(
         # group. Only the per-well results are returned, because that is what
         # the export path writes; the shared trace, which carries the pooled
         # control K itself, is reachable only through fit_binding_pymc_multi.
-        multi = fit_binding_pymc_multi(datasets, titration.scheme, sampler=spec.sampler)
+        multi = fit_binding_pymc_multi(
+            datasets,
+            titration.scheme,
+            sampler=spec.sampler,
+            per_well_ye_mags=spec.per_well_ye_mags,
+            ye_mag_parameterization=spec.ye_mag_parameterization,
+        )
         return TitrationResults(titration.scheme, titration.fit_keys, multi.results)
 
     if spec.model == "single":
@@ -365,12 +371,20 @@ def export_fit(
                 )
             )
 
-    method = (
-        "lm"
-        if titration.params.fit_method == "irls"
-        else ("huber" if titration.params.fit_method == "huber" else "lm")
-    )
-    reweight = "irls" if titration.params.fit_method == "irls" else None
+    # Written out rather than nested, because a method missing from this
+    # mapping does not fail - it silently falls through to "lm" and the run
+    # reports success having fitted something else. That is how --mcmc multi
+    # spent months as a no-op.
+    fit_method = titration.params.fit_method
+    reweight: str | None = None
+    if fit_method == "odr":
+        method = "odr"
+    elif fit_method == "irls":
+        method, reweight = "lm", "irls"
+    elif fit_method == "huber":
+        method = "huber"
+    else:
+        method = "lm"
 
     global_res = titration.fit_plate(
         datasets,
