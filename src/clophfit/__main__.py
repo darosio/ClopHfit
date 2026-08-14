@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 import click
+
+from clophfit.fitting.grid import model_signature
 import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
@@ -71,6 +73,30 @@ class _FlexChoice(click.Choice):
 @click.version_option(message="%(version)s")
 def clop() -> None:  # pragma: no cover
     """Group command."""
+
+
+
+def _echo_spec(spec: dict[str, Any]) -> None:
+    """Print a resolved analysis specification and the signature it hashes to.
+
+    Parameters
+    ----------
+    spec : dict[str, Any]
+        Resolved option values, one per factor the analysis varies.
+
+    Notes
+    -----
+    The option surface is large enough that two invocations can describe the
+    same analysis while looking different, and different analyses can look
+    alike. The signature is taken over resolved values, so it answers "have I
+    run this before" without relying on anyone remembering which flags they
+    typed.
+    """
+    signature = model_signature(spec, (), tuple(spec))
+    width = max(len(k) for k in spec)
+    for key, value in spec.items():
+        click.echo(f"  {key:<{width}}  {value!r}")
+    click.echo(f"\nsignature: {signature}")
 
 
 @clop.command()
@@ -164,6 +190,7 @@ def detect_bad_wells_cmd(
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a supplied --noise-gain/--noise-alpha value is treated: centered (a hint the posterior may leave) or fixed (pinned). A parameter with no value supplied is always free.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), or a per-label level plus one shared well factor (separable).")  # fmt: skip
+@click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
@@ -196,6 +223,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
     ye_mag_parameterization: str,
     noise_mode: str,
     dry_run: bool,
+    print_spec: bool,
     detect_bad: bool,
     mask_outliers: bool,
     outlier_threshold: float,
@@ -269,6 +297,30 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
             f"Please check the file format and contents."
         )
         raise click.ClickException(msg) from e
+
+    if print_spec:
+        _echo_spec({
+            "bg": bg,
+            "bg_adj": bg_adj,
+            "bg_mth": bg_mth,
+            "nrm": nrm,
+            "dil": dil,
+            "fit_method": fit_method,
+            "outlier": outlier,
+            "mask_outliers": mask_outliers,
+            "outlier_threshold": outlier_threshold,
+            "detect_bad": detect_bad,
+            "mcmc": mcmc,
+            "mcmc_samples": mcmc_samples,
+            "nuts_sampler": nuts_sampler,
+            "mcmc_noise": mcmc_noise,
+            "noise_mode": noise_mode,
+            "noise_alpha": tuple(noise_alpha),
+            "noise_gain": tuple(noise_gain),
+            "per_well_ye_mags": per_well_ye_mags,
+            "ye_mag_parameterization": ye_mag_parameterization,
+        })
+        return
 
     tit.params.bg = bg
     tit.params.bg_adj = bg_adj

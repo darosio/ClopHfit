@@ -335,3 +335,25 @@ def test_prtecan_rejects_retired_ctr_free_k(tmp_path: Path, runner: CliRunner) -
     )
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
+
+
+def test_print_spec_signs_the_resolved_analysis(runner: CliRunner) -> None:
+    """The signature depends on resolved values, not on how flags were typed.
+
+    The option surface is large enough that two invocations can describe one
+    analysis while looking different, and different analyses can look alike.
+    Signing resolved values answers "have I run this before" without anyone
+    having to remember the flags.
+    """
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+
+    def sig(*extra: str) -> str:
+        out = runner.invoke(ppr, ["tecan", list_f, "--print-spec", *extra]).output
+        return next(ln for ln in out.splitlines() if ln.startswith("signature:"))
+
+    reordered = sig("--mcmc", "multi", "--fit-method", "odr")
+    assert sig("--fit-method", "odr", "--mcmc", "multi") == reordered
+    assert sig("--fit-method", "lm", "--mcmc", "multi") != reordered
+    assert (
+        sig("--fit-method", "odr", "--mcmc", "multi", "--per-well-ye-mags") != reordered
+    )
