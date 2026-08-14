@@ -30,7 +30,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -60,7 +60,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -100,7 +100,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -150,14 +150,7 @@ jobs:
   auto_merge_deps:
     name: Auto Merge dependencies and template updates
     needs: [pre-commit, tests, docs_build]
-    # Run only on pull_request labeled "dependencies" or template updates
-    if: >
-      github.event_name == 'pull_request' &&
-      (
-      startsWith(github.event.pull_request.title, 'build(pre-commit): update hooks') ||
-      contains(github.event.pull_request.labels.*.name, 'dependencies') ||
-      contains(github.event.pull_request.labels.*.name, 'update-template')
-      )
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -165,9 +158,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+      # Eligibility is read from the API, not from github.event.pull_request: the
+      # bots label the PR a second *after* opening it, so the "opened" payload
+      # snapshot can still show no labels (and "labeled" does not re-trigger CI).
       - name: Merge PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          gh pr merge --auto --squash --delete-branch "$PR_URL"
+          title=$(gh pr view "$PR_URL" --json title --jq .title)
+          labels=$(gh pr view "$PR_URL" --json labels --jq '[.labels[].name] | join(" ")')
+          echo "title=$title"
+          echo "labels=$labels"
+          if [[ " $labels " == *" dependencies "* ]] ||
+             [[ " $labels " == *" update-template "* ]] ||
+             [[ "$title" == "build(pre-commit): update hooks"* ]]; then
+            gh pr merge --auto --squash --delete-branch "$PR_URL"
+          else
+            echo "Not a dependency or template update; leaving PR open."
+          fi
