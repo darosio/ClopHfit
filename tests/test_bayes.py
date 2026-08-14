@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, Literal, cast
-
 import warnings
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -17,7 +16,7 @@ from lmfit import Parameters  # type: ignore[import-untyped]
 
 from clophfit.fitting import bayes, bayes_config
 from clophfit.fitting.bayes import (
-    _pipetting_step_sigmas,  # noqa: PLC2701
+    _pipetting_step_sigmas,  # ruff: ignore[import-private-name]
     create_parameter_priors,
     create_x_true,
     extract_fit,
@@ -307,7 +306,7 @@ def test_create_parameter_priors_skip_shared_k(lmfit_params: Parameters) -> None
 
 def test_data_prior_seed_uses_ph_extremes_and_midpoint(ph_dataset: Dataset) -> None:
     """Data-prior initialization should infer pH edge signals without LMFit."""
-    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         ph_dataset,
         edge_points=1,
         signal_sigma_scale=0.5,
@@ -329,7 +328,7 @@ def test_data_prior_default_k_bounds_respect_is_ph(
     ph_dataset: Dataset, cl_dataset: Dataset
 ) -> None:
     """Omitted k_bounds should resolve from is_ph, not a fixed pH range."""
-    ph_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    ph_fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         ph_dataset,
         edge_points=1,
         signal_sigma_scale=0.5,
@@ -341,7 +340,7 @@ def test_data_prior_default_k_bounds_respect_is_ph(
     assert ph_fr.result.params["K"].min == pytest.approx(4.5)
     assert ph_fr.result.params["K"].max == pytest.approx(9.0)
 
-    cl_fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    cl_fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         cl_dataset,
         edge_points=1,
         signal_sigma_scale=0.5,
@@ -356,7 +355,7 @@ def test_data_prior_default_k_bounds_respect_is_ph(
 
 def test_create_data_parameter_priors_can_use_uniform_k(ph_dataset: Dataset) -> None:
     """Direct data priors should support a bounded flat K prior."""
-    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         ph_dataset,
         edge_points=2,
         signal_sigma_scale=0.5,
@@ -417,11 +416,11 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
 )
 def test_resolve_data_prior_k_bounds(
     k_bounds: tuple[float, float] | None,
-    is_ph: bool,  # noqa: FBT001
+    is_ph: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
     expected: tuple[float, float],
 ) -> None:
     """K-bound resolution should fall back per is_ph and validate the range."""
-    lo, hi = bayes._resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)  # noqa: SLF001
+    lo, hi = bayes._resolve_data_prior_k_bounds(k_bounds, is_ph=is_ph)  # ruff: ignore[private-member-access]
     assert lo == pytest.approx(expected[0])
     assert hi == pytest.approx(expected[1])
 
@@ -438,7 +437,7 @@ def test_normalize_fit_inputs_data_priors_skips_lmfit(
 
     monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
 
-    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # ruff: ignore[private-member-access]
         {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
         init_strategy="data_priors",
     )
@@ -467,7 +466,7 @@ def test_normalize_fit_inputs_data_priors_ignores_prefit_result(
     prefit = fit_binding_glob(multi_dataset)
     monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
 
-    normalized, prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+    normalized, prefer_centered = bayes._normalize_fit_inputs(  # ruff: ignore[private-member-access]
         {"A01": prefit},
         init_strategy="data_priors",
         data_prior_edge_points=1,
@@ -514,12 +513,12 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
 def test_edge_helpers_handle_empty_input() -> None:
     """Edge-window helpers should degrade gracefully on empty arrays."""
     empty = np.array([], dtype=float)
-    assert bayes._edge_mean(empty, start=True, n_points=2) == 0.0  # noqa: SLF001
-    assert bayes._edge_signal_priors(  # noqa: SLF001
+    assert bayes._edge_mean(empty, start=True, n_points=2) == 0.0  # ruff: ignore[private-member-access]
+    assert bayes._edge_signal_priors(  # ruff: ignore[private-member-access]
         empty, empty, is_ph=True, edge_points=2
     ) == (0.0, 0.0)
     assert (
-        bayes._midpoint_x_for_prior(  # noqa: SLF001
+        bayes._midpoint_x_for_prior(  # ruff: ignore[private-member-access]
             empty, empty, high_edge=1.0, low_edge=0.0, bounds=(4.5, 9.0)
         )
         is None
@@ -530,14 +529,14 @@ def test_edge_mean_falls_back_to_full_window_mean() -> None:
     """A fully-NaN edge window should fall back to the finite full-array mean."""
     values = np.array([np.nan, 2.0, 4.0])
     # start window of 1 point is NaN -> nanmean over all finite values (3.0).
-    assert bayes._edge_mean(values, start=True, n_points=1) == pytest.approx(3.0)  # noqa: SLF001
+    assert bayes._edge_mean(values, start=True, n_points=1) == pytest.approx(3.0)  # ruff: ignore[private-member-access]
 
 
 def test_fit_result_from_data_priors_all_masked_label() -> None:
     """A label with no active points should still yield finite seed params."""
     da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([np.nan, np.nan, np.nan]))
     ds = Dataset({"default": da}, is_ph=True)
-    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         ds,
         edge_points=2,
         signal_sigma_scale=0.5,
@@ -557,7 +556,7 @@ def test_fit_result_from_data_priors_constant_signal() -> None:
     """A flat titration (zero signal range) should use a positive fallback sigma."""
     da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([2.0, 2.0, 2.0]))
     ds = Dataset({"default": da}, is_ph=True)
-    fr = bayes._fit_result_from_data_priors(  # noqa: SLF001
+    fr = bayes._fit_result_from_data_priors(  # ruff: ignore[private-member-access]
         ds,
         edge_points=1,
         signal_sigma_scale=0.5,
@@ -572,7 +571,7 @@ def test_fit_result_from_data_priors_constant_signal() -> None:
 
 def test_normalize_fit_input_data_priors_without_dataset() -> None:
     """Single-well data-prior normalization returns empty on a dataset-less input."""
-    fr, prefit = bayes._normalize_fit_input(  # noqa: SLF001
+    fr, prefit = bayes._normalize_fit_input(  # ruff: ignore[private-member-access]
         FitResult(), init_strategy="data_priors"
     )
     assert prefit is False
@@ -581,7 +580,7 @@ def test_normalize_fit_input_data_priors_without_dataset() -> None:
 
 def test_normalize_fit_inputs_data_priors_skips_dataset_less_wells() -> None:
     """Multi-well data-prior normalization drops wells that carry no dataset."""
-    normalized, _prefer_centered = bayes._normalize_fit_inputs(  # noqa: SLF001
+    normalized, _prefer_centered = bayes._normalize_fit_inputs(  # ruff: ignore[private-member-access]
         {"A01": FitResult()}, init_strategy="data_priors"
     )
     assert normalized == {}
@@ -601,7 +600,7 @@ def test_plate_noise_from_bg_floor_resolution(
     bg_noise: float | dict[str, float], expected_floor: float
 ) -> None:
     """Background-noise floors should validate and fall back per label."""
-    model = bayes._plate_noise_from_bg(bg_noise, ["1"], alpha=0.1)  # noqa: SLF001
+    model = bayes._plate_noise_from_bg(bg_noise, ["1"], alpha=0.1)  # ruff: ignore[private-member-access]
     assert model["1"].sigma_floor == pytest.approx(expected_floor)
     assert model["1"].gain == 0.0
     assert model["1"].alpha == pytest.approx(0.1)
@@ -637,7 +636,7 @@ def test_resolve_structured_noise_model_passthrough(ph_dataset: Dataset) -> None
     """An explicit noise model should be returned unchanged."""
     explicit = PlateNoiseModel({"default": NoiseModelParams(sigma_floor=9.0)})
     noise = NoiseConfig.structured(noise_model=explicit)
-    assert bayes._resolve_structured_noise_model(noise, ph_dataset) is explicit  # noqa: SLF001
+    assert bayes._resolve_structured_noise_model(noise, ph_dataset) is explicit  # ruff: ignore[private-member-access]
 
 
 def test_resolve_structured_noise_model_synthesizes_from_data(
@@ -646,7 +645,7 @@ def test_resolve_structured_noise_model_synthesizes_from_data(
     """Without a model, the floor is taken from the label's y_err scale."""
     ph_dataset["default"].y_err = np.full_like(ph_dataset["default"].yc, 3.0)
     noise = NoiseConfig.structured(alpha=0.02)
-    model = bayes._resolve_structured_noise_model(noise, ph_dataset)  # noqa: SLF001
+    model = bayes._resolve_structured_noise_model(noise, ph_dataset)  # ruff: ignore[private-member-access]
     assert model["default"].sigma_floor == pytest.approx(3.0)
     assert model["default"].gain == 0.0
     assert model["default"].alpha == pytest.approx(0.02)
@@ -655,7 +654,7 @@ def test_resolve_structured_noise_model_synthesizes_from_data(
 def test_resolve_structured_noise_model_uses_hints(cl_dataset: Dataset) -> None:
     """Explicit floor/gain hints seed the synthesized model."""
     noise = NoiseConfig.structured(floor=5.0, gain=0.1)
-    model = bayes._resolve_structured_noise_model(noise, cl_dataset)  # noqa: SLF001
+    model = bayes._resolve_structured_noise_model(noise, cl_dataset)  # ruff: ignore[private-member-access]
     for params in model.values():
         assert params.sigma_floor == pytest.approx(5.0)
         assert params.gain == pytest.approx(0.1)
@@ -828,7 +827,7 @@ def test_ye_mag_value(
     value: float | dict[str, float], label: str, expected: float
 ) -> None:
     """ye_mag prior values should be finite with scalar/mapping fallbacks."""
-    assert bayes._ye_mag_value(value, label) == pytest.approx(expected)  # noqa: SLF001
+    assert bayes._ye_mag_value(value, label) == pytest.approx(expected)  # ruff: ignore[private-member-access]
 
 
 @pytest.mark.parametrize(
@@ -842,7 +841,7 @@ def test_ye_mag_value(
 )
 def test_shared_ye_mag_value(value: float | dict[str, float], expected: float) -> None:
     """Shared ye_mag values should collapse mappings to a finite mean."""
-    assert bayes._shared_ye_mag_value(value) == pytest.approx(expected)  # noqa: SLF001
+    assert bayes._shared_ye_mag_value(value) == pytest.approx(expected)  # ruff: ignore[private-member-access]
 
 
 @pytest.mark.parametrize(
@@ -858,7 +857,7 @@ def test_ye_mag_sigma(
     sigma: float | dict[str, float], label: str, expected: float
 ) -> None:
     """ye_mag sigmas should be strictly positive with per-label fallbacks."""
-    assert bayes._ye_mag_sigma(sigma, label) == pytest.approx(expected)  # noqa: SLF001
+    assert bayes._ye_mag_sigma(sigma, label) == pytest.approx(expected)  # ruff: ignore[private-member-access]
 
 
 @pytest.mark.parametrize(
@@ -872,20 +871,20 @@ def test_ye_mag_sigma(
 )
 def test_shared_ye_mag_sigma(sigma: float | dict[str, float], expected: float) -> None:
     """Shared ye_mag sigmas should stay positive across scalar/mapping inputs."""
-    assert bayes._shared_ye_mag_sigma(sigma) == pytest.approx(expected)  # noqa: SLF001
+    assert bayes._shared_ye_mag_sigma(sigma) == pytest.approx(expected)  # ruff: ignore[private-member-access]
 
 
 def test_validate_robust_likelihood_rejects_unknown() -> None:
     """An unrecognized robust-likelihood selector should raise ValueError."""
     with pytest.raises(ValueError, match=r"student_t.*mixture"):
-        bayes_config._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # noqa: SLF001
+        bayes_config._validate_robust_likelihood("bogus")  # type: ignore[arg-type]  # ruff: ignore[private-member-access]
 
 
 def test_add_y_likelihood_mixture_requires_outlier_priors() -> None:
     """Mixture likelihood without outlier priors should raise a clear error."""
     da = DataArray(np.array([6.0, 7.0, 8.0]), np.array([1.0, 2.0, 3.0]))
     with pytest.raises(ValueError, match="pi_outlier and outlier_inflate"):
-        bayes._add_y_likelihood(  # noqa: SLF001
+        bayes._add_y_likelihood(  # ruff: ignore[private-member-access]
             "y_likelihood_1",
             np.zeros(3),
             da,
@@ -899,14 +898,14 @@ def test_add_y_likelihood_mixture_requires_outlier_priors() -> None:
 
 def test_scale_and_log_scaled_ye_mag_helpers() -> None:
     """ye_mag scaling helpers should guard the scale and log-transform medians."""
-    assert bayes._scale_ye_mag_sigma(2.0, 3.0) == pytest.approx(6.0)  # noqa: SLF001
+    assert bayes._scale_ye_mag_sigma(2.0, 3.0) == pytest.approx(6.0)  # ruff: ignore[private-member-access]
     # Non-positive scale is coerced to 1.0.
-    assert bayes._scale_ye_mag_sigma(2.0, -1.0) == pytest.approx(2.0)  # noqa: SLF001
-    scaled = bayes._scale_ye_mag_sigma({"1": 2.0}, 3.0)  # noqa: SLF001
+    assert bayes._scale_ye_mag_sigma(2.0, -1.0) == pytest.approx(2.0)  # ruff: ignore[private-member-access]
+    scaled = bayes._scale_ye_mag_sigma({"1": 2.0}, 3.0)  # ruff: ignore[private-member-access]
     assert isinstance(scaled, dict)
     assert scaled["1"] == pytest.approx(6.0)
-    assert bayes._log_scaled_ye_mag_mu(1.0, 1.0) == pytest.approx(0.0)  # noqa: SLF001
-    log_map = bayes._log_scaled_ye_mag_mu({"1": 1.0}, 1.0)  # noqa: SLF001
+    assert bayes._log_scaled_ye_mag_mu(1.0, 1.0) == pytest.approx(0.0)  # ruff: ignore[private-member-access]
+    log_map = bayes._log_scaled_ye_mag_mu({"1": 1.0}, 1.0)  # ruff: ignore[private-member-access]
     assert isinstance(log_map, dict)
     assert log_map["1"] == pytest.approx(0.0)
 
@@ -1243,7 +1242,7 @@ def test_student_t_nu_value_records_fixed_nu_as_deterministic() -> None:
     without an explicit ``robust=`` override.
     """
     with pm.Model() as model:
-        nu = bayes._student_t_nu_value(7.5)  # noqa: SLF001
+        nu = bayes._student_t_nu_value(7.5)  # ruff: ignore[private-member-access]
     assert nu == 7.5  # plain float is still handed to the likelihood
     assert "student_t_nu" in model.named_vars
     assert float(model["student_t_nu"].eval()) == 7.5
@@ -1494,8 +1493,8 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
 def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_model(
     monkeypatch: pytest.MonkeyPatch,
     multi_dataset: Dataset,
-    per_well_ye_mags: bool | None,  # noqa: FBT001
-    expected_per_well: bool,  # noqa: FBT001
+    per_well_ye_mags: bool | None,  # ruff: ignore[boolean-type-hint-positional-argument]
+    expected_per_well: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> None:
     """Multi noise-model fits should add per-well ye_mag scales by default."""
     noise_model = PlateNoiseModel({
@@ -1507,7 +1506,7 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
     fr_init = fit_binding_glob(multi_dataset)
     captured: dict[str, bool] = {}
 
-    def fake_build_multi_ye_mag_priors(  # noqa: PLR0913
+    def fake_build_multi_ye_mag_priors(  # ruff: ignore[too-many-arguments]
         _labels: list[str],
         *,
         per_well: bool = False,
@@ -1859,7 +1858,7 @@ def test_fit_binding_pymc_multi_per_well_uses_denoised_sigmas(
     scheme = PlateScheme()
     scheme.names = {"ctrl": {"A01", "A02"}}
 
-    _dir, exp_x_start_sigma, _nom, exp_step_sigmas, _min = bayes._pipetting_walk_params(  # noqa: SLF001
+    _dir, exp_x_start_sigma, _nom, exp_step_sigmas, _min = bayes._pipetting_walk_params(  # ruff: ignore[private-member-access]
         xc, x_errc, 1.0, min_x_step=0.2
     )
 
@@ -1910,7 +1909,7 @@ def test_fit_binding_pymc_multi_per_well_uses_denoised_sigmas(
 def test_fit_binding_pymc_multi_x_start_between_sigma_opt_in(
     monkeypatch: pytest.MonkeyPatch,
     between: float,
-    expect_well: bool,  # noqa: FBT001
+    expect_well: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> None:
     """A positive x_start_between_sigma adds a per-well x_start_well term.
 
@@ -2412,8 +2411,8 @@ def test_extract_x_per_well_from_xarray_returns_correct_ordered_values() -> None
     )
     trace = xr.DataTree.from_dict({"posterior": ds})
 
-    nxc_a01, nx_errc_a01 = bayes._extract_x_per_well_from_xarray(trace, "A01")  # noqa: SLF001
-    nxc_a02, nx_errc_a02 = bayes._extract_x_per_well_from_xarray(trace, "A02")  # noqa: SLF001
+    nxc_a01, nx_errc_a01 = bayes._extract_x_per_well_from_xarray(trace, "A01")  # ruff: ignore[private-member-access]
+    nxc_a02, nx_errc_a02 = bayes._extract_x_per_well_from_xarray(trace, "A02")  # ruff: ignore[private-member-access]
 
     np.testing.assert_allclose(nxc_a01, np.array([8.9, 8.3, 7.7]))
     np.testing.assert_allclose(nxc_a02[0], 8.9, atol=1e-6)
@@ -2551,7 +2550,7 @@ def test_first_fit_result_without_dataset_does_not_break_multiwell(
 
     # Verification that the dataset-finding logic skips None-dataset entries.
     # Test the internal logic directly instead of running the full fit.
-    fit_results, _ = bayes._normalize_fit_inputs(results)  # noqa: SLF001
+    fit_results, _ = bayes._normalize_fit_inputs(results)  # ruff: ignore[private-member-access]
     ds = next((r.dataset for r in fit_results.values() if r.dataset), None)
     assert ds is not None  # finds A02's dataset
     # A01 should be filtered out by the dataset check
@@ -2578,8 +2577,8 @@ def test_x_per_well_extraction_from_xarray_not_string_names() -> None:
     )
     trace = xr.DataTree.from_dict({"posterior": ds})
 
-    nxc_a01, _ = bayes._extract_x_per_well_from_xarray(trace, "A01")  # noqa: SLF001
-    nxc_a02, _ = bayes._extract_x_per_well_from_xarray(trace, "A02")  # noqa: SLF001
+    nxc_a01, _ = bayes._extract_x_per_well_from_xarray(trace, "A01")  # ruff: ignore[private-member-access]
+    nxc_a02, _ = bayes._extract_x_per_well_from_xarray(trace, "A02")  # ruff: ignore[private-member-access]
 
     np.testing.assert_allclose(nxc_a01, [8.9, 7.0])
     np.testing.assert_allclose(nxc_a02, [8.9, 8.0])
@@ -2914,7 +2913,7 @@ def test_ye_mag_hierarchical_correlates_labels_at_prior() -> None:
     """Shared per-well factor induces positive cross-label prior correlation."""
     coords = {"well": [f"w{i}" for i in range(30)]}
     with pm.Model(coords=coords):
-        bayes._build_multi_ye_mag_priors(  # noqa: SLF001
+        bayes._build_multi_ye_mag_priors(  # ruff: ignore[private-member-access]
             ["1", "2"], per_well=True, parameterization="hierarchical"
         )
         pr = pm.sample_prior_predictive(
@@ -2937,7 +2936,7 @@ def test_ye_mag_separable_is_label_level_plus_shared_well_factor() -> None:
     """
     coords = {"well": [f"w{i}" for i in range(30)]}
     with pm.Model(coords=coords) as model:
-        bayes._build_multi_ye_mag_priors(  # noqa: SLF001
+        bayes._build_multi_ye_mag_priors(  # ruff: ignore[private-member-access]
             ["1", "2"], per_well=True, parameterization="separable"
         )
         pr = pm.sample_prior_predictive(
@@ -2982,7 +2981,7 @@ def _tiny_multi_dataset() -> dict[str, Dataset]:
 
 @pytest.mark.parametrize("explicit", [None, True, False])
 def test_per_well_ye_mags_warns_only_when_resolved_from_learn_ye_mags(
-    explicit: bool | None,  # noqa: FBT001
+    explicit: bool | None,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> None:
     """A structured noise model must not silently decide per-well ye_mags.
 

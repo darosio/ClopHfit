@@ -1005,10 +1005,10 @@ def test_residual_diagnostics_plots_smoke(
     annotated_diagnostics: ResidualDiagnostics,
 ) -> None:
     """Plotting helpers should build figures without a display backend."""
-    import matplotlib as mpl  # noqa: PLC0415
+    import matplotlib as mpl  # ruff: ignore[import-outside-top-level]
 
     mpl.use("Agg")
-    import matplotlib.pyplot as plt  # noqa: PLC0415
+    import matplotlib.pyplot as plt  # ruff: ignore[import-outside-top-level]
 
     diag = annotated_diagnostics.label_scaled()
     for figure in (

@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 import click
-
-from clophfit.fitting.grid import model_signature
 import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from click import Context, Path as cPath
+
+from clophfit.fitting.grid import model_signature
 
 # Set unique pytensor compile dir per process to avoid atexit filelock race
 # when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock.
@@ -73,7 +73,6 @@ class _FlexChoice(click.Choice):
 @click.version_option(message="%(version)s")
 def clop() -> None:  # pragma: no cover
     """Group command."""
-
 
 
 def _echo_spec(spec: dict[str, Any]) -> None:
@@ -195,7 +194,7 @@ def detect_bad_wells_cmd(
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
 @click.option("--outlier-threshold", default=0.2, type=float, show_default=True, help="Threshold for geometric point outlier scoring (0-1).")  # fmt: skip
-def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
+def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-statements]
     ctx: Context,  # Click context object.
     list_file: str,
     cl: float,
@@ -366,7 +365,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
 
     # Load scheme file with error handling
     if sch:
-        try:
+        try:  # ruff: ignore[too-many-statements-in-try-clause]
             tit.load_scheme(Path(sch))
             f = tit.buffer.plot(title=title)
             f.savefig(out_fp / "buffer.png")
@@ -430,7 +429,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
         raise click.ClickException(msg) from e
 
 
-def _validate_tecan_options(  # noqa: PLR0913
+def _validate_tecan_options(  # ruff: ignore[too-many-arguments]
     cl: float | None,
     bg: bool,
     dil: bool,
@@ -522,7 +521,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
         click.echo(f"  - Contains {len(df)} entries")
         if len(df) == 0:
             msg = "List file is empty"
-            raise click.ClickException(msg)  # noqa: TRY301 #FIXME:
+            raise click.ClickException(msg)  # ruff: ignore[raise-within-try] #FIXME:
     except click.ClickException:
         raise
     except Exception as e:
@@ -602,7 +601,7 @@ def enspire(ctx: Context, csv_f: str, note_f: str | None, bands: tuple[Any]) -> 
 
 
 # TODO: Simplify this function
-def fit_enspire(  # noqa: C901,PLR0912
+def fit_enspire(  # ruff: ignore[complex-structure, too-many-branches]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,

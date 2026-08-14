@@ -330,7 +330,7 @@ def detect_adjacent_correlation(
 
 def estimate_x_shift_statistics(
     all_res: pd.DataFrame,
-    fit_results: dict[str, Any] | None = None,  # noqa: ARG001
+    fit_results: dict[str, Any] | None = None,  # ruff: ignore[unused-function-argument]
 ) -> pd.DataFrame:
     """Estimate potential systematic x-shifts per well (heuristics).
 

@@ -51,7 +51,7 @@ def _compute_odr_residuals(
         Weighted residuals = raw_residual / original_y_err
     """
     residuals_list: list[np.ndarray] = []
-    K = params["K"].value  # noqa: N806
+    K = params["K"].value  # ruff: ignore[non-lowercase-variable-in-function]
 
     idx = 0
     for lbl, da in ds.items():
@@ -106,19 +106,19 @@ def generalized_combined_model(
     start_idx = 0
     results = []
     # The shared K parameter is always the first parameter
-    K = pars[0]  # noqa: N806
+    K = pars[0]  # ruff: ignore[non-lowercase-variable-in-function]
     for i, length in enumerate(dataset_lengths):
         end_idx = start_idx + length
         current_x = x[start_idx:end_idx]
-        S0 = pars[1 + 2 * i]  # S0 for dataset i # noqa: N806
-        S1 = pars[2 + 2 * i]  # S1 for dataset i # noqa: N806
+        S0 = pars[1 + 2 * i]  # S0 for dataset i # ruff: ignore[non-lowercase-variable-in-function]
+        S1 = pars[2 + 2 * i]  # S1 for dataset i # ruff: ignore[non-lowercase-variable-in-function]
         model_output = binding_1site(current_x, K, S0, S1, is_ph=is_ph)
         results.append(model_output)
         start_idx = end_idx
     return np.concatenate(results)
 
 
-def fit_binding_odr(  # noqa: C901, PLR0915
+def fit_binding_odr(  # ruff: ignore[complex-structure, too-many-statements]
     ds_or_fr: Dataset | FitResult,
     *,
     reweight: bool = False,

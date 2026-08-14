@@ -252,7 +252,7 @@ def _qc_panel_rows(
     for well, y_arr in da_dict.items():
         y = np.asarray(y_arr)
         valid = y[~np.isnan(y)]
-        if len(valid) < 2:  # noqa: PLR2004
+        if len(valid) < 2:  # ruff: ignore[magic-value-comparison]
             continue
         rows.append({
             "well": well,
@@ -278,7 +278,7 @@ def _combine_flagged(
     return sorted(combined)
 
 
-def _qc_flag_panel(  # noqa: PLR0913
+def _qc_flag_panel(  # ruff: ignore[too-many-arguments]
     panel_df: pd.DataFrame,
     *,
     x_col: str = "center",
@@ -298,7 +298,9 @@ def _qc_flag_panel(  # noqa: PLR0913
     The background floor still applies to controls, so one that is genuinely
     below ``bg_multiplier * bg`` is still flagged as dead.
     """
-    from clophfit.fitting.utils import flag_trend_outliers  # noqa: PLC0415
+    from clophfit.fitting.utils import (  # ruff: ignore[import-outside-top-level]
+        flag_trend_outliers,
+    )
 
     x_val = panel_df[x_col]
     y_val = panel_df[y_col]
@@ -315,12 +317,12 @@ def _qc_flag_panel(  # noqa: PLR0913
     if bg_value is not None:
         threshold_bg = bg_multiplier * bg_value
         bg = (x_val < threshold_bg) | (
-            (y_val < threshold_bg) & (y_val.max() > 1e-6)  # noqa: PLR2004
+            (y_val < threshold_bg) & (y_val.max() > 1e-6)  # ruff: ignore[magic-value-comparison]
         )
     return trend, bg
 
 
-def _ctrl_trend_outliers(  # noqa: PLR0913
+def _ctrl_trend_outliers(  # ruff: ignore[too-many-arguments]
     panel_df: pd.DataFrame,
     ctrl_mask: pd.Series,
     *,
@@ -338,13 +340,13 @@ def _ctrl_trend_outliers(  # noqa: PLR0913
     """
     out = pd.Series(data=False, index=panel_df.index)
     cand = panel_df.loc[~ctrl_mask]
-    if len(cand) < 2 or not bool(ctrl_mask.any()):  # noqa: PLR2004
+    if len(cand) < 2 or not bool(ctrl_mask.any()):  # ruff: ignore[magic-value-comparison]
         return out
     resid = cand[y_col].to_numpy() - (m * cand[x_col].to_numpy() + c)
     med = float(np.median(resid))
     mad = float(np.median(np.abs(resid - med)))
-    scale = 1.4826 * mad if mad > 1e-6 else float(np.std(resid))  # noqa: PLR2004
-    if scale <= 1e-6:  # noqa: PLR2004
+    scale = 1.4826 * mad if mad > 1e-6 else float(np.std(resid))  # ruff: ignore[magic-value-comparison]
+    if scale <= 1e-6:  # ruff: ignore[magic-value-comparison]
         return out
     all_resid = panel_df[y_col].to_numpy() - (m * panel_df[x_col].to_numpy() + c)
     z = (all_resid - med) / scale
@@ -352,7 +354,7 @@ def _ctrl_trend_outliers(  # noqa: PLR0913
     return out
 
 
-def _render_qc_panel(  # noqa: C901, PLR0913
+def _render_qc_panel(  # ruff: ignore[complex-structure, too-many-arguments]
     ax: Axes,
     panel_df: pd.DataFrame,
     *,
@@ -369,7 +371,9 @@ def _render_qc_panel(  # noqa: C901, PLR0913
     ctrl_wells: list[str] | None = None,
 ) -> None:
     """Render one QC scatter panel with shared highlighting logic."""
-    from clophfit.fitting.utils import fit_trendline  # noqa: PLC0415
+    from clophfit.fitting.utils import (  # ruff: ignore[import-outside-top-level]
+        fit_trendline,
+    )
 
     ctrl_mask = (
         panel_df["well"].isin(ctrl_wells)
@@ -389,7 +393,7 @@ def _render_qc_panel(  # noqa: C901, PLR0913
     # Fit the reference trendline on candidate (non-control) wells only.
     cand = panel_df.loc[~ctrl_mask]
     ctrl_dev = pd.Series(data=False, index=panel_df.index)
-    if len(cand) >= 2:  # noqa: PLR2004
+    if len(cand) >= 2:  # ruff: ignore[magic-value-comparison]
         m, c = fit_trendline(cand[x_col], cand[y_col])
         x_line = np.linspace(float(cand[x_col].min()), float(cand[x_col].max()), 100)
         ax.plot(x_line, m * x_line + c, "k--", alpha=0.5, label="Trendline")
@@ -670,7 +674,7 @@ def plot_spectra_distributed(
     fig.colorbar(sm, ax=axl, label=pp.kind)
 
 
-def plot_qc_mean_vs_std(  # noqa: PLR0913, PLR0917
+def plot_qc_mean_vs_std(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     trace: xr.DataTree | MultiFitResult,
     results: Mapping[str, FitResult] | None = None,
     figsize_per_label: tuple[float, float] = (5, 4),
@@ -1508,14 +1512,14 @@ def plot_ppc_well(
     return fig
 
 
-def plot_qc_span_vs_center(  # noqa: PLR0913, PLR0917
+def plot_qc_span_vs_center(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     data: Mapping[str, Mapping[str, ArrayF]],
     center: str | float = "mean",
     figsize_per_label: tuple[float, float] = (5, 4),
     z_threshold: float = 3.0,
     bg_noise: Mapping[str, float | ArrayF] | Mapping[int, float | ArrayF] | None = None,
     bg_multiplier: float = 4.0,
-    loglog: bool = False,  # noqa: FBT001, FBT002
+    loglog: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
     annotate_wells: list[str] | None = None,
     span_q: tuple[float, float] | None = None,
     ctrl_wells: list[str] | None = None,
@@ -1620,7 +1624,7 @@ def qc_flag_bad_wells(
     ctrl_wells: Iterable[str] = ...,
     combine: Literal["intersection", "union"],
 ) -> list[str]: ...
-def qc_flag_bad_wells(  # noqa: PLR0913
+def qc_flag_bad_wells(  # ruff: ignore[too-many-arguments]
     data: Mapping[str, Mapping[str, ArrayF]],
     *,
     center: str | float = 0.9,
@@ -1699,7 +1703,7 @@ def _titration_qc_data(tit: object) -> dict[str, dict[str, ArrayF]]:
     QC pass can be compared against an existing detector.
     """
     if hasattr(tit, "_get_normalized_or_raw_data"):
-        data = tit._get_normalized_or_raw_data()  # noqa: SLF001
+        data = tit._get_normalized_or_raw_data()  # ruff: ignore[private-member-access]
     else:
         data = getattr(tit, "data", {})
     buffer = set(getattr(getattr(tit, "scheme", None), "buffer", []) or [])
@@ -1740,7 +1744,7 @@ def qc_flag_bad_wells_titration(
     bg_multiplier: float = ...,
     combine: Literal["intersection", "union"],
 ) -> list[str]: ...
-def qc_flag_bad_wells_titration(  # noqa: PLR0913
+def qc_flag_bad_wells_titration(  # ruff: ignore[too-many-arguments]
     tit: object,
     *,
     center: str | float = 0.9,
@@ -1771,13 +1775,13 @@ def qc_flag_bad_wells_titration(  # noqa: PLR0913
     )
 
 
-def plot_qc_span_vs_center_titration(  # noqa: PLR0913, PLR0917
+def plot_qc_span_vs_center_titration(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     tit: object,
     center: str | float = 0.9,
     figsize_per_label: tuple[float, float] = (5, 4),
     z_threshold: float = 3.0,
     bg_multiplier: float = 4.0,
-    loglog: bool = False,  # noqa: FBT001, FBT002
+    loglog: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
     annotate_wells: list[str] | None = None,
     span_q: tuple[float, float] | None = (0.1, 0.9),
 ) -> Figure:

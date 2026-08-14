@@ -9,7 +9,7 @@ from clophfit._config import (
     configure_logging,
 )
 
-logging.getLogger(__name__).addHandler(logging.NullHandler())  # noqa: RUF067
+logging.getLogger(__name__).addHandler(logging.NullHandler())  # ruff: ignore[non-empty-init-module]
 
 __all__ = [
     "__enspire_out_dir__",

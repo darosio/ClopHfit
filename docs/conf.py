@@ -15,7 +15,7 @@ import os
 # -- Project information -----------------------------------------------------
 
 project = "ClopHfit"
-copyright = "2023, Daniele Arosio"  # noqa: A001
+copyright = "2023, Daniele Arosio"  # ruff: ignore[builtin-variable-shadowing]
 author = "Daniele Arosio"
 html_title = "ClopHfit"
 

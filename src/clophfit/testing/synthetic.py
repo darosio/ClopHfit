@@ -98,7 +98,7 @@ def _sample_from_real(
     return float(np.clip(val, lower_bound, stats["max"]))
 
 
-def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
+def make_dataset(  # ruff: ignore[too-many-arguments, too-many-branches, too-many-statements, complex-structure]
     k: float | None = None,
     s0: dict[str, float] | float | None = None,
     s1: dict[str, float] | float | None = None,
@@ -416,7 +416,7 @@ def make_dataset(  # noqa: PLR0913, PLR0912, PLR0915, C901
     return ds, TruthParams(K=k, S0=truth_s0, S1=truth_s1)
 
 
-def make_simple_dataset(  # noqa: PLR0913
+def make_simple_dataset(  # ruff: ignore[too-many-arguments]
     k: float,
     s0: dict[str, float] | float,
     s1: dict[str, float] | float,
@@ -458,7 +458,7 @@ def make_simple_dataset(  # noqa: PLR0913
     return ds, TruthParams(K=k, S0=s0, S1=s1)
 
 
-def make_benchmark_dataset(  # noqa: PLR0913
+def make_benchmark_dataset(  # ruff: ignore[too-many-arguments]
     k: float = 7.0,
     *,
     n_labels: int = 1,

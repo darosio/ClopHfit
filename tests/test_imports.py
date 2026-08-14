@@ -7,12 +7,12 @@ regressions surface instead of being masked by an already-populated
 
 from __future__ import annotations
 
-import subprocess  # noqa: S404
+import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 
 
 def _cold_import(statement: str) -> None:
-    subprocess.run([sys.executable, "-c", statement], check=True)  # noqa: S603
+    subprocess.run([sys.executable, "-c", statement], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
 
 
 def test_cold_import_fitting_package() -> None:

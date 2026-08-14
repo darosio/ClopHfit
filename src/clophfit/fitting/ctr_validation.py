@@ -178,7 +178,7 @@ def weighted_mean_reference(arrays: list[np.ndarray]) -> tuple[np.ndarray, np.nd
     return np.nansum(stacked * weights[:, None], axis=0), weights
 
 
-def summarize_bayesian_ctr_holdout(  # noqa: PLR0913
+def summarize_bayesian_ctr_holdout(  # ruff: ignore[too-many-arguments]
     trace: _t.Any,
     *,
     trace_id: str,

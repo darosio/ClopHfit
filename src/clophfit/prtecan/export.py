@@ -258,6 +258,36 @@ def _single_refit_two_pass(
     return final, residuals
 
 
+def _global_fit_method(fit_method: str) -> tuple[str, str | None]:
+    """Map a configured fit method onto the plate fit's method and reweighting.
+
+    Parameters
+    ----------
+    fit_method : str
+        Value of ``params.fit_method``.
+
+    Returns
+    -------
+    tuple[str, str | None]
+        Method to fit with, and the reweighting scheme if any.
+
+    Notes
+    -----
+    Written out per method rather than nested, because a method missing here
+    does not fail: it falls through to ``"lm"`` and the run reports success
+    having fitted something else. That is how ``--mcmc multi`` spent months as
+    a no-op, and adding ``odr`` to the CLI without touching this would have
+    repeated it.
+    """
+    if fit_method == "odr":
+        return "odr", None
+    if fit_method == "irls":
+        return "lm", "irls"
+    if fit_method == "huber":
+        return "huber", None
+    return "lm", None
+
+
 def fit_single_mcmc(
     titration: Titration,
     datasets: dict[str, typing.Any],
@@ -371,20 +401,7 @@ def export_fit(
                 )
             )
 
-    # Written out rather than nested, because a method missing from this
-    # mapping does not fail - it silently falls through to "lm" and the run
-    # reports success having fitted something else. That is how --mcmc multi
-    # spent months as a no-op.
-    fit_method = titration.params.fit_method
-    reweight: str | None = None
-    if fit_method == "odr":
-        method = "odr"
-    elif fit_method == "irls":
-        method, reweight = "lm", "irls"
-    elif fit_method == "huber":
-        method = "huber"
-    else:
-        method = "lm"
+    method, reweight = _global_fit_method(titration.params.fit_method)
 
     global_res = titration.fit_plate(
         datasets,

@@ -241,7 +241,7 @@ class Dataset(UserDict[str, DataArray]):
                     f"        x_err={_fmt_arr(getattr(da, 'x_errc', np.array([])))}",
                     f"        y_err={_fmt_arr(getattr(da, 'y_errc', np.array([])))}",
                 ))
-            except Exception:  # noqa: BLE001 - never crash on repr
+            except Exception:  # ruff: ignore[blind-except] - never crash on repr
                 lines.append(f"  - {lbl}: <unavailable>")
         return "\n".join(lines)
 
@@ -787,7 +787,7 @@ class NoiseModelParams:
     def compute_y_err(
         self,
         y: ArrayF,
-        dS_dph: ArrayF | None = None,  # noqa: N803
+        dS_dph: ArrayF | None = None,  # ruff: ignore[invalid-argument-name]
     ) -> ArrayF:
         """Compute per-point error from the noise model.
 
@@ -822,17 +822,17 @@ class PlateNoiseModel(UserDict[str, NoiseModelParams]):
 
     @property
     def sigma_floor(self) -> dict[str, float]:
-        """Get baseline noise floor per label."""
+        """The baseline noise floor per label."""
         return {lbl: params.sigma_floor for lbl, params in self.data.items()}
 
     @property
     def gain(self) -> dict[str, float]:
-        """Get Poisson shot-noise scaling factor per label."""
+        """The Poisson shot-noise scaling factor per label."""
         return {lbl: params.gain for lbl, params in self.data.items()}
 
     @property
     def alpha(self) -> dict[str, float]:
-        """Get proportional error coefficient per label."""
+        """The proportional error coefficient per label."""
         return {lbl: params.alpha for lbl, params in self.data.items()}
 
     def apply_to(

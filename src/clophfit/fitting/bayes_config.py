@@ -257,7 +257,7 @@ class NoiseConfig:
         )
 
     @classmethod
-    def structured(  # noqa: PLR0913
+    def structured(  # ruff: ignore[too-many-arguments]
         cls,
         *,
         noise_model: PlateNoiseModel | None = None,

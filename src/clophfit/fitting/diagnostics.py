@@ -158,7 +158,7 @@ def detect_bad_wells_from_dat(
     return result.sort_values("flag_count", ascending=False).reset_index(drop=True)
 
 
-def detect_bad_wells(  # noqa: PLR0913, PLR0915
+def detect_bad_wells(  # ruff: ignore[too-many-arguments, too-many-statements]
     ffit: pd.DataFrame,
     *,
     k_min: float = 3.0,

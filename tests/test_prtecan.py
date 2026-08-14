@@ -307,7 +307,7 @@ class TestLabelblock:
     def test_eq(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """A Labelblock is equal to itself and not equal to a different Labelblock."""
         lb0, lb1 = labelblocks
-        assert lb0 == lb0  # noqa: PLR0124
+        assert lb0 == lb0  # ruff: ignore[comparison-with-itself]
         assert lb0 is not lb1
         with pytest.raises(TypeError):
             assert lb0 == 1
@@ -1388,7 +1388,7 @@ class TestTitrationAnalysis:
         g = tit.buffer.plot(title="Test Title")
         assert isinstance(g, sns.FacetGrid)
         assert len(g.axes_dict) == 2
-        assert g.fig._suptitle.get_text() == "Test Title"  # noqa: SLF001
+        assert g.fig._suptitle.get_text() == "Test Title"  # ruff: ignore[private-member-access]
 
     def test_plot_buffer_normalized(self, tit: Titration) -> None:
         """It plots buffers_norm for 2 lbg."""
@@ -1591,9 +1591,9 @@ def test_single_refit_two_pass_masks_clear_outlier(
     )
 
     sampler = SamplerConfig(n_samples=5, nuts_sampler="pymc")
-    final, _residuals = export._single_refit_two_pass(  # noqa: SLF001
+    final, _residuals = export._single_refit_two_pass(  # ruff: ignore[private-member-access]
         ds,
-        screening_noise=export._ye_mag_screening_noise(0.1),  # noqa: SLF001
+        screening_noise=export._ye_mag_screening_noise(0.1),  # ruff: ignore[private-member-access]
         refit_noise=NoiseConfig.ye_mag(
             shared=False, prior="lognormal", mu=0.0, sigma=0.25
         ),
@@ -1645,7 +1645,7 @@ class TestStructuredMcmcNoise:
         mode; floors still come from the measured background noise.
         """
         titan = self._titration()
-        noise = export._structured_noise(  # noqa: SLF001
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
             titan, noise_mode="centered"
         )
         assert noise.kind == "structured"
@@ -1660,7 +1660,7 @@ class TestStructuredMcmcNoise:
         labels = sorted(titan.data)
         titan.params.noise_gain = (4.93, 1.34)
         titan.params.noise_alpha = (0.106, 0.0)
-        noise = export._structured_noise(  # noqa: SLF001
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
             titan, noise_mode="centered"
         )
         assert noise.gain_mode == "centered"
@@ -1674,7 +1674,7 @@ class TestStructuredMcmcNoise:
         """``noise_mode="fixed"`` pins supplied hints instead of centring them."""
         titan = self._titration()
         titan.params.noise_alpha = (0.05, 0.02)
-        noise = export._structured_noise(  # noqa: SLF001
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
             titan, noise_mode="fixed"
         )
         assert noise.alpha_mode == "fixed"
@@ -1694,7 +1694,7 @@ class TestStructuredMcmcNoise:
         """
         titan = self._titration()
         titan.params.noise_gain = (1.0, 1.0)
-        noise = export._structured_noise(  # noqa: SLF001
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
             titan, noise_mode="fixed"
         )
         assert noise.gain_mode == "fixed"
@@ -1709,12 +1709,12 @@ def test_params_change_resets_derived_data() -> None:
     tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     tit.load_scheme(data_tests / "140220" / "scheme.txt")
     assert tit.data  # populate the lazily-built cache
-    assert tit._data != {}  # noqa: SLF001
+    assert tit._data != {}  # ruff: ignore[private-member-access]
 
     tit.params.nrm = not tit.params.nrm
 
     # Do not touch tit.data here — reading it would refill the cache.
-    assert tit._data == {}  # noqa: SLF001
+    assert tit._data == {}  # ruff: ignore[private-member-access]
 
 
 def test_mcmc_spec_defaults() -> None:
@@ -1728,7 +1728,9 @@ def test_mcmc_spec_defaults() -> None:
 
 def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
     """No spec means no sampling, regardless of what params says."""
-    from clophfit.prtecan.export import fit_single_mcmc  # noqa: PLC0415
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        fit_single_mcmc,
+    )
 
     tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     assert fit_single_mcmc(tit, {}, tmp_path, None) is None
@@ -1742,8 +1744,13 @@ def test_fit_single_mcmc_multi_fits_wells_jointly(tmp_path: Path) -> None:
     multi spec must come back with one result per fitted well, not None and not
     a single-well fit.
     """
-    from clophfit.fitting.data_structures import DataArray, Dataset  # noqa: PLC0415
-    from clophfit.prtecan.export import fit_single_mcmc  # noqa: PLC0415
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        fit_single_mcmc,
+    )
 
     tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     x = np.linspace(5.5, 8.5, 7)

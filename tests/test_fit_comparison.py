@@ -48,9 +48,9 @@ def _load_ph_list(fp: Path) -> tuple[np.ndarray, np.ndarray]:
 )
 def test_compare_lm_variants(
     csv_name: str,
-    K0: float,  # noqa: N803
-    S0: float,  # noqa: N803
-    S1: float,  # noqa: N803
+    K0: float,  # ruff: ignore[invalid-argument-name]
+    S0: float,  # ruff: ignore[invalid-argument-name]
+    S1: float,  # ruff: ignore[invalid-argument-name]
     noise_sd: float,
 ) -> None:
     """Compare LM variants on realistic pH grids with x-errors.
@@ -124,7 +124,7 @@ def test_compare_lm_variants(
 def test_iterative_outlier_removal_is_stable(csv_name: str) -> None:
     """Ensure IRLS with outlier removal does not explode on typical inputs."""
     x, x_err = _load_ph_list(Path(csv_name))
-    K0, S0, S1 = 7.0, 2.0, 1.0  # noqa: N806
+    K0, S0, S1 = 7.0, 2.0, 1.0  # ruff: ignore[non-lowercase-variable-in-function]
     np.random.default_rng(123)
     y = binding_1site(x, K0, S0, S1, is_ph=True)
     # Inject a single outlier

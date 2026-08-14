@@ -12,7 +12,7 @@ from clophfit.fitting.data_structures import (
     DataArray,
     Dataset,
     FitResult,
-    _Result,  # noqa: PLC2701
+    _Result,  # ruff: ignore[import-private-name]
 )
 
 

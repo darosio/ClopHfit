@@ -271,7 +271,7 @@ def fit_noise_model_nnls(
             floor = sigma_floor_fixed.get(lbl_str, 0.0)
             adjusted = r2 - floor**2
             positive = adjusted > 0
-            if positive.sum() < 2:  # noqa: PLR2004
+            if positive.sum() < 2:  # ruff: ignore[magic-value-comparison]
                 gain_out[lbl_str] = 0.0
                 alpha_out[lbl_str] = 0.0
                 sigma_floor_out[lbl_str] = floor

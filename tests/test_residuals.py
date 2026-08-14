@@ -785,7 +785,7 @@ def test_fgls_plate_fit_workflow() -> None:
 
 def test_residuals_mixin_resolves_classical_fit_as_normal() -> None:
     """A classical fit has no trace, so it standardizes as Normal."""
-    settings = ResidualsMixin._resolve_residual_settings(None)  # noqa: SLF001
+    settings = ResidualsMixin._resolve_residual_settings(None)  # ruff: ignore[private-member-access]
 
     assert settings.robust is False
     assert settings.student_t_nu == 3.0
@@ -794,7 +794,7 @@ def test_residuals_mixin_resolves_classical_fit_as_normal() -> None:
 
 def test_residuals_mixin_honours_explicit_robust() -> None:
     """An explicit robust flag skips auto-detection and its likelihood label."""
-    settings = ResidualsMixin._resolve_residual_settings(  # noqa: SLF001
+    settings = ResidualsMixin._resolve_residual_settings(  # ruff: ignore[private-member-access]
         None, robust=True, student_t_nu=5.0
     )
 

@@ -79,7 +79,7 @@ _PH_K_MAX: float = 11.0
 def _fit_datasets(
     datasets: dict[str, Dataset],
     method: str,
-    **kwargs: typing.Any,  # noqa: ANN401
+    **kwargs: typing.Any,  # ruff: ignore[any-type]
 ) -> dict[str, FitResult]:
     """Fit each dataset, turning per-well failures into empty results.
 
@@ -169,7 +169,7 @@ class TitrationConfig:
     def __setattr__(
         self,
         name: str,
-        value: bool | str | float | tuple[float, ...] | None,  # noqa: FBT001
+        value: bool | str | float | tuple[float, ...] | None,  # ruff: ignore[boolean-type-hint-positional-argument]
     ) -> None:
         """Trigger callback when a tracked attribute value actually changes."""
         if name == "_callback":
@@ -192,7 +192,7 @@ class BufferFit:
 
     @property
     def empty(self) -> bool:
-        """Return True if all attributes are NaN, emulating DataFrame's empty behavior."""
+        """True when all attributes are NaN, emulating DataFrame's empty behavior."""
         return all(np.isnan(value) for value in vars(self).values())
 
 
@@ -374,7 +374,7 @@ class Buffer:
                 diffs = y_obs - y_fit[:, np.newaxis]
                 n_obs = diffs.size
                 sigma_res = (
-                    np.sqrt(np.sum(diffs**2) / (n_obs - 2)) if n_obs > 2 else 0.0  # noqa: PLR2004
+                    np.sqrt(np.sum(diffs**2) / (n_obs - 2)) if n_obs > 2 else 0.0  # ruff: ignore[magic-value-comparison]
                 )
                 pooled_std = np.sqrt(buf_df.var(axis=1, ddof=1).mean())
 
@@ -724,7 +724,7 @@ class TitrationResults(ResidualsMixin):
         return xlim
 
 
-@dataclass  # noqa: PLR0904 (acceptable for a complex class)
+@dataclass  # ruff: ignore[too-many-public-methods] (acceptable for a complex class)
 class Titration(TecanfilesGroup):
     """Build titrations from grouped Tecanfiles and concentrations or pH values.
 
@@ -774,7 +774,7 @@ class Titration(TecanfilesGroup):
             self.labelblocksgroups[first_label].data_nrm.keys() - self.scheme.nofit_keys
         )
 
-    def detect_and_discard_bad_wells(  # noqa: C901, PLR0912
+    def detect_and_discard_bad_wells(  # ruff: ignore[complex-structure, too-many-branches]
         self,
         smoothness_threshold: float | None = None,
         roughness_threshold: float | None = None,
@@ -839,7 +839,7 @@ class Titration(TecanfilesGroup):
                     ds = apply_outlier_mask(ds, threshold=outlier_threshold)
                 y = np.asarray(ds[str(label)].y, dtype=float)
                 valid_y = y[~np.isnan(y)]
-                if len(valid_y) < 2:  # noqa: PLR2004
+                if len(valid_y) < 2:  # ruff: ignore[magic-value-comparison]
                     discard_well = True
                     break
 
@@ -915,7 +915,7 @@ class Titration(TecanfilesGroup):
 
     @property
     def params(self) -> TitrationConfig:
-        """Get the datafit parameters."""
+        """The datafit parameters."""
         return self._params
 
     @params.setter
@@ -1214,7 +1214,7 @@ class Titration(TecanfilesGroup):
         method: str = "",
         *,
         label: str | None = None,
-        **kwargs: typing.Any,  # noqa: ANN401
+        **kwargs: typing.Any,  # ruff: ignore[any-type]
     ) -> TitrationResults:
         """Run a single-pass fit on an entire plate of datasets.
 
@@ -1253,14 +1253,14 @@ class Titration(TecanfilesGroup):
         results = _fit_datasets(datasets, method, **kwargs)
         return TitrationResults(self.scheme, self.fit_keys, results)
 
-    def fgls_fit_plate(  # noqa: PLR0913
+    def fgls_fit_plate(  # ruff: ignore[too-many-arguments]
         self,
         datasets: dict[str, Dataset] | None = None,
         *,
         label: str | None = None,
         sigma_floor: dict[str, float] | None = None,
-        first_pass_method: str = "huber",  # noqa: S107
-        second_pass_method: str = "lm",  # noqa: S107
+        first_pass_method: str = "huber",  # ruff: ignore[hardcoded-password-default]
+        second_pass_method: str = "lm",  # ruff: ignore[hardcoded-password-default]
         max_iter: int = 3,
         tol: float = 1e-3,
     ) -> TitrationResults:

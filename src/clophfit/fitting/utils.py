@@ -286,7 +286,7 @@ def flag_trend_outliers(
     pd.Series
         A boolean Series of the same length as x, True for outliers.
     """
-    if len(x) < 3:  # noqa: PLR2004
+    if len(x) < 3:  # ruff: ignore[magic-value-comparison]
         return pd.Series(data=False, index=x.index)
 
     x_np = x.to_numpy()
@@ -300,19 +300,19 @@ def flag_trend_outliers(
     residuals = y_np - predicted
 
     mad = np.median(np.abs(residuals - np.median(residuals)))
-    if mad < 1e-6:  # noqa: PLR2004
+    if mad < 1e-6:  # ruff: ignore[magic-value-comparison]
         mad = np.std(residuals)
 
     z_scores = np.zeros_like(x_np, dtype=float)
-    if mad > 1e-6:  # noqa: PLR2004
+    if mad > 1e-6:  # ruff: ignore[magic-value-comparison]
         z_scores = (residuals - np.median(residuals)) / (1.4826 * mad)
 
     # Marginal Z-score for x (signal amplitude)
     mad_x = np.median(np.abs(x_np - np.median(x_np)))
     z_x = np.zeros_like(x_np, dtype=float)
-    if mad_x < 1e-6:  # noqa: PLR2004
+    if mad_x < 1e-6:  # ruff: ignore[magic-value-comparison]
         mad_x = np.std(x_np)
-    if mad_x > 1e-6:  # noqa: PLR2004
+    if mad_x > 1e-6:  # ruff: ignore[magic-value-comparison]
         z_x = (x_np - np.median(x_np)) / (1.4826 * mad_x)
 
     # We want to flag wells that are far from the trendline (both above or below)
@@ -335,7 +335,7 @@ def fit_trendline(x: pd.Series, y: pd.Series) -> tuple[float, float]:
     tuple[float, float]
         Slope and intercept.
     """
-    if len(x) < 2:  # noqa: PLR2004
+    if len(x) < 2:  # ruff: ignore[magic-value-comparison]
         return 0.0, 0.0
     res = stats.theilslopes(y.to_numpy(), x.to_numpy())
     return float(res[0]), float(res[1])
@@ -380,7 +380,7 @@ def roughness(y: np.ndarray) -> float:
     """
     span = float(np.abs(y[-1] - y[0]))
     consec = float(np.sum(np.abs(np.diff(y))))
-    if consec < 1e-12:  # noqa: PLR2004
+    if consec < 1e-12:  # ruff: ignore[magic-value-comparison]
         return 0.0  # flat and smooth → good
     return (consec - span) / consec
 
@@ -417,7 +417,7 @@ def outlier_scores_extended(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     True
     """
     scores = np.zeros(len(y))
-    if len(y) < 3:  # noqa: PLR2004
+    if len(y) < 3:  # ruff: ignore[magic-value-comparison]
         return scores
     consec = float(np.sum(np.abs(np.diff(y))))
 
@@ -428,7 +428,7 @@ def outlier_scores_extended(x: np.ndarray, y: np.ndarray) -> np.ndarray:
         scores[i] = (through - direct) / (consec + 1e-12)
 
     # Edge points: hybrid check
-    def _edge_score(  # noqa: PLR0913,PLR0917
+    def _edge_score(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
         y_edge: float,
         y_near: float,
         y_far: float,

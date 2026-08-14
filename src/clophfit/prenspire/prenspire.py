@@ -103,7 +103,7 @@ class EnspireFile:
             # Check for existing file and append timestamp if necessary
             csv_file = out_dir / f"{basename}.csv"
             if csv_file.exists():
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # noqa: UP017 [for py3.10]
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # ruff: ignore[datetime-timezone-utc] [for py3.10]
                 basename = f"{self.file.stem}_{measurement_name}_{timestamp}"
                 csv_file = out_dir / f"{basename}.csv"
             md_file = out_dir / f"{basename}.json"
@@ -328,7 +328,7 @@ class EnspireFile:
             pe.setDefaultWhitespaceChars(" \t")
 
         def line(keyword: str) -> pyparsing.ParserElement:
-            EOL = pyparsing.LineEnd().suppress()  # noqa: N806
+            EOL = pyparsing.LineEnd().suppress()  # ruff: ignore[non-lowercase-variable-in-function]
             w = pyparsing.Word(pyparsing.alphanums + ".\u00b0%")  # . | deg | %
             return (
                 pyparsing.ZeroOrMore(pyparsing.White(" \t")).suppress()

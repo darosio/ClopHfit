@@ -545,8 +545,8 @@ class ResidualDiagnostics:
 
     def plot_hist_qq(self, *, column: str | None = None) -> _t.Any:
         """Plot histogram and Q-Q panels by label plus pooled."""
-        import matplotlib.pyplot as plt  # noqa: PLC0415
-        import seaborn as sns  # type: ignore[import-untyped]  # noqa: PLC0415
+        import matplotlib.pyplot as plt  # ruff: ignore[import-outside-top-level]
+        import seaborn as sns  # type: ignore[import-untyped]  # ruff: ignore[import-outside-top-level]
 
         column = column or self.value_col
         groups = [
@@ -567,7 +567,7 @@ class ResidualDiagnostics:
 
     def plot_step(self, *, column: str | None = None) -> _t.Any:
         """Plot residual distributions by label and titration step."""
-        import seaborn as sns  # noqa: PLC0415
+        import seaborn as sns  # ruff: ignore[import-outside-top-level]
 
         column = column or self.value_col
         return sns.catplot(
@@ -581,7 +581,7 @@ class ResidualDiagnostics:
 
     def plot_role(self, *, column: str | None = None) -> _t.Any:
         """Plot residual distributions by role, if diagnostics are annotated."""
-        import seaborn as sns  # noqa: PLC0415
+        import seaborn as sns  # ruff: ignore[import-outside-top-level]
 
         if "role" not in self.residuals:
             msg = "Call annotate(ctrl_wells=...) before plot_role()."
@@ -598,7 +598,7 @@ class ResidualDiagnostics:
 
     def plot_col(self, *, column: str | None = None) -> _t.Any:
         """Plot residual distributions by plate column."""
-        import seaborn as sns  # noqa: PLC0415
+        import seaborn as sns  # ruff: ignore[import-outside-top-level]
 
         if "col" not in self.residuals:
             msg = "Call annotate(...) before plot_col()."
@@ -621,7 +621,7 @@ class ResidualDiagnostics:
         hue: str = "role",
     ) -> _t.Any:
         """Plot per-well residual spread against signal or fitted parameters."""
-        import seaborn as sns  # noqa: PLC0415
+        import seaborn as sns  # ruff: ignore[import-outside-top-level]
 
         summary = self.well_summary()
         kwargs: dict[str, _t.Any] = {
@@ -646,7 +646,7 @@ class ResidualComparison:
     parameters: pd.DataFrame
 
     @classmethod
-    def from_fit_results(  # noqa: PLR0913
+    def from_fit_results(  # ruff: ignore[too-many-arguments]
         cls,
         results: dict[str, _t.Any],
         trace_id: str,
@@ -746,7 +746,7 @@ def robust_residual_outlier_mask(
     return np.asarray(np.isfinite(z) & (np.abs(z) > threshold), dtype=bool)
 
 
-def excess_tail_outlier_mask(  # noqa: PLR0913
+def excess_tail_outlier_mask(  # ruff: ignore[too-many-arguments]
     likelihood_residual: ArrayLike,
     *,
     threshold: float = 3.0,
@@ -1273,7 +1273,7 @@ def x_axis_sanity(trace: _t.Any) -> dict[str, _t.Any]:
     ``well`` dimension and is skipped.
     """
     out: dict[str, _t.Any] = {}
-    try:
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
         posterior = posterior_dataset(trace)
         if "x_true" not in posterior:
             return out
@@ -1306,7 +1306,7 @@ def trace_diagnostics(
     """Collect basic MCMC and optional LOO diagnostics from a PyMC trace."""
     row: dict[str, _t.Any] = {}
 
-    try:
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
         ss = sample_stats_dataset(trace)
         if "diverging" in ss:
             row["n_divergences"] = int(ss["diverging"].sum().values)
@@ -1336,7 +1336,7 @@ def trace_diagnostics(
             "gain",
         ]
 
-    try:
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             summary = az.summary(trace, var_names=summary_var_names, filter_vars="like")
@@ -1351,7 +1351,7 @@ def trace_diagnostics(
         row["summary_error"] = repr(e)
 
     if compute_loo:
-        try:
+        try:  # ruff: ignore[too-many-statements-in-try-clause]
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 loo = az.loo(merge_log_likelihoods(trace), var_name="obs")
@@ -1695,7 +1695,7 @@ def _outlier_probability_for_label_well(
     )
 
 
-def residuals_from_multifit(  # noqa: PLR0913
+def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
     multi: _t.Any,
     trace_id: str,
     binding_function: _t.Callable[..., ArrayLike],
@@ -1801,7 +1801,7 @@ def residuals_from_multifit(  # noqa: PLR0913
     return df.loc[:, [*leading_cols, *extra_cols]]
 
 
-def residuals_from_fit_results(  # noqa: PLR0913
+def residuals_from_fit_results(  # ruff: ignore[too-many-arguments]
     results: dict[str, _t.Any],
     trace_id: str,
     binding_function: _t.Callable[..., ArrayLike],

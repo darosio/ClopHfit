@@ -62,7 +62,7 @@ class Knob:
 
     @property
     def key(self) -> str:
-        """Return the key to read from the source block."""
+        """The key to read from the source block."""
         return self.source_key or self.name
 
 

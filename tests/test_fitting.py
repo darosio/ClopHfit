@@ -710,7 +710,7 @@ _TRUE_S0_Y2, _TRUE_S1_Y2 = 500.0, 40.0
 _BUFFER_SD = 40.0
 
 
-def _create_synthetic_dataset(  # noqa: PLR0913
+def _create_synthetic_dataset(  # ruff: ignore[too-many-arguments]
     n_points: int = 7,
     true_k: float = _TRUE_K,
     seed: int = 42,

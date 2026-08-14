@@ -110,15 +110,15 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     Optimized version with reduced dictionary lookups and vectorized operations.
     """
     is_ph = ds.is_ph
-    K = params["K"].value  # Extract once to avoid repeated access  # noqa: N806
+    K = params["K"].value  # Extract once to avoid repeated access  # ruff: ignore[non-lowercase-variable-in-function]
 
     # Pre-allocate lists for better performance
     residuals_list: list[ArrayF] = []
 
     for lbl, da in ds.items():
         # Get parameter values once per label
-        S0 = params[f"S0_{lbl}"].value  # noqa: N806
-        S1 = params[f"S1_{lbl}"].value  # noqa: N806
+        S0 = params[f"S0_{lbl}"].value  # ruff: ignore[non-lowercase-variable-in-function]
+        S1 = params[f"S1_{lbl}"].value  # ruff: ignore[non-lowercase-variable-in-function]
 
         # Compute model and residuals in one go
         model = binding_1site(da.x, K, S0, S1, is_ph=is_ph)
@@ -465,7 +465,7 @@ def _plot_spectra_glob_emcee(
 # ---- Unified LM fitting function ----
 
 
-def fit_binding_glob(  # noqa: PLR0913
+def fit_binding_glob(  # ruff: ignore[too-many-arguments]
     ds: Dataset,
     *,
     method: str = "lm",

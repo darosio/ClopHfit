@@ -42,16 +42,16 @@ class _Result:
 
 def test_noise_model_building_and_convergence() -> None:
     """Noise-model helpers should compare gain and alpha per label."""
-    old = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
+    old = noise_calibration._plate_noise_model_from_nnls(  # ruff: ignore[private-member-access]
         {"1": 1.0}, {"1": 0.2}, {"1": 0.03}
     )
-    same = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
+    same = noise_calibration._plate_noise_model_from_nnls(  # ruff: ignore[private-member-access]
         {"1": 1.0}, {"1": 0.2001}, {"1": 0.03001}
     )
-    changed = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
+    changed = noise_calibration._plate_noise_model_from_nnls(  # ruff: ignore[private-member-access]
         {"1": 1.0}, {"1": 0.3}, {"1": 0.03}
     )
-    missing = noise_calibration._plate_noise_model_from_nnls(  # noqa: SLF001
+    missing = noise_calibration._plate_noise_model_from_nnls(  # ruff: ignore[private-member-access]
         {"1": 1.0, "2": 2.0},
         {"1": 0.2, "2": 0.0},
         {"1": 0.03, "2": 0.0},
@@ -59,13 +59,13 @@ def test_noise_model_building_and_convergence() -> None:
 
     assert old["1"].sigma_floor == 1.0
     assert old["1"].sigma_ph == 0.0
-    assert noise_calibration._noise_params_converged(  # noqa: SLF001
+    assert noise_calibration._noise_params_converged(  # ruff: ignore[private-member-access]
         old, same, tol=1e-2
     )
-    assert not noise_calibration._noise_params_converged(  # noqa: SLF001
+    assert not noise_calibration._noise_params_converged(  # ruff: ignore[private-member-access]
         old, changed, tol=1e-2
     )
-    assert not noise_calibration._noise_params_converged(  # noqa: SLF001
+    assert not noise_calibration._noise_params_converged(  # ruff: ignore[private-member-access]
         old, missing, tol=1e-2
     )
 

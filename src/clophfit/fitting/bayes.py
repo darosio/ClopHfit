@@ -81,7 +81,7 @@ _ZERO_HINT_WIDTH = 1.0
 _ZERO_HINT_ALPHA_SCALE = 0.1
 
 
-def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any:  # noqa: ANN401
+def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any:  # ruff: ignore[any-type]
     """Build one floor prior from a hint, shared by the pooled and per-label paths.
 
     Parameters
@@ -174,7 +174,7 @@ def _alpha_prior_sigma(mu_a: float, plate_alpha_scale: float) -> float:
     return _ZERO_HINT_WIDTH * plate_alpha_scale
 
 
-def build_pymc_noise_priors(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def build_pymc_noise_priors(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-statements]
     noise_model: PlateNoiseModel,
     *,
     shared_alpha: bool = False,
@@ -644,7 +644,7 @@ def _resolve_data_prior_k_bounds(
     return lo, hi
 
 
-def _fit_result_from_data_priors(  # noqa: PLR0913
+def _fit_result_from_data_priors(  # ruff: ignore[too-many-arguments]
     ds: Dataset,
     *,
     edge_points: int,
@@ -696,7 +696,7 @@ def _fit_result_from_data_priors(  # noqa: PLR0913
     return FitResult(result=_Result(params), dataset=copy.deepcopy(ds))
 
 
-def _normalize_fit_input(  # noqa: PLR0913
+def _normalize_fit_input(  # ruff: ignore[too-many-arguments]
     ds_or_fr: Dataset | FitResult,
     *,
     init_strategy: InitStrategy = "lmfit",
@@ -754,7 +754,7 @@ def _normalize_fit_input(  # noqa: PLR0913
     return copy.deepcopy(ds_or_fr), True
 
 
-def _normalize_fit_inputs(  # noqa: PLR0913
+def _normalize_fit_inputs(  # ruff: ignore[too-many-arguments]
     results: Mapping[str, Dataset | FitResult],
     *,
     init_strategy: InitStrategy = "lmfit",
@@ -868,7 +868,7 @@ def _build_ye_mag_priors(
     }
 
 
-def _build_multi_ye_mag_priors(  # noqa: PLR0913
+def _build_multi_ye_mag_priors(  # ruff: ignore[too-many-arguments]
     labels: Sequence[str],
     *,
     per_well: bool = False,
@@ -1197,7 +1197,7 @@ def _summary_mean_or_none(trace_df: pd.DataFrame, name: str) -> float | None:
         value = float(
             np.asarray(trace_df.loc[name, "mean"], dtype=float).reshape(-1)[0]
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # ruff: ignore[blind-except]
         return None
     return value if np.isfinite(value) else None
 
@@ -1307,7 +1307,7 @@ def _build_multi_x_start(
     xc: ArrayF,
     x_start_sigma: float,
     x_start_between_sigma: float,
-) -> typing.Any:  # noqa: ANN401
+) -> typing.Any:  # ruff: ignore[any-type]
     """Build the starting-x anchor for the multi-well x-error models.
 
     The plate shares one buffer and one pre-addition reading, so the starting x
@@ -1388,7 +1388,7 @@ def create_x_true(
         if model is not None:
             # In a model context, wrap as Deterministic
             return pm.Deterministic("x_true", as_tensor_variable(xc))
-    except Exception:  # noqa: S110, BLE001
+    except Exception:  # ruff: ignore[try-except-pass, blind-except]
         pass
     # Outside model context or error, return numpy array
     return xc
@@ -1497,7 +1497,7 @@ def _hdi_bounds_or_none(row: pd.Series) -> tuple[float | None, float | None]:
     try:
         lo = float(row["hdi_3%"])
         hi = float(row["hdi_97%"])
-    except Exception:  # noqa: BLE001
+    except Exception:  # ruff: ignore[blind-except]
         return None, None
 
     if not (np.isfinite(lo) and np.isfinite(hi)):
@@ -1521,17 +1521,17 @@ def _add_param_from_summary(rpars: Parameters, name: str, row: pd.Series) -> Non
     rpars[name].init_value = row.get("r_hat", np.nan)
 
 
-def _add_y_likelihood(  # noqa: PLR0913
+def _add_y_likelihood(  # ruff: ignore[too-many-arguments]
     name: str,
-    y_model: typing.Any,  # noqa: ANN401  # pt.TensorVariable (no stubs)
+    y_model: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable (no stubs)
     da: DataArray,
-    sigma: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
+    sigma: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable | np.ndarray
     *,
     robust: bool = False,
-    student_t_nu: typing.Any = 3.0,  # noqa: ANN401  # float | TensorVariable
+    student_t_nu: typing.Any = 3.0,  # ruff: ignore[any-type]  # float | TensorVariable
     robust_likelihood: RobustLikelihood = "student_t",
-    pi_outlier: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
-    outlier_inflate: typing.Any | None = None,  # noqa: ANN401  # TensorVariable
+    pi_outlier: typing.Any | None = None,  # ruff: ignore[any-type]  # TensorVariable
+    outlier_inflate: typing.Any | None = None,  # ruff: ignore[any-type]  # TensorVariable
 ) -> None:
     """Add a Normal, StudentT, or contamination-mixture likelihood for one label."""
     mu = y_model[da.mask]
@@ -1559,14 +1559,14 @@ def _add_y_likelihood(  # noqa: PLR0913
         pm.Normal(name, mu=mu, sigma=sigma, observed=da.y)
 
 
-def _add_mixture_likelihood(  # noqa: PLR0913
+def _add_mixture_likelihood(  # ruff: ignore[too-many-arguments]
     name: str,
-    mu: typing.Any,  # noqa: ANN401  # pt.TensorVariable
-    sigma_normal: typing.Any,  # noqa: ANN401  # pt.TensorVariable | np.ndarray
+    mu: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable
+    sigma_normal: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable | np.ndarray
     observed: np.ndarray,
     *,
-    pi_outlier: typing.Any,  # noqa: ANN401  # pt.TensorVariable
-    outlier_inflate: typing.Any,  # noqa: ANN401  # pt.TensorVariable
+    pi_outlier: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable
+    outlier_inflate: typing.Any,  # ruff: ignore[any-type]  # pt.TensorVariable
 ) -> None:
     """Add a marginalized normal/outlier contamination mixture likelihood."""
     sigma_outlier = sigma_normal * (1.0 + outlier_inflate)
@@ -1617,7 +1617,7 @@ def _build_outlier_priors(
     return pi_outliers, outlier_inflate
 
 
-def _student_t_nu_value(student_t_nu: float | None) -> typing.Any:  # noqa: ANN401
+def _student_t_nu_value(student_t_nu: float | None) -> typing.Any:  # ruff: ignore[any-type]
     """Return a fixed or inferred Student-t degrees-of-freedom value.
 
     In both branches a ``student_t_nu`` variable is registered in the model, so a
@@ -1783,7 +1783,7 @@ def process_trace(
     return FitResult(fig, _Result(rpars, residual=residuals), trace=trace, dataset=ds)
 
 
-def extract_fit(  # noqa: PLR0913, C901, PLR0912
+def extract_fit(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
     key: str,
     ctr: str,
     trace_df: xr.DataTree | MultiFitResult | pd.DataFrame,
@@ -2109,7 +2109,7 @@ def _scale_yerr_by_ye_mag_from_xarray(
     return any_scaled
 
 
-def _update_dataset_yerr_from_sigma_obs(  # noqa: C901, PLR0912
+def _update_dataset_yerr_from_sigma_obs(  # ruff: ignore[complex-structure, too-many-branches]
     trace_df: pd.DataFrame, ds: Dataset, *, well_key: str | None = None
 ) -> None:
     """Replace per-data-array ``y_errc`` with posterior ``sigma_obs`` from the trace.
@@ -2131,7 +2131,7 @@ def _update_dataset_yerr_from_sigma_obs(  # noqa: C901, PLR0912
             # Extract indices from sigma_obs_lbl[idx1, idx2, ...]
             inner = row_name[len(prefix_with_bracket) : -1]
             parts = [p.strip() for p in inner.split(",")]
-            if len(parts) == 2 and well_key is not None:  # noqa: PLR2004
+            if len(parts) == 2 and well_key is not None:  # ruff: ignore[magic-value-comparison]
                 # Multi-well case: expected parts [step, well]
                 if parts[1] == well_key:
                     with contextlib.suppress(ValueError, KeyError):
@@ -2195,7 +2195,7 @@ _DEFAULT_INIT = InitConfig()
 _DEFAULT_SAMPLER = SamplerConfig()
 
 
-def fit_binding_pymc(  # noqa: PLR0913, PLR0915
+def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
     ds_or_fr: Dataset | FitResult,
     *,
     n_sd: float = 10.0,
@@ -2443,7 +2443,7 @@ def _ctr_param_name(group_name: str) -> str:
     return f"K_ctr_{group_name}"
 
 
-def _build_ctr_k_params(  # noqa: PLR0913
+def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
     scheme: PlateScheme,
     ctr_ks: dict[str, tuple[float, float]],
     active_wells: set[str],
@@ -2512,7 +2512,7 @@ def _build_ctr_k_params(  # noqa: PLR0913
     return k_params, k_replicate
 
 
-def _free_k_init(  # noqa: PLR0913
+def _free_k_init(  # ruff: ignore[too-many-arguments]
     fit_results: dict[str, FitResult],
     wells_list: list[str],
     scheme: PlateScheme,
@@ -2603,7 +2603,7 @@ def _free_k_init(  # noqa: PLR0913
     return free_wells, np.asarray(mus), np.asarray(sigmas), shared_of
 
 
-def _resolve_well_k(  # noqa: PLR0913
+def _resolve_well_k(  # ruff: ignore[too-many-arguments]
     key: str,
     ctr_name: str,
     pars: dict[str, typing.Any],
@@ -2611,7 +2611,7 @@ def _resolve_well_k(  # noqa: PLR0913
     k_replicate: dict[str, typing.Any],
     *,
     ctr_free_k: bool,
-) -> typing.Any:  # noqa: ANN401
+) -> typing.Any:  # ruff: ignore[any-type]
     """Return the PyMC K variable for *key* given the current CTR-K mode."""
     if ctr_free_k:
         k_rep = k_replicate.get(key)
@@ -2634,7 +2634,7 @@ def _ph_at_mid_fluorescence(da: DataArray) -> float | None:
         midpoint crossing cannot be found.
     """
     x, y = da.x, da.y
-    if len(x) < 2:  # noqa: PLR2004
+    if len(x) < 2:  # ruff: ignore[magic-value-comparison]
         return None
     y_mid = (float(y.max()) + float(y.min())) / 2
     order = np.argsort(x)
@@ -2690,8 +2690,8 @@ def _well_k_init_from_results(
         if not (r and r.result and "K" in r.result.params):
             continue
         p = r.result.params["K"]
-        at_bound = (p.min is not None and abs(p.value - p.min) < 0.01) or (  # noqa: PLR2004
-            p.max is not None and abs(p.value - p.max) < 0.01  # noqa: PLR2004
+        at_bound = (p.min is not None and abs(p.value - p.min) < 0.01) or (  # ruff: ignore[magic-value-comparison]
+            p.max is not None and abs(p.value - p.max) < 0.01  # ruff: ignore[magic-value-comparison]
         )
         large_stderr = p.stderr is None or p.stderr > 1.0
         if at_bound or large_stderr:
@@ -2701,7 +2701,7 @@ def _well_k_init_from_results(
             if r.dataset:
                 best_delta, best_ph = -1.0, None
                 for da in r.dataset.values():
-                    if len(da.y) < 2:  # noqa: PLR2004
+                    if len(da.y) < 2:  # ruff: ignore[magic-value-comparison]
                         continue
                     delta = float(da.y.max() - da.y.min())
                     ph = _ph_at_mid_fluorescence(da)
@@ -2719,7 +2719,7 @@ def _well_k_init_from_results(
     return well_k
 
 
-def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-statements]
     results: Mapping[str, Dataset | FitResult],
     scheme: PlateScheme,
     *,
@@ -3015,7 +3015,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
         k_segments: list[typing.Any] = []
         for key in wells_list:
             if key in free_pos:
-                assert k_free is not None  # noqa: S101 — free_pos implies k_free built
+                assert k_free is not None  # ruff: ignore[assert] — free_pos implies k_free built
                 k_segments.append(k_free[free_pos[key]])
             else:
                 k_segments.append(k_params[shared_of[key]])

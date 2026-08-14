@@ -280,7 +280,9 @@ def test_odr_reaches_the_global_fit(
     months. This captures the method the plate fit actually receives, rather
     than asserting the flag parses.
     """
-    from clophfit.prtecan.titration import Titration  # noqa: PLC0415
+    from clophfit.prtecan.titration import (  # ruff: ignore[import-outside-top-level]
+        Titration,
+    )
 
     methods: list[str] = []
     real = Titration.fit_plate
