@@ -2925,7 +2925,42 @@ def test_ye_mag_hierarchical_correlates_labels_at_prior() -> None:
     assert float(np.asarray(pr["ye_mag_tau_delta"]).min()) >= 0.0
 
 
-@pytest.mark.parametrize("param", ["centered", "hierarchical"])
+def test_ye_mag_separable_is_label_level_plus_shared_well_factor() -> None:
+    """Separable ye_mag costs #lbl + #well + 1 and keeps a label main effect.
+
+    The hierarchical prior shares mu across labels, so a systematic label
+    difference has to be carried by per-well deviations - #well * #lbl
+    parameters doing the work of #lbl. Here the level is explicit, so the two
+    labels differ by a constant in log space at every well.
+    """
+    coords = {"well": [f"w{i}" for i in range(30)]}
+    with pm.Model(coords=coords) as model:
+        bayes._build_multi_ye_mag_priors(  # noqa: SLF001
+            ["1", "2"], per_well=True, parameterization="separable"
+        )
+        pr = pm.sample_prior_predictive(
+            400, var_names=["ye_mag_1", "ye_mag_2", "ye_mag_mu_1", "ye_mag_mu_2"]
+        ).prior
+
+    assert {rv.name for rv in model.free_RVs} == {
+        "ye_mag_tau_well",
+        "ye_mag_z_well",
+        "ye_mag_mu_1",
+        "ye_mag_mu_2",
+    }
+
+    # One shared well factor: the labels differ by a constant offset per draw,
+    # so log ye_mag_1 - log ye_mag_2 has no spread across wells.
+    d = np.log(np.asarray(pr["ye_mag_1"]).reshape(-1, 30)) - np.log(
+        np.asarray(pr["ye_mag_2"]).reshape(-1, 30)
+    )
+    assert float(np.abs(d.std(axis=1)).max()) < 1e-8
+    # ...and that offset is exactly the difference of the two label levels.
+    mu_d = np.asarray(pr["ye_mag_mu_1"]).ravel() - np.asarray(pr["ye_mag_mu_2"]).ravel()
+    assert np.allclose(d[:, 0], mu_d, atol=1e-8)
+
+
+@pytest.mark.parametrize("param", ["centered", "hierarchical", "separable"])
 def test_fit_binding_pymc_multi_accepts_parameterization(param: str) -> None:
     """Each ye_mag parameterization builds and prior-samples with pwym on."""
     rng = np.random.default_rng(0)

@@ -875,7 +875,7 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
     prior: Literal["halfnormal", "lognormal"] = "lognormal",
     mu: float | Mapping[str, float] = 0.0,
     sigma: float | Mapping[str, float] = 1.5,
-    parameterization: Literal["centered", "hierarchical"] = "centered",
+    parameterization: Literal["centered", "hierarchical", "separable"] = "centered",
 ) -> dict[str, typing.Any]:
     """Build label-indexed ye_mag priors for multi-well models.
 
@@ -914,6 +914,8 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
         }
     if parameterization == "hierarchical":
         return _build_hierarchical_ye_mag_priors(labels, mu=mu, sigma=sigma)
+    if parameterization == "separable":
+        return _build_separable_ye_mag_priors(labels, mu=mu, sigma=sigma)
     return {
         lbl: pm.LogNormal(
             f"ye_mag_{lbl}",
@@ -923,6 +925,58 @@ def _build_multi_ye_mag_priors(  # noqa: PLR0913
         )
         for lbl in labels
     }
+
+
+def _build_separable_ye_mag_priors(
+    labels: Sequence[str],
+    *,
+    mu: float | Mapping[str, float],
+    sigma: float | Mapping[str, float],
+) -> dict[str, typing.Any]:
+    """Separable per-well ye_mag: per-label level plus one shared well factor.
+
+    ``log ye_mag_lbl[w] = mu_lbl + tau_well * z_well[w]``, costing ``#lbl +
+    #well + 1`` parameters against ``#well * #lbl`` for the centered and
+    hierarchical per-well priors.
+
+    The hierarchical prior shares ``mu`` across labels, so it has no label main
+    effect and must spend per-well deviations to represent one. It does exactly
+    that: over eleven plates its fitted deviations are systematically negative
+    for label 1 and positive for label 2 on every plate, giving geometric-mean
+    ``ye_mag_2/ye_mag_1`` ratios of 1.1 to 8.0. That is ``#well * #lbl``
+    parameters carrying a ``#lbl`` effect, and it inflates the effective
+    parameter count enough to break PSIS-LOO. Here the label level is explicit
+    and the well factor is shared, giving the same structure far more cheaply.
+
+    ``z_well`` is mean-zero and the level lives entirely in ``mu_lbl``, so the
+    two are identifiable.
+
+    Parameters
+    ----------
+    labels : Sequence[str]
+        Emission labels.
+    mu : float | Mapping[str, float]
+        Log-scale prior location for each label's level.
+    sigma : float | Mapping[str, float]
+        Log-scale prior scale for each label's level.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        Label -> per-well ``ye_mag`` tensor (dims ``"well"``).
+    """
+    tau_well = pm.HalfNormal("ye_mag_tau_well", sigma=_shared_ye_mag_sigma(sigma))
+    z_well = pm.Normal("ye_mag_z_well", 0.0, 1.0, dims="well")
+    log_well = tau_well * z_well
+    out: dict[str, typing.Any] = {}
+    for lbl in labels:
+        mu_lbl = pm.Normal(
+            f"ye_mag_mu_{lbl}", _ye_mag_value(mu, lbl), _ye_mag_sigma(sigma, lbl)
+        )
+        out[lbl] = pm.Deterministic(
+            f"ye_mag_{lbl}", pm.math.exp(mu_lbl + log_well), dims="well"
+        )
+    return out
 
 
 def _build_hierarchical_ye_mag_priors(
@@ -2676,7 +2730,9 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
-    ye_mag_parameterization: Literal["centered", "hierarchical"] = "centered",
+    ye_mag_parameterization: Literal[
+        "centered", "hierarchical", "separable"
+    ] = "centered",
     well_noise_scale: bool = False,
     shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
@@ -2720,7 +2776,7 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     per_well_ye_mags : bool | None
         Learn per-well (not just per-label) ``ye_mag`` factors. ``None`` follows
         the noise config's ``learn_ye_mags`` when a structured model is supplied.
-    ye_mag_parameterization : Literal["centered", "hierarchical"]
+    ye_mag_parameterization : Literal["centered", "hierarchical", "separable"]
         Parameterization of the per-well ``ye_mag`` prior. ``"centered"`` (default)
         reproduces the historical independent-per-well construction;
         ``"hierarchical"`` partially pools the labels' per-well factors with a
