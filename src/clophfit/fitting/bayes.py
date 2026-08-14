@@ -1585,7 +1585,7 @@ def _add_mixture_likelihood(  # noqa: PLR0913
     pm.Deterministic(
         name.replace("y_likelihood", "outlier_probability"),
         pm_math.exp(
-            log_p_outlier - pt.logaddexp(log_p_normal, log_p_outlier)  # type: ignore[no-untyped-call]
+            log_p_outlier - pt.logaddexp(log_p_normal, log_p_outlier)  # type: ignore[attr-defined,no-untyped-call]
         ),
     )
 
