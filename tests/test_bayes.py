@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
@@ -2958,6 +2960,57 @@ def test_ye_mag_separable_is_label_level_plus_shared_well_factor() -> None:
     # ...and that offset is exactly the difference of the two label levels.
     mu_d = np.asarray(pr["ye_mag_mu_1"]).ravel() - np.asarray(pr["ye_mag_mu_2"]).ravel()
     assert np.allclose(d[:, 0], mu_d, atol=1e-8)
+
+
+def _tiny_multi_dataset() -> dict[str, Dataset]:
+    """Return a four-well two-label dataset small enough for a smoke fit."""
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.5, 8.5, 7)
+    dsd = {}
+    for w in ("A01", "A02", "A03", "A04"):
+        y1 = binding_1site(x, 7.0, 600.0, 50.0, is_ph=True) + rng.normal(0, 20, 7)
+        y2 = binding_1site(x, 7.0, 40.0, 500.0, is_ph=True) + rng.normal(0, 8, 7)
+        dsd[w] = Dataset(
+            {
+                "1": DataArray(x, y1, y_errc=np.full(7, 20.0)),
+                "2": DataArray(x, y2, y_errc=np.full(7, 8.0)),
+            },
+            is_ph=True,
+        )
+    return dsd
+
+
+@pytest.mark.parametrize("explicit", [None, True, False])
+def test_per_well_ye_mags_warns_only_when_resolved_from_learn_ye_mags(
+    explicit: bool | None,  # noqa: FBT001
+) -> None:
+    """A structured noise model must not silently decide per-well ye_mags.
+
+    Resolving one knob from another couples the noise base to the ye_mag
+    structure, so "structured vs uniform" cannot be told apart from "per-well vs
+    per-label". The behaviour is kept, but passing the knob explicitly must
+    silence the warning - that is the escape hatch callers need.
+    """
+    noise = NoiseConfig.structured(learn_ye_mags=True)
+    sampler = SamplerConfig(
+        nuts_sampler="pymc", n_tune=10, n_samples=10, chains=1, cores=1
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        bayes.fit_binding_pymc_multi(
+            _tiny_multi_dataset(),
+            PlateScheme(),
+            noise=noise,
+            per_well_ye_mags=explicit,
+            sampler=sampler,
+        )
+    coupled = [
+        w
+        for w in caught
+        if issubclass(w.category, DeprecationWarning)
+        and "per_well_ye_mags" in str(w.message)
+    ]
+    assert bool(coupled) is (explicit is None)
 
 
 @pytest.mark.parametrize("param", ["centered", "hierarchical", "separable"])

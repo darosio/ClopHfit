@@ -7,6 +7,7 @@ import copy
 import os
 import re
 import typing
+import warnings
 from collections.abc import Mapping, Mapping as MappingABC
 from typing import Literal
 
@@ -2862,6 +2863,21 @@ def fit_binding_pymc_multi(  # noqa: C901, PLR0912, PLR0913, PLR0915
     labels = list(ds.keys())
     if well_noise_scale_sigma is not None:
         well_noise_sd_sigma = well_noise_scale_sigma
+    # Resolving one knob from another couples two factors that callers expect to
+    # set independently: a structured noise model silently switches per-well
+    # ye_mags on while a uniform one leaves them off, so "structured vs uniform"
+    # cannot be separated from "per-well vs per-label" unless the caller passes
+    # this explicitly. That confound went unnoticed through a whole campaign.
+    # The behaviour is kept for compatibility, but it now says so.
+    if noise_model is not None and per_well_ye_mags is None:
+        warnings.warn(
+            "per_well_ye_mags was not given, so it is being resolved from "
+            f"learn_ye_mags ({learn_ye_mags!r}) because a structured noise model "
+            "is in use. This couples the noise base to the ye_mag structure. "
+            "Pass per_well_ye_mags explicitly to keep the two independent.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     use_per_well_ye_mags = (
         learn_ye_mags
         if noise_model is not None and per_well_ye_mags is None
