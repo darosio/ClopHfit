@@ -8,6 +8,7 @@ from clophfit.fitting.grid import (
     Knob,
     apply_blocks,
     check_unique_signature,
+    direct_kwargs,
     inert_knobs,
     model_signature,
 )
@@ -79,3 +80,14 @@ def test_inert_knobs_allows_a_single_spec_grid() -> None:
 def test_inert_knobs_passes_when_a_knob_varies() -> None:
     """A knob taking different values across specs is doing its job."""
     assert inert_knobs([{"k": 1}, {"k": 2}], [Knob("k", "x")]) == {}
+
+
+def test_direct_kwargs_passes_only_targeted_knobs() -> None:
+    """A knob with a target is renamed through; one without is left alone."""
+    knobs = [
+        Knob("n_sd", "run", target="n_sd"),
+        Knob("acid_drop", "x", target="x_start_between_sigma"),
+        Knob("learn_ye_mags", "noise"),  # folded into a config object elsewhere
+    ]
+    cfg = {"n_sd": 4, "acid_drop": 0.015, "learn_ye_mags": True}
+    assert direct_kwargs(cfg, knobs) == {"n_sd": 4, "x_start_between_sigma": 0.015}

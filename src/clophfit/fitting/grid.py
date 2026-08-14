@@ -42,6 +42,11 @@ class Knob:
         spelling and the specification spelling diverge.
     default : typing.Any
         Value used when the block omits the key.
+    target : str
+        Model-kwarg this knob is passed as, when the pass-through is a plain
+        rename with no coercion or conditional construction. Empty means the
+        caller places it, which is the case for anything that lands inside a
+        config object or needs a type conversion.
     reader : Callable[[dict[str, typing.Any]], typing.Any] | None
         How to read the resulting value back out of the built model kwargs.
         ``None`` marks a knob that is consumed on the way through and has no one
@@ -52,12 +57,40 @@ class Knob:
     block: str
     source_key: str = ""
     default: typing.Any = None
+    target: str = ""
     reader: Callable[[dict[str, typing.Any]], typing.Any] | None = None
 
     @property
     def key(self) -> str:
         """Return the key to read from the source block."""
         return self.source_key or self.name
+
+
+def direct_kwargs(
+    cfg: Mapping[str, typing.Any], knobs: Iterable[Knob]
+) -> dict[str, typing.Any]:
+    """Return the model kwargs that are plain pass-throughs of a knob.
+
+    Parameters
+    ----------
+    cfg : Mapping[str, typing.Any]
+        An expanded specification.
+    knobs : Iterable[Knob]
+        Knobs to consider; those without a *target* are skipped.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        Target name to value.
+
+    Notes
+    -----
+    Only knobs whose journey to the model is a rename belong here. A knob that
+    is coerced, made conditional, or folded into a config object stays with the
+    caller: expressing those generically would need a coercion language whose
+    mistakes are exactly as silent as the ones this registry exists to prevent.
+    """
+    return {knob.target: cfg[knob.name] for knob in knobs if knob.target}
 
 
 def apply_blocks(
