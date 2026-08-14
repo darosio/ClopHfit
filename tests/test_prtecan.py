@@ -1734,6 +1734,39 @@ def test_fit_single_mcmc_returns_none_without_spec(tmp_path: Path) -> None:
     assert fit_single_mcmc(tit, {}, tmp_path, None) is None
 
 
+def test_fit_single_mcmc_multi_fits_wells_jointly(tmp_path: Path) -> None:
+    """model="multi" routes to the joint fit and returns per-well results.
+
+    The CLI could previously express only per-well sampling, so a plate whose
+    controls share a K had no route through it at all. This pins the branch: a
+    multi spec must come back with one result per fitted well, not None and not
+    a single-well fit.
+    """
+    from clophfit.fitting.data_structures import DataArray, Dataset  # noqa: PLC0415
+    from clophfit.prtecan.export import fit_single_mcmc  # noqa: PLC0415
+
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    x = np.linspace(5.5, 8.5, 7)
+    rng = np.random.default_rng(0)
+    datasets = {
+        w: Dataset(
+            {"1": DataArray(x, 100 + 50 * x + rng.normal(0, 1, 7), y_errc=np.ones(7))},
+            is_ph=True,
+        )
+        for w in ("A01", "A02")
+    }
+    spec = prtecan.McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(
+            nuts_sampler="pymc", n_tune=10, n_samples=10, chains=1, cores=1
+        ),
+    )
+    res = fit_single_mcmc(tit, datasets, tmp_path, spec)
+
+    assert res is not None
+    assert set(datasets) <= set(res.results)
+
+
 @pytest.mark.parametrize("comb", [False, True])
 def test_export_data_fit_with_mcmc_spec_samples(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, comb: bool

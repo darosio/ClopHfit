@@ -12,7 +12,11 @@ import numpy as np
 import pandas as pd
 
 from clophfit.clophfit_types import ArrayF
-from clophfit.fitting.bayes import dataset_with_unit_yerr, fit_binding_pymc
+from clophfit.fitting.bayes import (
+    dataset_with_unit_yerr,
+    fit_binding_pymc,
+    fit_binding_pymc_multi,
+)
 from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConfig
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
@@ -260,7 +264,7 @@ def fit_single_mcmc(
     outfit: Path,
     spec: McmcSpec | None,
 ) -> TitrationResults | None:
-    """Run optional per-well single PyMC fits for export.
+    """Run optional PyMC fits for export, per well or jointly.
 
     Parameters
     ----------
@@ -272,8 +276,8 @@ def fit_single_mcmc(
     outfit : Path
         Output directory used for residual-refit diagnostic CSV files.
     spec : McmcSpec | None
-        Sampling request deciding whether and how to run per-well MCMC.
-        ``None`` disables single-well MCMC export.
+        Sampling request deciding whether and how to run MCMC. ``None``
+        disables MCMC export.
 
     Returns
     -------
@@ -283,6 +287,14 @@ def fit_single_mcmc(
     """
     if spec is None:
         return None
+
+    if spec.model == "multi":
+        # Every well fitted jointly, with control K shared across each control
+        # group. Only the per-well results are returned, because that is what
+        # the export path writes; the shared trace, which carries the pooled
+        # control K itself, is reachable only through fit_binding_pymc_multi.
+        multi = fit_binding_pymc_multi(datasets, titration.scheme, sampler=spec.sampler)
+        return TitrationResults(titration.scheme, titration.fit_keys, multi.results)
 
     if spec.model == "single":
         mcmc_fits = {

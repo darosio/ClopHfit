@@ -155,7 +155,7 @@ def detect_bad_wells_cmd(
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting).")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
-@click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit"], case_sensitive=False), default="None", show_default=True, help="Per-well MCMC sampling: None, single, single-refit (robust screening pass then refit).")  # fmt: skip
+@click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit", "multi"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, single, single-refit (robust screening pass then refit), multi (all wells jointly, control K shared per group).")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label. Adds proportional term to y_err variance. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
@@ -352,7 +352,7 @@ def tecan(  # noqa: C901,PLR0912,PLR0913,PLR0915
         None
         if mcmc == "None"
         else McmcSpec(
-            model=cast('Literal["single", "single-refit"]', mcmc),
+            model=cast('Literal["single", "single-refit", "multi"]', mcmc),
             sampler=SamplerConfig(n_samples=mcmc_samples, nuts_sampler=nuts_sampler),
             structured_noise=mcmc_noise == "structured",
             noise_mode=cast('Literal["centered", "fixed"]', noise_mode),

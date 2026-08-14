@@ -232,10 +232,34 @@ def test_fit_titration_glob(dat_f: str, ph_opt: str, output: str, opts: str) -> 
         file.unlink()
 
 
-def test_prtecan_rejects_retired_mcmc_modes(tmp_path: Path, runner: CliRunner) -> None:
-    """The multi modes were no-ops after 01735f12; they must not be offered."""
+def test_prtecan_accepts_multi_mcmc(tmp_path: Path, runner: CliRunner) -> None:
+    """--mcmc multi is offered again, now that it is wired to the joint fit.
+
+    It was retired because it had been a no-op since 01735f12: accepted and
+    silently doing nothing. It is back because it now routes to
+    fit_binding_pymc_multi, which is the model a shared control K requires and
+    which the CLI previously had no way to express.
+    """
     list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
-    for mode in ("multi", "multi-noise", "multi-noise-xrw"):
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(tmp_path / "out"),
+            "tecan",
+            list_f,
+            "--mcmc",
+            "multi",
+            "--dry-run",
+        ],
+    )
+    assert "not a valid choice" not in result.output.lower()
+
+
+def test_prtecan_rejects_retired_mcmc_modes(tmp_path: Path, runner: CliRunner) -> None:
+    """The multi-noise modes were no-ops after 01735f12; they stay unoffered."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+    for mode in ("multi-noise", "multi-noise-xrw"):
         result = runner.invoke(
             ppr,
             [

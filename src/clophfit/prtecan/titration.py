@@ -1461,9 +1461,11 @@ class McmcSpec:
 
     Parameters
     ----------
-    model : Literal["single", "single-refit"]
-        Which per-well fit to run. ``"single"`` samples each well once;
-        ``"single-refit"`` runs the robust screening pass then refits.
+    model : Literal["single", "single-refit", "multi"]
+        Which fit to run. ``"single"`` samples each well once;
+        ``"single-refit"`` runs the robust screening pass then refits;
+        ``"multi"`` fits every well jointly with control K shared across each
+        control group.
     sampler : SamplerConfig
         NUTS controls forwarded to ``pm.sample``.
     structured_noise : bool
@@ -1475,7 +1477,7 @@ class McmcSpec:
         parameter with no supplied value is always free.
     """
 
-    model: Literal["single", "single-refit"]
+    model: Literal["single", "single-refit", "multi"]
     sampler: SamplerConfig
     structured_noise: bool = False
     noise_mode: Literal["centered", "fixed"] = "centered"
