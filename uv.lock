@@ -3,16 +3,16 @@ revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -745,7 +745,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.4" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.18.0" },
     { name = "pygments", marker = "extra == 'docs'", specifier = ">=2.20.0" },
-    { name = "pymc", specifier = ">=6.3.0" },
+    { name = "pymc", specifier = ">=6.3.1" },
     { name = "pyparsing", specifier = ">=3.3.2" },
     { name = "scipy", specifier = ">=1.18.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
@@ -3476,7 +3476,7 @@ wheels = [
 
 [[package]]
 name = "pymc"
-version = "6.3.0"
+version = "6.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arviz" },
@@ -3490,9 +3490,9 @@ dependencies = [
     { name = "threadpoolctl" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/32/fa/6ab63da787189a6fc0905b112f6517b484254c8180f25d384fdf142d6ec9/pymc-6.3.0.tar.gz", hash = "sha256:68ba7e5accbc57f509992ee8d96f820a00cca3a3cf080ab8c62ead84f6455728", size = 556006, upload-time = "2026-08-12T08:28:29.038Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/3e/5ff8e170253de4e11183409d1046cd178eae0c074eccbb756a2716477061/pymc-6.3.1.tar.gz", hash = "sha256:c909ea4c88bd2f2311ecceb6f078a1bfe9e652732991e438a11660cd367c5d19", size = 555410, upload-time = "2026-08-16T09:04:21.629Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/b7/9ba8cb6a1d4aa54428ad76b87d4efb3c2b4c4782e691bb1b1ea7250065e4/pymc-6.3.0-py3-none-any.whl", hash = "sha256:b8751545ddf66e16c9b67317b42b3babdab3a9328f06f11d76b3b4ca3f5a672a", size = 608788, upload-time = "2026-08-12T08:28:27.221Z" },
+    { url = "https://files.pythonhosted.org/packages/de/12/5b4852fc4ce4ff4e09d2532a964775c1fb431069097339fc41f9c64df443/pymc-6.3.1-py3-none-any.whl", hash = "sha256:a2840af709888d1077dab252db133bcaa1befd72b74503483cde159b9d19efc8", size = 608477, upload-time = "2026-08-16T09:04:20.044Z" },
 ]
 
 [[package]]
