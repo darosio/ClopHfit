@@ -280,16 +280,27 @@ def test_odr_reaches_the_global_fit(
     months. This captures the method the plate fit actually receives, rather
     than asserting the flag parses.
     """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        Dataset,
+    )
     from clophfit.prtecan.titration import (  # ruff: ignore[import-outside-top-level]
         Titration,
+        TitrationResults,
     )
 
     methods: list[str] = []
     real = Titration.fit_plate
 
-    def spy(self: Titration, *args: object, **kwargs: object) -> object:
-        methods.append(str(kwargs.get("method", "")))
-        return real(self, *args, **kwargs)
+    def spy(
+        self: Titration,
+        datasets: dict[str, Dataset] | None = None,
+        method: str = "",
+        *,
+        label: str | None = None,
+        **kwargs: object,
+    ) -> TitrationResults:
+        methods.append(method)
+        return real(self, datasets, method, label=label, **kwargs)
 
     monkeypatch.setattr(Titration, "fit_plate", spy)
     runner.invoke(
