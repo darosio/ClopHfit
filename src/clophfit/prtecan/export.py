@@ -21,6 +21,7 @@ from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConf
 from clophfit.fitting.data_structures import Dataset, FitResult
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.model_validation import (
+    OutlierCriterion,
     ResidualTail,
     apply_exclusions,
     mark_outliers,
@@ -187,13 +188,14 @@ def _structured_noise(
     )
 
 
-def _single_refit_two_pass(
+def _single_refit_two_pass(  # ruff: ignore[too-many-arguments]
     ds: Dataset,
     *,
     screening_noise: NoiseConfig,
     refit_noise: NoiseConfig,
     sampler: SamplerConfig,
     unit_yerr: bool = True,
+    criterion: OutlierCriterion | None = None,
 ) -> tuple[FitResult, pd.DataFrame]:
     """Screen residual outliers with a robust PyMC pass, then refit unrobustly.
 
@@ -215,6 +217,11 @@ def _single_refit_two_pass(
         Reset observation errors to one before the screening pass. Required by
         the ``ye_mag`` strategy, whose multiplier learns the scale; a structured
         floor/gain/alpha model builds its own variance and must pass ``False``.
+    criterion : OutlierCriterion | None
+        What the screening pass counts as an outlier. ``None`` keeps the
+        standardized-residual tail rule, tolerating no expected tail; pass
+        :class:`RobustZMad` to score against the residuals' own MAD scale
+        instead.
 
     Returns
     -------
@@ -237,7 +244,8 @@ def _single_refit_two_pass(
     )
     residuals = mark_outliers(
         residuals,
-        ResidualTail(
+        criterion
+        or ResidualTail(
             threshold=3.0, allowed_tail_fraction=0.0, min_allowed_tail_count=0
         ),
     )

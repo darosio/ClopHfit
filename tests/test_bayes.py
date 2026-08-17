@@ -40,6 +40,7 @@ from clophfit.fitting.data_structures import (
     NoiseModelParams,
     PlateNoiseModel,
 )
+from clophfit.fitting.model_validation import RobustZMad
 from clophfit.fitting.models import binding_1site
 from clophfit.prtecan import PlateScheme
 
@@ -3040,3 +3041,61 @@ def test_fit_binding_pymc_multi_accepts_parameterization(param: str) -> None:
     assert "ye_mag_1" in fit.trace.posterior
     if param == "hierarchical":
         assert "ye_mag_tau_delta" in fit.trace.posterior
+
+
+def test_multi_screened_refits_without_the_flagged_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The screening pass's exclusions reach the dataset the refit pass fits.
+
+    Both passes are stubbed, so this pins the composition - fit, score, mask,
+    refit - rather than any sampler behaviour.
+    """
+    x = np.linspace(5.5, 8.5, 7)
+    y = binding_1site(x, 7.0, 600.0, 50.0, is_ph=True)
+    datasets = {"A01": Dataset({"1": DataArray(x, y)}, is_ph=True)}
+
+    calls: list[dict[str, Dataset | FitResult]] = []
+
+    class _StubMulti:
+        """Minimal stand-in carrying the two attributes the screen consumes."""
+
+        def __init__(self, results: dict[str, FitResult]) -> None:
+            self.results = results
+
+        def residual_table(self, **_kwargs: object) -> pd.DataFrame:
+            return pd.DataFrame({
+                "well": ["A01"] * 7,
+                "label": ["1"] * 7,
+                "step": list(range(7)),
+                "raw_res": [0.1, -0.2, 0.15, 3.0, 0.2, -0.1, -0.05],
+            })
+
+    def fake_multi(
+        results: dict[str, Dataset | FitResult],
+        _scheme: PlateScheme,
+        **_kwargs: object,
+    ) -> _StubMulti:
+        calls.append(dict(results))
+        return _StubMulti({
+            well: FitResult(dataset=ds if isinstance(ds, Dataset) else ds.dataset)
+            for well, ds in results.items()
+        })
+
+    monkeypatch.setattr(bayes, "fit_binding_pymc_multi", fake_multi)
+
+    final = bayes.fit_binding_pymc_multi_screened(
+        datasets,
+        PlateScheme(),
+        criterion=RobustZMad(threshold=3.5),
+        sampler=SamplerConfig(nuts_sampler="pymc", n_tune=2, n_samples=2),
+    )
+
+    assert len(calls) == 2  # screening pass, then refit
+    screened = calls[0]["A01"]
+    refitted = calls[1]["A01"]
+    assert isinstance(screened, Dataset)
+    assert isinstance(refitted, Dataset)
+    assert screened["1"].mask.all()  # the screening pass saw every point
+    assert refitted["1"].mask.tolist() == [True, True, True, False, True, True, True]
+    assert final is not None

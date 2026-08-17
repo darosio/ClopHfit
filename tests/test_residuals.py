@@ -20,6 +20,7 @@ from clophfit.fitting.data_structures import (
 from clophfit.fitting.model_validation import (
     OutlierProbability,
     ResidualAnalysis,
+    RobustZMad,
     apply_exclusions,
     mark_outliers,
     residuals_from_fit_results,
@@ -625,6 +626,134 @@ def test_apply_exclusions_honours_the_criterion_conjunction() -> None:
         mark_outliers(residuals, OutlierProbability(residual_threshold=3.0)),
     )
     assert masked_conjunction["A01"]["1"].mask[2]
+
+
+###############################################################################
+# Tests for mark_outliers(RobustZMad)
+###############################################################################
+
+
+def test_robust_zmad_flags_the_point_the_mad_scale_exposes() -> None:
+    """A point far outside the group's own MAD scale is flagged and scored by z."""
+    df = pd.DataFrame({
+        "well": ["A01"] * 7,
+        "label": ["1"] * 7,
+        "raw_res": [0.1, -0.2, 0.15, -0.05, 0.2, -0.1, 3.0],
+    })
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    assert out["exclude_outlier"].tolist() == [False] * 6 + [True]
+    # The score is the robust z, not |residual|: median 0.1, MAD-sigma 0.222.
+    assert out.loc[6, "residual_outlier_score"] == pytest.approx(
+        2.9 / (0.15 * 1.4826), rel=1e-3
+    )
+
+
+def test_robust_zmad_has_no_sample_size_ceiling() -> None:
+    """The MAD scale exposes an outlier a mean/SD z-score cannot reach.
+
+    A mean/SD z is inflated by the very point it should expose, capping it at
+    ``sqrt(n - 1)`` — 2.449 for the seven points of a label-1 titration — so a
+    3.5 cutoff on it can never flag anything. The MAD scale has no such ceiling.
+    """
+    residuals = [0.1, -0.2, 0.15, -0.05, 0.2, -0.1, 3.0]
+    values = np.array(residuals)
+    classical_z = abs(values[-1] - values.mean()) / values.std(ddof=1)
+    assert classical_z < 3.5  # the rule zmad replaces cannot see this point
+    assert classical_z < np.sqrt(len(values) - 1)
+
+    df = pd.DataFrame({
+        "well": ["A01"] * 7,
+        "label": ["1"] * 7,
+        "raw_res": residuals,
+    })
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    assert bool(out["exclude_outlier"].iloc[-1])
+
+
+def test_robust_zmad_scales_each_group_separately() -> None:
+    """The same residual is an outlier in a quiet label and ordinary in a noisy one.
+
+    The two channels differ in scale by an order of magnitude, which is why the
+    scale has to come from each group rather than from the pooled table.
+    """
+    df = pd.DataFrame({
+        "well": ["A01"] * 14,
+        "label": ["1"] * 7 + ["2"] * 7,
+        "raw_res": [
+            0.05,
+            -0.05,
+            0.1,
+            -0.1,
+            0.05,
+            -0.05,
+            1.0,  # quiet channel
+            -1.5,
+            -0.8,
+            -0.2,
+            0.3,
+            0.9,
+            1.4,
+            1.0,  # noisy channel
+        ],
+    })
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    flagged = out.loc[out["exclude_outlier"], ["label", "raw_res"]]
+    assert flagged["label"].tolist() == ["1"]
+    assert flagged["raw_res"].tolist() == [1.0]
+
+
+def test_robust_zmad_flags_nothing_in_a_clean_group() -> None:
+    """A group with no outlier keeps every point at the 3.5 cutoff."""
+    df = pd.DataFrame({
+        "well": ["A01"] * 7,
+        "label": ["1"] * 7,
+        "raw_res": [-0.9, -0.5, -0.1, 0.2, 0.5, 0.8, 1.0],
+    })
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    assert not out["exclude_outlier"].any()
+
+
+def test_robust_zmad_ignores_a_group_with_no_spread() -> None:
+    """Identical residuals give no scale, so nothing is flagged and no score is NaN."""
+    df = pd.DataFrame({
+        "well": ["A01"] * 5,
+        "label": ["1"] * 5,
+        "raw_res": [0.5] * 5,
+    })
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    assert not out["exclude_outlier"].any()
+    assert out["residual_outlier_score"].notna().all()
+
+
+def test_robust_zmad_missing_residual_column_marks_nothing() -> None:
+    """A requested residual column that is absent excludes no rows."""
+    df = pd.DataFrame({"well": ["A01"], "label": ["1"], "std_res": [9.0]})
+    out = mark_outliers(df, RobustZMad(threshold=3.5))
+    assert out["exclude_outlier"].tolist() == [False]
+
+
+def test_apply_exclusions_masks_the_zmad_flagged_point() -> None:
+    """The zmad verdict reaches the dataset mask that the refit pass will use."""
+    ds = Dataset(
+        {
+            "1": DataArray(
+                np.array([9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0]),
+                np.array([100.0, 101.0, 99.0, 500.0, 100.5, 99.5, 100.0]),
+            )
+        },
+        is_ph=True,
+    )
+    residuals = pd.DataFrame({
+        "well": ["A01"] * 7,
+        "label": ["1"] * 7,
+        "step": list(range(7)),
+        "raw_res": [0.1, -0.2, 0.15, 3.0, 0.2, -0.1, -0.05],
+    })
+    masked = apply_exclusions(
+        {"A01": ds}, mark_outliers(residuals, RobustZMad(threshold=3.5))
+    )
+    assert not masked["A01"]["1"].mask[3]  # the flagged step is masked out
+    assert masked["A01"]["1"].mask.sum() == 6
 
 
 ###############################################################################
