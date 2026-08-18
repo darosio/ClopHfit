@@ -36,6 +36,13 @@ from clophfit.fitting.bayes_config import (
     SamplerConfig,
     _validate_contamination_frac_prior,
 )
+from clophfit.fitting.model_validation import (
+    EXCLUDE_COL,
+    OutlierCriterion,
+    RobustZMad,
+    apply_exclusions,
+    mark_outliers,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
@@ -3219,3 +3226,67 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             global_p_names=global_names,
         ),
     )
+
+
+def fit_binding_pymc_multi_screened(
+    results: Mapping[str, Dataset | FitResult],
+    scheme: PlateScheme,
+    *,
+    criterion: OutlierCriterion | None = None,
+    min_keep: int = 3,
+    screening_robust: RobustConfig | None = None,
+    **kwargs: typing.Any,  # ruff: ignore[any-type]
+) -> MultiFitResult:
+    """Fit the multi-well model twice, screening residual outliers in between.
+
+    The first pass fits every well jointly and scores its own residuals; the
+    points *criterion* rejects are masked, and the second pass refits the
+    remaining data. Screening after a joint fit rather than before it means the
+    residuals are measured against the shared-K model that will be reported,
+    not against a per-well prefit whose own error is larger.
+
+    Deleting points is not free - it lowers the reduced chi-square and so the
+    reported uncertainty - so prefer a robust likelihood
+    (``robust=RobustConfig(enabled=True)``) unless a holdout comparison shows
+    screening earns its place.
+
+    Returns a :class:`MultiFitResult` exactly as
+    :func:`fit_binding_pymc_multi` does, so a grid can point at either. What
+    the screen excluded is recoverable from the returned per-well dataset
+    masks.
+
+    Parameters
+    ----------
+    results : Mapping[str, Dataset | FitResult]
+        Per-well datasets or initial fit results, as for
+        :func:`fit_binding_pymc_multi`.
+    scheme : PlateScheme
+        Plate scheme defining the control groups.
+    criterion : OutlierCriterion | None
+        What counts as an outlier in the screening pass's residual table.
+        ``None`` uses :class:`RobustZMad`, scoring each well and label against
+        its own median/MAD scale.
+    min_keep : int
+        Minimum unmasked points retained per label, however many the criterion
+        flags. The mildest flagged points survive when this binds.
+    screening_robust : RobustConfig | None
+        Likelihood for the screening pass. ``None`` screens with a Student-t,
+        whose wide tails keep an outlier from dragging the fit toward itself and
+        hiding in the residuals. The refit uses whatever *kwargs* specify.
+    **kwargs : typing.Any
+        Forwarded unchanged to both passes.
+
+    Returns
+    -------
+    MultiFitResult
+        The refit pass's result.
+    """
+    screening_kwargs = dict(kwargs)
+    screening_kwargs["robust"] = screening_robust or RobustConfig(enabled=True)
+    initial = fit_binding_pymc_multi(results, scheme, **screening_kwargs)
+
+    residuals = mark_outliers(
+        initial.residual_table(), criterion or RobustZMad(), exclude_col=EXCLUDE_COL
+    )
+    masked = apply_exclusions(initial.results, residuals, min_keep=min_keep)
+    return fit_binding_pymc_multi(masked, scheme, **kwargs)

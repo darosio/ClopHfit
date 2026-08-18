@@ -26,7 +26,7 @@ from clophfit.fitting.data_structures import (
     FitResult,
     PlateNoiseModel,
 )
-from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS
+from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS, RobustZMad
 from clophfit.prtecan import (
     Buffer,
     BufferFit,
@@ -1602,6 +1602,66 @@ def test_single_refit_two_pass_masks_clear_outlier(
 
     assert final is not None
     assert len(calls) == 2
+    seeded = calls[1]
+    assert isinstance(seeded, FitResult)
+    assert seeded.dataset is not None
+    assert seeded.dataset["default"].mask.tolist() == [True, True, True, False]
+
+
+def test_single_refit_two_pass_screens_with_the_given_criterion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A supplied criterion decides the exclusions, not the default tail rule.
+
+    The residual table is built so the default ``ResidualTail`` on ``std_res``
+    flags nothing, while ``RobustZMad`` on ``raw_res`` flags step 3. Only a
+    criterion that actually reaches the screening step can change the mask.
+    """
+    x = np.array([6.0, 7.0, 8.0, 9.0])
+    y = np.array([1.90909091, 1.5, 1.09090909, 1.00990099])
+    ds = Dataset({"default": DataArray(x, y)}, is_ph=True)
+
+    calls: list[object] = []
+
+    def fake_fit_binding_pymc(
+        ds_or_fr: Dataset | FitResult, **_kwargs: object
+    ) -> FitResult:
+        calls.append(ds_or_fr)
+        ds_for_fit = ds_or_fr.dataset if isinstance(ds_or_fr, FitResult) else ds_or_fr
+        assert ds_for_fit is not None
+        return fit_binding_glob(ds_for_fit)
+
+    def fake_residuals_from_fit_results(
+        *_args: object, **_kwargs: object
+    ) -> pd.DataFrame:
+        return pd.DataFrame({
+            "trace_id": ["pymc_robust_unweighted"] * 4,
+            "well": ["single"] * 4,
+            "label": ["default"] * 4,
+            "step": [0, 1, 2, 3],
+            "x": x,
+            # Below the default 3.0 cutoff, so ResidualTail flags nothing.
+            "std_res": [0.1, -0.2, 0.15, 0.4],
+            # Far outside the group's MAD scale, so RobustZMad flags step 3.
+            "raw_res": [0.1, -0.2, 0.15, 3.0],
+        })
+
+    monkeypatch.setattr(export, "fit_binding_pymc", fake_fit_binding_pymc)
+    monkeypatch.setattr(
+        export, "residuals_from_fit_results", fake_residuals_from_fit_results
+    )
+
+    final, _residuals = export._single_refit_two_pass(  # ruff: ignore[private-member-access]
+        ds,
+        screening_noise=export._ye_mag_screening_noise(0.1),  # ruff: ignore[private-member-access]
+        refit_noise=NoiseConfig.ye_mag(
+            shared=False, prior="lognormal", mu=0.0, sigma=0.25
+        ),
+        sampler=SamplerConfig(n_samples=5, nuts_sampler="pymc"),
+        criterion=RobustZMad(threshold=3.5),
+    )
+
+    assert final is not None
     seeded = calls[1]
     assert isinstance(seeded, FitResult)
     assert seeded.dataset is not None

@@ -891,6 +891,78 @@ class ResidualTail:
 
 
 @dataclass(frozen=True)
+class RobustZMad:
+    """Flag points by a robust z-score built on each group's median and MAD.
+
+    The scale is estimated from the residuals themselves rather than taken from
+    ``y_err`` or from the model's standardized residual, so an error model whose
+    scale is wrong cannot hide an outlier behind it. Unlike a mean/SD z-score,
+    which the outlier itself inflates and which therefore cannot exceed
+    ``sqrt(n - 1)`` - 2.449 over the seven points of a label-1 titration - this
+    score has no ceiling.
+
+    It is deliberately model-free about *shape*: no expected tail is tolerated,
+    unlike :class:`ResidualTail`. Combine it with a ``min_keep`` in
+    :func:`apply_exclusions` rather than with a tail allowance here.
+
+    Parameters
+    ----------
+    residual_col : str
+        Column holding the raw (unweighted) residual. Raw rather than
+        standardized, so the scale comes from the data.
+    group_cols : tuple[str, ...]
+        Columns defining the groups scored independently. Missing columns are
+        ignored; if none are present the whole table is one group. Channel
+        scales differ by up to an order of magnitude, so keep ``"label"``.
+    threshold : float
+        Robust z beyond which a point is flagged.
+    """
+
+    residual_col: str = "raw_res"
+    group_cols: tuple[str, ...] = ("well", "label")
+    threshold: float = 3.5
+
+    def evaluate(self, residuals: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        """Score every row by its group's robust z and flag those above the cutoff.
+
+        Parameters
+        ----------
+        residuals : pd.DataFrame
+            Canonical residual table.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series]
+            Robust z-scores, and the exclusion flag.
+        """
+        # Local import: utils imports data_structures, which imports this
+        # module, so utils cannot be imported here at module level. Same cycle
+        # plotting.py works around at its two utils call sites.
+        from clophfit.fitting.utils import (  # ruff: ignore[import-outside-top-level]
+            robust_z_scores,
+        )
+
+        score = pd.Series(0.0, index=residuals.index, dtype=float)
+        flag = pd.Series(data=False, index=residuals.index, dtype=bool)
+        if self.residual_col not in residuals.columns:
+            return score, flag
+
+        present = [col for col in self.group_cols if col in residuals.columns]
+        grouped: _t.Iterable[tuple[object, pd.DataFrame]]
+        grouped = (
+            residuals.groupby(present, observed=True, sort=False)
+            if present
+            else [(None, residuals)]
+        )
+        for _key, group in grouped:
+            values = group[self.residual_col].to_numpy(dtype=float)
+            z = robust_z_scores(values)
+            score.loc[group.index] = z
+            flag.loc[group.index] = z > self.threshold
+        return score, flag
+
+
+@dataclass(frozen=True)
 class OutlierProbability:
     """Flag points by posterior outlier probability from a mixture fit.
 
