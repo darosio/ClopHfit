@@ -102,6 +102,37 @@ def test_binding_1site() -> None:
     np.testing.assert_allclose(actual_y, expected_y)
 
 
+def test_binding_1site_hill_defaults_to_one() -> None:
+    """Omitting the Hill coefficient reproduces the plain 1-site curve exactly."""
+    x = np.array([5.0, 6.0, 7.0, 8.0, 9.0])
+    plain = binding_1site(x=x, K=7.0, S0=2.0, S1=1.0, is_ph=True)
+    explicit = binding_1site(x=x, K=7.0, S0=2.0, S1=1.0, is_ph=True, hill=1.0)
+    np.testing.assert_allclose(plain, explicit)
+
+
+def test_binding_1site_hill_below_one_broadens_the_transition() -> None:
+    """Hill < 1 widens the transition, which is what flat-ended residuals imply.
+
+    One pH unit above K the plain curve has travelled 91% of the way to its
+    plateau; a broader transition must be further from it, and the direction has
+    to reverse on the other side of K.
+    """
+    s0, s1, k = 2.0, 1.0, 7.0
+    plain = binding_1site(x=8.0, K=k, S0=s0, S1=s1, is_ph=True)
+    broad = binding_1site(x=8.0, K=k, S0=s0, S1=s1, is_ph=True, hill=0.5)
+    assert s1 < broad < plain  # nearer the midpoint, still inside the plateaus
+
+    plain_lo = binding_1site(x=6.0, K=k, S0=s0, S1=s1, is_ph=True)
+    broad_lo = binding_1site(x=6.0, K=k, S0=s0, S1=s1, is_ph=True, hill=0.5)
+    assert plain_lo < broad_lo < s0
+
+
+def test_binding_1site_hill_leaves_the_midpoint_alone() -> None:
+    """K stays the midpoint whatever the Hill coefficient, so it stays comparable."""
+    for hill in (0.5, 1.0, 2.0):
+        assert binding_1site(x=7.0, K=7.0, S0=2.0, S1=1.0, is_ph=True, hill=hill) == 1.5
+
+
 def test_kd() -> None:
     """It returns int float np.ndarray[float]."""
     assert kd(10, 7, 6.0) == 11

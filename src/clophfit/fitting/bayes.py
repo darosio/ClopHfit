@@ -2741,6 +2741,8 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     ye_mag_parameterization: Literal[
         "centered", "hierarchical", "separable"
     ] = "centered",
+    learn_hill: bool = False,
+    hill_prior_sigma: float = 0.2,
     well_noise_scale: bool = False,
     shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
@@ -2790,6 +2792,15 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         ``"hierarchical"`` partially pools the labels' per-well factors with a
         learned deviation scale (the only per-well form that samples reliably).
         Applies in both noise modes; a no-op for shared or non-per-well ``ye_mag``.
+    learn_hill : bool
+        Fit one plate-wide Hill coefficient, shared across wells and labels, so
+        the transition may be broader or sharper than Henderson-Hasselbalch.
+        ``False`` fixes it at 1 and reproduces the plain model exactly. K remains
+        the midpoint at any value, so estimates stay comparable.
+    hill_prior_sigma : float
+        Width of the ``LogNormal(0, sigma)`` prior on that coefficient. The
+        default keeps 95% of its mass between about 0.68 and 1.48, so the data
+        must pull it off 1.
     well_noise_scale : bool
         Enable a per-well multiplicative noise scale.
     shared_well_noise_scale : bool
@@ -3028,6 +3039,15 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 k_segments.append(k_params[shared_of[key]])
         k_all = pt.stack(k_segments)  # (n_wells,)
 
+        # One shape parameter for the whole plate. Off by default, so every
+        # existing fit is bit-for-bit unchanged; K stays the midpoint at any
+        # value, which keeps estimates comparable across the two settings.
+        hill_n = (
+            pm.LogNormal("hill_n", mu=0.0, sigma=hill_prior_sigma)
+            if learn_hill
+            else 1.0
+        )
+
         # Collect and create vectorized S0 and S1 priors
         s0_vars = {}
         s1_vars = {}
@@ -3138,7 +3158,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             )
 
             y_model_all = binding_1site(
-                x_w_all, k_all, s0_vars[lbl], s1_vars[lbl], is_ph=is_ph
+                x_w_all, k_all, s0_vars[lbl], s1_vars[lbl], is_ph=is_ph, hill=hill_n
             )
             mu_vec = y_model_all[mask_lbl]
             y_obs_vec = y_obs_full[mask_lbl]
@@ -3210,6 +3230,8 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             trace = _compute_sample_log_likelihood(trace)
 
     global_names: list[str] = []
+    if learn_hill:
+        global_names.append("hill_n")
     if robust_on and robust_likelihood == "student_t" and student_t_nu is None:
         global_names.append("student_t_nu")
     if robust_on and robust_likelihood == "mixture":

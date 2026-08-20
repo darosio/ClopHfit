@@ -51,18 +51,18 @@ from clophfit.clophfit_types import ArrayF
 # fmt: off
 @typing.overload
 def binding_1site(
-    x: float, K: float, S0: float, S1: float, *, is_ph: bool = False  # ruff: ignore[invalid-argument-name]
+    x: float, K: float, S0: float, S1: float, *, is_ph: bool = False, hill: float = 1.0  # ruff: ignore[invalid-argument-name]
 ) -> float: ...
 
 @typing.overload
 def binding_1site(
-    x: ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False  # ruff: ignore[invalid-argument-name]
+    x: ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False, hill: float = 1.0  # ruff: ignore[invalid-argument-name]
 ) -> ArrayF: ...
 # fmt: on
 
 
-def binding_1site(
-    x: float | ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False  # ruff: ignore[invalid-argument-name]
+def binding_1site(  # ruff: ignore[too-many-arguments]
+    x: float | ArrayF, K: float, S0: float, S1: float, *, is_ph: bool = False, hill: float = 1.0  # ruff: ignore[invalid-argument-name]
 ) -> float | ArrayF:  # fmt: skip
     r"""Single site binding model function.
 
@@ -95,6 +95,11 @@ def binding_1site(
         Selects the equation form:
         - True: Henderson-Hasselbalch for pH titration (default)
         - False: Standard binding isotherm for ligand concentration
+    hill : float, optional
+        Hill coefficient scaling the exponent, 1.0 by default. Values below 1
+        broaden the transition and values above sharpen it; K stays the
+        midpoint either way. The default is exact in IEEE-754, so leaving it
+        alone reproduces the plain model bit-for-bit.
 
     Returns
     -------
@@ -182,8 +187,8 @@ def binding_1site(
         # For PyTensor/Symbolic, we'll use a form that works for both numpy and symbolic
         # but let's stick to the basic one first, or use a conditional.
         # Actually, 1 / (1 + 10**(x - K)) is very stable for pH.
-        return S0 + (S1 - S0) / (1 + 10 ** (x - K))
-    return S0 + (S1 - S0) * x / K / (1 + x / K)
+        return S0 + (S1 - S0) / (1 + 10 ** (hill * (x - K)))
+    return S0 + (S1 - S0) * (x / K) ** hill / (1 + (x / K) ** hill)
 
 
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
