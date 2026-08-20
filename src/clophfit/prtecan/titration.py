@@ -999,7 +999,12 @@ class Titration(TecanfilesGroup):
     ) -> tuple[list[Tecanfile], ArrayF, ArrayF]:
         """Help construction from list file."""
         try:
-            table = pd.read_csv(listfile, names=["filenames", "x", "x_err"])
+            # Separator sniffed rather than assumed: the pH lists are csv with
+            # three columns, the chloride ones tab-separated with two, and a
+            # hardcoded comma silently folds filename and value into one field.
+            table = pd.read_csv(
+                listfile, names=["filenames", "x", "x_err"], sep=None, engine="python"
+            )
         except FileNotFoundError as exc:
             msg = f"Cannot find: {listfile}"
             raise FileNotFoundError(msg) from exc
@@ -1011,7 +1016,8 @@ class Titration(TecanfilesGroup):
         root = listfile.parent if base_dir is None else base_dir
         tecanfiles = [Tecanfile(root / f) for f in table["filenames"]]
         x = table["x"].to_numpy().astype(float)
-        x_err = table["x_err"].to_numpy().astype(float)
+        # A two-column list carries no uncertainty; that is zero, not unknown.
+        x_err = table["x_err"].fillna(0.0).to_numpy().astype(float)
         return tecanfiles, x, x_err
 
     @property

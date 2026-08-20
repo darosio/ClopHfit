@@ -661,6 +661,25 @@ class TestTitration:
         assert len(tit.x) > 0
         assert len(tit.tecanfiles) > 0
 
+    def test_from_listfile_tab_separated_without_x_err(self, tmp_path: Path) -> None:
+        """A tab-separated list with no x_err column loads.
+
+        The pH lists in this project are comma-separated with three columns, but
+        the chloride ones are tab-separated with two: filename and a placeholder
+        concentration, because the real concentrations are derived from the
+        addition volumes afterwards. Hardcoding the comma collapsed filename and
+        value into a single column, so every chloride list failed to parse.
+        """
+        src = data_tests / "140220"
+        listfile = tmp_path / "list.cl"
+        listfile.write_text("NaCl1_200214.xls\t0\nNaCl2_200214.xls\t0\n")
+
+        tit = Titration.fromlistfile(listfile, is_ph=False, base_dir=src)
+
+        assert len(tit.tecanfiles) == 2
+        assert list(tit.x) == [0.0, 0.0]
+        assert list(tit.x_err) == [0.0, 0.0]  # absent means zero, not NaN
+
     def test_buffer_handling(self, titration: Titration) -> None:
         """It handles buffer wells."""
         titration.buffer.wells = ["D01", "E01"]
