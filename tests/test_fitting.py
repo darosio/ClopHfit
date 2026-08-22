@@ -102,6 +102,24 @@ def test_binding_1site() -> None:
     np.testing.assert_allclose(actual_y, expected_y)
 
 
+def test_binding_1site_survives_an_extreme_k() -> None:
+    """No overflow warning, and the right limits, however far K wanders.
+
+    An unconstrained solver can walk K to a few hundred while the plateaus are
+    still badly seeded. At K below about -320, ``10 ** (x - K)`` leaves double
+    range and warns, which buries any genuine numerical warning in noise.
+    """
+    x = np.array([5.0, 7.0, 9.0])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        far_low = binding_1site(x=x, K=-400.0, S0=1000.0, S1=200.0, is_ph=True)
+        far_high = binding_1site(x=x, K=400.0, S0=1000.0, S1=200.0, is_ph=True)
+
+    # x far above K: the curve sits on S0. Far below: on S1.
+    np.testing.assert_allclose(far_low, np.full(3, 1000.0))
+    np.testing.assert_allclose(far_high, np.full(3, 200.0))
+
+
 def test_binding_1site_hill_defaults_to_one() -> None:
     """Omitting the Hill coefficient reproduces the plain 1-site curve exactly."""
     x = np.array([5.0, 6.0, 7.0, 8.0, 9.0])

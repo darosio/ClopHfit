@@ -179,15 +179,20 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
     array([2.48, 2.28, 1.3 , 0.32, 0.12])
     """
     if is_ph:
-        # Henderson-Hasselbalch: S = S0 + (S1 - S0) * 10^(K-pH) / (1 + 10^(K-pH))
-        # Equivalent to S = S0 + (S1 - S0) / (1 + 10^(pH-K))
-        # and also to S = S0 + (S1 - S0) * sigmoid((K - pH) * ln(10))
-        # We use a stable form to avoid overflow in 10^(K-pH)
-        (K - x) * np.log(10)
-        # For PyTensor/Symbolic, we'll use a form that works for both numpy and symbolic
-        # but let's stick to the basic one first, or use a conditional.
-        # Actually, 1 / (1 + 10**(x - K)) is very stable for pH.
-        return S0 + (S1 - S0) / (1 + 10 ** (hill * (x - K)))
+        # Henderson-Hasselbalch: S = S0 + (S1 - S0) / (1 + 10^(hill*(pH-K))).
+        #
+        # Written naively that overflows once the exponent passes ~308, which
+        # an unconstrained solver reaches by walking K a few hundred below the
+        # data; the result is still correct, but the warning buries any real
+        # numerical problem in noise. Factoring out 10^max(t, 0) leaves both
+        # exponents non-positive, so nothing can overflow and the limits stay
+        # exact. max(t, 0) is spelt (t + |t|) / 2 because that works on numpy
+        # arrays and PyTensor symbolic variables alike, and this function has
+        # to serve both.
+        t = hill * (x - K)
+        shift = (t + abs(t)) / 2
+        low = 10 ** (-shift)
+        return S0 + (S1 - S0) * low / (low + 10 ** (t - shift))
     return S0 + (S1 - S0) * (x / K) ** hill / (1 + (x / K) ** hill)
 
 
