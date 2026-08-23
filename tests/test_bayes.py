@@ -3099,3 +3099,35 @@ def test_multi_screened_refits_without_the_flagged_point(
     assert screened["1"].mask.all()  # the screening pass saw every point
     assert refitted["1"].mask.tolist() == [True, True, True, False, True, True, True]
     assert final is not None
+
+
+def test_multi_learns_a_hill_coefficient_when_asked(multi_dataset: Dataset) -> None:
+    """learn_hill adds one shared shape parameter and leaves K as the midpoint.
+
+    The label-1 residuals run negative at both ends of the titration and positive
+    through the middle on every plate, which is what a transition broader than
+    Henderson-Hasselbalch looks like. One shared coefficient is the cheapest test
+    of that, and it must be off by default so no existing fit changes.
+    """
+    scheme = PlateScheme()
+    scheme.names = {"ctrl": {"A01", "A02"}}
+    fr_init = fit_binding_glob(multi_dataset)
+    sampler = SamplerConfig(
+        nuts_sampler="pymc", n_tune=8, n_samples=8, chains=1, cores=1
+    )
+
+    plain = bayes.fit_binding_pymc_multi(
+        {"A01": fr_init, "A02": fr_init}, scheme, n_xerr=0.0, sampler=sampler
+    )
+    assert "hill_n" not in plain.trace.posterior
+
+    hill = bayes.fit_binding_pymc_multi(
+        {"A01": fr_init, "A02": fr_init},
+        scheme,
+        n_xerr=0.0,
+        sampler=sampler,
+        learn_hill=True,
+    )
+    assert "hill_n" in hill.trace.posterior
+    # One shared coefficient for the plate, not one per well or per label.
+    assert np.asarray(hill.trace.posterior["hill_n"]).squeeze().ndim <= 1
