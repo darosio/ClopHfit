@@ -725,6 +725,11 @@ class SpectraGlobResults:
     `None` if the bands fit was not performed."""
 
 
+# Smallest variance the weighting can divide by without overflowing; the point
+# is to exclude zero, not to impose a scale.
+_VAR_FLOOR = 1e-12
+
+
 def compute_noise_variance(
     y: ArrayF,
     sigma_floor: float | ArrayF,
@@ -751,13 +756,22 @@ def compute_noise_variance(
     Returns
     -------
     ArrayF
-        Variance array, clipped to a minimum of 1.0 to prevent
-        division-by-zero in downstream weighting.
+        Variance array, clipped only away from zero so downstream weighting
+        cannot divide by it.
+
+    Notes
+    -----
+    The clip used to be at ``1.0``, which silently discarded any genuine
+    variance below it. A read-noise floor under one count is ordinary on the
+    second label -- measured floors here run from 0.17 to 4.04 -- so on seven
+    of eleven plates the returned sigma was 1.0 rather than the floor, an
+    inflation of up to 5.9x that no diagnostic reported. The clip exists to
+    avoid division by zero, and for that a tiny positive number suffices.
     """
     floor_val = np.asarray(sigma_floor, dtype=float)
     poisson = gain * np.maximum(y, 0.0)
     var = floor_val**2 + poisson + (alpha * y) ** 2
-    return np.maximum(1.0, var)
+    return np.maximum(_VAR_FLOOR, var)
 
 
 @dataclass(frozen=True)

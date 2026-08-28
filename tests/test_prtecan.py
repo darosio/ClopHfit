@@ -1353,17 +1353,21 @@ class TestTitrationAnalysis:
         assert k_h02_glob.value == pytest.approx(7.899, abs=1e-3)
         assert k_h02_glob.stderr == pytest.approx(0.026, abs=1e-3)
 
-        # Check 'K' and std error for 'E02' in the second fit result
+        # Check 'K' and std error for 'E02' in the second fit result.
+        # 8.000 -> 8.002 when compute_noise_variance stopped clipping the
+        # variance at 1.0: this plate's second-label floor is 0.424, so that
+        # label's sigma had been inflated 2.4x and its points under-weighted.
         assert res2["E02"].result is not None
         k_e02 = res2["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(8.000, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.040, abs=1e-3)
+        assert k_e02.value == pytest.approx(8.002, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.041, abs=1e-3)
 
-        # Check 'K' and std error for 'E02' in the third fit result
+        # Check 'K' and std error for 'E02' in the third fit result.
+        # Moved with the second fit, and for the same reason.
         assert res_global["E02"].result is not None
         k_e02_glob = res_global["E02"].result.params["K"]
-        assert k_e02_glob.value == pytest.approx(8.000, abs=1e-3)
-        assert k_e02_glob.stderr == pytest.approx(0.031, abs=1e-3)
+        assert k_e02_glob.value == pytest.approx(8.002, abs=1e-3)
+        assert k_e02_glob.stderr == pytest.approx(0.028, abs=1e-3)
 
     def test_titration_results_residuals(self, tit: Titration) -> None:
         """Plate results expose the canonical residual table."""
