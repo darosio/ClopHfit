@@ -339,15 +339,27 @@ def test_prtecan_rejects_retired_mcmc_modes(tmp_path: Path, runner: CliRunner) -
         assert "single-refit" in result.output
 
 
-def test_prtecan_rejects_retired_ctr_free_k(tmp_path: Path, runner: CliRunner) -> None:
-    """--ctr-free-k was written to params and read by nobody; it must not be offered."""
+def test_prtecan_ctr_free_k_is_live_not_retired(runner: CliRunner) -> None:
+    """--ctr-free-k is offered again, and this time it changes the model.
+
+    It was withdrawn once because it was written to ``params`` and read by
+    nobody, so a run that asked for free control K quietly fitted pooled K. The
+    flag is back only because it now reaches ``fit_binding_pymc_multi`` -- see
+    ``test_mcmc_spec_knobs_reach_the_multi_model``, which pins that call. Here
+    the weaker but independent claim: the option exists and it moves the
+    analysis signature, so a free-K run cannot be mistaken for a pooled one.
+    """
     list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
-    result = runner.invoke(
-        ppr,
-        ["--out", str(tmp_path / "out"), "tecan", list_f, "--ctr-free-k", "--dry-run"],
+
+    def sig(*extra: str) -> str:
+        out = runner.invoke(ppr, ["tecan", list_f, "--print-spec", *extra]).output
+        return next(ln for ln in out.splitlines() if ln.startswith("signature:"))
+
+    assert sig("--mcmc", "multi", "--ctr-free-k") != sig("--mcmc", "multi")
+    assert sig("--mcmc", "multi", "--mcmc-robust") != sig("--mcmc", "multi")
+    assert sig("--mcmc", "multi", "--mcmc-robust", "--student-t-nu", "2") != sig(
+        "--mcmc", "multi", "--mcmc-robust"
     )
-    assert result.exit_code != 0
-    assert "no such option" in result.output.lower()
 
 
 def test_print_spec_signs_the_resolved_analysis(runner: CliRunner) -> None:

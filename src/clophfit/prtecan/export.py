@@ -337,12 +337,14 @@ def fit_single_mcmc(
             sampler=spec.sampler,
             per_well_ye_mags=spec.per_well_ye_mags,
             ye_mag_parameterization=spec.ye_mag_parameterization,
+            robust=spec.robust,
+            ctr_free_k=spec.ctr_free_k,
         )
         return TitrationResults(titration.scheme, titration.fit_keys, multi.results)
 
     if spec.model == "single":
         mcmc_fits = {
-            key: fit_binding_pymc(ds, sampler=spec.sampler)
+            key: fit_binding_pymc(ds, sampler=spec.sampler, robust=spec.robust)
             for key, ds in datasets.items()
         }
         return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)

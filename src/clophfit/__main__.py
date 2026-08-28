@@ -41,7 +41,7 @@ from clophfit import (
     configure_logging,
     fitting,
 )
-from clophfit.fitting.bayes_config import SamplerConfig
+from clophfit.fitting.bayes_config import RobustConfig, SamplerConfig
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import (
     DataValidationError,
@@ -189,6 +189,11 @@ def detect_bad_wells_cmd(
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a supplied --noise-gain/--noise-alpha value is treated: centered (a hint the posterior may leave) or fixed (pinned). A parameter with no value supplied is always free.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), or a per-label level plus one shared well factor (separable).")  # fmt: skip
+@click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
+@click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
+@click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
+@click.option("--mcmc-tune", default=None, type=int, help="Tuning draws per chain for --mcmc. Default is mcmc-samples // 2.")  # fmt: skip
+@click.option("--mcmc-target-accept", default=None, type=float, help="NUTS target acceptance for --mcmc. Default is latent-x aware.")  # fmt: skip
 @click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
@@ -221,6 +226,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     per_well_ye_mags: bool | None,
     ye_mag_parameterization: str,
     noise_mode: str,
+    mcmc_robust: bool,
+    student_t_nu: float,
+    ctr_free_k: bool,
+    mcmc_tune: int | None,
+    mcmc_target_accept: float | None,
     dry_run: bool,
     print_spec: bool,
     detect_bad: bool,
@@ -318,6 +328,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "noise_gain": tuple(noise_gain),
             "per_well_ye_mags": per_well_ye_mags,
             "ye_mag_parameterization": ye_mag_parameterization,
+            "mcmc_robust": mcmc_robust,
+            "student_t_nu": student_t_nu if mcmc_robust else None,
+            "ctr_free_k": ctr_free_k,
+            "mcmc_tune": mcmc_tune,
+            "mcmc_target_accept": mcmc_target_accept,
         })
         return
 
@@ -408,7 +423,18 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         if mcmc == "None"
         else McmcSpec(
             model=cast('Literal["single", "single-refit", "multi"]', mcmc),
-            sampler=SamplerConfig(n_samples=mcmc_samples, nuts_sampler=nuts_sampler),
+            sampler=SamplerConfig(
+                n_samples=mcmc_samples,
+                nuts_sampler=nuts_sampler,
+                n_tune=mcmc_tune,
+                target_accept=mcmc_target_accept,
+            ),
+            # nu=0 is the CLI's way of asking for an inferred nu, which the
+            # library spells as None.
+            robust=RobustConfig(
+                enabled=mcmc_robust, nu=student_t_nu if student_t_nu > 0 else None
+            ),
+            ctr_free_k=ctr_free_k,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
             ye_mag_parameterization=cast(

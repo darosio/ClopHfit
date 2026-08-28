@@ -1921,3 +1921,45 @@ def test_titration_config_carries_no_sampler_fields() -> None:
     }
     assert names & retired == set()
     assert {"noise_alpha", "noise_gain"} <= names
+
+
+def test_mcmc_spec_knobs_reach_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every knob McmcSpec declares must arrive at ``fit_binding_pymc_multi``.
+
+    ``fit_single_mcmc`` forwarded only the sampler and the ye_mag settings, so
+    the likelihood family and the control-K parameterization were unreachable
+    from the CLI: ``--mcmc multi`` always fitted a Normal with pooled control K
+    whatever was asked for. That is the same class of failure the module
+    docstring above records for ``--mcmc multi`` itself, and it is silent -- the
+    run succeeds, having fitted a different model.
+
+    The sampler is patched, so this asserts the call's arguments rather than a
+    fit.
+    """
+    from clophfit.fitting.bayes_config import (  # ruff: ignore[import-outside-top-level]
+        RobustConfig,
+    )
+    from clophfit.prtecan import export  # ruff: ignore[import-outside-top-level]
+
+    seen: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return SimpleNamespace(results={})
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    spec = prtecan.McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_tune=4000),
+        robust=RobustConfig(enabled=True, likelihood="student_t", nu=3.0),
+        ctr_free_k=True,
+    )
+
+    export.fit_single_mcmc(tit, {}, tmp_path, spec)
+
+    assert seen["robust"] == spec.robust, "robust likelihood never reached the model"
+    assert seen["ctr_free_k"] is True, "ctr_free_k never reached the model"
+    assert seen["sampler"].n_tune == 4000  # type: ignore[attr-defined]
