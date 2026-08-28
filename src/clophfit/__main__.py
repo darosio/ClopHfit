@@ -189,6 +189,7 @@ def detect_bad_wells_cmd(
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a supplied --noise-gain/--noise-alpha value is treated: centered (a hint the posterior may leave) or fixed (pinned). A parameter with no value supplied is always free.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), or a per-label level plus one shared well factor (separable).")  # fmt: skip
+@click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
 @click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
@@ -226,6 +227,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     per_well_ye_mags: bool | None,
     ye_mag_parameterization: str,
     noise_mode: str,
+    plate_fit: str | None,
     mcmc_robust: bool,
     student_t_nu: float,
     ctr_free_k: bool,
@@ -333,6 +335,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "ctr_free_k": ctr_free_k,
             "mcmc_tune": mcmc_tune,
             "mcmc_target_accept": mcmc_target_accept,
+            "plate_fit": plate_fit,
         })
         return
 
@@ -446,7 +449,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     )
     logger.info("mcmc: %s", mcmc_spec)
     try:
-        export_data_fit(tit, tecan_config, mcmc_spec)
+        export_data_fit(tit, tecan_config, mcmc_spec, plate_fit)
     except Exception as e:
         msg = (
             f"Error during data export and fitting: {e}\n"

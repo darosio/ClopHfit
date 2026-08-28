@@ -1963,3 +1963,55 @@ def test_mcmc_spec_knobs_reach_the_multi_model(
     assert seen["robust"] == spec.robust, "robust likelihood never reached the model"
     assert seen["ctr_free_k"] is True, "ctr_free_k never reached the model"
     assert seen["sampler"].n_tune == 4000  # type: ignore[attr-defined]
+
+
+def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
+    """``--plate-fit`` must produce a K per well, with control groups pooled.
+
+    The plate-wide classical fitters were developed outside this package and
+    had no route through the CLI at all. This pins the seam: a plate fit writes
+    one row per well, marks which wells were pooled, and gives the pooled ones
+    the identical K -- pooling that happens inside the least-squares problem,
+    not by averaging separate fits afterwards.
+    """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+
+    def curve(k: float) -> np.ndarray:  # type: ignore[type-arg]
+        return 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+
+    wells = {"A01": 7.0, "A12": 7.0, "B01": 6.2}
+    datasets = {
+        w: Dataset({"1": DataArray(x, curve(k), y_errc=np.full(7, 5.0))}, is_ph=True)
+        for w, k in wells.items()
+    }
+    scheme = SimpleNamespace(names={"CTR": ["A01", "A12"]})
+    tit = SimpleNamespace(scheme=scheme, x_err=None)
+
+    out = export_plate_fit(tit, datasets, tmp_path, "lm")
+
+    assert out is not None
+    table = pd.read_csv(out).set_index("well")
+    assert set(table.index) == set(wells)
+    assert table.loc["A01", "K"] == pytest.approx(table.loc["A12", "K"])
+    assert bool(table.loc["A01", "k_shared"])
+    assert not bool(table.loc["B01", "k_shared"])
+    assert table.loc["B01", "K"] == pytest.approx(6.2, abs=0.05)
+    assert (tmp_path / "plate_lm_ye_mag.csv").exists()
+
+
+def test_export_plate_fit_returns_none_without_wells(tmp_path: Path) -> None:
+    """No wells means no file, rather than an empty CSV that reads as a result."""
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
+    assert export_plate_fit(tit, {}, tmp_path, "lm") is None

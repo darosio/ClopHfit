@@ -28,6 +28,8 @@ from clophfit.fitting.model_validation import (
     residuals_from_fit_results,
 )
 from clophfit.fitting.models import binding_1site
+from clophfit.fitting.plate_lm import PlateLMResult, fit_plate_lm
+from clophfit.fitting.plate_odr import PlateODRResult, fit_plate_odr
 from clophfit.fitting.residuals import (
     plot_residual_vs_predicted,
     plot_residual_vs_yerr,
@@ -385,11 +387,87 @@ def fit_single_mcmc(
     return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
 
 
+def export_plate_fit(
+    titration: Titration,
+    datasets: dict[str, typing.Any],
+    outfit: Path,
+    method: str,
+) -> Path | None:
+    """Fit the whole plate at once, classically, and write K per well.
+
+    The per-well fits above give each well its own noise scale; this fits every
+    well in one least-squares problem with the observation-noise scale profiled
+    per label across the plate, and each control group pooled onto one K. It is
+    a separate output rather than a replacement: it produces a K and a standard
+    error per well, not the fit objects the plot and dataset exports consume.
+
+    Parameters
+    ----------
+    titration : Titration
+        Supplies the plate scheme, whose control groups set which wells pool.
+    datasets : dict[str, typing.Any]
+        Well identifier to global `Dataset`, as built for the other fits.
+    outfit : Path
+        Fit output directory.
+    method : str
+        ``"lm"`` for the plate-wide least squares, ``"odr"`` to also let each
+        titration step's x move within its recorded uncertainty.
+
+    Returns
+    -------
+    Path | None
+        The CSV written, or ``None`` when no wells were fitted.
+    """
+    if not datasets:
+        return None
+    groups = {
+        name: sorted(wells)
+        for name, wells in getattr(titration.scheme, "names", {}).items()
+    }
+    result: PlateLMResult | PlateODRResult
+    if method == "odr":
+        x_err = getattr(titration, "x_err", None)
+        result = fit_plate_odr(
+            datasets,
+            groups,
+            x_err=np.asarray(x_err, dtype=float) if x_err is not None else None,
+        )
+    else:
+        result = fit_plate_lm(datasets, groups)
+
+    pooled = {well: name for name, wells in groups.items() for well in wells}
+    rows = [
+        {
+            "well": well,
+            "K": result.k[well],
+            "sK": result.k_stderr.get(well, float("nan")),
+            "ctr_group": pooled.get(well, ""),
+            "k_shared": well in pooled,
+        }
+        for well in sorted(result.k)
+    ]
+    out = outfit / f"plate_{method}_K.csv"
+    pd.DataFrame(rows).to_csv(out, index=False)
+    pd.DataFrame([
+        {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())
+    ]).to_csv(outfit / f"plate_{method}_ye_mag.csv", index=False)
+    logger.info(
+        "plate %s fit: %d wells, %d points, converged=%s, ye_mag=%s",
+        method,
+        len(result.k),
+        result.n_points,
+        result.success,
+        {k: round(v, 3) for k, v in result.ye_mag.items()},
+    )
+    return out
+
+
 def export_fit(
     titration: Titration,
     subfolder: Path,
     config: TecanConfig,
     spec: McmcSpec | None = None,
+    plate_fit: str | None = None,
 ) -> None:
     """Export all fitted parameters, plots, and data files."""
     outfit = subfolder / "fit"
@@ -429,6 +507,9 @@ def export_fit(
     )
     export_list.append(odr_res)
 
+    if plate_fit is not None:
+        export_plate_fit(titration, datasets, outfit, plate_fit)
+
     mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)
     if mcmc_res is not None:
         export_list.append(mcmc_res)
@@ -460,6 +541,7 @@ def export_data_fit(
     titration: Titration,
     tecan_config: TecanConfig,
     mcmc: McmcSpec | None = None,
+    plate_fit: str | None = None,
 ) -> None:
     """Export dat files [x,y1,..,yN] from copy of titration.data."""
 
@@ -483,7 +565,7 @@ def export_data_fit(
             if tecan_config.fit:
                 if tecan_config.detect_bad:
                     run_pre_fit_detection(titration, subfolder)
-                export_fit(titration, subfolder, tecan_config, mcmc)
+                export_fit(titration, subfolder, tecan_config, mcmc, plate_fit)
         titration.params = saved_p
     else:
         subfolder = prepare_output_folder(titration, tecan_config.out_fp)
@@ -491,4 +573,4 @@ def export_data_fit(
         if tecan_config.fit:
             if tecan_config.detect_bad:
                 run_pre_fit_detection(titration, subfolder)
-            export_fit(titration, subfolder, tecan_config, mcmc)
+            export_fit(titration, subfolder, tecan_config, mcmc, plate_fit)
