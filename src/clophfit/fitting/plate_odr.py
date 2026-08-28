@@ -64,8 +64,9 @@ class PlateODRResult:
     success : bool
         Whether the final solve converged.
     residuals : list[dict[str, Any]]
-        One record per unmasked observation - ``well``, ``label``, ``step``,
-        ``std_res`` - taken on the shifted pH grid, so it reflects the model the
+        One record per unmasked observation on the library's canonical columns
+        (``well``, ``label``, ``step``, ``yhat``, ``raw_res``, ``sigma``,
+        ``std_res``), taken on the shifted pH grid, so it reflects the model the
         fit actually settled on rather than the recorded axis.
     """
 
@@ -194,7 +195,7 @@ def _residual_table(
     Returns
     -------
     list[dict[str, Any]]
-        ``well``, ``label``, ``step`` and ``std_res`` per observation.
+        One row per observation on the canonical residual columns.
     """
     dx = p[n_struct:]
     rows: list[dict[str, Any]] = []
@@ -203,11 +204,20 @@ def _residual_table(
         model = binding_1site(
             x + dx[: len(x)], p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph
         )
-        std = (y - model) / (yerr * scales[lbl])
+        sigma = yerr * scales[lbl]
+        raw = y - model
         order = np.argsort(np.argsort(x))
         rows.extend(
-            {"well": well, "label": lbl, "step": int(step), "std_res": float(r)}
-            for step, r in zip(order, std, strict=True)
+            {
+                "well": well,
+                "label": lbl,
+                "step": int(step),
+                "yhat": float(yh),
+                "raw_res": float(r),
+                "sigma": float(sd),
+                "std_res": float(r / sd),
+            }
+            for step, yh, r, sd in zip(order, model, raw, sigma, strict=True)
         )
     return rows
 

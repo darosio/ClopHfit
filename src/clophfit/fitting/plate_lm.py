@@ -71,10 +71,12 @@ class PlateLMResult:
     success : bool
         Whether the final least-squares solve converged.
     residuals : list[dict[str, Any]]
-        One record per unmasked observation, with ``well``, ``label``, ``step``
-        and ``std_res``.  ``std_res`` divides by ``y_err`` *and* the profiled
-        scale, so its per-label SD is ~1 by construction and only its shape -
-        tails, step dependence - carries information.
+        One record per unmasked observation, on the library's canonical
+        columns: ``well``, ``label``, ``step``, ``yhat``, ``raw_res``,
+        ``sigma`` and ``std_res``.  ``sigma`` includes the profiled scale, so
+        ``std_res`` has per-label SD ~1 by construction and only its shape -
+        tails, step dependence - carries information; ``raw_res`` and ``yhat``
+        are the signal-scale pair the noise-calibration estimators read.
     """
 
     k: dict[str, float] = field(default_factory=dict)
@@ -242,19 +244,28 @@ def _residual_table(
     Returns
     -------
     list[dict[str, Any]]
-        ``well``, ``label``, ``step`` and ``std_res`` per observation.  ``step``
-        is the rank of the point on the titration axis, so masked points do not
+        One row per observation on the canonical residual columns.  ``step`` is
+        the rank of the point on the titration axis, so masked points do not
         shift the numbering of the ones that survive.
     """
     rows: list[dict[str, Any]] = []
     for well, lbl, x, y, yerr in prob.obs:
         s0, s1 = p[prob.sidx[well, lbl]], p[prob.sidx[well, lbl] + 1]
         model = binding_1site(x, p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
-        std = (y - model) / (yerr * scales[lbl])
+        sigma = yerr * scales[lbl]
+        raw = y - model
         order = np.argsort(np.argsort(x))
         rows.extend(
-            {"well": well, "label": lbl, "step": int(step), "std_res": float(r)}
-            for step, r in zip(order, std, strict=True)
+            {
+                "well": well,
+                "label": lbl,
+                "step": int(step),
+                "yhat": float(yh),
+                "raw_res": float(r),
+                "sigma": float(sd),
+                "std_res": float(r / sd),
+            }
+            for step, yh, r, sd in zip(order, model, raw, sigma, strict=True)
         )
     return rows
 
