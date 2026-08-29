@@ -18,6 +18,7 @@ import seaborn as sns  # type: ignore[import-untyped]
 from matplotlib import figure
 
 from clophfit.fitting.bayes import fit_binding_pymc
+from clophfit.fitting.bayes_config import RobustConfig
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
     DataArray,
@@ -1491,6 +1492,15 @@ class McmcSpec:
         (``"centered"``), a shared well factor with per-label deviations
         (``"hierarchical"``), or a per-label level plus one shared well factor
         (``"separable"``).
+    robust : RobustConfig
+        Likelihood family. The default is a plain Normal; a Student-t with
+        ``nu=3`` is the arm that scored best on this campaign's plates.
+    ctr_free_k : bool
+        Give every well its own K instead of pooling each control group onto a
+        shared one. Only meaningful for ``model="multi"``. Pooling buys no
+        accuracy at the construct level and makes the stated interval too
+        narrow, and the library wells have no group to pool with, so free K is
+        the setting that matches what a plate is fitted for.
     """
 
     model: Literal["single", "single-refit", "multi"]
@@ -1501,3 +1511,5 @@ class McmcSpec:
     ye_mag_parameterization: Literal["centered", "hierarchical", "separable"] = (
         "centered"
     )
+    robust: RobustConfig = field(default_factory=RobustConfig)
+    ctr_free_k: bool = False

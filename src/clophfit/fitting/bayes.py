@@ -34,6 +34,7 @@ from clophfit.fitting.bayes_config import (
     RobustConfig,
     RobustLikelihood,
     SamplerConfig,
+    XPrior,
     _validate_contamination_frac_prior,
 )
 from clophfit.fitting.model_validation import (
@@ -1314,6 +1315,8 @@ def _build_multi_x_start(
     xc: ArrayF,
     x_start_sigma: float,
     x_start_between_sigma: float,
+    *,
+    x_start_mu: float | None = None,
 ) -> typing.Any:  # ruff: ignore[any-type]
     """Build the starting-x anchor for the multi-well x-error models.
 
@@ -1336,6 +1339,9 @@ def _build_multi_x_start(
     x_start_between_sigma : float
         Fixed between-well scale. ``<= 0`` returns the shared scalar anchor;
         ``> 0`` adds the per-well ``x_start_well`` term.
+    x_start_mu : float | None
+        Centre for the shared anchor. ``None`` uses ``xc[0]``; a two-stage fit
+        passes the anchor a previous plate-level fit estimated.
 
     Returns
     -------
@@ -1345,7 +1351,8 @@ def _build_multi_x_start(
         centred on the shared anchor. Both broadcast against the
         ``(step, well)`` offset/drop tensors.
     """
-    x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
+    mu = xc[0] if x_start_mu is None else x_start_mu
+    x_start = pm.Normal("x_start", mu=mu, sigma=max(x_start_sigma, 1e-6))
     if x_start_between_sigma <= 0:
         return x_start
     return pm.Normal(
@@ -1356,12 +1363,82 @@ def _build_multi_x_start(
     )
 
 
-def create_x_true(
+def x_prior_from_trace(idata: typing.Any, *, inflate: float = 1.0) -> XPrior:  # ruff: ignore[any-type]
+    """Extract a plate-level pH-axis prior from a multi-well fit.
+
+    Takes only quantities estimated from every well at once: the shared
+    ``x_start`` anchor and the across-well mean of ``x_step``. A well's own
+    ``x_start_well`` deviation is deliberately discarded - stage one inferred it
+    from that well's fluorescence, so returning it as that well's prior would
+    put the same measurements into both prior and likelihood and shrink the
+    resulting interval below what the evidence supports.
+
+    The returned widths combine two distinct ignorances in quadrature: how well
+    the shared axis is determined (posterior SD), and how much wells genuinely
+    differ from it (across-well spread of the posterior means). Using only the
+    first would tell stage two the axis is common to every well, which is the
+    assumption the per-well terms exist to relax.
+
+    Parameters
+    ----------
+    idata : typing.Any
+        ``InferenceData`` from a multi-well fit, carrying ``x_start`` and
+        ``x_step`` in its posterior.
+    inflate : float
+        Multiplier applied to both widths. ``1.0`` leaves them as derived.
+
+    Returns
+    -------
+    XPrior
+        Plate-level prior suitable for :func:`create_x_true`.
+
+    Raises
+    ------
+    KeyError
+        If the posterior lacks ``x_start`` or ``x_step``.
+    """
+    post = idata.posterior
+    for name in ("x_start", "x_step"):
+        if name not in post:
+            msg = f"posterior has no {name!r}; not a latent-x multi-well fit"
+            raise KeyError(msg)
+
+    draw_dims = ("chain", "draw")
+    x_start_mu = float(post["x_start"].mean())
+    x_start_sd = float(post["x_start"].std())
+    if "x_start_well" in post:
+        # Population spread, not any single well's value.
+        x_start_sd = float(
+            np.hypot(x_start_sd, float(post["x_start_well"].mean(dim=draw_dims).std()))
+        )
+
+    step = post["x_step"]
+    if "well" in step.dims:
+        shared = step.mean(dim="well")
+        spread = step.mean(dim=draw_dims).std(dim="well").to_numpy()
+    else:
+        shared = step
+        step_dim = next(d for d in step.dims if d not in draw_dims)
+        spread = np.zeros(step.sizes[step_dim])
+    step_mu = shared.mean(dim=draw_dims).to_numpy()
+    step_sd = np.hypot(shared.std(dim=draw_dims).to_numpy(), spread)
+
+    return XPrior(
+        x_start_mu=x_start_mu,
+        x_start_sigma=max(x_start_sd * inflate, 1e-6),
+        step_mu=step_mu,
+        step_sigma=np.maximum(step_sd * inflate, 1e-6),
+    )
+
+
+def create_x_true(  # ruff: ignore[too-many-arguments]
     xc: ArrayF,
     x_errc: ArrayF,
     n_xerr: float,
     lower_nsd: float = 2.5,
     min_x_step: float = 0.2,
+    *,
+    x_prior: XPrior | None = None,
 ) -> ArrayF | pm.Deterministic:
     """Create latent variables for x-values with uncertainty.
 
@@ -1371,6 +1448,11 @@ def create_x_true(
     variance (see :func:`_pipetting_step_sigmas`). Returns a PyMC Deterministic
     variable when in a Model context with uncertainty, or a numpy array when
     there's no uncertainty or no active Model.
+
+    Passing *x_prior* replaces the moments derived from ``xc``/``x_errc`` with a
+    plate-level estimate from a previous fit; the walk structure and the
+    ``min_x_step`` truncation are unchanged, so x stays latent and this well can
+    still deviate from the shared axis.
     """
     if n_xerr > 0 and np.any(x_errc > 0):
         direction, x_start_sigma, step_nominal, step_sigmas, min_steps = (
@@ -1378,7 +1460,17 @@ def create_x_true(
                 xc, x_errc, n_xerr, min_x_step=min_x_step, lower_nsd=lower_nsd
             )
         )
-        x_start = pm.Normal("x_start", mu=xc[0], sigma=max(x_start_sigma, 1e-6))
+        x_start_mu = xc[0]
+        if x_prior is not None:
+            # A previous plate-level fit already estimated this titration's pH
+            # axis from every well at once. Adopt it, keeping the random-walk
+            # structure and the min_x_step truncation so x stays latent and this
+            # well can still deviate from the shared axis.
+            x_start_mu = x_prior.x_start_mu
+            x_start_sigma = x_prior.x_start_sigma
+            step_nominal = np.asarray(x_prior.step_mu, dtype=float)
+            step_sigmas = np.asarray(x_prior.step_sigma, dtype=float)
+        x_start = pm.Normal("x_start", mu=x_start_mu, sigma=max(x_start_sigma, 1e-6))
         x_step = pm.TruncatedNormal(
             "x_step",
             mu=step_nominal,
@@ -2212,6 +2304,7 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
     robust: RobustConfig = _DEFAULT_ROBUST,
     init: InitConfig = _DEFAULT_INIT,
     sampler: SamplerConfig = _DEFAULT_SAMPLER,
+    x_prior: XPrior | None = None,
 ) -> FitResult:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -2238,7 +2331,11 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
         Prior-initialization strategy (``"lmfit"`` prefit or ``"data_priors"``).
         See :class:`InitConfig`.
     sampler : SamplerConfig
-        NUTS sampling controls. See :class:`SamplerConfig`.
+        NUTS sampling controls.
+    x_prior : XPrior | None
+        Plate-level pH-axis prior from a previous multi-well fit, as produced by
+        :func:`x_prior_from_trace`. ``None`` derives the axis from this
+        dataset's own x and x_err, as before. See :class:`SamplerConfig`.
 
     Returns
     -------
@@ -2293,7 +2390,9 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
             if init.strategy == "data_priors"
             else create_parameter_priors(params, n_sd)
         )
-        x_true = create_x_true(xc, x_errc, n_xerr, min_x_step=min_x_step)
+        x_true = create_x_true(
+            xc, x_errc, n_xerr, min_x_step=min_x_step, x_prior=x_prior
+        )
         robust_nu = (
             _student_t_nu_value(student_t_nu)
             if robust_on and robust_likelihood == "student_t"
@@ -2735,6 +2834,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     min_x_step: float = 0.2,
     x_error_model: Literal["deterministic", "per_well"] = "deterministic",
     x_start_between_sigma: float = _DEFAULT_X_START_BETWEEN_SIGMA,
+    x_prior: XPrior | None = None,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
@@ -2778,6 +2878,12 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         x_start, x_start_between_sigma)`` tightly anchored on the shared plate
         ``x_start`` prior (common-mode anchor plus independent per-well jitter).
         Set to ``0.0`` for a single shared ``x_start`` across all wells.
+    x_prior : XPrior | None
+        Plate-level pH axis from a previous fit, typically built by
+        :func:`x_prior_from_trace`. ``None`` derives the axis from this plate's
+        own ``xc``/``x_errc``. Stage two of a two-stage fit passes what stage
+        one learned, so the axis is not rediscovered from scratch; only
+        plate-level moments transfer, never a well's own deviation.
     ctr_free_k : bool
         If ``True``, each control replicate gets an independent flat K prior
         instead of a shared control K.
@@ -2969,7 +3075,20 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             direction, x_start_sigma, step_nominal, step_sigmas, min_steps = (
                 _pipetting_walk_params(xc, x_errc, n_xerr, min_x_step=min_x_step)
             )
-            x_start = _build_multi_x_start(xc, x_start_sigma, x_start_between_sigma)
+            x_start_mu: float | None = None
+            if x_prior is not None:
+                # Adopt the axis a previous plate-level fit estimated, keeping
+                # the random-walk structure and the min_x_step truncation so x
+                # stays latent and a well can still deviate from it. Only
+                # plate-level moments arrive here; see x_prior_from_trace for
+                # why a well's own deviation must not come back to it.
+                x_start_mu = x_prior.x_start_mu
+                x_start_sigma = x_prior.x_start_sigma
+                step_nominal = np.asarray(x_prior.step_mu, dtype=float)
+                step_sigmas = np.asarray(x_prior.step_sigma, dtype=float)
+            x_start = _build_multi_x_start(
+                xc, x_start_sigma, x_start_between_sigma, x_start_mu=x_start_mu
+            )
             x_step = pm.TruncatedNormal(
                 "x_step",
                 mu=step_nominal[:, None],
@@ -3010,6 +3129,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 x_errc,
                 n_xerr,
                 min_x_step=min_x_step,
+                x_prior=x_prior,
             )
             x_w_all = pt.tile(x_true[:, None], (1, n_wells))
 

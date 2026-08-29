@@ -12,7 +12,12 @@ from __future__ import annotations
 import typing
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from clophfit.clophfit_types import ArrayF
 
 if typing.TYPE_CHECKING:
     from clophfit.fitting.data_structures import PlateNoiseModel
@@ -194,6 +199,56 @@ class InitConfig:
     k_prior: DataKPrior = "midpoint_truncnorm"
     k_bounds: tuple[float, float] | None = None
     k_sigma: float = 1.5
+
+
+@dataclass(frozen=True)
+class XPrior:
+    """An informed prior for the latent pH axis, from a previous plate fit.
+
+    ``create_x_true`` normally derives the pipetting random walk from the
+    measured ``x`` and its per-point SD. A two-stage fit instead estimates the
+    plate's pH axis once with all wells pooled, then hands that estimate to
+    per-well fits so each well refines a shared axis rather than rediscovering
+    it alone.
+
+    Only plate-level quantities belong here. A well's *own* deviation must not
+    be fed back to it: stage one inferred that deviation from that well's
+    fluorescence, so reusing it as a prior would put the same measurements into
+    both prior and likelihood and shrink the resulting K interval below what the
+    evidence supports. The shared anchor is diluted across every well, so its
+    contamination by any single well is of order ``1/n_wells``.
+
+    Parameters
+    ----------
+    x_start_mu : float
+        Prior mean for the titration's starting x.
+    x_start_sigma : float
+        Prior SD for the starting x. Must be positive.
+    step_mu : ArrayF
+        Prior mean per addition step, length ``len(x) - 1``.
+    step_sigma : ArrayF
+        Prior SD per addition step, same length as *step_mu*. Must be positive.
+    """
+
+    x_start_mu: float
+    x_start_sigma: float
+    step_mu: ArrayF
+    step_sigma: ArrayF
+
+    def __post_init__(self) -> None:
+        """Reject degenerate widths and mismatched step vectors."""
+        if self.x_start_sigma <= 0:
+            msg = f"x_start_sigma must be positive, got {self.x_start_sigma}"
+            raise ValueError(msg)
+        if np.shape(self.step_mu) != np.shape(self.step_sigma):
+            msg = (
+                "step_mu and step_sigma must have the same shape, got "
+                f"{np.shape(self.step_mu)} and {np.shape(self.step_sigma)}"
+            )
+            raise ValueError(msg)
+        if np.any(np.asarray(self.step_sigma) <= 0):
+            msg = "every step_sigma must be positive"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True)

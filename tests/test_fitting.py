@@ -1842,3 +1842,29 @@ class TestAddRobustScores:
             add_robust_scores(df, levels=("per_plate",))
         with pytest.raises(ValueError, match="no column"):
             add_robust_scores(df, residual_col="nope")
+
+
+def test_compute_noise_variance_keeps_a_sub_unit_floor() -> None:
+    """A read-noise floor below one count must survive, not be clipped to 1.0.
+
+    The clip used to sit at ``1.0``. Measured second-label floors on this
+    project's plates run 0.17 to 4.04, so on seven of eleven plates the
+    returned sigma was 1.0 instead of the floor -- up to 5.9x too large, on
+    exactly the label with the cleanest signal, and nothing reported it. The
+    clip only has to keep the variance away from zero.
+    """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        compute_noise_variance,
+    )
+
+    y = np.array([100.0, 200.0])
+    var = compute_noise_variance(y, sigma_floor=0.169, gain=0.0, alpha=0.0)
+    assert np.sqrt(var) == pytest.approx(0.169)
+
+    # Still positive when every term vanishes, so weighting cannot divide by 0.
+    zero = compute_noise_variance(np.zeros(2), sigma_floor=0.0, gain=0.0, alpha=0.0)
+    assert np.all(zero > 0)
+
+    # A floor above 1 is untouched, as before.
+    big = compute_noise_variance(y, sigma_floor=4.041, gain=0.0, alpha=0.0)
+    assert np.sqrt(big) == pytest.approx(4.041)

@@ -1353,17 +1353,21 @@ class TestTitrationAnalysis:
         assert k_h02_glob.value == pytest.approx(7.899, abs=1e-3)
         assert k_h02_glob.stderr == pytest.approx(0.026, abs=1e-3)
 
-        # Check 'K' and std error for 'E02' in the second fit result
+        # Check 'K' and std error for 'E02' in the second fit result.
+        # 8.000 -> 8.002 when compute_noise_variance stopped clipping the
+        # variance at 1.0: this plate's second-label floor is 0.424, so that
+        # label's sigma had been inflated 2.4x and its points under-weighted.
         assert res2["E02"].result is not None
         k_e02 = res2["E02"].result.params["K"]
-        assert k_e02.value == pytest.approx(8.000, abs=1e-3)
-        assert k_e02.stderr == pytest.approx(0.040, abs=1e-3)
+        assert k_e02.value == pytest.approx(8.002, abs=1e-3)
+        assert k_e02.stderr == pytest.approx(0.041, abs=1e-3)
 
-        # Check 'K' and std error for 'E02' in the third fit result
+        # Check 'K' and std error for 'E02' in the third fit result.
+        # Moved with the second fit, and for the same reason.
         assert res_global["E02"].result is not None
         k_e02_glob = res_global["E02"].result.params["K"]
-        assert k_e02_glob.value == pytest.approx(8.000, abs=1e-3)
-        assert k_e02_glob.stderr == pytest.approx(0.031, abs=1e-3)
+        assert k_e02_glob.value == pytest.approx(8.002, abs=1e-3)
+        assert k_e02_glob.stderr == pytest.approx(0.028, abs=1e-3)
 
     def test_titration_results_residuals(self, tit: Titration) -> None:
         """Plate results expose the canonical residual table."""
@@ -1921,3 +1925,97 @@ def test_titration_config_carries_no_sampler_fields() -> None:
     }
     assert names & retired == set()
     assert {"noise_alpha", "noise_gain"} <= names
+
+
+def test_mcmc_spec_knobs_reach_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every knob McmcSpec declares must arrive at ``fit_binding_pymc_multi``.
+
+    ``fit_single_mcmc`` forwarded only the sampler and the ye_mag settings, so
+    the likelihood family and the control-K parameterization were unreachable
+    from the CLI: ``--mcmc multi`` always fitted a Normal with pooled control K
+    whatever was asked for. That is the same class of failure the module
+    docstring above records for ``--mcmc multi`` itself, and it is silent -- the
+    run succeeds, having fitted a different model.
+
+    The sampler is patched, so this asserts the call's arguments rather than a
+    fit.
+    """
+    from clophfit.fitting.bayes_config import (  # ruff: ignore[import-outside-top-level]
+        RobustConfig,
+    )
+    from clophfit.prtecan import export  # ruff: ignore[import-outside-top-level]
+
+    seen: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return SimpleNamespace(results={})
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    spec = prtecan.McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_tune=4000),
+        robust=RobustConfig(enabled=True, likelihood="student_t", nu=3.0),
+        ctr_free_k=True,
+    )
+
+    export.fit_single_mcmc(tit, {}, tmp_path, spec)
+
+    assert seen["robust"] == spec.robust, "robust likelihood never reached the model"
+    assert seen["ctr_free_k"] is True, "ctr_free_k never reached the model"
+    assert seen["sampler"].n_tune == 4000  # type: ignore[attr-defined]
+
+
+def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
+    """``--plate-fit`` must produce a K per well, with control groups pooled.
+
+    The plate-wide classical fitters were developed outside this package and
+    had no route through the CLI at all. This pins the seam: a plate fit writes
+    one row per well, marks which wells were pooled, and gives the pooled ones
+    the identical K -- pooling that happens inside the least-squares problem,
+    not by averaging separate fits afterwards.
+    """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+
+    def curve(k: float) -> np.ndarray:  # type: ignore[type-arg]
+        return 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+
+    wells = {"A01": 7.0, "A12": 7.0, "B01": 6.2}
+    datasets = {
+        w: Dataset({"1": DataArray(x, curve(k), y_errc=np.full(7, 5.0))}, is_ph=True)
+        for w, k in wells.items()
+    }
+    scheme = SimpleNamespace(names={"CTR": ["A01", "A12"]})
+    tit = SimpleNamespace(scheme=scheme, x_err=None)
+
+    out = export_plate_fit(tit, datasets, tmp_path, "lm")
+
+    assert out is not None
+    table = pd.read_csv(out).set_index("well")
+    assert set(table.index) == set(wells)
+    assert table.loc["A01", "K"] == pytest.approx(table.loc["A12", "K"])
+    assert bool(table.loc["A01", "k_shared"])
+    assert not bool(table.loc["B01", "k_shared"])
+    assert table.loc["B01", "K"] == pytest.approx(6.2, abs=0.05)
+    assert (tmp_path / "plate_lm_ye_mag.csv").exists()
+
+
+def test_export_plate_fit_returns_none_without_wells(tmp_path: Path) -> None:
+    """No wells means no file, rather than an empty CSV that reads as a result."""
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
+    assert export_plate_fit(tit, {}, tmp_path, "lm") is None

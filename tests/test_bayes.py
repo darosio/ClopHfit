@@ -1744,6 +1744,7 @@ def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
         n_xerr: float,
         lower_nsd: float = 2.5,
         min_x_step: float = 0.2,
+        **_kwargs: object,
     ) -> np.ndarray:
         del xc, lower_nsd, min_x_step
         captured["x_errc"] = np.array(x_errc, copy=True)
@@ -2132,6 +2133,7 @@ def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
         n_xerr: float,
         lower_nsd: float = 2.5,
         min_x_step: float = 0.2,
+        **_kwargs: object,
     ) -> np.ndarray:
         del xc, x_errc, n_xerr, lower_nsd
         captured["min_x_step"] = min_x_step
