@@ -112,11 +112,13 @@ def test_x_prior_rejects_degenerate_widths() -> None:
         XPrior,
     )
 
+    # Mixed float/array values make mypy infer dict[str, object]; the runtime
+    # kwargs are correct, so silence the unpack rather than restructure.
     ok = {"x_start_mu": 7.0, "step_mu": np.array([0.5]), "step_sigma": np.array([0.01])}
-    XPrior(x_start_sigma=0.01, **ok)  # baseline: valid
+    XPrior(x_start_sigma=0.01, **ok)  # type: ignore[arg-type]  # baseline: valid
 
     with pytest.raises(ValueError, match="x_start_sigma must be positive"):
-        XPrior(x_start_sigma=0.0, **ok)
+        XPrior(x_start_sigma=0.0, **ok)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="same shape"):
         XPrior(
             x_start_mu=7.0,

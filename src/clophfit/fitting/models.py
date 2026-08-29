@@ -190,7 +190,9 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
         # arrays and PyTensor symbolic variables alike, and this function has
         # to serve both.
         t = hill * (x - K)
-        shift = (t + abs(t)) / 2
+        # abs() over the float | ArrayF union widens to object under mypy; the
+        # runtime value is the same float-or-array as t, so cast it back.
+        shift = (t + typing.cast("float | ArrayF", abs(t))) / 2
         low = 10 ** (-shift)
         return S0 + (S1 - S0) * low / (low + 10 ** (t - shift))
     return S0 + (S1 - S0) * (x / K) ** hill / (1 + (x / K) ** hill)

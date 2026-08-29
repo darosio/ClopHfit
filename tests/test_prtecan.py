@@ -1988,7 +1988,7 @@ def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
 
     x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
 
-    def curve(k: float) -> np.ndarray:  # type: ignore[type-arg]
+    def curve(k: float) -> np.ndarray:
         return 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
 
     wells = {"A01": 7.0, "A12": 7.0, "B01": 6.2}
@@ -1999,7 +1999,7 @@ def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
     scheme = SimpleNamespace(names={"CTR": ["A01", "A12"]})
     tit = SimpleNamespace(scheme=scheme, x_err=None)
 
-    out = export_plate_fit(tit, datasets, tmp_path, "lm")
+    out = export_plate_fit(tit, datasets, tmp_path, "lm")  # type: ignore[arg-type]  # SimpleNamespace test double
 
     assert out is not None
     table = pd.read_csv(out).set_index("well")
@@ -2018,4 +2018,4 @@ def test_export_plate_fit_returns_none_without_wells(tmp_path: Path) -> None:
     )
 
     tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
-    assert export_plate_fit(tit, {}, tmp_path, "lm") is None
+    assert export_plate_fit(tit, {}, tmp_path, "lm") is None  # type: ignore[arg-type]  # SimpleNamespace test double
