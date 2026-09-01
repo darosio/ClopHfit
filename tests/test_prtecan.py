@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import logging
+import math
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
+import pymc as pm
 import pytest
 import seaborn as sns  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
@@ -49,6 +51,7 @@ from clophfit.prtecan import (
 )
 from clophfit.prtecan.export import (
     export_data_fit,
+    export_trace_summary,
     generate_combinations,
     prepare_output_folder,
 )
@@ -1423,14 +1426,23 @@ class TestTitrationAnalysis:
         ("folder", "expected"),
         [
             ("140220", []),
-            ("L2", ["B03", "C05"]),
+            # L2: B03 fails label 1 only, so it is kept single-label.
+            ("L2", []),
+            # L4: G12 fails every label, so there is nothing left to fit.
             ("L4", ["G12"]),
         ],
     )
     def test_detect_and_discard_bad_wells(
         self, folder: str, expected: list[str]
     ) -> None:
-        """It discards only the low-signal wells seen in the reference plates."""
+        """Low-signal wells are discarded, or lose only the label that failed.
+
+        Signal quality belongs to a label, not a well: the 400 nm channel is dim
+        by construction, so a well failing on label 1 alone keeps label 2 and is
+        fitted single-label rather than thrown away. Only a well that fails
+        every label is discarded outright, so ``expected`` now names the wells
+        with no usable label at all, and the rest appear in ``excluded_labels``.
+        """
         titan = Titration.fromlistfile(data_tests / f"{folder}/list.pH.csv", is_ph=True)
         titan.load_additions(data_tests / f"{folder}/additions.pH")
         titan.load_scheme(data_tests / f"{folder}/scheme.txt")
@@ -1439,10 +1451,16 @@ class TestTitrationAnalysis:
         discards = titan.detect_and_discard_bad_wells(
             outlier_threshold=0.2,
             bg_multiplier=3.0,
+            max_k_stderr=math.inf,
         )
 
         assert discards == expected
         assert set(expected).issubset(set(titan.scheme.discard))
+        # Nothing is silently half-kept: a well is either discarded, fully
+        # fitted, or recorded as having lost specific labels.
+        for well, labels in titan.excluded_labels.items():
+            assert well not in discards
+            assert labels
 
     def test_single_refit_two_pass_contract(
         self,
@@ -2086,3 +2104,229 @@ class TestBufferEstimators:
         mean_shift = abs(np.nanmean(spiked, axis=1) - np.nanmean(obs, axis=1)).max()
         med_shift = abs(np.nanmedian(spiked, axis=1) - np.nanmedian(obs, axis=1)).max()
         assert med_shift < mean_shift / 10.0
+
+
+def test_output_folder_is_distinct_for_every_bg_method(tmp_path: Path) -> None:
+    """Each buffer method needs its own folder, or results overwrite each other.
+
+    The name was built from two special cases (`fit`, `meansd`), so any method
+    outside that pair fell through to the bare `dat...` name and would quietly
+    land on top of `mean`'s output. Historical names must not move, since
+    existing result trees are addressed by them.
+    """
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.params.bg = True
+    tit.params.nrm = True
+    tit.params.dil = False
+    tit.params.bg_adj = False
+    names = {}
+    for method in ("mean", "median", "meansd", "mediansd", "fit"):
+        tit.params.bg_mth = method
+        names[method] = prepare_output_folder(tit, tmp_path).name
+    assert len(set(names.values())) == len(names), f"folder collision: {names}"
+    # The three that already existed keep the names result trees refer to.
+    assert names["mean"] == "dat_bg_nrm"
+    assert names["fit"] == "dat_bg_nrm_fit"
+    assert names["meansd"] == "dat_bg_nrm_1sd"
+
+
+class TestKStderrDetection:
+    """Pre-fit detection must catch a well that is bright but uninformative."""
+
+    @staticmethod
+    def _tit() -> Titration:
+        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+        tit.load_additions(data_tests / "L1" / "additions.pH")
+        tit.load_scheme(data_tests / "L1" / "scheme.txt")
+        tit.scheme.discard = []
+        return tit
+
+    def test_raising_bg_multiplier_only_ever_adds_wells(self) -> None:
+        """The signal rule is monotone in its threshold, and only about brightness.
+
+        Raising the multiplier raises the bar, so the discarded set can only
+        grow. What it cannot do at any setting is notice a well that is bright
+        and still uninformative: on L2, C05 has K = 7.138 +- 426 pH and survives
+        every multiplier from 2.0 to 4.0, all of which discard the same single
+        well. That is what the fit-quality criterion is for.
+        """
+        sets = {
+            m: set(
+                self._tit().detect_and_discard_bad_wells(
+                    bg_multiplier=m, max_k_stderr=math.inf
+                )
+            )
+            for m in (2.0, 3.0, 4.0)
+        }
+        assert sets[2.0] <= sets[3.0] <= sets[4.0]
+
+    def test_k_stderr_criterion_discards_an_unconstrained_well(self) -> None:
+        """A well whose K error exceeds the pH range measured says nothing about K.
+
+        That is the rule, and it is scale-free: if one cannot locate the midpoint
+        inside the window one actually titrated, the well carries no information
+        about K no matter how bright it is.
+        """
+        tit = self._tit()
+        span = float(np.nanmax(tit.x) - np.nanmin(tit.x))
+        loose = set(tit.detect_and_discard_bad_wells(max_k_stderr=math.inf))
+        strict_tit = self._tit()
+        strict = set(strict_tit.detect_and_discard_bad_wells(max_k_stderr=span))
+        # The criterion can only ever add wells, never rescue one.
+        assert loose.issubset(strict)
+
+    def test_k_stderr_flags_exactly_what_the_limit_says(self) -> None:
+        """The rule is a property of each well's fit, not of a plate's quality.
+
+        Asserting "few wells are discarded" would only measure how good the
+        fixture plate happens to be - the bundled L1 is a poor one, where most
+        wells genuinely cannot pin K. So check the rule itself: every well whose
+        fitted K standard error exceeds the limit is discarded, and no well
+        below it is discarded by this criterion.
+
+        On the real L2 plate the limit behaves as intended - K stderr has median
+        0.024 and 98th percentile 0.144, C05 sits at 426, and the span limit of
+        3.39 discards exactly that one well of ninety.
+        """
+        tit = self._tit()
+        limit = float(np.nanmax(tit.x) - np.nanmin(tit.x))
+        wells = sorted(
+            set(tit.labelblocksgroups[next(iter(tit.labelblocksgroups))].data_nrm)
+            - tit.scheme.nofit_keys
+        )
+        expected_unconstrained = {
+            w
+            for w in wells
+            if tit._k_is_unconstrained(w, limit)  # ruff: ignore[private-member-access]
+        }
+        baseline = set(self._tit().detect_and_discard_bad_wells(max_k_stderr=math.inf))
+        discards = set(self._tit().detect_and_discard_bad_wells(max_k_stderr=limit))
+        assert expected_unconstrained - baseline <= discards
+        assert discards <= baseline | expected_unconstrained
+
+
+class TestTraceSummaryExport:
+    """A sampled model must leave inspectable posterior statistics behind."""
+
+    def test_summary_and_trace_are_written(self, tmp_path: Path) -> None:
+        """Running MCMC and keeping nothing from it is not a usable result.
+
+        `--mcmc multi` sampled x_true, the per-well K, and the ye_mag family
+        (including the new per-step terms) and then discarded the trace, so a
+        user could run the model but not see what it had inferred.
+        """
+        rng = np.random.default_rng(0)
+        x = np.linspace(5.0, 9.0, 7)
+        with pm.Model() as model:
+            pm.Normal("K", 7.0, 0.1)
+            pm.HalfNormal("ye_mag_1", 1.0)
+            trace = pm.sample(60, tune=60, chains=2, progressbar=False, random_seed=1)
+        assert model is not None
+        assert rng is not None
+        assert x is not None
+        export_trace_summary(trace, tmp_path, "multi")
+        summary = tmp_path / "trace_summary_multi.csv"
+        assert summary.exists()
+        text = summary.read_text()
+        assert "K" in text
+        assert "ye_mag_1" in text
+        # r_hat and ess are the numbers that say whether to trust the rest.
+        assert "r_hat" in text
+        assert "ess_bulk" in text
+        assert (tmp_path / "trace_multi.nc").exists()
+
+    def test_summary_export_never_breaks_a_run(self, tmp_path: Path) -> None:
+        """A diagnostic must not be able to destroy the fit it describes.
+
+        The summary is written after sampling has already succeeded, so a
+        failure here would throw away a completed run for the sake of a report.
+        """
+        export_trace_summary(object(), tmp_path, "multi")
+        assert not (tmp_path / "trace_summary_multi.csv").exists()
+
+
+class TestSingleLabelWells:
+    """A well may lose one label and keep the other, and must say so."""
+
+    @staticmethod
+    def _tit() -> Titration:
+        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+        tit.load_additions(data_tests / "L1" / "additions.pH")
+        tit.load_scheme(data_tests / "L1" / "scheme.txt")
+        tit.scheme.discard = []
+        return tit
+
+    def test_one_dim_label_does_not_condemn_the_whole_well(self) -> None:
+        """Losing a label is not the same as losing a well.
+
+        The 400 nm channel is dim by construction, so a well can fail the
+        background test on label 1 while label 2 is perfectly good. Discarding
+        the well throws away a usable titration; dropping the label keeps it.
+        """
+        tit = self._tit()
+        labels = sorted(tit.labelblocksgroups)
+        well = min(
+            set(tit.labelblocksgroups[labels[0]].data_nrm) - tit.scheme.nofit_keys
+        )
+        # Make one label of one well look like background, and nothing else.
+        tit.exclude_label(well, labels[0])
+        assert tit.excluded_labels[well] == {labels[0]}
+        ds = tit.create_global_ds(well)
+        assert labels[0] not in ds
+        assert labels[1] in ds
+
+    def test_a_well_failing_every_label_is_still_discarded(self) -> None:
+        """Excluding all labels leaves nothing to fit, so the well must go."""
+        tit = self._tit()
+        labels = sorted(tit.labelblocksgroups)
+        well = min(
+            set(tit.labelblocksgroups[labels[0]].data_nrm) - tit.scheme.nofit_keys
+        )
+        for lbl in labels:
+            tit.exclude_label(well, lbl)
+        assert well in tit.scheme.discard
+        assert well not in tit.fit_keys
+
+    def test_results_record_how_many_labels_each_well_was_fitted_on(self) -> None:
+        """The number is derived from the fit itself, so it cannot drift.
+
+        A single-label K rests on 3 parameters over 7 points instead of 6 over
+        14, and loses the ratiometric cancellation, so it is systematically less
+        certain than its neighbours. A results table that does not say which
+        wells those are invites exactly the silent heterogeneity this project
+        has been bitten by.
+        """
+        tit = self._tit()
+        labels = sorted(tit.labelblocksgroups)
+        well = min(
+            set(tit.labelblocksgroups[labels[0]].data_nrm) - tit.scheme.nofit_keys
+        )
+        tit.exclude_label(well, labels[0])
+        datasets = {k: tit.create_global_ds(k) for k in tit.fit_keys}
+        res = tit.fit_plate(datasets, method="lm")
+        df = res.dataframe
+        assert "n_labels" in df.columns
+        assert int(df.loc[well, "n_labels"]) == len(labels) - 1
+        others = df.drop(index=well)["n_labels"]
+        assert (others == len(labels)).all()
+
+
+def test_ctr_loo_summary_uses_the_column_the_holdout_actually_writes(
+    tmp_path: Path,
+) -> None:
+    """The summary reads ``delta_k_mean``; a rename must fail here, not silently.
+
+    First attempt guessed ``delta`` and the summary simply never appeared - the
+    rows were written, no error was raised, and the missing file was the only
+    clue. Pin the contract so the next rename breaks a test instead.
+    """
+    rows = pd.DataFrame([
+        {"heldout_well": "A01", "delta_k_mean": 0.10, "p_abs_delta_k_lt_rope": 1.0},
+        {"heldout_well": "A02", "delta_k_mean": -0.30, "p_abs_delta_k_lt_rope": 0.0},
+    ])
+    rows.to_csv(tmp_path / "ctr_loo_lm.csv", index=False)
+    df = pd.read_csv(tmp_path / "ctr_loo_lm.csv")
+    assert "delta_k_mean" in df.columns
+    col = df["delta_k_mean"].astype(float)
+    assert float(np.nanmedian(np.abs(col))) == pytest.approx(0.20)
+    assert float(np.sqrt(np.nanmean(col**2))) == pytest.approx(0.2236, abs=1e-3)

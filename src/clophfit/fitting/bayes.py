@@ -1295,6 +1295,11 @@ def _masked_obs_err_matrices(
             msg = f"Dataset for well {key} is missing."
             raise ValueError(msg)
 
+        if lbl not in ds_well:
+            # Not an error: this well is fitted on its other labels, and its
+            # column here stays masked off so it contributes nothing.
+            continue
+
         da = ds_well[lbl]
 
         if da.mask.shape != (n_steps,):
@@ -3331,17 +3336,38 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         for lbl in labels:
             mu_s0, sig_s0 = [], []
             mu_s1, sig_s1 = [], []
-            for key in wells_list:
+            # A well may carry only some labels: pre-fit detection drops a dim
+            # label rather than the whole well. S0/S1 are vectors over every
+            # well, so the missing entries still need a value. They are given a
+            # placeholder and excluded from this label's likelihood, so they
+            # stay at their prior and touch nothing else.
+            missing: list[int] = []
+            for w_idx, key in enumerate(wells_list):
                 r = fit_results[key]
                 if r.result is None:
                     msg = f"Fit result for well {key} is missing."
                     raise ValueError(msg)
+                if f"S0_{lbl}" not in r.result.params:
+                    missing.append(w_idx)
+                    mu_s0.append(np.nan)
+                    sig_s0.append(np.nan)
+                    mu_s1.append(np.nan)
+                    sig_s1.append(np.nan)
+                    continue
                 p_s0 = r.result.params[f"S0_{lbl}"]
                 p_s1 = r.result.params[f"S1_{lbl}"]
                 mu_s0.append(p_s0.value)
                 sig_s0.append(_safe_sigma(p_s0.stderr, n_sd))
                 mu_s1.append(p_s1.value)
                 sig_s1.append(_safe_sigma(p_s1.stderr, n_sd))
+            if missing:
+                # Centre the placeholders on the plate so the sampler explores a
+                # sane region rather than an arbitrary one.
+                for vec in (mu_s0, sig_s0, mu_s1, sig_s1):
+                    arr = np.asarray(vec, dtype=float)
+                    fill = float(np.nanmedian(arr)) if np.isfinite(arr).any() else 1.0
+                    for i in missing:
+                        vec[i] = fill
             s0_vars[lbl] = pm.Normal(
                 f"S0_{lbl}", mu=np.array(mu_s0), sigma=np.array(sig_s0), dims="well"
             )

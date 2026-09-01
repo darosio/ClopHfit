@@ -17,6 +17,7 @@ import pandas as pd
 from scipy import stats as sp_stats
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
     from clophfit.clophfit_types import ArrayF
@@ -386,6 +387,54 @@ def estimate_x_shift_statistics(
     return pd.DataFrame(shift_stats)
 
 
+# A point this far out is worth naming; below it the plot would be unreadable.
+_OUTLIER_LABEL_SIGMA = 4.0
+# Even above the threshold, only the worst few get named - a plate in trouble
+# would otherwise paper the figure with text and hide the shape it exists to show.
+_MAX_OUTLIER_LABELS = 8
+
+
+def _annotate_strong_outliers(
+    ax: Axes, grp: pd.DataFrame, pred: np.ndarray, std_res: np.ndarray
+) -> None:
+    """Name the worst residuals as ``well:step`` so they can be chased.
+
+    An extreme point is the most useful thing on this plot and the hardest to
+    act on: seeing a residual at 24 sigma says something is wrong, but not
+    where. Labelling turns it into a well and a titration step one can open.
+
+    Parameters
+    ----------
+    ax : Axes
+        Axes to draw on.
+    grp : pd.DataFrame
+        Rows for this label, carrying ``well`` and ``step`` where available.
+    pred : np.ndarray
+        Predicted signal per row.
+    std_res : np.ndarray
+        Standardised residual per row.
+    """
+    if "well" not in grp.columns:
+        return
+    mag = np.abs(std_res)
+    strong = np.flatnonzero(np.isfinite(mag) & (mag > _OUTLIER_LABEL_SIGMA))
+    if strong.size == 0:
+        return
+    worst = strong[np.argsort(-mag[strong])][:_MAX_OUTLIER_LABELS]
+    wells = grp["well"].to_numpy()
+    steps = grp["step"].to_numpy() if "step" in grp.columns else None
+    for i in worst:
+        name = str(wells[i]) if steps is None else f"{wells[i]}:{steps[i]}"
+        ax.annotate(
+            name,
+            (pred[i], mag[i]),
+            fontsize=7,
+            xytext=(4, 2),
+            textcoords="offset points",
+            color="C3",
+        )
+
+
 def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure:
     r"""Plot \|standardized residual\| vs predicted signal per label.
 
@@ -416,6 +465,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
         pred = grp["yhat"].to_numpy(dtype=float)
         std_res = grp["std_res"].to_numpy(dtype=float)
         ax.scatter(pred, np.abs(std_res), s=8, alpha=0.3, color="C0")
+        _annotate_strong_outliers(ax, grp, pred, std_res)
 
         valid = np.isfinite(pred) & np.isfinite(std_res)
         if valid.sum() > MIN_POINTS_FOR_BINNING:
@@ -446,6 +496,62 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
     fig.suptitle(suptitle, fontsize=13)
     fig.tight_layout()
     plt.close(fig)
+    return fig
+
+
+def plot_residual_distribution(all_res: pd.DataFrame, title: str = "") -> Figure:
+    """Histogram and Q-Q of the standardised residuals, per label.
+
+    Summary statistics cannot tell a heavy tail from a bimodal spread from a
+    shifted centre, and those call for different fixes: a heavy tail wants a
+    robust likelihood, a shift wants the mean model looked at, a bimodal spread
+    usually means two populations of wells. The histogram against the reference
+    normal shows centre and width; the Q-Q plot shows the tails, which is where
+    an error model is normally wrong.
+
+    Parameters
+    ----------
+    all_res : pd.DataFrame
+        Canonical residual table with ``label`` and ``std_res`` columns.
+    title : str
+        Figure title.
+
+    Returns
+    -------
+    Figure
+        Two rows - histogram and Q-Q - by one column per label.
+    """
+    labels = sorted(all_res["label"].astype(str).unique())
+    fig, axes = plt.subplots(
+        2, len(labels), figsize=(5.5 * len(labels), 8), squeeze=False
+    )
+    grid = np.linspace(-4.0, 4.0, 200)
+    for col, label in enumerate(labels):
+        v = all_res.loc[all_res["label"].astype(str) == label, "std_res"]
+        v = np.asarray(v, dtype=float)
+        v = v[np.isfinite(v)]
+        ax_h = axes[0][col]
+        if v.size:
+            ax_h.hist(v, bins=40, density=True, alpha=0.6, color="C0")
+            ax_h.plot(
+                grid,
+                np.exp(-0.5 * grid**2) / np.sqrt(2 * np.pi),
+                "g--",
+                label="N(0,1)",
+            )
+            ax_h.legend(fontsize=8)
+        ax_h.set_title(f"Label {label}")
+        ax_h.set_xlabel("Standardized residual")
+        ax_h.set_ylabel("Density")
+        ax_q = axes[1][col]
+        if v.size > 1:
+            sp_stats.probplot(v, dist="norm", plot=ax_q)
+            ax_q.get_lines()[0].set_markersize(3)
+            ax_q.set_title("")
+        ax_q.set_xlabel("Theoretical quantiles")
+        ax_q.set_ylabel("Ordered residuals")
+    fig.suptitle(f"Residual distribution: departures from N(0,1) - {title}")
+    fig.tight_layout()
     return fig
 
 

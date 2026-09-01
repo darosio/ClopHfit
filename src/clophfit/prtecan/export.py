@@ -4,10 +4,11 @@ import copy
 import itertools
 import logging
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
+import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 
@@ -28,9 +29,14 @@ from clophfit.fitting.model_validation import (
     residuals_from_fit_results,
 )
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.plate_lm import PlateLMResult, fit_plate_lm
-from clophfit.fitting.plate_odr import PlateODRResult, fit_plate_odr
+from clophfit.fitting.plate_lm import PlateLMResult, ctr_holdout, fit_plate_lm
+from clophfit.fitting.plate_odr import (
+    PlateODRResult,
+    ctr_holdout_odr,
+    fit_plate_odr,
+)
 from clophfit.fitting.residuals import (
+    plot_residual_distribution,
     plot_residual_vs_predicted,
     plot_residual_vs_yerr,
     residual_statistics,
@@ -68,6 +74,17 @@ def apply_combination(
     titration.params.bg_mth = method
 
 
+# Output-folder suffix per buffer method. `mean`, `fit` and `meansd` keep the
+# names they have always had; anything new gets its own.
+_BG_MTH_SUFFIX = {
+    "mean": "",
+    "fit": "_fit",
+    "meansd": "_1sd",
+    "median": "_med",
+    "mediansd": "_med1sd",
+}
+
+
 def prepare_output_folder(titration: Titration, base_path: Path) -> Path:
     """Prepare the output folder for a given combination of parameters."""
     p = titration.params
@@ -75,9 +92,11 @@ def prepare_output_folder(titration: Titration, base_path: Path) -> Path:
     sadj = "_adj" if p.bg_adj else ""
     sdil = "_dil" if p.dil else ""
     snrm = "_nrm" if p.nrm else ""
-    sfit = "_fit" if p.bg_mth == "fit" else ""
-    smeansd = "_1sd" if p.bg_mth == "meansd" else ""
-    subfolder_name = "dat" + sbg + sadj + sdil + snrm + sfit + smeansd
+    # Every method needs a distinct suffix or its results land on top of
+    # another's. The first three are historical and must not move: existing
+    # result trees are addressed by those names.
+    smth = _BG_MTH_SUFFIX.get(p.bg_mth, f"_{p.bg_mth}")
+    subfolder_name = "dat" + sbg + sadj + sdil + snrm + smth
     subfolder_path = base_path / subfolder_name
     subfolder_path.mkdir(parents=True, exist_ok=True)
     return subfolder_path
@@ -101,6 +120,45 @@ def export_residuals(
     fig_pred.savefig(outfit / f"residual_vs_predicted_{index}.png", dpi=150)
     fig_yerr = plot_residual_vs_yerr(all_res, title=label)
     fig_yerr.savefig(outfit / f"residual_vs_yerr_{index}.png", dpi=150)
+    fig_dist = plot_residual_distribution(all_res, title=label)
+    fig_dist.savefig(outfit / f"residual_distribution_{index}.png", dpi=150)
+
+
+def export_trace_summary(trace: object, outfit: Path, tag: str) -> None:
+    """Write posterior statistics and the trace of a sampled model.
+
+    Sampling and then keeping nothing from it is not a usable result: the
+    multi-well path inferred ``x_true``, a per-well ``K`` and the whole ye_mag
+    family, and dropped the trace on return, so a run could be performed but not
+    inspected. This writes ``trace_summary_<tag>.csv`` - mean, sd, HDI, ``r_hat``
+    and ESS per variable, the numbers that say whether to trust the rest - and
+    the full trace as NetCDF for anything the summary does not cover.
+
+    Failures here are logged and swallowed. The summary describes a fit that has
+    already succeeded, and a diagnostic must not be able to destroy the run it
+    reports on.
+
+    Parameters
+    ----------
+    trace : object
+        PyMC/ArviZ inference data from the fit. ``None`` writes nothing.
+    outfit : Path
+        Directory to write into.
+    tag : str
+        Suffix identifying the model, e.g. ``"multi"``.
+    """
+    if trace is None:
+        return
+    try:
+        summary = az.summary(trace)
+        summary.to_csv(outfit / f"trace_summary_{tag}.csv")
+    except Exception:
+        logger.warning("Could not summarise the %s trace", tag, exc_info=True)
+        return
+    try:
+        trace.to_netcdf(outfit / f"trace_{tag}.nc")  # type: ignore[attr-defined]
+    except Exception:
+        logger.warning("Could not write the %s trace to NetCDF", tag, exc_info=True)
 
 
 def export_bad_wells(outfit: Path, global_res: TitrationResults) -> None:
@@ -330,9 +388,9 @@ def fit_single_mcmc(
 
     if spec.model == "multi":
         # Every well fitted jointly, with control K shared across each control
-        # group. Only the per-well results are returned, because that is what
-        # the export path writes; the shared trace, which carries the pooled
-        # control K itself, is reachable only through fit_binding_pymc_multi.
+        # group. Only the per-well results are returned, but the shared trace -
+        # which carries the pooled control K, x_true and the ye_mag family - is
+        # summarised to disk rather than dropped.
         multi = fit_binding_pymc_multi(
             datasets,
             titration.scheme,
@@ -342,6 +400,7 @@ def fit_single_mcmc(
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
         )
+        export_trace_summary(getattr(multi, "trace", None), outfit, "multi")
         return TitrationResults(titration.scheme, titration.fit_keys, multi.results)
 
     if spec.model == "single":
@@ -385,6 +444,73 @@ def fit_single_mcmc(
             outfit / "single_refit_initial_residual_outliers.csv", index=False
         )
     return TitrationResults(titration.scheme, titration.fit_keys, mcmc_fits)
+
+
+def _export_ctr_holdout(
+    datasets: Mapping[str, typing.Any],
+    groups: Mapping[str, Sequence[str]],
+    outfit: Path,
+    method: str,
+) -> None:
+    """Leave each control out in turn and write how far it lands from its group.
+
+    Agreement with a bench pK measures accuracy; this measures repeatability,
+    which is the thing a plate can report about itself. Each control is refitted
+    with its own free K while its group-mates keep the shared one, so the spread
+    of those differences is the precision the plate actually delivers - and it
+    needs no external reference to be interpretable.
+
+    Failures are logged, not raised: this is a diagnostic running after the fit
+    it describes has already succeeded.
+
+    Parameters
+    ----------
+    datasets : Mapping[str, typing.Any]
+        Well to dataset, as fitted.
+    groups : Mapping[str, Sequence[str]]
+        Control group name to member wells.
+    outfit : Path
+        Directory to write into.
+    method : str
+        ``"lm"`` or ``"odr"``, naming the output file.
+    """
+    if not groups:
+        return
+    try:
+        rows = (
+            ctr_holdout_odr(datasets, groups)
+            if method == "odr"
+            else ctr_holdout(datasets, groups)
+        )
+    except Exception:
+        logger.warning("Control leave-one-out failed for %s", method, exc_info=True)
+        return
+    if not rows:
+        return
+    df = pd.DataFrame(rows)
+    df.to_csv(outfit / f"ctr_loo_{method}.csv", index=False)
+    if "delta_k_mean" not in df.columns:
+        logger.warning(
+            "Control leave-one-out for %s has no delta_k_mean column; "
+            "wrote the rows but no summary.",
+            method,
+        )
+        return
+    col = df["delta_k_mean"].astype(float)
+    row: dict[str, object] = {
+        "method": method,
+        "n_controls": int(col.notna().sum()),
+        "median_abs_delta_k": float(np.nanmedian(np.abs(col))),
+        "rms_delta_k": float(np.sqrt(np.nanmean(col**2))),
+        "max_abs_delta_k": float(np.nanmax(np.abs(col))),
+    }
+    if "p_abs_delta_k_lt_rope" in df.columns:
+        # How often a held-out control lands close enough to its group to be
+        # called the same - the plate's own statement about repeatability.
+        row["frac_within_rope"] = float(
+            np.nanmean(df["p_abs_delta_k_lt_rope"].astype(float))
+        )
+    pd.DataFrame([row]).to_csv(outfit / f"ctr_loo_{method}_summary.csv", index=False)
 
 
 def export_plate_fit(
@@ -451,6 +577,7 @@ def export_plate_fit(
     pd.DataFrame([
         {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())
     ]).to_csv(outfit / f"plate_{method}_ye_mag.csv", index=False)
+    _export_ctr_holdout(datasets, groups, outfit, method)
     logger.info(
         "plate %s fit: %d wells, %d points, converged=%s, ye_mag=%s",
         method,

@@ -1,11 +1,9 @@
 """Tests for clophfit.fitting.diagnostics."""
 
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-from clophfit.fitting.diagnostics import detect_bad_wells, detect_bad_wells_from_dat
+from clophfit.fitting.diagnostics import detect_bad_wells
 
 
 @pytest.fixture
@@ -257,83 +255,3 @@ def test_ctr_cols_k_stats_use_samples_only() -> None:
     assert not flags[flags["well"] == "A01"].iloc[0]["flag_any"]
     # E02 is a sample outlier — must be flagged
     assert flags[flags["well"] == "E02"].iloc[0]["flag_k_outlier"]
-
-
-# ---------------------------------------------------------------------------
-# detect_bad_wells_from_dat tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def dat_dir(tmp_path: Path) -> str:
-    """Create a minimal plate with 4 wells: 2 good, 1 low-signal, 1 flat."""
-    wells = {
-        # Good wells: strong signal, clear dynamic range
-        "A02": "x,1,2\n8,100,200\n7,90,190\n6,50,120\n5,10,30\n",
-        "B02": "x,1,2\n8,110,210\n7,95,195\n6,55,130\n5,15,35\n",
-        # Low-signal: ~1% of plate median (should fire flag_low_signal)
-        "G12": "x,1,2\n8,1.0,0.5\n7,1.1,0.6\n6,0.9,0.4\n5,0.8,0.3\n",
-        # Flat curve: no dynamic range in y1 (should fire flag_flat_curve)
-        "H05": "x,1,2\n8,500,200\n7,499,190\n6,500,120\n5,501,30\n",
-    }
-    for name, content in wells.items():
-        (tmp_path / f"{name}.dat").write_text(content)
-    return str(tmp_path)
-
-
-def test_from_dat_low_signal(dat_dir: str) -> None:
-    """G12 with tiny signal must be caught by flag_low_signal."""
-    flags = detect_bad_wells_from_dat(dat_dir)
-    row = flags[flags["well"] == "G12"].iloc[0]
-    assert row["flag_low_signal"], "G12 tiny signal must be flagged"
-    assert row["flag_any"]
-
-
-def test_from_dat_flat_curve(dat_dir: str) -> None:
-    """H05 with flat y1 must be caught by flag_flat_curve."""
-    flags = detect_bad_wells_from_dat(dat_dir)
-    row = flags[flags["well"] == "H05"].iloc[0]
-    assert row["flag_flat_curve"], "H05 flat y1 must be flagged"
-    assert row["flag_any"]
-
-
-def test_from_dat_good_wells_not_flagged(dat_dir: str) -> None:
-    """Good wells A02 and B02 must not be flagged."""
-    flags = detect_bad_wells_from_dat(dat_dir)
-    for well in ["A02", "B02"]:
-        row = flags[flags["well"] == well].iloc[0]
-        assert not row["flag_any"], f"{well} is a good well and must not be flagged"
-
-
-def test_from_dat_no_dat_files(tmp_path: Path) -> None:
-    """Empty directory must raise FileNotFoundError."""
-    with pytest.raises(FileNotFoundError):
-        detect_bad_wells_from_dat(str(tmp_path))
-
-
-def test_from_dat_ctr_cols_logged(dat_dir: str) -> None:
-    """ctr_cols parameter adds is_ctr column to the output."""
-    flags = detect_bad_wells_from_dat(dat_dir, ctr_cols=[1, 12])
-    assert "flag_low_signal" in flags.columns
-    assert "is_ctr" in flags.columns, "is_ctr column must appear when ctr_cols is set"
-    # G12 is col 12 → is_ctr=True
-    row = flags[flags["well"] == "G12"].iloc[0]
-    assert row["is_ctr"]
-    # A02 is col 2 → is_ctr=False
-    row = flags[flags["well"] == "A02"].iloc[0]
-    assert not row["is_ctr"]
-
-
-def test_from_dat_empty_series_flagged(tmp_path: Path) -> None:
-    """Header-only .dat files must be treated as bad wells instead of crashing."""
-    (tmp_path / "A01.dat").write_text("x,1,2\n8,100,200\n7,90,190\n")
-    (tmp_path / "A02.dat").write_text("x,1,2\n")
-    (tmp_path / "A03.dat").write_text("x,1,2\n8,101,199\n7,91,191\n")
-    (tmp_path / "A04.dat").write_text("x,1,2\n8,102,202\n7,89,188\n")
-
-    flags = detect_bad_wells_from_dat(tmp_path)
-
-    row = flags[flags["well"] == "A02"].iloc[0]
-    assert row["flag_low_signal"]
-    assert row["flag_flat_curve"]
-    assert row["flag_any"]

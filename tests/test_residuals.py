@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
+from clophfit.fitting import residuals
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import (
     DataArray,
@@ -930,3 +931,33 @@ def test_residuals_mixin_honours_explicit_robust() -> None:
     assert settings.robust is True
     assert settings.student_t_nu == 5.0
     assert settings.residual_likelihood is None
+
+
+def test_plot_residual_distribution_shows_shape_and_tails() -> None:
+    """Residual *shape* needs its own plot, not just summary statistics.
+
+    ``residual_stats`` reports mean, sd and an outlier count, which cannot tell a
+    heavy tail from a bimodal spread from a shifted centre - and on real plates
+    these differ: one export shows sd 10.8 with 55% of label-1 points outside
+    2 sigma, which is a statement about the error model, not about 335 bad
+    measurements. A histogram against the reference normal, plus a Q-Q plot,
+    says which it is.
+    """
+    rng = np.random.default_rng(0)
+    n = 300
+    all_res = pd.DataFrame({
+        "label": ["1"] * n + ["2"] * n,
+        "well": [f"A{i:02d}" for i in range(n)] * 2,
+        "step": list(range(n)) * 2,
+        "yhat": np.r_[rng.normal(500, 50, n), rng.normal(500, 50, n)],
+        # label 1 normal, label 2 heavy-tailed: the plot must distinguish them.
+        "std_res": np.r_[rng.normal(0, 1, n), rng.standard_t(2, n)],
+    })
+    fig = residuals.plot_residual_distribution(all_res, title="t")
+    assert fig is not None
+    # One column per label, two rows: histogram and Q-Q.
+    assert len(fig.axes) == 4
+    fig2 = residuals.plot_residual_distribution(
+        all_res[all_res["label"] == "1"], title="single"
+    )
+    assert len(fig2.axes) == 2

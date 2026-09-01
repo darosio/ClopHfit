@@ -3248,3 +3248,49 @@ def test_step_tau_hint_falls_back_when_it_cannot_tell() -> None:
     assert bayes.step_tau_hint_from_residuals(two_steps, ["1"])["1"] == pytest.approx(
         bayes._YE_MAG_STEP_TAU_SIGMA  # ruff: ignore[private-member-access]
     )
+
+
+def _plate_with_a_single_label_well() -> dict[str, Dataset]:
+    """Build a plate where one well kept only label 2, as detection leaves it."""
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    out: dict[str, Dataset] = {}
+    for i, well in enumerate(("A01", "A02", "A03", "A04")):
+        k = 6.8 + 0.1 * i
+        arrays = {}
+        for lbl in ("1", "2"):
+            if well == "A03" and lbl == "1":
+                continue  # label 1 was dropped for this well
+            s0, s1 = (200.0, 1000.0) if lbl == "1" else (1000.0, 200.0)
+            y = binding_1site(x, k, s0, s1, is_ph=True) + rng.normal(0.0, 5.0, len(x))
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones_like(y))
+        out[well] = Dataset(arrays, is_ph=True)
+    return out
+
+
+def test_multi_fit_accepts_a_well_with_fewer_labels() -> None:
+    """A well fitted on one label must not take the whole plate down.
+
+    Pre-fit detection drops a label rather than a well when only one channel is
+    too dim - the 400 nm channel often is - so heterogeneous label sets reach
+    the joint model. It used to die on ``KeyError: 'S0_1'`` because S0/S1 are
+    built per label across every well, leaving no entry for the missing one.
+
+    Dropping label 1 is not a free simplification either: scored against bench
+    pK on L2/L9/L4, label 2 alone costs 1.8x the median deviation of both
+    labels (0.050 vs 0.028) and only 65% of controls land within 0.1 pH against
+    94%. So these wells have to be carried, not discarded.
+    """
+    dsd = _plate_with_a_single_label_well()
+    scheme = PlateScheme()
+    res = bayes.fit_binding_pymc_multi(
+        dsd,
+        scheme,
+        per_well_ye_mags=True,
+        ye_mag_parameterization="separable_step",
+        sampler=SamplerConfig(n_samples=60, n_tune=60, chains=2),
+    )
+    assert set(res.results) == set(dsd)
+    for well in dsd:
+        assert res.results[well].result is not None
+        assert "K" in res.results[well].result.params

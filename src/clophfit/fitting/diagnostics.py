@@ -2,9 +2,6 @@ r"""Well-quality diagnostics for plate-reader titration data.
 
 Two complementary entry points:
 
-- :func:`detect_bad_wells_from_dat` — reads raw ``.dat`` files (one per well,
-  all labels together).  No fitting required; works before the fitting pipeline.
-  Detects outliers based on robust trendline between signal span and maximum signal.
 
 - :func:`detect_bad_wells` — reads ``ffit*.csv`` fit results (one label per
   file).  Adds fit-quality criteria (K at bound, K outlier, poor fit) on top
@@ -29,7 +26,6 @@ Detection criteria
 """
 
 import logging
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -38,124 +34,9 @@ from clophfit.fitting.utils import flag_trend_outliers
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["detect_bad_wells", "detect_bad_wells_from_dat"]
+__all__ = ["detect_bad_wells"]
 
 _NEAR_ZERO = 1e-9
-
-
-def detect_bad_wells_from_dat(
-    data_dir: str | Path,
-    *,
-    z_threshold: float = 3.0,
-    ctr_cols: list[int] | None = None,
-) -> pd.DataFrame:
-    r"""Flag unreliable wells by reading raw ``.dat`` titration files.
-
-    Reads every ``*.dat`` file in *data_dir* (one per well).  Each file must
-    have an ``x`` column and one or more signal columns (e.g. ``y1``, ``y2``).
-    All labels are checked together — no fitting is required.
-
-    Parameters
-    ----------
-    data_dir : str | Path
-        Directory containing ``*.dat`` files (one per well, CSV format with
-        columns ``x, y1[, y2, ...]``).
-    z_threshold : float
-        Z-score threshold for outlier detection on the max-vs-span trendline.
-    ctr_cols : list[int] | None
-        1-based column numbers for control wells (e.g. ``[1, 12]``).
-        Currently used only for logging; all flags apply equally to CTR wells.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per well with columns:
-
-        - ``well``
-        - ``flag_low_signal``
-        - ``flag_flat_curve``
-        - ``flag_any``
-        - ``flag_count``
-
-        Sorted by descending ``flag_count``.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no ``*.dat`` files are found in *data_dir*.
-    """
-    data_dir = Path(data_dir)
-    dat_files = sorted(data_dir.glob("*.dat"))
-    if not dat_files:
-        msg = f"No .dat files found in {data_dir}"
-        raise FileNotFoundError(msg)
-
-    # Load all wells
-    well_data: dict[str, pd.DataFrame] = {}
-    for f in dat_files:
-        well_data[f.stem] = pd.read_csv(f)
-
-    wells = list(well_data.keys())
-    sig_cols = [c for c in next(iter(well_data.values())).columns if c != "x"]
-
-    # Per label, per well: max |signal| and dynamic range
-    max_sig: dict[str, list[float]] = {col: [] for col in sig_cols}
-    span_val: dict[str, list[float]] = {col: [] for col in sig_cols}
-
-    for well in wells:
-        df = well_data[well]
-        for col in sig_cols:
-            y = df[col].astype(float).dropna().to_numpy()
-            if y.size == 0:
-                logger.warning(
-                    "detect_bad_wells_from_dat: %s has no valid %s values; flagging as low-signal/flat",
-                    well,
-                    col,
-                )
-                max_sig[col].append(0.0)
-                span_val[col].append(0.0)
-                continue
-            abs_max = float(np.max(np.abs(y)))
-            span = float(y.max() - y.min())
-            max_sig[col].append(abs_max)
-            span_val[col].append(span)
-
-    result = pd.DataFrame({"well": wells})
-
-    # We keep the column names flag_low_signal and flag_flat_curve for backwards compatibility
-    low_signal_or_flat = pd.Series(data=False, index=result.index)
-
-    for col in sig_cols:
-        x_series = pd.Series(max_sig[col], index=result.index)
-        y_series = pd.Series(span_val[col], index=result.index)
-        outliers = flag_trend_outliers(x_series, y_series, threshold=z_threshold)
-        low_signal_or_flat |= outliers
-
-    result["flag_low_signal"] = low_signal_or_flat
-    result["flag_flat_curve"] = (
-        low_signal_or_flat  # They are the same under the trendline approach
-    )
-    flag_cols = ["flag_low_signal", "flag_flat_curve"]
-    result["flag_count"] = result[flag_cols].sum(axis=1)
-    result["flag_any"] = result["flag_count"] > 0
-
-    if ctr_cols:
-        col_nums = result["well"].str.extract(r"(\d+)$", expand=False).astype(int)
-        is_ctr_mask = col_nums.isin(ctr_cols)
-        result["is_ctr"] = is_ctr_mask
-        n_ctr = int(is_ctr_mask.sum())
-    else:
-        n_ctr = 0
-    n_flagged = int(result["flag_any"].sum())
-    logger.info(
-        "detect_bad_wells_from_dat: %d/%d wells flagged (%d CTR wells present); %s",
-        n_flagged,
-        len(wells),
-        n_ctr,
-        ", ".join(f"{c}={result[c].sum()}" for c in flag_cols),
-    )
-
-    return result.sort_values("flag_count", ascending=False).reset_index(drop=True)
 
 
 def detect_bad_wells(  # ruff: ignore[too-many-arguments, too-many-statements]

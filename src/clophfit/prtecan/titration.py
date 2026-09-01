@@ -45,9 +45,6 @@ from clophfit.fitting.odr import fit_binding_odr, format_estimate
 from clophfit.fitting.plotting import PlotParameters
 from clophfit.fitting.utils import (
     apply_outlier_mask,
-    flag_trend_outliers,
-    roughness,
-    smoothness,
 )
 from clophfit.utils import weights_from_sigma
 
@@ -576,7 +573,9 @@ class TitrationResults(ResidualsMixin):
         data = []
         for lbl, fr in self.results.items():
             pars = fr.result.params if fr.result else None
-            row = {"well": lbl}
+            # Derived from the fit itself rather than plumbed alongside it, so
+            # it cannot drift out of step with what was actually fitted.
+            row = {"well": lbl, "n_labels": len(fr.dataset) if fr.dataset else 0}
             if pars is not None:
                 for k in pars:
                     row[k] = pars[k].value
@@ -666,6 +665,12 @@ class TitrationResults(ResidualsMixin):
     ) -> figure.Figure:
         """Plot K values as stripplot.
 
+        Wells fitted on fewer labels than the rest are marked with a trailing
+        ``*``, and the title says how many there are. Their K rests on 3
+        parameters over 7 points rather than 6 over 14 and loses the ratiometric
+        cancellation, so it is systematically less certain than its neighbours -
+        which a bare stripplot would otherwise hide.
+
         Parameters
         ----------
         xlim : tuple[float, float] | None, optional
@@ -679,6 +684,14 @@ class TitrationResults(ResidualsMixin):
             The figure.
         """
         dataframe = self.dataframe
+        # A well fitted on fewer labels than its neighbours carries a K that is
+        # systematically less certain - 3 parameters over 7 points instead of 6
+        # over 14, and no ratiometric cancellation. Mark those so nobody reads
+        # them as equivalent points on the same plot.
+        partial: set[str] = set()
+        if "n_labels" in dataframe.columns:
+            full = int(dataframe["n_labels"].max()) if len(dataframe) else 0
+            partial = set(dataframe.index[dataframe["n_labels"] < full])
         with sns.plotting_context("paper"):  # axes_style("whitegrid"):
             fig = plt.figure(figsize=(12, 16))
             keys_unk = list(set(dataframe.index))
@@ -698,6 +711,10 @@ class TitrationResults(ResidualsMixin):
                 x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
                 sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
                 ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
+                ax1.set_yticklabels([
+                    f"{label} *" if str(label) in partial else str(label)
+                    for label in df_ctr.index
+                ])
                 ax1.legend(loc="upper left", frameon=False)
                 ax1.grid(visible=True, axis="both")
                 ax1.set_xticklabels([])
@@ -712,7 +729,10 @@ class TitrationResults(ResidualsMixin):
             ax2.errorbar(x, y, xerr=df_unk["sK"], fmt=".", c="gray", lw=2)
             ax2.grid(visible=True, axis="both")
             ax2.set_yticks(range(len(df_unk)))
-            ax2.set_yticklabels([str(label) for label in df_unk.index])
+            ax2.set_yticklabels([
+                f"{label} *" if str(label) in partial else str(label)
+                for label in df_unk.index
+            ])
             ax2.set_ylim(-1, len(df_unk))
             # Set x-limits
             xlim = xlim or self._determine_xlim(df_ctr, df_unk)
@@ -720,7 +740,8 @@ class TitrationResults(ResidualsMixin):
                 ax1.set_xlim(xlim)
             ax2.set_xlim(xlim)
             # Set title
-            fig.suptitle(title, fontsize=16)
+            note = f"  ({len(partial)} well(s) * = fewer labels)" if partial else ""
+            fig.suptitle(title + note, fontsize=16)
             fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
             # Close the figure after returning it to avoid memory issues
         plt.close(fig)
@@ -767,6 +788,9 @@ class Titration(TecanfilesGroup):
 
     _params: TitrationConfig = field(init=False, default_factory=TitrationConfig)
     _additions: list[float] = field(init=False, default_factory=list)
+    # Well -> labels dropped by pre-fit detection. A well can lose one label and
+    # keep the other; only losing every label discards the well.
+    _excluded_labels: dict[str, set[str]] = field(init=False, default_factory=dict)
     _scheme: PlateScheme = field(init=False, default_factory=PlateScheme)
     _bg: dict[str, ArrayF] = field(init=False, default_factory=dict)
     _bg_err: dict[str, ArrayF] = field(init=False, default_factory=dict)
@@ -790,12 +814,10 @@ class Titration(TecanfilesGroup):
 
     def detect_and_discard_bad_wells(  # ruff: ignore[complex-structure, too-many-branches]
         self,
-        smoothness_threshold: float | None = None,
-        roughness_threshold: float | None = None,
-        z_threshold: float | None = None,
         *,
         outlier_threshold: float | None = 0.2,
         bg_multiplier: float | None = 3.0,
+        max_k_stderr: float | None = None,
     ) -> list[str]:
         """Detect and discard bad wells from masked per-label signal quality.
 
@@ -805,17 +827,19 @@ class Titration(TecanfilesGroup):
         background-derived floor. The floor uses ``bg_err`` when available and
         falls back to ``bg_noise``.
 
-        Legacy smoothness, roughness, and trendline criteria are still available
-        as optional extra filters when their thresholds are provided explicitly.
+        A signal test alone cannot catch a well that is bright but
+        uninformative. On L2, C05 has ample signal and a meaningless titration -
+        K = 7.138 +- 254 pH - and survives every ``bg_multiplier`` from 2.0 to
+        4.0, all of which discard the same single well. So a fit-quality test
+        runs alongside it: fit the well and ask how well K is pinned.
+
+        The smoothness, roughness and trendline criteria that used to sit here
+        were removed. They were disabled by default, no caller ever passed them,
+        and at plausible thresholds (0.5/0.5/3.0) they discarded 90 of 90 wells
+        on L2 - not a criterion, a bug in waiting.
 
         Parameters
         ----------
-        smoothness_threshold : float | None
-            Optional maximum allowed smoothness value.
-        roughness_threshold : float | None
-            Optional maximum allowed roughness value.
-        z_threshold : float | None
-            Optional trendline outlier threshold on max signal vs span.
         outlier_threshold : float | None
             Threshold passed to :func:`apply_outlier_mask` before computing
             per-label summary statistics. If ``None``, no masking is applied.
@@ -823,6 +847,12 @@ class Titration(TecanfilesGroup):
             Discard a well when any masked per-label mean signal is below
             ``bg_multiplier * mean(background_floor)``. If ``None``, this check
             is disabled.
+        max_k_stderr : float | None
+            Discard a well whose fitted K has a standard error above this, or a
+            non-finite one. ``None`` uses the titration's own x span, which is
+            the scale-free form of the rule: a well whose midpoint cannot be
+            located inside the window actually titrated carries no information
+            about K, however bright it is. Pass ``math.inf`` to disable.
 
         Returns
         -------
@@ -841,12 +871,21 @@ class Titration(TecanfilesGroup):
 
         label_ids = sorted(self.labelblocksgroups)
         new_discards: set[str] = set()
-        trend_inputs: dict[str, dict[str, dict[str, float]]] = {
-            label: {} for label in label_ids
-        }
+        # None means the titration's own x span - see the docstring.
+        k_stderr_limit = (
+            float(np.nanmax(self.x) - np.nanmin(self.x))
+            if max_k_stderr is None
+            else float(max_k_stderr)
+        )
+        if not np.isfinite(k_stderr_limit):
+            k_stderr_limit = None  # type: ignore[assignment]
 
         for well in candidate_wells:
-            discard_well = False
+            # Signal quality is a property of a label, not of a well. Judge each
+            # label on its own and let a well keep the ones that are good: the
+            # 400 nm channel is dim by construction, so condemning the well for
+            # it would throw away usable titrations.
+            failed_labels: set[str] = set()
             for label in label_ids:
                 ds = self.create_ds(well, label)
                 if outlier_threshold is not None:
@@ -854,8 +893,8 @@ class Titration(TecanfilesGroup):
                 y = np.asarray(ds[str(label)].y, dtype=float)
                 valid_y = y[~np.isnan(y)]
                 if len(valid_y) < 2:  # ruff: ignore[magic-value-comparison]
-                    discard_well = True
-                    break
+                    failed_labels.add(str(label))
+                    continue
 
                 if bg_multiplier is not None:
                     floor_values = self.bg_err.get(label)
@@ -868,49 +907,51 @@ class Titration(TecanfilesGroup):
                         np.isfinite(floor)
                         and float(np.nanmean(valid_y)) < bg_multiplier * floor
                     ):
-                        discard_well = True
+                        failed_labels.add(str(label))
 
-                if (
-                    smoothness_threshold is not None
-                    and smoothness(valid_y) > smoothness_threshold
-                ):
-                    discard_well = True
+            discard_well = failed_labels >= {str(i) for i in label_ids}
+            if not discard_well and failed_labels:
+                for label in sorted(failed_labels):
+                    self.exclude_label(well, label)
 
-                if (
-                    roughness_threshold is not None
-                    and roughness(valid_y) > roughness_threshold
-                ):
-                    discard_well = True
-
-                trend_inputs[label][well] = {
-                    "max_sig": float(np.max(np.abs(valid_y))),
-                    "span": float(np.max(valid_y) - np.min(valid_y)),
-                }
+            if not discard_well and k_stderr_limit is not None:
+                discard_well = self._k_is_unconstrained(well, k_stderr_limit)
 
             if discard_well:
                 new_discards.add(well)
-
-        if z_threshold is not None:
-            for label in label_ids:
-                label_metrics = trend_inputs[label]
-                if not label_metrics:
-                    continue
-                x_series = pd.Series({
-                    well: metrics["max_sig"] for well, metrics in label_metrics.items()
-                })
-                y_series = pd.Series({
-                    well: metrics["span"] for well, metrics in label_metrics.items()
-                })
-                outliers = flag_trend_outliers(
-                    x_series, y_series, threshold=z_threshold
-                )
-                new_discards.update(outliers[outliers].index)
 
         if new_discards:
             self.scheme.discard = list(set(self.scheme.discard) | new_discards)
             self.clear_all_data_results()
 
         return sorted(new_discards)
+
+    def _k_is_unconstrained(self, well: str, limit: float) -> bool:
+        """Whether a cheap global fit leaves K less certain than the x span.
+
+        Parameters
+        ----------
+        well : str
+            Well key to fit.
+        limit : float
+            Largest acceptable standard error on K.
+
+        Returns
+        -------
+        bool
+            True when K cannot be pinned - a non-finite standard error, a fit
+            that fails outright, or one wider than ``limit``. A fit that will
+            not converge is itself evidence the well carries no K.
+        """
+        try:
+            res = fit_binding_glob(self.create_global_ds(well))
+        except Exception:  # ruff: ignore[blind-except] - a well that cannot be fitted is a bad well
+            return True
+        params = getattr(getattr(res, "result", None), "params", None)
+        if params is None or "K" not in params:
+            return True
+        stderr = params["K"].stderr
+        return stderr is None or not np.isfinite(stderr) or float(stderr) > limit
 
     def _reset_data_and_results(self) -> None:
         """Discard derived data so the next access recomputes it."""
@@ -1195,9 +1236,47 @@ class Titration(TecanfilesGroup):
         ds = Dataset({label: da}, is_ph=self.is_ph)
         return self._apply_error_model(ds)
 
+    @property
+    def excluded_labels(self) -> dict[str, set[str]]:
+        """Labels dropped per well, keyed by well.
+
+        Returns
+        -------
+        dict[str, set[str]]
+            Well to the set of its excluded labels. Wells with every label
+            excluded are discarded outright instead of appearing here.
+        """
+        return self._excluded_labels
+
+    def exclude_label(self, key: str, label: str) -> None:
+        """Drop one label of one well from the global fit.
+
+        The 400 nm channel is dim by construction, so a well can fail a
+        background test on one label while the other is perfectly usable.
+        Discarding the well would throw away a good titration; dropping the
+        label keeps it, at the cost of a less certain K - which is why the
+        results table records how many labels each well was fitted on.
+
+        Parameters
+        ----------
+        key : str
+            Well identifier.
+        label : str
+            Label to drop for that well. Dropping every label discards the well.
+        """
+        self._excluded_labels.setdefault(key, set()).add(str(label))
+        if self._excluded_labels[key] >= {str(i) for i in self.data}:
+            self.scheme.discard = list({*self.scheme.discard, key})
+        self.clear_all_data_results()
+
     def create_global_ds(self, key: str) -> Dataset:
         """Create a global dataset for the given key."""
-        data_arrays_dict = {i: self._create_data_array(key, i) for i in self.data}
+        dropped = self._excluded_labels.get(key, set())
+        data_arrays_dict = {
+            i: self._create_data_array(key, i)
+            for i in self.data
+            if str(i) not in dropped
+        }
         ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
         return self._apply_error_model(ds)
 
@@ -1500,7 +1579,7 @@ class McmcSpec:
         ``None`` leaves the library to resolve it from the noise family, which
         couples the two; pass a bool to keep them independent. Only meaningful
         for ``model="multi"``, since a single-well fit has one well.
-    ye_mag_parameterization : Literal["centered", "hierarchical", "separable"]
+    ye_mag_parameterization : Literal["centered", "hierarchical", "separable", "separable_step"]
         How per-well ye_mags are structured: independent per label
         (``"centered"``), a shared well factor with per-label deviations
         (``"hierarchical"``), or a per-label level plus one shared well factor
@@ -1521,8 +1600,8 @@ class McmcSpec:
     structured_noise: bool = False
     noise_mode: Literal["centered", "fixed"] = "centered"
     per_well_ye_mags: bool | None = None
-    ye_mag_parameterization: Literal["centered", "hierarchical", "separable"] = (
-        "centered"
-    )
+    ye_mag_parameterization: Literal[
+        "centered", "hierarchical", "separable", "separable_step"
+    ] = "centered"
     robust: RobustConfig = field(default_factory=RobustConfig)
     ctr_free_k: bool = False

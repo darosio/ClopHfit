@@ -69,6 +69,13 @@ class _FlexChoice(click.Choice):
         return cast("str", super().convert(normalized, param, ctx))
 
 
+# Default for --bg-mth. Choosing a non-default method means wanting the
+# background subtracted, so it implies --bg: otherwise `--bg-mth fit` picks a
+# background that is then never used, and the only clue is the output folder
+# quietly losing its `_bg` suffix.
+_DEFAULT_BG_MTH = "mean"
+
+
 @click.group()
 @click.version_option(message="%(version)s")
 def clop() -> None:  # pragma: no cover
@@ -123,43 +130,6 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 
 
 ######################################
-# ppr.detect-bad-wells               #
-######################################
-@ppr.command("detect-bad-wells")
-@click.argument("data_dir", type=cPath(exists=True, file_okay=False))
-@click.option("--z-threshold", default=3.0, show_default=True, type=float, help="Z-score threshold for outlier detection on the max-vs-span trendline.")  # fmt: skip
-@click.option("--ctr-cols", default="1,12", show_default=True, type=str, help="Comma-separated 1-based column numbers for CTR wells (used for logging only).")  # fmt: skip
-def detect_bad_wells_cmd(
-    data_dir: str,
-    z_threshold: float,
-    ctr_cols: str,
-) -> None:
-    """Flag unreliable wells from raw .dat files in DATA_DIR.
-
-    Reads every `*.dat` file (one per well, columns: x, 1[, 2, ...]) and
-    reports wells with very low signal or flat curves across all labels.
-    No fitting is required.
-
-    Example::
-
-        ppr detect-bad-wells path/to/pH/dat_bg_adj_dil_nrm_1sd/
-    """
-    ctr_list = [int(c.strip()) for c in ctr_cols.split(",") if c.strip()]
-    flags = fitting.diagnostics.detect_bad_wells_from_dat(
-        data_dir,
-        z_threshold=z_threshold,
-        ctr_cols=ctr_list or None,
-    )
-    bad = flags[flags["flag_any"]]
-    if bad.empty:
-        click.echo("No problematic wells detected.")
-        return
-    flag_cols = [c for c in bad.columns if c.startswith("flag_") and c not in {"flag_any", "flag_count"}]  # fmt: skip
-    extra = ["is_ctr"] if "is_ctr" in bad.columns else []
-    click.echo(bad[["well", *extra, "flag_count", *flag_cols]].to_string(index=False))
-
-
-######################################
 # pr.tecan                           #
 ######################################
 @ppr.command()
@@ -168,7 +138,7 @@ def detect_bad_wells_cmd(
 @click.option("--cl", type=float, help="Cl stock concentration (mM) of added aliquots.")
 @click.option("--bg", is_flag=True, help="Subtract buffer signal (from scheme.txt).  Implied by --bg-adj.")  # fmt: skip
 @click.option("--bg-adj", is_flag=True, help="Heuristically adjust negative buffer values (implies --bg).")  # fmt: skip
-@click.option("--bg-mth", default="mean", show_default=True, type=click.Choice(["mean", "fit", "meansd"]), help="Buffer calculation method.")  # fmt: skip
+@click.option("--bg-mth", default=_DEFAULT_BG_MTH, show_default=True, type=click.Choice(["mean", "median", "fit", "meansd", "mediansd"]), help="Buffer calculation method.")  # fmt: skip
 @click.option("--nrm", is_flag=True, help="Normalize using label metadata.")
 @click.option("--raw-dir", type=cPath(exists=True, file_okay=False), help="Folder holding the Tecan .xls files, when they are not next to LIST_FILE.")  # fmt: skip
 @click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
@@ -261,7 +231,10 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     out_fp = Path(out) / "Cl" if cl else Path(out) / "pH"
     out_fp.mkdir(parents=True, exist_ok=True)
     # Derived flags: --bg-adj implies --bg; --add implies dilution correction
-    bg = bg or bg_adj
+    # Choosing how to compute the buffer means wanting it subtracted. Without
+    # this, `--bg-mth fit` silently selects a background that is then never
+    # used, and the only clue is the output folder losing its `_bg` suffix.
+    bg = bg or bg_adj or bg_mth != _DEFAULT_BG_MTH
     dil = add is not None
     # Options validation with clear error messages
     try:
