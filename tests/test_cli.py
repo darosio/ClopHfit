@@ -266,7 +266,7 @@ def test_prtecan_offers_odr_and_ye_mag_knobs(runner: CliRunner) -> None:
     out = runner.invoke(ppr, ["tecan", "--help"]).output
     assert "[lm|huber|irls|odr]" in out
     assert "--per-well-ye-mags" in out
-    assert "[centered|hierarchical|separable]" in out
+    assert "[centered|hierarchical|separable|separable_step]" in out
 
 
 def test_odr_reaches_the_global_fit(

@@ -2019,3 +2019,70 @@ def test_export_plate_fit_returns_none_without_wells(tmp_path: Path) -> None:
 
     tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
     assert export_plate_fit(tit, {}, tmp_path, "lm") is None  # type: ignore[arg-type]  # SimpleNamespace test double
+
+
+class TestBufferEstimators:
+    """Buffer location estimators: per-pH ``mean``/``median``, pooled ``*sd``.
+
+    ``meansd`` was intended to pool the buffer into a single value over every
+    replicate and every pH point, but only ever pooled the *error*, leaving the
+    value identical to ``mean``. Every config selecting it therefore ran the
+    same fit as ``mean`` under a different name.
+    """
+
+    @staticmethod
+    def _tit() -> Titration:
+        tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+        tit.buffer.wells = ["D01", "D12", "E01", "E12"]
+        return tit
+
+    def _bg(self, method: str) -> np.ndarray:
+        tit = self._tit()
+        tit.params.bg_mth = method
+        return np.asarray(tit.bg["1"], dtype=float)
+
+    def test_pooled_estimators_are_flat_across_ph(self) -> None:
+        """``meansd`` and ``mediansd`` collapse the buffer to one number."""
+        for method in ("meansd", "mediansd"):
+            bg = self._bg(method)
+            assert len(bg) > 1
+            assert np.allclose(bg, bg[0]), f"{method} should be constant across pH"
+
+    def test_per_ph_estimators_track_the_buffer_trend(self) -> None:
+        """``mean`` and ``median`` keep one value per pH point.
+
+        The buffer is not flat across a titration - on the real plates it rises
+        by several standard errors - so these must not be collapsed.
+        """
+        for method in ("mean", "median"):
+            bg = self._bg(method)
+            assert not np.allclose(bg, bg[0]), f"{method} should vary with pH"
+
+    def test_meansd_no_longer_duplicates_mean(self) -> None:
+        """The bug: these two were bit-identical, so the knob did nothing."""
+        assert not np.allclose(self._bg("mean"), self._bg("meansd"))
+
+    def test_pooled_values_pool_over_reps_and_ph(self) -> None:
+        """The pooled value is taken over every replicate at every pH point."""
+        tit = self._tit()
+        wells = tit.buffer.wells
+        # bg reads the normalised buffers whenever nrm is on, which is default.
+        obs = tit.buffer.dataframes_nrm["1"][wells].to_numpy(dtype=float)
+        assert self._bg("meansd")[0] == pytest.approx(np.nanmean(obs))
+        assert self._bg("mediansd")[0] == pytest.approx(np.nanmedian(obs))
+
+    def test_median_resists_one_bad_buffer_well(self) -> None:
+        """Why ``median`` earns its place: bad buffer wells are not hypothetical.
+
+        Detection is disabled in most of this project's configs, so an outlying
+        buffer well reaches the mean and shifts the background for every well on
+        the plate. The median barely moves.
+        """
+        tit = self._tit()
+        wells = tit.buffer.wells
+        obs = tit.buffer.dataframes["1"][wells].to_numpy(dtype=float)
+        spiked = obs.copy()
+        spiked[:, 0] *= 50.0
+        mean_shift = abs(np.nanmean(spiked, axis=1) - np.nanmean(obs, axis=1)).max()
+        med_shift = abs(np.nanmedian(spiked, axis=1) - np.nanmedian(obs, axis=1)).max()
+        assert med_shift < mean_shift / 10.0

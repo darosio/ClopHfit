@@ -87,6 +87,19 @@ _ZERO_HINT_WIDTH = 1.0
 # gain term entirely when no label resolved a positive gain, whereas alpha's
 # gate there keeps building a prior even when every hint is 0.
 _ZERO_HINT_ALPHA_SCALE = 0.1
+# Prior scale for the per-label pH axis on ye_mag (`separable_step`). Set from
+# the measured profile rather than taste: label 1's robust per-step SD spans
+# roughly 0.70-1.45 of its plate mean, a log range of ~0.73, so a log-scale SD
+# near 0.25 covers the observed structure while still letting a label with no
+# reproducible profile - label 2, cross-plate correlation +0.04 - shrink to
+# flat. Wide enough to express what is there, tight enough not to invent it.
+_YE_MAG_STEP_TAU_SIGMA = 0.5
+# Bounds on the data-derived version of the same scale. The floor keeps a label
+# whose prefit happens to look flat from having its pH axis pinned shut; the
+# ceiling stops one pathological well from opening it arbitrarily wide.
+_YE_MAG_STEP_TAU_MIN = 0.1
+_YE_MAG_STEP_TAU_MAX = 1.5
+_MIN_STEPS_FOR_TAU_HINT = 3
 
 
 def _build_floor_prior(name: str, mu: float, mode: NoiseParamMode) -> typing.Any:  # ruff: ignore[any-type]
@@ -884,7 +897,10 @@ def _build_multi_ye_mag_priors(  # ruff: ignore[too-many-arguments]
     prior: Literal["halfnormal", "lognormal"] = "lognormal",
     mu: float | Mapping[str, float] = 0.0,
     sigma: float | Mapping[str, float] = 1.5,
-    parameterization: Literal["centered", "hierarchical", "separable"] = "centered",
+    parameterization: Literal[
+        "centered", "hierarchical", "separable", "separable_step"
+    ] = "centered",
+    step_tau_sigma: Mapping[str, float] | None = None,
 ) -> dict[str, typing.Any]:
     """Build label-indexed ye_mag priors for multi-well models.
 
@@ -921,10 +937,18 @@ def _build_multi_ye_mag_priors(  # ruff: ignore[too-many-arguments]
             )
             for lbl in labels
         }
-    if parameterization == "hierarchical":
-        return _build_hierarchical_ye_mag_priors(labels, mu=mu, sigma=sigma)
-    if parameterization == "separable":
-        return _build_separable_ye_mag_priors(labels, mu=mu, sigma=sigma)
+    builders = {
+        "hierarchical": _build_hierarchical_ye_mag_priors,
+        "separable": _build_separable_ye_mag_priors,
+        "separable_step": _build_separable_step_ye_mag_priors,
+    }
+    if parameterization == "separable_step":
+        return _build_separable_step_ye_mag_priors(
+            labels, mu=mu, sigma=sigma, step_tau_sigma=step_tau_sigma
+        )
+    builder = builders.get(parameterization)
+    if builder is not None:
+        return builder(labels, mu=mu, sigma=sigma)
     return {
         lbl: pm.LogNormal(
             f"ye_mag_{lbl}",
@@ -985,6 +1009,129 @@ def _build_separable_ye_mag_priors(
         out[lbl] = pm.Deterministic(
             f"ye_mag_{lbl}", pm.math.exp(mu_lbl + log_well), dims="well"
         )
+    return out
+
+
+def step_tau_hint_from_residuals(
+    residuals: pd.DataFrame, labels: Sequence[str]
+) -> dict[str, float]:
+    """Estimate the ye_mag pH-axis prior scale from a fast first-round fit.
+
+    A fixed scale is a guess about how much the scatter varies along a titration,
+    and it was a poor one: set at 0.25 from a residual-SD profile, the posteriors
+    came back at 0.37-0.75, so the data had to fight the prior. The seeding
+    least-squares fits already contain the answer, so ask them.
+
+    Per label, take the robust SD of the prefit standardised residuals at each
+    step, normalise by its own mean, and return the SD in log space - directly
+    the scale of ``tau_step``. A flat profile gives a small number and the pH
+    axis stays shut; a varying one opens it as far as the data warrant.
+
+    Robust statistics throughout: a single wild well must not be able to
+    manufacture a pH axis for the whole plate.
+
+    Parameters
+    ----------
+    residuals : pd.DataFrame
+        Canonical residual table from the seeding fits, with ``label``,
+        ``step`` and ``std_res`` columns.
+    labels : Sequence[str]
+        Emission labels.
+
+    Returns
+    -------
+    dict[str, float]
+        Label -> prior scale, clipped to a sane range. Labels the table cannot
+        speak to fall back to :data:`_YE_MAG_STEP_TAU_SIGMA`.
+    """
+    out: dict[str, float] = {}
+    for lbl in labels:
+        out[lbl] = _YE_MAG_STEP_TAU_SIGMA
+        sub_df = residuals[residuals["label"].astype(str) == str(lbl)]
+        if sub_df.empty:
+            continue
+        prof = sub_df.groupby("step")["std_res"].apply(
+            lambda v: float(1.4826 * np.median(np.abs(v - np.median(v))))
+        )
+        prof = prof[np.isfinite(prof) & (prof > 0)]
+        if len(prof) < _MIN_STEPS_FOR_TAU_HINT:
+            continue
+        rel = np.asarray(prof, dtype=float) / float(np.mean(prof))
+        out[lbl] = float(
+            np.clip(np.std(np.log(rel)), _YE_MAG_STEP_TAU_MIN, _YE_MAG_STEP_TAU_MAX)
+        )
+    return out
+
+
+def _build_separable_step_ye_mag_priors(
+    labels: Sequence[str],
+    *,
+    mu: float | Mapping[str, float],
+    sigma: float | Mapping[str, float],
+    step_tau_sigma: Mapping[str, float] | None = None,
+) -> dict[str, typing.Any]:
+    """Separable ye_mag with a pH axis: label level x well factor x step factor.
+
+    ``log ye_mag_lbl[s, w] = mu_lbl + tau_well * z_well[w]
+    + tau_step_lbl * z_step_lbl[s]``.
+
+    One ye_mag per label assumes the scatter is constant along the titration,
+    and for label 1 it is not: the robust per-step SD varies about 2.6x within a
+    plate, and nine plates agree on *which* steps are noisy - profile
+    correlation +0.58, step 6 noisiest on every one. That is the acidic end,
+    where wells differ in how far their label-1 signal turns over, so the excess
+    scatter there is real. Label 2 shows a similar 2.4x spread with no
+    cross-plate agreement (+0.04), which is sampling noise in the SD estimate.
+
+    So the pH axis is per label and can switch itself off: ``tau_step_lbl``
+    shrinks to zero for a label with no reproducible profile, leaving a single
+    ye_mag, and grows for one that has. The data decides rather than the caller.
+
+    Unlike a mean-shift term, this reweights points instead of moving them, so
+    it cannot bias K the way a per-step gain does - though it still reaches K
+    through the weighting, so it is worth scoring against known pK.
+
+    ``ye_mag_{lbl}`` keeps its per-well dims so existing diagnostics still read
+    the level they expect; the pH factor is published as ``ye_mag_step_{lbl}``.
+
+    Parameters
+    ----------
+    labels : Sequence[str]
+        Emission labels.
+    mu : float | Mapping[str, float]
+        Log-scale prior location for each label's level.
+    sigma : float | Mapping[str, float]
+        Log-scale prior scale for each label's level.
+    step_tau_sigma : Mapping[str, float] | None
+        Per-label prior scale for the pH axis, normally estimated from the
+        seeding fits by :func:`step_tau_hint_from_residuals`. Falls back to
+        :data:`_YE_MAG_STEP_TAU_SIGMA` for any label not covered.
+
+    Returns
+    -------
+    dict[str, typing.Any]
+        Label -> ``ye_mag`` tensor with dims ``("step", "well")``, matching the
+        order the multi-well sigma is assembled in.
+    """
+    tau_well = pm.HalfNormal("ye_mag_tau_well", sigma=_shared_ye_mag_sigma(sigma))
+    z_well = pm.Normal("ye_mag_z_well", 0.0, 1.0, dims="well")
+    log_well = tau_well * z_well
+    out: dict[str, typing.Any] = {}
+    for lbl in labels:
+        mu_lbl = pm.Normal(
+            f"ye_mag_mu_{lbl}", _ye_mag_value(mu, lbl), _ye_mag_sigma(sigma, lbl)
+        )
+        tau_sigma = (
+            _YE_MAG_STEP_TAU_SIGMA
+            if step_tau_sigma is None
+            else float(step_tau_sigma.get(lbl, _YE_MAG_STEP_TAU_SIGMA))
+        )
+        tau_step = pm.HalfNormal(f"ye_mag_tau_step_{lbl}", sigma=tau_sigma)
+        z_step = pm.Normal(f"ye_mag_z_step_{lbl}", 0.0, 1.0, dims="step")
+        log_step = tau_step * z_step
+        pm.Deterministic(f"ye_mag_{lbl}", pm.math.exp(mu_lbl + log_well), dims="well")
+        pm.Deterministic(f"ye_mag_step_{lbl}", pm.math.exp(log_step), dims="step")
+        out[lbl] = pm.math.exp(mu_lbl + log_well[None, :] + log_step[:, None])
     return out
 
 
@@ -2839,7 +2986,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     sample_ppc: bool = False,
     per_well_ye_mags: bool | None = None,
     ye_mag_parameterization: Literal[
-        "centered", "hierarchical", "separable"
+        "centered", "hierarchical", "separable", "separable_step"
     ] = "centered",
     learn_hill: bool = False,
     hill_prior_sigma: float = 0.2,
@@ -2892,7 +3039,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     per_well_ye_mags : bool | None
         Learn per-well (not just per-label) ``ye_mag`` factors. ``None`` follows
         the noise config's ``learn_ye_mags`` when a structured model is supplied.
-    ye_mag_parameterization : Literal["centered", "hierarchical", "separable"]
+    ye_mag_parameterization : Literal["centered", "hierarchical", "separable", "separable_step"]
         Parameterization of the per-well ``ye_mag`` prior. ``"centered"`` (default)
         reproduces the historical independent-per-well construction;
         ``"hierarchical"`` partially pools the labels' per-well factors with a
@@ -2985,6 +3132,16 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
     labels = list(ds.keys())
+    # The seeding least-squares fits already say how much the scatter varies
+    # along the titration, so the pH-axis prior is read off them rather than
+    # guessed. Only needed for the parameterization that has a pH axis.
+    step_tau_hint: dict[str, float] | None = None
+    if ye_mag_parameterization == "separable_step":
+        frames = [r.residuals for r in fit_results.values() if r.result is not None]
+        if frames:
+            step_tau_hint = step_tau_hint_from_residuals(
+                pd.concat(frames, ignore_index=True), labels
+            )
     if well_noise_scale_sigma is not None:
         well_noise_sd_sigma = well_noise_scale_sigma
     # Resolving one knob from another couples two factors that callers expect to
@@ -3214,6 +3371,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                     mu=0.0,
                     sigma=1.5,
                     parameterization=ye_mag_parameterization,
+                    step_tau_sigma=step_tau_hint,
                 )
         else:
             noise_priors = {}
@@ -3225,6 +3383,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 mu=ye_mag_mu,
                 sigma=ye_mag_sigma,
                 parameterization=ye_mag_parameterization,
+                step_tau_sigma=step_tau_hint,
             )
         if well_noise_scale:
             label_scale_sigma = max(float(label_noise_scale_sigma), 1e-6)

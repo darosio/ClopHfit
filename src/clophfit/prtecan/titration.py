@@ -304,10 +304,16 @@ class Buffer:
         bg = {}
         bg_err = {}
         # Mapping methods to column names for clarity and reuse
+        # Location estimator per method. `mean`/`median` keep one value per pH
+        # point, which matters because the buffer is not flat across a titration
+        # - on the real plates it climbs by several standard errors. The `*sd`
+        # pair deliberately collapses that to a single pooled value.
         method_map = {
             "fit": ("fit", "fit_err"),
             "mean": ("mean", "sem"),
-            "meansd": ("mean", "sem"),
+            "median": ("median", "sem"),
+            "meansd": ("mean_all", "sem"),
+            "mediansd": ("median_all", "sem"),
         }
         if self.tit.params.bg_mth not in method_map:
             msg = f"Unknown bg_method: {self.tit.params.bg_mth}"
@@ -319,7 +325,7 @@ class Buffer:
                 bg_err[label] = np.array([])
                 continue
             bg[label] = bdf[value_col].to_numpy()
-            if self.tit.params.bg_mth == "meansd":
+            if self.tit.params.bg_mth in {"meansd", "mediansd"}:
                 bg_err[label] = np.repeat(
                     np.nanpercentile(bdf[error_col], 50), len(bdf[error_col])
                 )
@@ -384,6 +390,13 @@ class Buffer:
                 buf_df["fit_err"] = fit_error(self.tit.x, cov_matrix)
                 buf_df["fit_noise"] = sigma_res
                 buf_df["mean"] = mean
+                buf_df["median"] = np.nanmedian(y_obs, axis=1)
+                # Pooled over every replicate *and* every pH point, so these
+                # are one number broadcast across the titration. `meansd` was
+                # always meant to be this; it previously pooled only the error
+                # and so returned `mean` under another name.
+                buf_df["mean_all"] = float(np.nanmean(y_obs))
+                buf_df["median_all"] = float(np.nanmedian(y_obs))
                 buf_df["sem"] = sem
                 buf_df["mean_noise"] = pooled_std
         return fit_resultd

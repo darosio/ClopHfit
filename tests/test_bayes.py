@@ -1516,8 +1516,11 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
         mu: float | dict[str, float] = 0.0,
         sigma: float | dict[str, float] = 1.5,
         parameterization: str = "centered",
+        # Accept whatever else the real builder takes, so adding a keyword there
+        # does not fail this test for a reason unrelated to what it checks.
+        **_extra: object,
     ) -> dict[str, object]:
-        del _labels, shared_ye_mags, prior, mu, sigma, parameterization
+        del _labels, shared_ye_mags, prior, mu, sigma, parameterization, _extra
         captured["per_well"] = per_well
         raise _StopBayesBuildError
 
@@ -3015,7 +3018,9 @@ def test_per_well_ye_mags_warns_only_when_resolved_from_learn_ye_mags(
     assert bool(coupled) is (explicit is None)
 
 
-@pytest.mark.parametrize("param", ["centered", "hierarchical", "separable"])
+@pytest.mark.parametrize(
+    "param", ["centered", "hierarchical", "separable", "separable_step"]
+)
 def test_fit_binding_pymc_multi_accepts_parameterization(param: str) -> None:
     """Each ye_mag parameterization builds and prior-samples with pwym on."""
     rng = np.random.default_rng(0)
@@ -3133,3 +3138,113 @@ def test_multi_learns_a_hill_coefficient_when_asked(multi_dataset: Dataset) -> N
     assert "hill_n" in hill.trace.posterior
     # One shared coefficient for the plate, not one per well or per label.
     assert np.asarray(hill.trace.posterior["hill_n"]).squeeze().ndim <= 1
+
+
+def test_ye_mag_separable_step_adds_a_ph_axis_per_label() -> None:
+    """``separable_step`` gives ye_mag a pH axis, pooled per label.
+
+    One ye_mag per label assumes the scatter is constant along the titration.
+    On the real plates it is not, for label 1: the robust per-step SD varies
+    2.6x within a plate and the nine plates agree on *which* steps are noisy
+    (profile correlation +0.58, step 6 noisiest on every plate). Label 2 shows
+    the same 2.4x spread with no cross-plate agreement (+0.04), i.e. sampling
+    noise rather than structure.
+
+    So the pH axis has to be per label and it has to be able to switch itself
+    off. ``tau_step_lbl`` is that switch: shrink to zero and the label keeps a
+    single ye_mag, grow and it expresses a profile. The data decides, rather
+    than us hard-coding which label gets one.
+    """
+    n_step, n_well = 7, 30
+    coords = {"well": [f"w{i}" for i in range(n_well)], "step": list(range(n_step))}
+    with pm.Model(coords=coords) as model:
+        out = bayes._build_multi_ye_mag_priors(  # ruff: ignore[private-member-access]
+            ["1", "2"], per_well=True, parameterization="separable_step"
+        )
+        pr = pm.sample_prior_predictive(
+            300, var_names=["ye_mag_1", "ye_mag_step_1", "ye_mag_step_2"]
+        ).prior
+
+    assert {rv.name for rv in model.free_RVs} == {
+        "ye_mag_tau_well",
+        "ye_mag_z_well",
+        "ye_mag_mu_1",
+        "ye_mag_mu_2",
+        "ye_mag_tau_step_1",
+        "ye_mag_tau_step_2",
+        "ye_mag_z_step_1",
+        "ye_mag_z_step_2",
+    }
+    # The applied multiplier carries both axes, in the (step, well) order the
+    # multi-well sigma is built in.
+    assert out["1"].eval().shape == (n_step, n_well)
+    # The step factor genuinely varies along the titration.
+    assert np.asarray(pr["ye_mag_step_1"]).reshape(-1, n_step).std(axis=1).mean() > 0
+    # Each label owns its pH axis, so one can be flat while the other is not.
+    assert "ye_mag_step_1" in {v.name for v in model.deterministics}
+    assert "ye_mag_step_2" in {v.name for v in model.deterministics}
+
+
+def test_ye_mag_separable_step_keeps_the_historical_per_well_variable() -> None:
+    """``ye_mag_{lbl}`` stays per-well so existing diagnostics keep working.
+
+    ``model_validation`` and ``plotting`` both read ``ye_mag_{lbl}`` expecting
+    the per-well level. Widening it to (step, well) would silently change what
+    those report, so the level keeps the name and dims and the new pH factor is
+    published separately as ``ye_mag_step_{lbl}``.
+    """
+    coords = {"well": [f"w{i}" for i in range(8)], "step": list(range(7))}
+    with pm.Model(coords=coords) as model:
+        bayes._build_multi_ye_mag_priors(  # ruff: ignore[private-member-access]
+            ["1"], per_well=True, parameterization="separable_step"
+        )
+    named = {v.name: v for v in model.deterministics}
+    assert model.named_vars_to_dims["ye_mag_1"] == ("well",)
+    assert model.named_vars_to_dims["ye_mag_step_1"] == ("step",)
+    assert "ye_mag_1" in named
+
+
+def test_step_tau_hint_reads_the_profile_off_the_prefit() -> None:
+    """The pH-axis prior scale is estimated, not guessed.
+
+    A fixed 0.25 was set from a residual-SD profile and the posteriors came back
+    at 0.37-0.75, so the data spent itself fighting the prior. The seeding
+    least-squares fits already carry the answer, so the scale is read off them:
+    flat prefit residuals leave the axis shut, a varying profile opens it.
+    """
+    rng = np.random.default_rng(0)
+    n_well, n_step = 40, 7
+    flat = pd.DataFrame({
+        "label": "2",
+        "step": np.tile(np.arange(n_step), n_well),
+        "std_res": rng.normal(0.0, 1.0, n_well * n_step),
+    })
+    # Label 1 as the real plates look: quiet mid-titration, noisy at both ends.
+    profile = np.array([4.0, 1.5, 0.5, 0.5, 0.5, 1.5, 4.0])
+    structured = pd.DataFrame({
+        "label": "1",
+        "step": np.tile(np.arange(n_step), n_well),
+        "std_res": rng.normal(0.0, 1.0, n_well * n_step) * np.tile(profile, n_well),
+    })
+    hint = bayes.step_tau_hint_from_residuals(
+        pd.concat([flat, structured], ignore_index=True), ["1", "2"]
+    )
+    assert hint["1"] > hint["2"] * 2.0
+    assert bayes._YE_MAG_STEP_TAU_MIN <= hint["2"] < 0.3  # ruff: ignore[private-member-access]
+    assert 0.5 < hint["1"] <= bayes._YE_MAG_STEP_TAU_MAX  # ruff: ignore[private-member-access]
+
+
+def test_step_tau_hint_falls_back_when_it_cannot_tell() -> None:
+    """A label the prefit cannot speak to keeps the fixed default, not zero.
+
+    Pinning the axis shut on missing evidence would be worse than the guess it
+    replaces, so absent or too-short profiles fall back rather than shrink.
+    """
+    empty = pd.DataFrame({"label": [], "step": [], "std_res": []})
+    assert bayes.step_tau_hint_from_residuals(empty, ["1"])["1"] == pytest.approx(
+        bayes._YE_MAG_STEP_TAU_SIGMA  # ruff: ignore[private-member-access]
+    )
+    two_steps = pd.DataFrame({"label": "1", "step": [0, 1], "std_res": [1.0, 2.0]})
+    assert bayes.step_tau_hint_from_residuals(two_steps, ["1"])["1"] == pytest.approx(
+        bayes._YE_MAG_STEP_TAU_SIGMA  # ruff: ignore[private-member-access]
+    )
