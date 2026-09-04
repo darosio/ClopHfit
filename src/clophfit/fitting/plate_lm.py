@@ -64,6 +64,11 @@ class PlateLMResult:
         optimistic.
     ye_mag : dict[str, float]
         Profiled noise multiplier per label, relative to the supplied ``y_err``.
+    params : dict[str, dict[str, float]]
+        Per well, the whole fitted curve - ``K``, ``sK`` and the ``S0_``/``S1_``
+        plateaus per label - not only K. Exporting K alone made the plate fit a
+        second-class output: it could be tabulated but not plotted, while every
+        other fitter in the same run produced a K plot and per-well figures.
     n_points : int
         Unmasked observations entering the fit.
     n_params : int
@@ -82,6 +87,7 @@ class PlateLMResult:
     k: dict[str, float] = field(default_factory=dict)
     k_stderr: dict[str, float] = field(default_factory=dict)
     ye_mag: dict[str, float] = field(default_factory=dict)
+    params: dict[str, dict[str, float]] = field(default_factory=dict)
     n_points: int = 0
     n_params: int = 0
     success: bool = False
@@ -389,6 +395,17 @@ def fit_plate_lm(
     for well in datasets:
         result.k[well] = float(p[prob.kidx[well]])
         result.k_stderr[well] = float(err[prob.kidx[well]])
+        row = {
+            "K": float(p[prob.kidx[well]]),
+            "sK": float(err[prob.kidx[well]]),
+        }
+        for (w, lbl), i in prob.sidx.items():
+            if w == well:
+                row[f"S0_{lbl}"] = float(p[i])
+                row[f"S1_{lbl}"] = float(p[i + 1])
+                row[f"sS0_{lbl}"] = float(err[i])
+                row[f"sS1_{lbl}"] = float(err[i + 1])
+        result.params[well] = row
     return result
 
 

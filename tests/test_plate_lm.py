@@ -73,3 +73,24 @@ def test_k_stays_inside_the_ph_range() -> None:
     result = fit_plate_lm(make_plate(ks, {"1": 5.0}), groups={})
     for well in ks:
         assert 3.0 <= result.k[well] <= 11.0
+
+
+def test_result_carries_the_plateaus_not_only_k() -> None:
+    """K alone cannot be plotted or inspected; the curve needs its plateaus.
+
+    ``--plate-fit`` wrote a CSV of K and its error and nothing else: no K plot
+    and no per-well fit figures, while every other fitter in the same run
+    produced both. The plateaus are computed by the fit anyway, so exporting
+    them lets the plate fit reuse the plotting path instead of being a
+    second-class output.
+    """
+    ks = {"A01": 6.5, "A02": 7.0, "A03": 7.5}
+    result = fit_plate_lm(make_plate(ks, {"1": 5.0, "2": 3.0}), groups={})
+    for well in ks:
+        p = result.params[well]
+        assert p["K"] == pytest.approx(result.k[well])
+        for lbl in ("1", "2"):
+            # Plateaus bracket the data the fit saw.
+            assert np.isfinite(p[f"S0_{lbl}"])
+            assert np.isfinite(p[f"S1_{lbl}"])
+        assert np.isfinite(p["sK"])

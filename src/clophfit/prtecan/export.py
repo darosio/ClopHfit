@@ -6,11 +6,15 @@ import logging
 import typing
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 import arviz as az  # type: ignore[import-untyped]
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from lmfit import Parameters  # type: ignore[import-untyped]
+from scipy import stats as sp_stats
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.bayes import (
@@ -35,6 +39,7 @@ from clophfit.fitting.plate_odr import (
     ctr_holdout_odr,
     fit_plate_odr,
 )
+from clophfit.fitting.plotting import PlotParameters, plot_fit
 from clophfit.fitting.residuals import (
     plot_residual_distribution,
     plot_residual_vs_predicted,
@@ -513,19 +518,238 @@ def _export_ctr_holdout(
     pd.DataFrame([row]).to_csv(outfit / f"ctr_loo_{method}_summary.csv", index=False)
 
 
+# Shapiro-Wilk says nothing useful below a handful of points; printing it there
+# would invite over-reading a number that is mostly noise.
+_MIN_N_FOR_SHAPIRO = 5
+
+
+def _plate_fit_caption(well: str, pars: Parameters, ds: Dataset) -> str:
+    """Title carrying the fitted midpoint, its error, and whether it is inside.
+
+    A midpoint fitted outside the range actually titrated is an extrapolation,
+    and the figure should say so where it cannot be missed - it is the single
+    most useful warning about a well.
+
+    Parameters
+    ----------
+    well : str
+        Well identifier.
+    pars : Parameters
+        Fitted parameters, carrying ``K`` and its standard error.
+    ds : Dataset
+        The fitted dataset, whose x span defines "inside".
+
+    Returns
+    -------
+    str
+        One-line title.
+    """
+    k = pars["K"]
+    err = f" ± {k.stderr:.3f}" if k.stderr and np.isfinite(k.stderr) else ""
+    xs = np.concatenate([np.asarray(da.xc, dtype=float) for da in ds.values()])
+    outside = (
+        " — outside titrated range" if not (xs.min() <= k.value <= xs.max()) else ""
+    )
+    return f"{well}   pK = {k.value:.3f}{err}{outside}"
+
+
+def _plate_fit_stats(rows: list[dict[str, typing.Any]]) -> str:
+    """Per-label residual summary: its scale, and how far from normal.
+
+    ``RMS z`` sits near 1 when the error model is right. A Shapiro p far below
+    0.05 says the residuals are not plausibly normal, which on seven points
+    usually means one bad point rather than a wrong curve.
+
+    Parameters
+    ----------
+    rows : list[dict[str, typing.Any]]
+        One well's canonical residual records.
+
+    Returns
+    -------
+    str
+        A short monospace block, or "" when there is nothing to report.
+    """
+    if not rows:
+        return ""
+    df = pd.DataFrame(rows)
+    if "std_res" not in df or "label" not in df:
+        return ""
+    lines = []
+    for lbl, g in df.groupby("label"):
+        z = np.asarray(g["std_res"], dtype=float)
+        z = z[np.isfinite(z)]
+        if z.size == 0:
+            continue
+        piece = f"lbl{lbl}: n={z.size}  RMS z={float(np.sqrt(np.mean(z**2))):.2f}"
+        if z.size >= _MIN_N_FOR_SHAPIRO:
+            piece += f"  shapiro p={float(sp_stats.shapiro(z).pvalue):.2f}"
+        lines.append(piece)
+    return "\n".join(lines)
+
+
+def _plate_fit_results(
+    datasets: Mapping[str, typing.Any],
+    result: PlateLMResult | PlateODRResult,
+    titration: Titration,
+    *,
+    with_figures: bool = False,
+) -> TitrationResults:
+    """Wrap a plate-wide fit as per-well results, so it can be plotted.
+
+    The plate fitters solve one least-squares problem over every well and return
+    parameter vectors, not the per-well objects the export path draws from.
+    Rebuilding those objects here is what lets a plate fit produce the same K
+    plot and per-well figures as the fits beside it.
+
+    Parameters
+    ----------
+    datasets : Mapping[str, typing.Any]
+        Well to the `Dataset` that was fitted.
+    result : PlateLMResult | PlateODRResult
+        The plate-wide fit.
+    titration : Titration
+        Supplies the scheme and fit keys carried on the results.
+
+    with_figures : bool
+        Also draw each well's fitted curve. The plate solver never plots - it
+        returns parameter vectors - so the figures are rendered here from those
+        parameters, which is what gives ``--plate-fit`` the same per-well images
+        as the fitters beside it.
+
+    Returns
+    -------
+    TitrationResults
+        Per-well results carrying K, its error, the plateaus, and a figure when
+        one was asked for.
+    """
+    resid_by_well: dict[str, list[dict[str, typing.Any]]] = {}
+    for r in getattr(result, "residuals", []) or []:
+        resid_by_well.setdefault(str(r.get("well")), []).append(r)
+    out: dict[str, FitResult] = {}
+    for well, ds in datasets.items():
+        row = result.params.get(well)
+        if not row:
+            continue
+        pars = Parameters()
+        for name, value in row.items():
+            if name.startswith("s"):
+                continue
+            pars.add(name, value=value)
+            stderr = row.get(f"s{name}")
+            if stderr is not None and np.isfinite(stderr):
+                pars[name].stderr = float(stderr)
+        fig = None
+        if with_figures:
+            fig, ax = plt.subplots()
+            # nboot=0: the bootstrap band resamples each parameter from its own
+            # standard error independently, which for a plate fit would ignore
+            # the covariance the joint solve produced and overstate the spread.
+            plot_fit(ax, ds, pars, nboot=0, pp=PlotParameters(ds.is_ph))
+            ax.set_title(_plate_fit_caption(well, pars, ds), fontsize=10)
+            note = _plate_fit_stats(resid_by_well.get(well, []))
+            if note:
+                ax.text(
+                    0.02,
+                    0.02,
+                    note,
+                    transform=ax.transAxes,
+                    fontsize=7.5,
+                    va="bottom",
+                    ha="left",
+                    family="monospace",
+                    bbox={"facecolor": "white", "alpha": 0.75, "lw": 0},
+                )
+        out[well] = FitResult(
+            figure=fig, result=SimpleNamespace(params=pars), dataset=ds
+        )
+    return TitrationResults(scheme=titration.scheme, fit_keys=set(out), results=out)
+
+
+def _write_plate_fit_figures(
+    results: TitrationResults, outfit: Path, method: str, *, png: bool
+) -> None:
+    """Save the K plot and, when asked, one figure per well.
+
+    Parameters
+    ----------
+    results : TitrationResults
+        Per-well results wrapped from the plate fit.
+    outfit : Path
+        Fit output directory.
+    method : str
+        ``"lm"`` or ``"odr"``, naming the outputs.
+    png : bool
+        Write per-well figures as well as the K plot.
+    """
+    fig = results.plot_k(title=f"plate {method}")
+    fig.savefig(outfit / f"K_plate_{method}.png")
+    plt.close(fig)
+    if not png:
+        return
+    png_dir = outfit / f"plate_{method}"
+    png_dir.mkdir(parents=True, exist_ok=True)
+    for well in results.fit_keys:
+        well_fig = results[well].figure
+        if well_fig is not None:
+            well_fig.savefig(png_dir / f"{well}.png")
+            plt.close(well_fig)
+
+
+def _export_plate_fit_plots(  # ruff: ignore[too-many-arguments]
+    titration: Titration,
+    datasets: Mapping[str, typing.Any],
+    result: PlateLMResult | PlateODRResult,
+    outfit: Path,
+    method: str,
+    *,
+    png: bool = True,
+) -> None:
+    """Write the K plot, and per-well figures, for a plate-wide fit.
+
+    Failures are logged rather than raised: the fit and its CSV have already
+    succeeded, and a plot must not be able to fail the run that produced it.
+
+    Parameters
+    ----------
+    titration : Titration
+        Supplies the plate scheme.
+    datasets : Mapping[str, typing.Any]
+        Well to the `Dataset` that was fitted.
+    result : PlateLMResult | PlateODRResult
+        The plate-wide fit.
+    outfit : Path
+        Fit output directory.
+    method : str
+        ``"lm"`` or ``"odr"``, naming the output.
+    png : bool
+        Also write one figure per well, under ``plate_<method>/``. Off when the
+        run asked for no images, since rendering a curve per well is the
+        expensive part.
+    """
+    try:
+        results = _plate_fit_results(datasets, result, titration, with_figures=png)
+        _write_plate_fit_figures(results, outfit, method, png=png)
+    except Exception:
+        logger.warning("Could not plot the plate %s fit", method, exc_info=True)
+
+
 def export_plate_fit(
     titration: Titration,
     datasets: dict[str, typing.Any],
     outfit: Path,
     method: str,
+    *,
+    png: bool = True,
 ) -> Path | None:
     """Fit the whole plate at once, classically, and write K per well.
 
     The per-well fits above give each well its own noise scale; this fits every
     well in one least-squares problem with the observation-noise scale profiled
     per label across the plate, and each control group pooled onto one K. It is
-    a separate output rather than a replacement: it produces a K and a standard
-    error per well, not the fit objects the plot and dataset exports consume.
+    Its results are wrapped as ordinary per-well fit results, so it produces the
+    same K plot and per-well figures as every other fitter in the run rather
+    than a bare CSV.
 
     Parameters
     ----------
@@ -538,6 +762,8 @@ def export_plate_fit(
     method : str
         ``"lm"`` for the plate-wide least squares, ``"odr"`` to also let each
         titration step's x move within its recorded uncertainty.
+    png : bool
+        Write per-well figures as well as the K plot.
 
     Returns
     -------
@@ -574,6 +800,7 @@ def export_plate_fit(
     ]
     out = outfit / f"plate_{method}_K.csv"
     pd.DataFrame(rows).to_csv(out, index=False)
+    _export_plate_fit_plots(titration, datasets, result, outfit, method, png=png)
     pd.DataFrame([
         {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())
     ]).to_csv(outfit / f"plate_{method}_ye_mag.csv", index=False)
@@ -635,7 +862,7 @@ def export_fit(
     export_list.append(odr_res)
 
     if plate_fit is not None:
-        export_plate_fit(titration, datasets, outfit, plate_fit)
+        export_plate_fit(titration, datasets, outfit, plate_fit, png=config.png)
 
     mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)
     if mcmc_res is not None:

@@ -16,6 +16,7 @@ import pandas as pd
 import pymc as pm
 import pytest
 import seaborn as sns  # type: ignore[import-untyped]
+from lmfit import Parameters
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -29,6 +30,8 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
 )
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS, RobustZMad
+from clophfit.fitting.models import binding_1site
+from clophfit.fitting.plate_lm import fit_plate_lm
 from clophfit.prtecan import (
     Buffer,
     BufferFit,
@@ -2330,3 +2333,89 @@ def test_ctr_loo_summary_uses_the_column_the_holdout_actually_writes(
     col = df["delta_k_mean"].astype(float)
     assert float(np.nanmedian(np.abs(col))) == pytest.approx(0.20)
     assert float(np.sqrt(np.nanmean(col**2))) == pytest.approx(0.2236, abs=1e-3)
+
+
+def test_hdi_columns_are_empty_when_the_fit_has_no_credible_interval() -> None:
+    """A least-squares bound must not be exported under an HDI column name.
+
+    ``ffit2.csv`` carried ``Khdi03=3, Khdi97=11`` - the pH box the solver was
+    bounded to, in columns a reader takes for a 94% interval. A bound is not an
+    interval, and one dressed as the other is worse than an absent value, so
+    these are written only when the fit actually produced them.
+    """
+    pars = Parameters()
+    pars.add("K", value=7.0, min=3.0, max=11.0)  # a bounded least-squares fit
+    pars["K"].stderr = 0.05
+    res = TitrationResults(
+        scheme=PlateScheme(),
+        fit_keys={"A01"},
+        results={"A01": FitResult(result=SimpleNamespace(params=pars), dataset=None)},
+    )
+    row = res.dataframe.loc["A01"]
+    assert row["K"] == pytest.approx(7.0)
+    assert row["sK"] == pytest.approx(0.05)
+    assert pd.isna(row["Khdi03"])
+    assert pd.isna(row["Khdi97"])
+
+
+def test_plate_fit_results_carry_a_figure_per_well() -> None:
+    """The winning fitter must produce the same per-well figures as the others.
+
+    A plate-wide solve returns parameter vectors, not the plotted fit objects
+    the export path draws from, so ``--plate-fit`` produced a CSV and nothing to
+    look at. Since this is the method the comparison selected, parity matters:
+    a well whose K looks wrong has to be inspectable.
+    """
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    datasets = {}
+    for i, well in enumerate(("A01", "A02", "A03")):
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            y = binding_1site(x, 6.8 + 0.1 * i, s0, s1, is_ph=True) + rng.normal(
+                0.0, 5.0, len(x)
+            )
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        datasets[well] = Dataset(arrays, is_ph=True)
+    result = fit_plate_lm(datasets, groups={})
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    res = export._plate_fit_results(  # ruff: ignore[private-member-access]
+        datasets, result, tit, with_figures=True
+    )
+    assert set(res.fit_keys) == set(datasets)
+    for well in datasets:
+        fr = res[well]
+        assert fr.figure is not None, f"{well} has no figure to inspect"
+        assert fr.result.params["K"].value == pytest.approx(result.k[well], abs=1e-9)
+
+
+def test_plate_fit_figures_report_k_and_residual_stats() -> None:
+    """A fit figure with no numbers on it cannot be judged, only admired.
+
+    The per-well plate-fit images carried the curve and nothing else: no pKa,
+    no interval, no indication of whether the residuals were plausibly normal.
+    Those are what tell a reader whether to believe the curve, and for an
+    edge-of-range well - where the midpoint sits outside the titrated span -
+    they are the only warning.
+    """
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    datasets = {}
+    for well in ("A01", "A02"):
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            y = binding_1site(x, 6.9, s0, s1, is_ph=True) + rng.normal(0.0, 5.0, len(x))
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        datasets[well] = Dataset(arrays, is_ph=True)
+    result = fit_plate_lm(datasets, groups={})
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    res = export._plate_fit_results(  # ruff: ignore[private-member-access]
+        datasets, result, tit, with_figures=True
+    )
+    text = (
+        " ".join(t.get_text() for t in res["A01"].figure.axes[0].texts)
+        + res["A01"].figure.axes[0].get_title()
+    )
+    assert "pK" in text, "the fitted pKa is not on the figure"
+    assert "±" in text or "+/-" in text, "no interval shown"
+    assert "RMS" in text or "z" in text, "no residual statistic shown"

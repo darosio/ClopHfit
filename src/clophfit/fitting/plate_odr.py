@@ -55,6 +55,10 @@ class PlateODRResult:
         Standard error per well from the Jacobian at the solution.
     ye_mag : dict[str, float]
         Profiled noise multiplier per label.
+    params : dict[str, dict[str, float]]
+        Per well, the whole fitted curve - ``K``, ``sK`` and the plateaus per
+        label - so the plate fit can be plotted like any other, not only
+        tabulated.
     dx : np.ndarray
         Fitted shift of each titration step, in pH, shared across wells.
     n_points : int
@@ -73,6 +77,7 @@ class PlateODRResult:
     k: dict[str, float] = field(default_factory=dict)
     k_stderr: dict[str, float] = field(default_factory=dict)
     ye_mag: dict[str, float] = field(default_factory=dict)
+    params: dict[str, dict[str, float]] = field(default_factory=dict)
     dx: np.ndarray = field(default_factory=lambda: np.zeros(0))
     n_points: int = 0
     n_params: int = 0
@@ -170,6 +175,14 @@ def fit_plate_odr(
     for well in datasets:
         result.k[well] = float(p[prob.kidx[well]])
         result.k_stderr[well] = float(err[prob.kidx[well]])
+        row = {"K": float(p[prob.kidx[well]]), "sK": float(err[prob.kidx[well]])}
+        for (w, lbl), i in prob.sidx.items():
+            if w == well:
+                row[f"S0_{lbl}"] = float(p[i])
+                row[f"S1_{lbl}"] = float(p[i + 1])
+                row[f"sS0_{lbl}"] = float(err[i])
+                row[f"sS1_{lbl}"] = float(err[i + 1])
+        result.params[well] = row
     return result
 
 
