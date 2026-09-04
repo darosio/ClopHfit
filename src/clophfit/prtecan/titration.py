@@ -1173,8 +1173,17 @@ class Titration(TecanfilesGroup):
         def _adjust_subtracted_data(
             key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 10
         ) -> ArrayF:
-            """Adjust negative values (alpha = F_bound/F_unbound)."""
-            if y.min() < alpha * 0 * y.max():
+            """Lift a trace that dips below zero (alpha = F_bound/F_unbound).
+
+            The test is simply whether the trace goes negative. It was written
+            ``y.min() < alpha * 0 * y.max()``, which is the same thing with a
+            multiplication by zero in the middle, so ``alpha`` looked like it
+            set the threshold while only ever sizing the shift. Written plainly
+            here; the behaviour is unchanged, and changing it to the
+            ``alpha * y.max()`` the old expression resembles would adjust far
+            more wells and move every existing ``--bg-adj`` result.
+            """
+            if y.min() < 0:
                 delta = alpha * (y.max() - y.min()) - y.min()
                 logger.warning(
                     "Buffer for '%s:%s' was adjusted by %.2f SD.",

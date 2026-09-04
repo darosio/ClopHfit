@@ -2419,3 +2419,36 @@ def test_plate_fit_figures_report_k_and_residual_stats() -> None:
     assert "pK" in text, "the fitted pKa is not on the figure"
     assert "±" in text or "+/-" in text, "no interval shown"
     assert "RMS" in text or "z" in text, "no residual statistic shown"
+
+
+def test_bg_adj_lifts_only_traces_that_go_negative() -> None:
+    """The adjustment triggers on a negative minimum, and nothing else.
+
+    The condition read ``y.min() < alpha * 0 * y.max()``, which is ``y.min() <
+    0`` with a multiplication by zero sitting in the middle of it - so ``alpha``
+    appeared to set the threshold while having no effect on it, and only sized
+    the shift. Pin the behaviour so the simplification cannot drift into the
+    ``alpha * y.max()`` the expression looks like it wanted.
+    """
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    tit.params.bg = True
+    tit.params.nrm = True
+    tit.params.bg_adj = True
+    label = next(iter(tit.labelblocksgroups))
+    adjust = tit._adjust_negative_values  # ruff: ignore[private-member-access]
+
+    def one(trace: list[float]) -> np.ndarray:
+        """Run the adjustment over every fit key, and read back the first."""
+        keys = sorted(tit.fit_keys)
+        data = {label: dict.fromkeys(keys, np.array(trace))}
+        data[label] = {k: np.array(trace) for k in keys}
+        return np.asarray(adjust(data)[label][keys[0]], dtype=float)
+
+    # Wholly positive, however close to zero relative to its range: untouched.
+    assert np.allclose(one([1.0, 20.0, 100.0]), [1.0, 20.0, 100.0])
+
+    # Dipping below zero: lifted so the minimum sits a tenth of the range up.
+    out = one([-10.0, 40.0, 90.0])
+    assert out.min() == pytest.approx(0.1 * 100.0)
+    assert np.allclose(np.diff(out), np.diff([-10.0, 40.0, 90.0]))
