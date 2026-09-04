@@ -805,6 +805,8 @@ def plot_fit(
         for lbl, x in xspan.items()
     }
     # Compute y-fit using the model directly to avoid circular imports
+    # A well may be fitted on a subset of the plate's labels, so only draw the
+    # curves the fit actually produced parameters for.
     yfit = {
         lbl: binding_1site(
             xfit[lbl],
@@ -814,6 +816,7 @@ def plot_fit(
             is_ph=ds.is_ph,
         )
         for lbl in ds
+        if f"S0_{lbl}" in params and f"S1_{lbl}" in params
     }
     # Create a color cycle
     colors = [COLOR_MAP(i) for i in range(len(ds))]
@@ -866,8 +869,9 @@ def plot_fit(
                 label=excluded_label,
                 zorder=6,
             )
-        # Plot fitting.
-        ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
+        # Plot fitting, where this label was fitted for this well.
+        if lbl in yfit:
+            ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         # Display label in error bar plot.
         if da.y_err.size > 0:
             xe = da.x_err if da.x_err.size > 0 else None
@@ -882,7 +886,7 @@ def plot_fit(
                 alpha=0.4,
                 capsize=3,
             )
-        if nboot:
+        if nboot and lbl in yfit:
             # Calculate uncertainty using Monte Carlo method.
             y_samples = np.empty((nboot, len(xfit[lbl])))
             rng = np.random.default_rng()

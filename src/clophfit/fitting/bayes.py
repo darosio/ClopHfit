@@ -1335,6 +1335,21 @@ def _masked_obs_err_matrices(
     return mask, y_obs, y_err
 
 
+def _az_summary(trace: typing.Any) -> typing.Any:  # ruff: ignore[any-type]
+    """Summarise a trace with a 94% HDI, across ArviZ versions.
+
+    ArviZ 1.x defaults to an 89% ETI and needs ``ci_kind``/``ci_prob`` to give
+    an HDI at all; 0.x took ``hdi_prob``. Ask for the interval this project
+    reports rather than accepting whichever default is installed.
+    """
+    for kwargs in ({"ci_kind": "hdi", "ci_prob": 0.94}, {"hdi_prob": 0.94}, {}):
+        try:
+            return az.summary(trace, **kwargs)
+        except TypeError:
+            continue
+    return az.summary(trace)
+
+
 def _trace_summary_df(
     trace_or_df: xr.DataTree | MultiFitResult | pd.DataFrame,
 ) -> pd.DataFrame:
@@ -1342,7 +1357,9 @@ def _trace_summary_df(
     if isinstance(trace_or_df, MultiFitResult):
         trace_or_df = trace_or_df.trace
     rdf = (
-        az.summary(trace_or_df) if isinstance(trace_or_df, xr.DataTree) else trace_or_df
+        _az_summary(trace_or_df)
+        if isinstance(trace_or_df, xr.DataTree)
+        else trace_or_df
     )
     if not isinstance(rdf, pd.DataFrame):
         msg = "az.summary did not return a DataFrame"
@@ -1744,10 +1761,38 @@ def create_data_parameter_priors(
 
 
 def _hdi_bounds_or_none(row: pd.Series) -> tuple[float | None, float | None]:
-    """Extract HDI bounds from summary row, returning None if invalid."""
+    """Extract HDI bounds from a summary row, returning None if absent.
+
+    ArviZ 1.x renamed these columns from ``hdi_3%``/``hdi_97%`` to
+    ``hdi<prob>_lb``/``hdi<prob>_ub`` and made an ETI the default interval.
+    Looking only for the old names found neither, so every PyMC fit exported
+    its credible interval as -inf/+inf - a bound where an interval was meant,
+    with nothing raised. Both spellings are accepted; an ETI is deliberately
+    not, since it is a different interval and should not be relabelled as one.
+    """
+    lo_key = next(
+        (
+            k
+            for k in row.index
+            if str(k) == "hdi_3%"
+            or (str(k).startswith("hdi") and str(k).endswith("_lb"))
+        ),
+        None,
+    )
+    hi_key = next(
+        (
+            k
+            for k in row.index
+            if str(k) == "hdi_97%"
+            or (str(k).startswith("hdi") and str(k).endswith("_ub"))
+        ),
+        None,
+    )
+    if lo_key is None or hi_key is None:
+        return None, None
     try:
-        lo = float(row["hdi_3%"])
-        hi = float(row["hdi_97%"])
+        lo = float(row[lo_key])
+        hi = float(row[hi_key])
     except Exception:  # ruff: ignore[blind-except]
         return None, None
 
@@ -3136,7 +3181,17 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     )
     xc = next(iter(ds.values())).xc
     x_errc = next(iter(ds.values())).x_errc
-    labels = list(ds.keys())
+    # Union over wells, not this one well's labels: per-label detection can
+    # leave the first well single-label, and taking the list from it would
+    # silently drop every observation of the other label on the plate.
+    labels = list(
+        dict.fromkeys(
+            lbl
+            for r in fit_results.values()
+            if r.dataset is not None
+            for lbl in r.dataset
+        )
+    ) or list(ds.keys())
     # The seeding least-squares fits already say how much the scatter varies
     # along the titration, so the pH-axis prior is read off them rather than
     # guessed. Only needed for the parameterization that has a pH axis.

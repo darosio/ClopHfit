@@ -580,8 +580,17 @@ class TitrationResults(ResidualsMixin):
                 for k in pars:
                     row[k] = pars[k].value
                     row[f"s{k}"] = pars[k].stderr
-                    row[f"{k}hdi03"] = pars[k].min
-                    row[f"{k}hdi97"] = pars[k].max
+                    # `min`/`max` carry the 94% HDI for a sampled fit, but the
+                    # solver's bounds for a least-squares one - which exported
+                    # K's [3, 11] pH box under an HDI column name. A bound is
+                    # not an interval, so write these only when a sampler
+                    # actually produced them.
+                    lo, hi = pars[k].min, pars[k].max
+                    finite = np.isfinite(lo) and np.isfinite(hi)
+                    inside = finite and lo <= pars[k].value <= hi
+                    from_sampler = inside and fr.trace is not None
+                    row[f"{k}hdi03"] = lo if from_sampler else np.nan
+                    row[f"{k}hdi97"] = hi if from_sampler else np.nan
             data.append(row)
         self._dataframe = pd.DataFrame(data).set_index("well")
         return self._dataframe
