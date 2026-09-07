@@ -107,6 +107,16 @@ class PlateLMResult:
         Whether the final least-squares solve converged.
     n_excluded : int
         Observations dropped by a screening pass, 0 for a single fit.
+    noise : dict[str, dict[str, float]]
+        Per-label ``sigma_floor``, ``gain`` and ``alpha`` actually used. When
+        calibration ran these are what it estimated, and they are the whole
+        point of asking for it - a run that fits the noise and reports only
+        ``ye_mag`` has thrown the answer away.
+    excluded_points : dict[str, dict[str, list[int]]]
+        Well to label to the original indices a screening pass dropped. The
+        screen builds its own masked copies internally, so without this a
+        caller plotting the input datasets would draw the discarded points as
+        though they had been fitted.
     residuals : list[dict[str, Any]]
         One record per unmasked observation, on the library's canonical
         columns: ``well``, ``label``, ``step``, ``yhat``, ``raw_res``,
@@ -124,6 +134,8 @@ class PlateLMResult:
     n_params: int = 0
     success: bool = False
     n_excluded: int = 0
+    noise: dict[str, dict[str, float]] = field(default_factory=dict)
+    excluded_points: dict[str, dict[str, list[int]]] = field(default_factory=dict)
     residuals: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -699,6 +711,14 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
 
     result = PlateLMResult(
         ye_mag=dict(scales),
+        noise={
+            str(lbl): {
+                "sigma_floor": float(getattr(params, "sigma_floor", 0.0)),
+                "gain": float(getattr(params, "gain", 0.0)),
+                "alpha": float(getattr(params, "alpha", 0.0)),
+            }
+            for lbl, params in (noise_model or {}).items()
+        },
         n_points=prob.n_points,
         n_params=len(p),
         success=bool(fit.success) if fit is not None else False,
@@ -1181,4 +1201,6 @@ def fit_plate_lm_screened(
 
     out = fit_plate_lm(screened, groups)
     out.n_excluded = n_excluded
+    for (well, lbl), idx in drop.items():
+        out.excluded_points.setdefault(well, {})[lbl] = sorted(idx)
     return out

@@ -602,6 +602,43 @@ def _plate_fit_stats(rows: list[dict[str, typing.Any]]) -> str:
     return "\n".join(lines)
 
 
+def _with_screened_mask(ds: Dataset, dropped: dict[str, list[int]]) -> Dataset:
+    """Copy a dataset with the screen's discards marked as excluded.
+
+    The screening fit masks its own copies internally, so the datasets handed
+    back to the plotter still show every point as fitted. Re-applying the mask
+    here is what makes a discarded point render as discarded rather than as a
+    point the curve simply misses.
+
+    Parameters
+    ----------
+    ds : Dataset
+        The well's dataset as it was passed to the fitter.
+    dropped : dict[str, list[int]]
+        Label to the original indices the screen removed.
+
+    Returns
+    -------
+    Dataset
+        A copy carrying the screen's mask, or *ds* itself when nothing was
+        dropped for this well.
+    """
+    if not dropped:
+        return ds
+    arrays = {}
+    for lbl, da in ds.items():
+        bad = dropped.get(str(lbl), [])
+        new = copy.deepcopy(da)
+        if bad:
+            mask = np.asarray(new.mask).copy()
+            for i in bad:
+                if 0 <= i < len(mask):
+                    mask[i] = False
+            new.mask = mask
+        arrays[lbl] = new
+    return type(ds)(arrays, is_ph=ds.is_ph)
+
+
 def _plate_fit_results(
     datasets: Mapping[str, typing.Any],
     result: PlateLMResult | PlateODRResult,
@@ -641,10 +678,12 @@ def _plate_fit_results(
     for r in getattr(result, "residuals", []) or []:
         resid_by_well.setdefault(str(r.get("well")), []).append(r)
     out: dict[str, FitResult] = {}
-    for well, ds in datasets.items():
+    excluded = getattr(result, "excluded_points", {}) or {}
+    for well, ds_in in datasets.items():
         row = result.params.get(well)
         if not row:
             continue
+        ds = _with_screened_mask(ds_in, excluded.get(well, {}))
         pars = Parameters()
         for name, value in row.items():
             if name.startswith("s"):
@@ -867,6 +906,7 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     png: bool = True,
     calibrate_noise: bool = False,
     screen_z: float | None = None,
+    ctr_free_k: bool = False,
 ) -> Path | None:
     """Fit the whole plate at once, classically, and write K per well.
 
@@ -896,6 +936,11 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     screen_z : float | None
         Drop points whose calibrated standardised residual exceeds this and
         refit. ``None`` fits once.
+    ctr_free_k : bool
+        Give every well its own K instead of pooling each control group onto a
+        shared one. The plate fitters pool by default, exactly as ``--mcmc
+        multi`` does, so the flag has to reach here or the two fitters answer
+        different questions from the same command line.
 
     Returns
     -------
@@ -904,10 +949,14 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     """
     if not datasets:
         return None
-    groups = {
-        name: sorted(wells)
-        for name, wells in getattr(titration.scheme, "names", {}).items()
-    }
+    groups = (
+        {}
+        if ctr_free_k
+        else {
+            name: sorted(wells)
+            for name, wells in getattr(titration.scheme, "names", {}).items()
+        }
+    )
     result: PlateLMResult | PlateODRResult
     if method == "odr":
         x_err = getattr(titration, "x_err", None)
@@ -949,6 +998,20 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     pd.DataFrame([
         {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())
     ]).to_csv(outfit / f"plate_{method}_ye_mag.csv", index=False)
+    # The noise parameters are the answer when calibration was asked for, so
+    # write them next to the multiplier rather than leaving them in the fit.
+    noise = getattr(result, "noise", {}) or {}
+    if noise:
+        pd.DataFrame([
+            {
+                "label": lbl,
+                "sigma_floor": v.get("sigma_floor", float("nan")),
+                "gain": v.get("gain", float("nan")),
+                "alpha": v.get("alpha", float("nan")),
+                "ye_mag": result.ye_mag.get(lbl, float("nan")),
+            }
+            for lbl, v in sorted(noise.items())
+        ]).to_csv(outfit / f"plate_{method}_noise.csv", index=False)
     _export_ctr_holdout(datasets, groups, outfit, method)
     logger.info(
         "plate %s fit: %d wells, %d points, converged=%s, ye_mag=%s",
@@ -1015,6 +1078,7 @@ def export_fit(
             png=config.png,
             calibrate_noise=getattr(config, "plate_noise", "fixed") == "calibrated",
             screen_z=getattr(config, "plate_screen_z", None),
+            ctr_free_k=getattr(config, "ctr_free_k", False),
         )
 
     mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)

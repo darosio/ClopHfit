@@ -1593,6 +1593,13 @@ class TecanConfig:
     detect_bad: bool = True
     """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""
 
+    ctr_free_k: bool = False
+    """Give every well its own K in --plate-fit, instead of pooling controls.
+
+    Mirrors what the flag already did for ``--mcmc multi``; without it the two
+    fitters answer different questions from the same command line.
+    """
+
     plate_screen_z: float | None = None
     """Drop points whose calibrated |z| exceeds this, then refit, for --plate-fit.
 
