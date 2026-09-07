@@ -34,7 +34,12 @@ from clophfit.fitting.model_validation import (
     residuals_from_fit_results,
 )
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.plate_lm import PlateLMResult, ctr_holdout, fit_plate_lm
+from clophfit.fitting.plate_lm import (
+    PlateLMResult,
+    ctr_holdout,
+    fit_plate_lm,
+    fit_plate_lm_screened,
+)
 from clophfit.fitting.plate_odr import (
     PlateODRResult,
     ctr_holdout_odr,
@@ -853,13 +858,15 @@ def _export_plate_fit_plots(  # ruff: ignore[too-many-arguments]
         )
 
 
-def export_plate_fit(
+def export_plate_fit(  # ruff: ignore[too-many-arguments]
     titration: Titration,
     datasets: dict[str, typing.Any],
     outfit: Path,
     method: str,
     *,
     png: bool = True,
+    calibrate_noise: bool = False,
+    screen_z: float | None = None,
 ) -> Path | None:
     """Fit the whole plate at once, classically, and write K per well.
 
@@ -883,6 +890,12 @@ def export_plate_fit(
         titration step's x move within its recorded uncertainty.
     png : bool
         Write per-well figures as well as the K plot.
+    calibrate_noise : bool
+        Estimate gain and alpha per label from the fit's own residuals and
+        refit under them, instead of taking ``y_err`` as built.
+    screen_z : float | None
+        Drop points whose calibrated standardised residual exceeds this and
+        refit. ``None`` fits once.
 
     Returns
     -------
@@ -908,9 +921,16 @@ def export_plate_fit(
         # is re-evaluated at the prediction rather than at the observation.
         # With a flat floor this changes nothing, which is why it is safe to
         # pass unconditionally.
-        result = fit_plate_lm(
-            datasets, groups, noise_model=_plate_noise_model(titration)
-        )
+        noise = _plate_noise_model(titration)
+        if screen_z is not None:
+            # Screen on the calibrated ruler, fit K on the plain one.
+            result = fit_plate_lm_screened(
+                datasets, groups, noise_model=noise, threshold=screen_z
+            )
+        else:
+            result = fit_plate_lm(
+                datasets, groups, noise_model=noise, calibrate_noise=calibrate_noise
+            )
 
     pooled = {well: name for name, wells in groups.items() for well in wells}
     rows = [
@@ -987,7 +1007,15 @@ def export_fit(
     export_list.append(odr_res)
 
     if plate_fit is not None:
-        export_plate_fit(titration, datasets, outfit, plate_fit, png=config.png)
+        export_plate_fit(
+            titration,
+            datasets,
+            outfit,
+            plate_fit,
+            png=config.png,
+            calibrate_noise=getattr(config, "plate_noise", "fixed") == "calibrated",
+            screen_z=getattr(config, "plate_screen_z", None),
+        )
 
     mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)
     if mcmc_res is not None:

@@ -1093,20 +1093,31 @@ def fit_plate_lm_screened(
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
     *,
+    noise_model: Mapping[str, Any] | None = None,
     threshold: float = 3.0,
     min_keep: int = 4,
 ) -> PlateLMResult:
-    """Fit, drop points the fit itself calls outliers, refit.
+    """Find outliers with a calibrated ruler, then fit K with the plain one.
 
-    Geometric masking judges the shape of a raw trace and never sees the fit, so
-    it cannot tell a point that disagrees with the curve from one that merely
-    sits at an extreme of it - which is why, over eleven plates, it changed pKa
-    accuracy not at all. A standardised residual is the quantity that actually
-    says a point is wrong, and it only exists once something has been fitted.
+    A standardised residual is only as good as the sigma it is divided by, and
+    the default sigma is one number per label - the read-noise floor - while the
+    noise plainly grows with signal. On L6a the binned |std residual| runs from
+    0.065 at low signal to 1.113 at high, so a fixed threshold is a far harsher
+    test of a bright point than a dim one. Screening on that ruler discards the
+    plateaus, which are what pin S0 and S1 and hence where the midpoint sits:
+    over eleven plates it threw away 947 points and made K worse.
 
-    Two passes, not iterated to convergence: the first pass locates the gross
-    outliers, and repeating the cycle mostly trims the tails of an already
-    clean fit, which is how a screen starts eating real curvature.
+    So the two jobs are split, each given the model measured to win at it. The
+    screening pass calibrates gain and alpha per label from its own residuals,
+    which puts every point on a comparable scale; the refit then uses the plain
+    weighting, because calibrated weights describe residuals better and fit K
+    worse. Same threshold, right ruler: 99 points dropped instead of 947, and
+    sum_log -5.92 against -5.49 for no screening at all, improving nine plates
+    of eleven.
+
+    The threshold is not a free knob. At 2.5 the screen turns harmful again
+    (-4.42), so 3.0 is not a rounding of "about three sigma" but the value that
+    separates a useful screen from a destructive one.
 
     Parameters
     ----------
@@ -1114,12 +1125,18 @@ def fit_plate_lm_screened(
         Well identifier to `Dataset`.
     groups : Mapping[str, Sequence[str]]
         Control group name to member wells; those wells share one K.
+    noise_model : Mapping[str, Any] | None
+        Per-label noise parameters supplying the floors the calibration pins.
+        Without it there is nothing to calibrate and the screening pass falls
+        back to the plain fit, which is the behaviour this function exists to
+        avoid - pass it.
     threshold : float
-        Standardised-residual magnitude above which a point is dropped.
+        Standardised-residual magnitude above which a point is dropped, judged
+        on the calibrated scale.
     min_keep : int
         Never leave a label with fewer points than this, whatever their
-        residuals - a curve fitted through three points is not an improvement
-        on one fitted through seven with an outlier in it.
+        residuals - a curve through three points is not an improvement on one
+        through seven with an outlier in it.
 
     Returns
     -------
@@ -1128,16 +1145,19 @@ def fit_plate_lm_screened(
         ``n_excluded``. When nothing crosses the threshold this is the
         single-pass fit.
     """
-    # Robust first pass: the point of this fit is to expose outliers, and
-    # ordinary least squares hides them by bending toward them.
-    first = fit_plate_lm(datasets, groups, loss="huber")
+    first = fit_plate_lm(
+        datasets,
+        groups,
+        noise_model=noise_model,
+        calibrate_noise=noise_model is not None,
+    )
     drop: dict[tuple[str, str], set[int]] = {}
     for row in first.residuals:
         if abs(float(row["std_res"])) > threshold:
             key = (str(row["well"]), str(row["label"]))
             drop.setdefault(key, set()).add(int(row["raw_i"]))
     if not drop:
-        return first
+        return fit_plate_lm(datasets, groups)
 
     screened: dict[str, Any] = {}
     n_excluded = 0

@@ -1593,6 +1593,24 @@ class TecanConfig:
     detect_bad: bool = True
     """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""
 
+    plate_screen_z: float | None = None
+    """Drop points whose calibrated |z| exceeds this, then refit, for --plate-fit.
+
+    ``None`` fits once. 3.0 is the value measured to help (sum_log -5.92 against
+    -5.49 unscreened, nine plates of eleven improved); 2.5 turns harmful, so
+    this is not a knob to sweep casually.
+    """
+
+    plate_noise: str = "fixed"
+    """How ``--plate-fit`` weights its points.
+
+    ``"fixed"`` uses ``y_err`` as built - the ``bg_noise`` floor, plus any
+    ``--noise-gain``/``--noise-alpha`` supplied. ``"calibrated"`` estimates gain
+    and alpha per label from the fit's own residuals and refits under them.
+    Calibration describes the residuals better and fits K worse, so it is not
+    the default; see ``fit_plate_lm``.
+    """
+
 
 @dataclass(frozen=True)
 class McmcSpec:

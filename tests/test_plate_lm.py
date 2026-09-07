@@ -5,7 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    NoiseModelParams,
+)
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plate_lm import (
     PlateLMResult,
@@ -190,8 +194,13 @@ def test_robust_first_pass_finds_the_outlier_least_squares_hides() -> None:
     assert abs(robust.k["A05"] - ks["A05"]) < abs(plain.k["A05"] - ks["A05"])
 
 
-def test_screening_uses_a_robust_first_pass_by_default() -> None:
-    """The screen's first pass must be the robust one, or it screens blind."""
+def test_screening_still_finds_a_gross_outlier_without_a_noise_model() -> None:
+    """Falling back to the plain ruler must still catch the obvious case.
+
+    Without a noise model there is nothing to calibrate, so the screen judges
+    on the sigma it was handed. That is the weaker mode - it is why
+    `noise_model` is worth passing - but it must not be a broken one.
+    """
     ks = {f"A{i:02d}": 6.5 + 0.12 * i for i in range(1, 13)}
     datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
     da = datasets["A07"]["1"]
@@ -262,3 +271,79 @@ def test_profile_reports_an_open_interval_when_k_is_unbounded() -> None:
     assert not (np.isfinite(lo) and np.isfinite(hi)), (
         f"a flat well reported a bounded K interval ({lo}, {hi})"
     )
+
+
+def test_calibrated_ruler_screens_where_the_flat_one_misfires() -> None:
+    """The screen must judge a bright point and a dim one on the same scale.
+
+    With noise that grows as the signal does, one flat sigma per label is too
+    big at the bottom of the curve and too small at the top. A fixed threshold
+    on that ruler is then a soft test of a dim point and a harsh test of a
+    bright one, so the screen reaches for the plateaus - the points that pin S0
+    and S1 - while a genuine low-signal outlier sits under the threshold.
+
+    Here the planted point sits at the alkaline end, where label 1 has decayed
+    to its low plateau: true sigma is about 7 there, so a +60 spike is nearly
+    nine sigma, yet the flat ruler - inflated by the bright end of the same
+    curve - reports it as unremarkable.
+    """
+    rng = np.random.default_rng(11)
+    ks = {f"A{i:02d}": 6.4 + 0.12 * i for i in range(1, 13)}
+    x = np.linspace(5.0, 9.0, 12)
+    datasets = {}
+    for well, k in ks.items():
+        arrays = {}
+        for lbl, (s0, s1) in {"1": (60.0, 2400.0), "2": (2400.0, 60.0)}.items():
+            clean = binding_1site(x, k, s0, s1, is_ph=True)
+            # Noise proportional to signal: the case a flat sigma cannot describe.
+            sigma = 4.0 + 0.05 * clean
+            y = clean + rng.normal(0.0, sigma)
+            arrays[lbl] = DataArray(x, y, y_errc=np.full(x.size, 4.0))
+        datasets[well] = Dataset(arrays, is_ph=True)
+
+    # Label 1 runs S1 (low pH, bright) -> S0 (high pH, dim), so the dim end
+    # is the last steps, not the first.
+    victim, step = "A05", 10
+    da = datasets[victim]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[step] += 60.0  # ~9 true sigma there, but small next to the flat sigma
+    datasets[victim] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets[victim]["2"],
+        },
+        is_ph=True,
+    )
+    floors = {
+        "1": NoiseModelParams(sigma_floor=4.0, gain=0.0, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=4.0, gain=0.0, alpha=0.0),
+    }
+
+    flat = fit_plate_lm(datasets, groups={})
+    cal = fit_plate_lm(datasets, groups={}, noise_model=floors, calibrate_noise=True)
+
+    def z_of_victim(result: PlateLMResult) -> float:
+        rows = [
+            r
+            for r in result.residuals
+            if r["well"] == victim and str(r["label"]) == "1" and r["raw_i"] == step
+        ]
+        return abs(float(rows[0]["std_res"]))
+
+    def spread(result: PlateLMResult) -> float:
+        """Ratio of mean |z| in the top signal decile to the bottom decile."""
+        rows = [r for r in result.residuals if str(r["label"]) == "1"]
+        yh = np.array([float(r["yhat"]) for r in rows])
+        z = np.array([abs(float(r["std_res"])) for r in rows])
+        lo, hi = np.quantile(yh, 0.25), np.quantile(yh, 0.75)
+        return float(z[yh >= hi].mean() / max(z[yh <= lo].mean(), 1e-12))
+
+    # The calibrated ruler is flat across the signal range; the raw one is not.
+    assert spread(flat) > 2.0, "fixture is not heteroscedastic enough to test"
+    assert spread(cal) < spread(flat)
+    # And the low-signal outlier stands out further once the scale is right.
+    assert z_of_victim(cal) > z_of_victim(flat)
