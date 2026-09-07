@@ -29,14 +29,20 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from scipy import stats as sp_stats
 from scipy.optimize import least_squares
 
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
-__all__ = ["PlateLMResult", "fit_plate_lm", "fit_plate_lm_screened"]
+__all__ = [
+    "PlateLMResult",
+    "fit_plate_lm",
+    "fit_plate_lm_screened",
+    "profile_k_intervals",
+]
 
 # Below this many unmasked points a well cannot suggest its own midpoint.
 _MIN_POINTS_FOR_SEED = 2
@@ -61,6 +67,10 @@ _LN10 = float(np.log(10.0))
 # that. Measured on L2, this cap puts every well within 0.0095 pH of a fit
 # ten times longer, an order of magnitude inside the 0.1 ROPE.
 _ROBUST_MAX_NFEV = 200
+# Largest number of refits spent walking out one side of one profile.
+_PROFILE_MAX_STEPS = 12
+# First step out from K-hat, in standard errors.
+_PROFILE_STEP_SE = 0.75
 
 
 @dataclass
@@ -370,6 +380,87 @@ def _standard_errors(jac: np.ndarray, n_params: int) -> np.ndarray:
     return out
 
 
+def _residual_fn(
+    prob: _Problem, scales: Mapping[str, float]
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Build the scaled-residual function for one plate problem.
+
+    Parameters
+    ----------
+    prob : _Problem
+        Assembled plate problem.
+    scales : Mapping[str, float]
+        Current per-label noise scale.
+
+    Returns
+    -------
+    Callable[[np.ndarray], np.ndarray]
+        Residuals, already divided by ``y_err`` and the label scale.
+    """
+
+    def residuals(params: np.ndarray) -> np.ndarray:
+        parts = []
+        for well, lbl, x, y, yerr in prob.obs:
+            s0, s1 = params[prob.sidx[well, lbl]], params[prob.sidx[well, lbl] + 1]
+            model = binding_1site(x, params[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
+            parts.append((y - model) / (yerr * scales[lbl]))
+        return np.concatenate(parts) if parts else np.zeros(0)
+
+    return residuals
+
+
+def _jacobian_fn(
+    prob: _Problem, scales: Mapping[str, float]
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Build the exact Jacobian of the scaled residuals.
+
+    Each residual block belongs to one (well, label) curve and depends on three
+    parameters only, so the matrix is almost all zeros. Estimating it by finite
+    differences costs one pass over the whole plate per parameter - several
+    hundred passes for a 96-well plate - which is what made the robust losses
+    unusably slow. The closed forms below cost one pass in total and are exact,
+    so the solver also steps better.
+
+    Parameters
+    ----------
+    prob : _Problem
+        Assembled plate problem.
+    scales : Mapping[str, float]
+        Current per-label noise scale.
+
+    Returns
+    -------
+    Callable[[np.ndarray], np.ndarray]
+        Jacobian, one row per residual.
+    """
+    n_res = sum(len(y) for *_, y, _ in prob.obs)
+
+    def jacobian(params: np.ndarray) -> np.ndarray:
+        jac = np.zeros((n_res, len(params)))
+        row = 0
+        for well, lbl, x, y, yerr in prob.obs:
+            n = len(y)
+            ki, si = prob.kidx[well], prob.sidx[well, lbl]
+            k, s0, s1 = params[ki], params[si], params[si + 1]
+            # Reuse the model itself for the sigmoid, so the overflow-safe
+            # algebra lives in exactly one place.
+            f = binding_1site(x, k, 0.0, 1.0, is_ph=prob.is_ph)
+            dk = (
+                (s1 - s0) * _LN10 * f * (1.0 - f)
+                if prob.is_ph
+                else -(s1 - s0) * f * (1.0 - f) / k
+            )
+            denom = yerr * scales[lbl]
+            block = slice(row, row + n)
+            jac[block, ki] = -dk / denom
+            jac[block, si] = -(1.0 - f) / denom
+            jac[block, si + 1] = -f / denom
+            row += n
+        return jac
+
+    return jacobian
+
+
 def fit_plate_lm(
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
@@ -410,47 +501,9 @@ def fit_plate_lm(
     p = prob.p0
     bounds = _k_bounds(prob.n_k, len(p), is_ph=prob.is_ph)
 
-    def residuals(params: np.ndarray) -> np.ndarray:
-        parts = []
-        for well, lbl, x, y, yerr in prob.obs:
-            s0, s1 = params[prob.sidx[well, lbl]], params[prob.sidx[well, lbl] + 1]
-            model = binding_1site(x, params[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
-            parts.append((y - model) / (yerr * scales[lbl]))
-        return np.concatenate(parts) if parts else np.zeros(0)
+    residuals = _residual_fn(prob, scales)
 
-    n_res = sum(len(y) for *_, y, _ in prob.obs)
-
-    def jacobian(params: np.ndarray) -> np.ndarray:
-        """Exact derivatives of the scaled residuals.
-
-        Each residual block belongs to one (well, label) curve and depends on
-        three parameters only, so the matrix is almost all zeros. Estimating it
-        by finite differences costs one pass over the whole plate per parameter
-        - several hundred passes for a 96-well plate - which is what made the
-        robust losses unusably slow. The closed forms below cost one pass in
-        total and are exact, so the solver also steps better.
-        """
-        jac = np.zeros((n_res, len(params)))
-        row = 0
-        for well, lbl, x, y, yerr in prob.obs:
-            n = len(y)
-            ki, si = prob.kidx[well], prob.sidx[well, lbl]
-            k, s0, s1 = params[ki], params[si], params[si + 1]
-            # Reuse the model itself for the sigmoid, so the overflow-safe
-            # algebra lives in exactly one place.
-            f = binding_1site(x, k, 0.0, 1.0, is_ph=prob.is_ph)
-            dk = (
-                (s1 - s0) * _LN10 * f * (1.0 - f)
-                if prob.is_ph
-                else -(s1 - s0) * f * (1.0 - f) / k
-            )
-            denom = yerr * scales[lbl]
-            block = slice(row, row + n)
-            jac[block, ki] = -dk / denom
-            jac[block, si] = -(1.0 - f) / denom
-            jac[block, si + 1] = -f / denom
-            row += n
-        return jac
+    jacobian = _jacobian_fn(prob, scales)
 
     fit = None
     for _ in range(max_iter):
@@ -500,6 +553,196 @@ def fit_plate_lm(
                 row[f"sS1_{lbl}"] = float(err[i + 1])
         result.params[well] = row
     return result
+
+
+def profile_k_intervals(
+    datasets: Mapping[str, Any],
+    groups: Mapping[str, Sequence[str]],
+    wells: Sequence[str],
+    *,
+    level: float = 0.94,
+    loss: Literal["linear", "huber", "soft_l1", "cauchy"] = "linear",
+) -> dict[str, tuple[float, float]]:
+    """Profile-likelihood interval on K, for wells the quadratic error fails.
+
+    ``k_stderr`` comes from the curvature at the optimum, which describes the
+    likelihood only where it is close to a parabola. That assumption breaks on
+    exactly the wells worth checking: a flat basin reports a standard error of
+    1e5, and a well whose K is genuinely pinned down can still sit in an
+    asymmetric valley. Profiling makes no such assumption - it fixes K, lets
+    every other parameter re-optimise, and reads off where the cost has risen by
+    the chi-square quantile for one degree of freedom.
+
+    One refit per profile point, so this is deliberately not run for a whole
+    plate. Pass the wells that need it.
+
+    Parameters
+    ----------
+    datasets : Mapping[str, Any]
+        Well identifier to `Dataset`, as passed to :func:`fit_plate_lm`.
+    groups : Mapping[str, Sequence[str]]
+        Control group name to member wells; those wells share one K.
+    wells : Sequence[str]
+        Wells to profile. Grouped wells share a K, so profiling any member
+        profiles the group.
+    level : float
+        Interval mass, 0.94 to match the HDI this project reports elsewhere.
+    loss : Literal["linear", "huber", "soft_l1", "cauchy"]
+        Loss for the refits; use the one the reported fit used.
+
+    Returns
+    -------
+    dict[str, tuple[float, float]]
+        Well to (lower, upper). A bound that runs into the edge of the K range
+        without the cost rising enough comes back as ``-inf`` or ``inf``: the
+        data does not bound K on that side, which is the honest answer and the
+        one a standard error cannot express.
+    """
+    base = fit_plate_lm(datasets, groups, loss=loss)
+    prob = _assemble(datasets, groups)
+    scales = base.ye_mag
+    residuals = _residual_fn(prob, scales)
+    jacobian = _jacobian_fn(prob, scales)
+    p_hat = np.asarray(_params_from(base, prob), dtype=float)
+    lo_b, hi_b = _k_bounds(prob.n_k, len(p_hat), is_ph=prob.is_ph)
+    # 2 * cost is the sum of squared residuals, so the usual chi-square
+    # threshold on one profiled parameter applies directly.
+    crit = float(sp_stats.chi2.ppf(level, 1))
+    cost0 = float(np.sum(residuals(p_hat) ** 2))
+
+    ctx = _ProfileCtx(residuals, jacobian, p_hat, lo_b, hi_b, crit, cost0, loss)
+    out: dict[str, tuple[float, float]] = {}
+    for well in wells:
+        ki = prob.kidx[well]
+        se = base.k_stderr.get(well, np.nan)
+        step = _PROFILE_STEP_SE * se if np.isfinite(se) and se > 0 else 0.25
+        out[well] = (
+            _profile_side(ctx, ki, -step, float(lo_b[ki])),
+            _profile_side(ctx, ki, step, float(hi_b[ki])),
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class _ProfileCtx:
+    """Everything a profile walk needs that does not change between wells.
+
+    Attributes
+    ----------
+    residuals : Callable[[np.ndarray], np.ndarray]
+        Full-vector residual function.
+    jacobian : Callable[[np.ndarray], np.ndarray]
+        Full-vector Jacobian function.
+    p_hat : np.ndarray
+        Parameters at the unconstrained optimum, warm-starting each refit.
+    lo_b : np.ndarray
+        Lower bounds on the full parameter vector.
+    hi_b : np.ndarray
+        Upper bounds on the full parameter vector.
+    crit : float
+        Rise in the sum of squares that marks an interval edge.
+    cost0 : float
+        Sum of squares at the optimum.
+    loss : Literal["linear", "huber", "soft_l1", "cauchy"]
+        Loss for the refits.
+    """
+
+    residuals: Callable[[np.ndarray], np.ndarray]
+    jacobian: Callable[[np.ndarray], np.ndarray]
+    p_hat: np.ndarray
+    lo_b: np.ndarray
+    hi_b: np.ndarray
+    crit: float
+    cost0: float
+    loss: Literal["linear", "huber", "soft_l1", "cauchy"]
+
+
+def _profile_side(ctx: _ProfileCtx, ki: int, step: float, edge: float) -> float:
+    """Walk one direction until the cost rises by the criterion, then interpolate.
+
+    Parameters
+    ----------
+    ctx : _ProfileCtx
+        Problem pieces shared by every walk.
+    ki : int
+        Index of the K being profiled.
+    step : float
+        Signed first step; its sign picks the direction.
+    edge : float
+        Limit of the K range in this direction.
+
+    Returns
+    -------
+    float
+        The interval edge, or an infinite bound when the K range runs out
+        before the cost rises enough - the data does not bound K on that side.
+    """
+    p_hat = ctx.p_hat
+    k_hat = float(p_hat[ki])
+    free = np.delete(np.arange(len(p_hat)), ki)
+    bounds = (np.delete(ctx.lo_b, ki), np.delete(ctx.hi_b, ki))
+
+    def refit(kval: float) -> float:
+        def res(q: np.ndarray) -> np.ndarray:
+            full = np.empty(len(p_hat))
+            full[free], full[ki] = q, kval
+            return ctx.residuals(full)
+
+        def jac(q: np.ndarray) -> np.ndarray:
+            full = np.empty(len(p_hat))
+            full[free], full[ki] = q, kval
+            return ctx.jacobian(full)[:, free]
+
+        fit = least_squares(
+            res,
+            p_hat[free],
+            jac=jac,
+            method="trf",
+            bounds=bounds,
+            loss=ctx.loss,
+            f_scale=_ROBUST_F_SCALE if ctx.loss != "linear" else 1.0,
+            max_nfev=None if ctx.loss == "linear" else _ROBUST_MAX_NFEV,
+        )
+        return float(np.sum(fit.fun**2))
+
+    prev_k, prev_d = k_hat, 0.0
+    for i in range(1, _PROFILE_MAX_STEPS + 1):
+        k = k_hat + step * i
+        if (step < 0 and k <= edge) or (step > 0 and k >= edge):
+            return -np.inf if step < 0 else np.inf
+        delta = refit(k) - ctx.cost0
+        if delta >= ctx.crit:
+            # Linear in the rise between the last two points; the curve is
+            # smooth here and a finer walk costs another refit per step.
+            span = delta - prev_d
+            frac = (ctx.crit - prev_d) / span if span > 0 else 0.0
+            return float(prev_k + (k - prev_k) * frac)
+        prev_k, prev_d = k, delta
+    return -np.inf if step < 0 else np.inf
+
+
+def _params_from(result: PlateLMResult, prob: _Problem) -> np.ndarray:
+    """Rebuild the solver's parameter vector from a finished fit.
+
+    Parameters
+    ----------
+    result : PlateLMResult
+        A fit produced from the same datasets and groups.
+    prob : _Problem
+        The problem those datasets assemble into.
+
+    Returns
+    -------
+    np.ndarray
+        Parameter vector in solver order.
+    """
+    p = np.zeros(prob.p0.shape)
+    for well, i in prob.kidx.items():
+        p[i] = result.k[well]
+    for (well, lbl), i in prob.sidx.items():
+        row = result.params[well]
+        p[i], p[i + 1] = row[f"S0_{lbl}"], row[f"S1_{lbl}"]
+    return p
 
 
 def ctr_holdout(

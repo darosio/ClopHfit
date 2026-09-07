@@ -11,6 +11,7 @@ from clophfit.fitting.plate_lm import (
     PlateLMResult,
     fit_plate_lm,
     fit_plate_lm_screened,
+    profile_k_intervals,
 )
 
 
@@ -210,3 +211,54 @@ def test_screening_uses_a_robust_first_pass_by_default() -> None:
     screened = fit_plate_lm_screened(datasets, groups={}, threshold=3.0)
     assert screened.n_excluded >= 1
     assert screened.k["A07"] == pytest.approx(ks["A07"], abs=0.1)
+
+
+def test_profile_interval_matches_the_standard_error_on_a_clean_well() -> None:
+    """Where the likelihood really is a parabola, the two must agree.
+
+    This is the calibration check: a profile that disagreed with sK on a
+    well-behaved well would mean the criterion or the walk is wrong, not that
+    the standard error is.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 7)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    fit = fit_plate_lm(datasets, groups={})
+    wells = sorted(datasets)[:3]
+    intervals = profile_k_intervals(datasets, groups={}, wells=wells)
+
+    for well in wells:
+        lo, hi = intervals[well]
+        k, sk = fit.k[well], fit.k_stderr[well]
+        assert np.isfinite([lo, hi]).all()
+        assert lo < k < hi
+        # 94% on one parameter is +/- 1.881 sigma when the parabola holds.
+        z94 = 1.881
+        assert (k - lo) == pytest.approx(z94 * sk, rel=0.25)
+        assert (hi - k) == pytest.approx(z94 * sk, rel=0.25)
+
+
+def test_profile_reports_an_open_interval_when_k_is_unbounded() -> None:
+    """A flat well should say so, rather than quote a number.
+
+    A well whose curve never turns over carries no K. The curvature at the
+    optimum still yields some standard error - often an absurdly large one,
+    which downstream code has no way to read as "no information". An infinite
+    bound is the honest statement, and it is one a screen can act on.
+    """
+    ks = {f"A{i:02d}": 6.5 + 0.1 * i for i in range(1, 5)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    # Replace one well with a flat trace: no transition anywhere in range.
+    flat = datasets["A01"]
+    arrays = {}
+    for lbl, da in flat.items():
+        x = np.asarray(da.xc, dtype=float)
+        arrays[lbl] = DataArray(
+            x, np.full(x.size, 500.0), y_errc=np.asarray(da.y_errc, dtype=float)
+        )
+    datasets["A01"] = Dataset(arrays, is_ph=True)
+
+    intervals = profile_k_intervals(datasets, groups={}, wells=["A01"])
+    lo, hi = intervals["A01"]
+    assert not (np.isfinite(lo) and np.isfinite(hi)), (
+        f"a flat well reported a bounded K interval ({lo}, {hi})"
+    )
