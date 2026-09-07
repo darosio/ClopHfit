@@ -1288,7 +1288,25 @@ class Titration(TecanfilesGroup):
         self.clear_all_data_results()
 
     def create_global_ds(self, key: str) -> Dataset:
-        """Create a global dataset for the given key."""
+        """Create a global dataset for the given key.
+
+        Applies ``mask_outliers`` like :meth:`create_dataset_dict`. It used not
+        to, and since ``ppr tecan`` builds its global datasets here, the flag
+        never reached the global, ODR, MCMC or plate fits - accepted, echoed
+        back in the run configuration, and silently confined to the per-label
+        path. Two builders of the same dataset must not disagree about what a
+        flag means.
+
+        Parameters
+        ----------
+        key : str
+            Well identifier.
+
+        Returns
+        -------
+        Dataset
+            The well's labels, masked and weighted as configured.
+        """
         dropped = self._excluded_labels.get(key, set())
         data_arrays_dict = {
             i: self._create_data_array(key, i)
@@ -1296,6 +1314,8 @@ class Titration(TecanfilesGroup):
             if str(i) not in dropped
         }
         ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
+        if self.params.mask_outliers:
+            ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
         return self._apply_error_model(ds)
 
     def create_dataset_dict(self, label: str | None = None) -> dict[str, Dataset]:
@@ -1318,7 +1338,9 @@ class Titration(TecanfilesGroup):
                 ds_dict[key] = self.create_global_ds(key)
             else:
                 ds_dict[key] = self.create_ds(key, label)
-        if self.params.mask_outliers:
+        if self.params.mask_outliers and label is not None:
+            # The global branch masks inside create_global_ds; only the
+            # per-label datasets still need it here.
             for key, ds in ds_dict.items():
                 ds_dict[key] = apply_outlier_mask(
                     ds, threshold=self.params.outlier_threshold

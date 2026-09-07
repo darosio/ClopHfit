@@ -7,7 +7,11 @@ import pytest
 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.plate_lm import fit_plate_lm
+from clophfit.fitting.plate_lm import (
+    PlateLMResult,
+    fit_plate_lm,
+    fit_plate_lm_screened,
+)
 
 
 def make_plate(
@@ -94,3 +98,115 @@ def test_result_carries_the_plateaus_not_only_k() -> None:
             assert np.isfinite(p[f"S0_{lbl}"])
             assert np.isfinite(p[f"S1_{lbl}"])
         assert np.isfinite(p["sK"])
+
+
+def test_screening_refit_drops_a_planted_outlier_and_recovers_k() -> None:
+    """Fit, mask on the fit's own residuals, refit - the classical two-step.
+
+    Geometric masking works on the shape of the raw trace and cannot see
+    whether a point disagrees with the *fit*; on this campaign it changed pKa
+    accuracy not at all. A z-score screen uses the fitted residuals, which is
+    the quantity that actually says a point is wrong.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 4.0, "2": 3.0})
+    # One point of one well, moved far off its curve.
+    da = datasets["A05"]["1"]
+    spoiled = np.asarray(da.yc, dtype=float).copy()
+    spoiled[3] += 400.0
+    datasets["A05"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                spoiled,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A05"]["2"],
+        },
+        is_ph=True,
+    )
+    plain = fit_plate_lm(datasets, groups={})
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=3.0)
+
+    assert screened.n_excluded >= 1, "the planted outlier was not screened"
+    # The spoiled well's K is recovered better after screening.
+    assert abs(screened.k["A05"] - ks["A05"]) < abs(plain.k["A05"] - ks["A05"])
+    # And the clean wells are left where they were.
+    for well in ("A01", "A12"):
+        assert screened.k[well] == pytest.approx(plain.k[well], abs=0.05)
+
+
+def test_screening_refit_leaves_a_clean_plate_alone() -> None:
+    """With nothing to screen, the two-step must return the one-pass answer."""
+    ks = {f"A{i:02d}": 6.5 + 0.12 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 4.0, "2": 3.0})
+    plain = fit_plate_lm(datasets, groups={})
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=4.0)
+    for well in ks:
+        assert screened.k[well] == pytest.approx(plain.k[well], abs=0.02)
+
+
+def test_robust_first_pass_finds_the_outlier_least_squares_hides() -> None:
+    """Screen on a robust fit, not on one the outlier has already bent.
+
+    Ordinary least squares drags the curve toward an outlier, which shrinks that
+    point's own residual and inflates its neighbours' - masking and swamping.
+    The profiled scale makes it worse: it is the RMS of the residuals, so the
+    outlier also inflates the ruler the z-scores are measured against. The
+    screen then decides with a bent curve and a stretched ruler, which is how a
+    threshold ends up behaving erratically.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    da = datasets["A05"]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[3] += 250.0  # one point, far off its curve
+    datasets["A05"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A05"]["2"],
+        },
+        is_ph=True,
+    )
+
+    def z_of_planted(result: PlateLMResult) -> float:
+        rows = [
+            r
+            for r in result.residuals
+            if r["well"] == "A05" and str(r["label"]) == "1" and r["raw_i"] == 3
+        ]
+        return abs(float(rows[0]["std_res"]))
+
+    plain = fit_plate_lm(datasets, groups={})
+    robust = fit_plate_lm(datasets, groups={}, loss="huber")
+    # The robust pass is not dragged, so the bad point stands out further.
+    assert z_of_planted(robust) > z_of_planted(plain)
+    # And the well's K is closer to truth without any screening at all.
+    assert abs(robust.k["A05"] - ks["A05"]) < abs(plain.k["A05"] - ks["A05"])
+
+
+def test_screening_uses_a_robust_first_pass_by_default() -> None:
+    """The screen's first pass must be the robust one, or it screens blind."""
+    ks = {f"A{i:02d}": 6.5 + 0.12 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    da = datasets["A07"]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[2] += 250.0
+    datasets["A07"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A07"]["2"],
+        },
+        is_ph=True,
+    )
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=3.0)
+    assert screened.n_excluded >= 1
+    assert screened.k["A07"] == pytest.approx(ks["A07"], abs=0.1)

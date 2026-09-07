@@ -24,8 +24,9 @@ label, which is the structure section 1 found to be the right amount.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -35,7 +36,7 @@ from clophfit.fitting.models import binding_1site
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-__all__ = ["PlateLMResult", "fit_plate_lm"]
+__all__ = ["PlateLMResult", "fit_plate_lm", "fit_plate_lm_screened"]
 
 # Below this many unmasked points a well cannot suggest its own midpoint.
 _MIN_POINTS_FOR_SEED = 2
@@ -47,6 +48,19 @@ _K_MIN_PH = 3.0
 _K_MAX_PH = 11.0
 # Half-width of a 94% interval in standard errors.
 _Z94 = 1.881
+# Residuals are already divided by y_err, so a robust loss switches from
+# quadratic to linear at this many nominal sigma.
+_ROBUST_F_SCALE = 2.0
+# MAD -> sigma for a normal distribution.
+_MAD_TO_SIGMA = 1.4826
+_LN10 = float(np.log(10.0))
+# A robust loss never satisfies scipy's termination tests on this problem:
+# the plateau parameters keep micro-adjusting, so the cost creeps downward
+# forever and the fit runs to the default budget of 100 * n_params - over
+# 40000 evaluations, around two hours for one plate. K settles long before
+# that. Measured on L2, this cap puts every well within 0.0095 pH of a fit
+# ten times longer, an order of magnitude inside the 0.1 ROPE.
+_ROBUST_MAX_NFEV = 200
 
 
 @dataclass
@@ -75,6 +89,8 @@ class PlateLMResult:
         Free structural parameters.
     success : bool
         Whether the final least-squares solve converged.
+    n_excluded : int
+        Observations dropped by a screening pass, 0 for a single fit.
     residuals : list[dict[str, Any]]
         One record per unmasked observation, on the library's canonical
         columns: ``well``, ``label``, ``step``, ``yhat``, ``raw_res``,
@@ -91,6 +107,7 @@ class PlateLMResult:
     n_points: int = 0
     n_params: int = 0
     success: bool = False
+    n_excluded: int = 0
     residuals: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -145,6 +162,10 @@ class _Problem:
     sidx: dict[tuple[str, str], int]
     p0: np.ndarray
     obs: list[tuple[str, str, np.ndarray, np.ndarray, np.ndarray]]
+    # Parallel to `obs`: where each kept point sat in the original array, so a
+    # residual can be traced back to the observation that produced it. Every
+    # other fitter emits this as `raw_i`; without it a screen cannot mask.
+    raw_i: list[np.ndarray]
     labels: list[str]
     is_ph: bool
     n_k: int
@@ -183,6 +204,7 @@ def _assemble(
 
     sidx: dict[tuple[str, str], int] = {}
     obs: list[tuple[str, str, np.ndarray, np.ndarray, np.ndarray]] = []
+    raw_i: list[np.ndarray] = []
     for well, dataset in datasets.items():
         for lbl, da in dataset.items():
             m = np.asarray(da.mask)
@@ -192,12 +214,14 @@ def _assemble(
             sidx[well, lbl] = len(p0)
             p0.extend([float(y[0]) if len(y) else 0.0, float(y[-1]) if len(y) else 0.0])
             obs.append((well, lbl, x, y, yerr))
+            raw_i.append(np.flatnonzero(m))
 
     return _Problem(
         kidx=kidx,
         sidx=sidx,
         p0=np.asarray(p0, dtype=float),
         obs=obs,
+        raw_i=raw_i,
         labels=labels,
         is_ph=bool(next(iter(datasets.values())).is_ph),
         n_k=n_k,
@@ -255,7 +279,7 @@ def _residual_table(
         shift the numbering of the ones that survive.
     """
     rows: list[dict[str, Any]] = []
-    for well, lbl, x, y, yerr in prob.obs:
+    for (well, lbl, x, y, yerr), raw_idx in zip(prob.obs, prob.raw_i, strict=True):
         s0, s1 = p[prob.sidx[well, lbl]], p[prob.sidx[well, lbl] + 1]
         model = binding_1site(x, p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
         sigma = yerr * scales[lbl]
@@ -266,17 +290,22 @@ def _residual_table(
                 "well": well,
                 "label": lbl,
                 "step": int(step),
+                "raw_i": int(ri),
                 "yhat": float(yh),
                 "raw_res": float(r),
                 "sigma": float(sd),
                 "std_res": float(r / sd),
             }
-            for step, yh, r, sd in zip(order, model, raw, sigma, strict=True)
+            for step, ri, yh, r, sd in zip(
+                order, raw_idx, model, raw, sigma, strict=True
+            )
         )
     return rows
 
 
-def _profiled_scale(prob: _Problem, resid: np.ndarray, label: str) -> float:
+def _profiled_scale(
+    prob: _Problem, resid: np.ndarray, label: str, *, robust: bool = False
+) -> float:
     """Closed-form noise scale for one label, corrected for degrees of freedom.
 
     The plain maximum-likelihood scale divides by *n* and is biased low, because
@@ -293,6 +322,11 @@ def _profiled_scale(prob: _Problem, resid: np.ndarray, label: str) -> float:
         That label's standardised residuals.
     label : str
         Label being scaled.
+    robust : bool
+        Estimate the scale from the median absolute deviation instead of the
+        root-mean-square. A single bad point inflates the RMS, and since this
+        scale is the denominator of every standardised residual, that hides the
+        very point a screen is looking for.
 
     Returns
     -------
@@ -302,6 +336,9 @@ def _profiled_scale(prob: _Problem, resid: np.ndarray, label: str) -> float:
     n_lbl = len(resid)
     if n_lbl == 0:
         return 1.0
+    if robust:
+        mad = float(np.median(np.abs(resid - np.median(resid))))
+        return max(_MAD_TO_SIGMA * mad, 1e-12)
     p_lbl = 2 * prob.n_curves[label] + prob.n_k * n_lbl / max(prob.n_points, 1)
     dof = max(n_lbl - p_lbl, 1.0)
     return max(float(np.sqrt(np.sum(resid**2) / dof)), 1e-12)
@@ -322,11 +359,12 @@ def _standard_errors(jac: np.ndarray, n_params: int) -> np.ndarray:
     np.ndarray
         Standard error per parameter, NaN where the Jacobian is singular.
     """
+    dense = np.asarray(jac, dtype=float)
     try:
-        _, s, vt = np.linalg.svd(np.asarray(jac, dtype=float), full_matrices=False)
+        _, s, vt = np.linalg.svd(dense, full_matrices=False)
     except np.linalg.LinAlgError:  # pragma: no cover - singular Jacobian
         return np.full(n_params, np.nan)
-    keep = s > np.finfo(float).eps * max(jac.shape) * s[0]
+    keep = s > np.finfo(float).eps * max(dense.shape) * s[0]
     cov = (vt[keep].T / s[keep] ** 2) @ vt[keep]
     out: np.ndarray = np.sqrt(np.clip(np.diag(cov), 0.0, None))
     return out
@@ -338,6 +376,7 @@ def fit_plate_lm(
     *,
     max_iter: int = 6,
     tol: float = 1e-3,
+    loss: Literal["linear", "huber", "soft_l1", "cauchy"] = "linear",
 ) -> PlateLMResult:
     """Fit every well of a plate jointly, profiling one noise scale per label.
 
@@ -351,6 +390,15 @@ def fit_plate_lm(
         Maximum alternations between solving and rescaling.
     tol : float
         Stop when every scale moves by less than this, relatively.
+    loss : Literal["linear", "huber", "soft_l1", "cauchy"]
+        Loss handed to the solver. ``"linear"`` is ordinary least squares.
+        Anything else down-weights large residuals, which matters when the fit
+        is about to be used to *find* outliers: least squares drags the curve
+        toward a bad point, shrinking its own residual and inflating its
+        neighbours', and the profiled scale then inflates too because it is the
+        RMS of those residuals. Screening on such a fit decides with a bent
+        curve and a stretched ruler. With a robust loss the scale is taken from
+        the median absolute deviation for the same reason.
 
     Returns
     -------
@@ -370,13 +418,58 @@ def fit_plate_lm(
             parts.append((y - model) / (yerr * scales[lbl]))
         return np.concatenate(parts) if parts else np.zeros(0)
 
+    n_res = sum(len(y) for *_, y, _ in prob.obs)
+
+    def jacobian(params: np.ndarray) -> np.ndarray:
+        """Exact derivatives of the scaled residuals.
+
+        Each residual block belongs to one (well, label) curve and depends on
+        three parameters only, so the matrix is almost all zeros. Estimating it
+        by finite differences costs one pass over the whole plate per parameter
+        - several hundred passes for a 96-well plate - which is what made the
+        robust losses unusably slow. The closed forms below cost one pass in
+        total and are exact, so the solver also steps better.
+        """
+        jac = np.zeros((n_res, len(params)))
+        row = 0
+        for well, lbl, x, y, yerr in prob.obs:
+            n = len(y)
+            ki, si = prob.kidx[well], prob.sidx[well, lbl]
+            k, s0, s1 = params[ki], params[si], params[si + 1]
+            # Reuse the model itself for the sigmoid, so the overflow-safe
+            # algebra lives in exactly one place.
+            f = binding_1site(x, k, 0.0, 1.0, is_ph=prob.is_ph)
+            dk = (
+                (s1 - s0) * _LN10 * f * (1.0 - f)
+                if prob.is_ph
+                else -(s1 - s0) * f * (1.0 - f) / k
+            )
+            denom = yerr * scales[lbl]
+            block = slice(row, row + n)
+            jac[block, ki] = -dk / denom
+            jac[block, si] = -(1.0 - f) / denom
+            jac[block, si + 1] = -f / denom
+            row += n
+        return jac
+
     fit = None
     for _ in range(max_iter):
-        fit = least_squares(residuals, p, method="trf", bounds=bounds)
+        fit = least_squares(
+            residuals,
+            p,
+            jac=jacobian,
+            method="trf",
+            bounds=bounds,
+            loss=loss,
+            f_scale=_ROBUST_F_SCALE if loss != "linear" else 1.0,
+            max_nfev=None if loss == "linear" else _ROBUST_MAX_NFEV,
+        )
         p = fit.x
         moved = 0.0
         for lbl in prob.labels:
-            new = _profiled_scale(prob, _raw_residuals(prob, p, lbl), lbl)
+            new = _profiled_scale(
+                prob, _raw_residuals(prob, p, lbl), lbl, robust=loss != "linear"
+            )
             moved = max(moved, abs(new - scales[lbl]) / new)
             scales[lbl] = new
         if moved < tol:
@@ -574,3 +667,78 @@ def _k_bounds(n_k: int, n_params: int, *, is_ph: bool) -> tuple[np.ndarray, np.n
     if is_ph:
         hi[:n_k] = _K_MAX_PH
     return lo, hi
+
+
+def fit_plate_lm_screened(
+    datasets: Mapping[str, Any],
+    groups: Mapping[str, Sequence[str]],
+    *,
+    threshold: float = 3.0,
+    min_keep: int = 4,
+) -> PlateLMResult:
+    """Fit, drop points the fit itself calls outliers, refit.
+
+    Geometric masking judges the shape of a raw trace and never sees the fit, so
+    it cannot tell a point that disagrees with the curve from one that merely
+    sits at an extreme of it - which is why, over eleven plates, it changed pKa
+    accuracy not at all. A standardised residual is the quantity that actually
+    says a point is wrong, and it only exists once something has been fitted.
+
+    Two passes, not iterated to convergence: the first pass locates the gross
+    outliers, and repeating the cycle mostly trims the tails of an already
+    clean fit, which is how a screen starts eating real curvature.
+
+    Parameters
+    ----------
+    datasets : Mapping[str, Any]
+        Well identifier to `Dataset`.
+    groups : Mapping[str, Sequence[str]]
+        Control group name to member wells; those wells share one K.
+    threshold : float
+        Standardised-residual magnitude above which a point is dropped.
+    min_keep : int
+        Never leave a label with fewer points than this, whatever their
+        residuals - a curve fitted through three points is not an improvement
+        on one fitted through seven with an outlier in it.
+
+    Returns
+    -------
+    PlateLMResult
+        The refit, carrying the count of dropped observations in
+        ``n_excluded``. When nothing crosses the threshold this is the
+        single-pass fit.
+    """
+    # Robust first pass: the point of this fit is to expose outliers, and
+    # ordinary least squares hides them by bending toward them.
+    first = fit_plate_lm(datasets, groups, loss="huber")
+    drop: dict[tuple[str, str], set[int]] = {}
+    for row in first.residuals:
+        if abs(float(row["std_res"])) > threshold:
+            key = (str(row["well"]), str(row["label"]))
+            drop.setdefault(key, set()).add(int(row["raw_i"]))
+    if not drop:
+        return first
+
+    screened: dict[str, Any] = {}
+    n_excluded = 0
+    for well, ds in datasets.items():
+        arrays = {}
+        for lbl, da in ds.items():
+            bad = drop.get((well, str(lbl)), set())
+            mask = np.asarray(da.mask).copy()
+            if bad:
+                keep = mask.copy()
+                for i in bad:
+                    if 0 <= i < len(keep):
+                        keep[i] = False
+                if int(keep.sum()) >= min_keep:
+                    n_excluded += int(mask.sum() - keep.sum())
+                    mask = keep
+            new = copy.deepcopy(da)
+            new.mask = mask
+            arrays[lbl] = new
+        screened[well] = type(ds)(arrays, is_ph=ds.is_ph)
+
+    out = fit_plate_lm(screened, groups)
+    out.n_excluded = n_excluded
+    return out

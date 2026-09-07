@@ -58,6 +58,12 @@ from clophfit.prtecan.export import (
     generate_combinations,
     prepare_output_folder,
 )
+from clophfit.prtecan.titration import McmcSpec
+
+
+class _StopBayesBuildError(Exception):
+    """Stop a fit once the call has been inspected, without sampling."""
+
 
 # Test data paths
 data_tests = Path(__file__).parent / "Tecan"
@@ -2452,3 +2458,66 @@ def test_bg_adj_lifts_only_traces_that_go_negative() -> None:
     out = one([-10.0, 40.0, 90.0])
     assert out.min() == pytest.approx(0.1 * 100.0)
     assert np.allclose(np.diff(out), np.diff([-10.0, 40.0, 90.0]))
+
+
+def test_structured_noise_reaches_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--mcmc-noise structured` must actually configure the multi-well fit.
+
+    The multi branch called `fit_binding_pymc_multi` without passing `noise` at
+    all, so `--mcmc-noise structured`, `--noise-gain` and `--noise-alpha` were
+    accepted, echoed in the run's configuration, and silently ignored - a whole
+    noise family that could be selected but never took effect.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    spec = McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_samples=10, n_tune=10),
+        structured_noise=True,
+    )
+    datasets = {k: tit.create_global_ds(k) for k in list(tit.fit_keys)[:2]}
+    with pytest.raises(_StopBayesBuildError):
+        export.fit_single_mcmc(tit, datasets, tmp_path, spec)
+    noise = captured.get("noise")
+    assert noise is not None, "noise was never passed to the multi model"
+    assert getattr(noise, "kind", None) == "structured"
+
+
+def test_create_global_ds_honours_mask_outliers() -> None:
+    """One flag, one meaning, whichever entry point builds the dataset.
+
+    ``create_dataset_dict`` applied ``mask_outliers``; ``create_global_ds`` did
+    not. Since ``ppr tecan`` builds its global datasets with the latter, the
+    flag never reached the global, ODR, MCMC or plate fits at all - it was
+    accepted, echoed back, and silently confined to the per-label path. Two
+    builders of the same dataset must not disagree about what the flag means.
+    """
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    tit.params.bg = False
+    tit.params.nrm = True
+    well = min(tit.fit_keys)
+
+    tit.params.mask_outliers = False
+    tit.params.outlier_threshold = 0.2
+    unmasked = tit.create_global_ds(well)
+    n_off = sum(int(np.asarray(da.mask).sum()) for da in unmasked.values())
+
+    tit.params.mask_outliers = True
+    masked = tit.create_global_ds(well)
+    n_on = sum(int(np.asarray(da.mask).sum()) for da in masked.values())
+
+    # Same route as create_dataset_dict takes, so the two must agree.
+    via_dict = tit.create_dataset_dict()[well]
+    n_dict = sum(int(np.asarray(da.mask).sum()) for da in via_dict.values())
+    assert n_on == n_dict, "the two builders disagree about masking"
+    assert n_on <= n_off

@@ -18,6 +18,7 @@ from scipy import stats as sp_stats
 
 from clophfit.clophfit_types import ArrayF
 from clophfit.fitting.bayes import (
+    _DEFAULT_NOISE,
     dataset_with_unit_yerr,
     fit_binding_pymc,
     fit_binding_pymc_multi,
@@ -396,6 +397,9 @@ def fit_single_mcmc(
         # group. Only the per-well results are returned, but the shared trace -
         # which carries the pooled control K, x_true and the ye_mag family - is
         # summarised to disk rather than dropped.
+        # The noise family has to be passed explicitly: omitting it left
+        # --mcmc-noise structured, --noise-gain and --noise-alpha accepted,
+        # echoed back in the run configuration, and silently ignored.
         multi = fit_binding_pymc_multi(
             datasets,
             titration.scheme,
@@ -404,6 +408,11 @@ def fit_single_mcmc(
             ye_mag_parameterization=spec.ye_mag_parameterization,
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
+            noise=(
+                _structured_noise(titration, noise_mode=spec.noise_mode)
+                if spec.structured_noise
+                else _DEFAULT_NOISE
+            ),
         )
         export_trace_summary(getattr(multi, "trace", None), outfit, "multi")
         return TitrationResults(titration.scheme, titration.fit_keys, multi.results)

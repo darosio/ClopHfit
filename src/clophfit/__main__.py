@@ -161,6 +161,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable", "separable_step"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), a per-label level plus one shared well factor (separable), or that plus a per-label pH axis on the noise (separable_step).")  # fmt: skip
 @click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
 @click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
+@click.option("--mcmc-robust-likelihood", type=click.Choice(["student_t", "mixture"], case_sensitive=False), default="student_t", show_default=True, help="Which robust likelihood --mcmc-robust selects: a heavy-tailed student_t, or a Normal/outlier contamination mixture that models the outliers rather than down-weighting them.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
 @click.option("--mcmc-tune", default=None, type=int, help="Tuning draws per chain for --mcmc. Default is mcmc-samples // 2.")  # fmt: skip
@@ -199,6 +200,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     noise_mode: str,
     plate_fit: str | None,
     mcmc_robust: bool,
+    mcmc_robust_likelihood: str,
     student_t_nu: float,
     ctr_free_k: bool,
     mcmc_tune: int | None,
@@ -408,7 +410,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             # nu=0 is the CLI's way of asking for an inferred nu, which the
             # library spells as None.
             robust=RobustConfig(
-                enabled=mcmc_robust, nu=student_t_nu if student_t_nu > 0 else None
+                enabled=mcmc_robust,
+                likelihood=cast(
+                    'Literal["student_t", "mixture"]', mcmc_robust_likelihood
+                ),
+                nu=student_t_nu if student_t_nu > 0 else None,
             ),
             ctr_free_k=ctr_free_k,
             structured_noise=mcmc_noise == "structured",
