@@ -24,7 +24,7 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc_multi,
 )
 from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConfig
-from clophfit.fitting.data_structures import Dataset, FitResult
+from clophfit.fitting.data_structures import Dataset, FitResult, NoiseModelParams
 from clophfit.fitting.diagnostics import detect_bad_wells
 from clophfit.fitting.model_validation import (
     OutlierCriterion,
@@ -705,6 +705,108 @@ def _write_plate_fit_figures(
             plt.close(well_fig)
 
 
+def _plate_noise_model(titration: Titration) -> dict[str, NoiseModelParams] | None:
+    """Per-label floor/gain/alpha, as the classical fitters want it.
+
+    ``Titration`` already assembles this to stamp ``y_errc`` onto a dataset;
+    the plate fitters need the parameters themselves so they can re-evaluate
+    a signal-dependent sigma at the model prediction.
+
+    Parameters
+    ----------
+    titration : Titration
+        Supplies ``bg_noise`` and the configured gain/alpha.
+
+    Returns
+    -------
+    dict[str, NoiseModelParams] | None
+        Label to its noise parameters, or ``None`` when the titration does not
+        carry enough to build one - the fitter then keeps the ``y_err`` already
+        on the datasets, which is the pre-existing behaviour.
+    """
+    data = getattr(titration, "data", None)
+    if not data:
+        return None
+    params = getattr(titration, "params", None)
+    gain = getattr(params, "noise_gain", ()) or ()
+    alpha = getattr(params, "noise_alpha", ()) or ()
+    floors = getattr(titration, "bg_noise", None) or {}
+    return {
+        lbl: NoiseModelParams(
+            sigma_floor=float(floors.get(lbl, 0.0)),
+            gain=gain[i] if i < len(gain) else 0.0,
+            alpha=alpha[i] if i < len(alpha) else 0.0,
+        )
+        for i, lbl in enumerate(sorted(data.keys()))
+    }
+
+
+def _write_plate_residual_diagnostics(
+    result: PlateLMResult | PlateODRResult, outfit: Path, method: str
+) -> None:
+    """Write the three error-model diagnostics for a plate-wide fit.
+
+    These are the plots that say whether the *shape* of the error model is
+    right, which no single summary number does: squared residual against
+    squared sigma for the calibration slope, standardised residual against
+    predicted signal for a trend the model does not carry, and the histogram
+    with its Q-Q plot for the tails.
+
+    Reading them here differs in one way from the per-label path. This fitter
+    profiles a noise scale per label, so a uniform rescaling of ``y_err`` is
+    absorbed into ``ye_mag`` and the calibration slope sits near one by
+    construction. What survives the rescaling is structure - a trend with
+    predicted signal, or tails - and that is exactly what these plots are for.
+    The absolute factor is not lost, it is reported as ``ye_mag``.
+
+    Parameters
+    ----------
+    result : PlateLMResult | PlateODRResult
+        The plate-wide fit, carrying its residual table.
+    outfit : Path
+        Fit output directory.
+    method : str
+        ``"lm"`` or ``"odr"``, naming the outputs.
+    """
+    rows = getattr(result, "residuals", []) or []
+    if not rows:
+        return
+    all_res = pd.DataFrame(rows)
+    needed = {"label", "yhat", "raw_res", "sigma", "std_res"}
+    if not needed.issubset(all_res.columns):
+        logger.warning(
+            "plate %s residuals lack %s; skipping the error-model plots",
+            method,
+            sorted(needed - set(all_res.columns)),
+        )
+        return
+    all_res.to_csv(outfit / f"plate_{method}_residuals.csv", index=False)
+    title = f"plate {method}"
+    figures = [
+        (plot_residual_vs_predicted(all_res, title=title), "residual_vs_predicted"),
+        (plot_residual_distribution(all_res, title=title), "residual_distribution"),
+    ]
+    # res^2 against y_err^2 needs y_err to vary. Under the default error model
+    # it does not: one sigma per label, so every point lands on the same
+    # vertical line and the plot cannot show a slope. It becomes meaningful
+    # once a signal-dependent error model is asked for, which is exactly when
+    # a calibration slope is worth reading.
+    if all_res.groupby("label")["sigma"].nunique().max() > 1:
+        figures.insert(
+            0, (plot_residual_vs_yerr(all_res, title=title), "residual_vs_yerr")
+        )
+    else:
+        logger.info(
+            "plate %s: y_err is constant within each label, so the res^2 vs "
+            "y_err^2 calibration plot carries no slope and is skipped; read "
+            "residual_vs_predicted instead",
+            method,
+        )
+    for fig, name in figures:
+        fig.savefig(outfit / f"plate_{method}_{name}.png", dpi=150)
+        plt.close(fig)
+
+
 def _export_plate_fit_plots(  # ruff: ignore[too-many-arguments]
     titration: Titration,
     datasets: Mapping[str, typing.Any],
@@ -741,6 +843,14 @@ def _export_plate_fit_plots(  # ruff: ignore[too-many-arguments]
         _write_plate_fit_figures(results, outfit, method, png=png)
     except Exception:
         logger.warning("Could not plot the plate %s fit", method, exc_info=True)
+    # Separate try: the error-model diagnostics read only the residual table,
+    # so a failure to render per-well curves must not take them down with it.
+    try:
+        _write_plate_residual_diagnostics(result, outfit, method)
+    except Exception:
+        logger.warning(
+            "Could not plot the plate %s residual diagnostics", method, exc_info=True
+        )
 
 
 def export_plate_fit(
@@ -794,7 +904,13 @@ def export_plate_fit(
             x_err=np.asarray(x_err, dtype=float) if x_err is not None else None,
         )
     else:
-        result = fit_plate_lm(datasets, groups)
+        # Hand the fitter the physical noise model so a signal-dependent y_err
+        # is re-evaluated at the prediction rather than at the observation.
+        # With a flat floor this changes nothing, which is why it is safe to
+        # pass unconditionally.
+        result = fit_plate_lm(
+            datasets, groups, noise_model=_plate_noise_model(titration)
+        )
 
     pooled = {well: name for name, wells in groups.items() for well in wells}
     rows = [

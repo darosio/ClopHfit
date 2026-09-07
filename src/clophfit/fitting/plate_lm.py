@@ -25,17 +25,23 @@ label, which is the structure section 1 found to be the right amount.
 from __future__ import annotations
 
 import copy
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+import pandas as pd
 from scipy import stats as sp_stats
 from scipy.optimize import least_squares
 
+from clophfit.fitting.data_structures import NoiseModelParams
 from clophfit.fitting.models import binding_1site
+from clophfit.fitting.noise_calibration import fit_noise_model_nnls
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "PlateLMResult",
@@ -240,7 +246,9 @@ def _assemble(
     )
 
 
-def _raw_residuals(prob: _Problem, p: np.ndarray, label: str) -> np.ndarray:
+def _raw_residuals(
+    prob: _Problem, p: np.ndarray, label: str, yerrs: Sequence[np.ndarray]
+) -> np.ndarray:
     """Return one label's residuals divided by ``y_err`` only, not by any scale.
 
     Parameters
@@ -251,6 +259,8 @@ def _raw_residuals(prob: _Problem, p: np.ndarray, label: str) -> np.ndarray:
         Current parameter vector.
     label : str
         Label to collect.
+    yerrs : Sequence[np.ndarray]
+        Per-observation y_err, parallel to ``prob.obs``.
 
     Returns
     -------
@@ -258,17 +268,140 @@ def _raw_residuals(prob: _Problem, p: np.ndarray, label: str) -> np.ndarray:
         Standardised residuals for that label.
     """
     parts = []
-    for well, lbl, x, y, yerr in prob.obs:
+    for i, (well, lbl, x, y, _ye) in enumerate(prob.obs):
         if lbl != label:
             continue
         s0, s1 = p[prob.sidx[well, lbl]], p[prob.sidx[well, lbl] + 1]
         model = binding_1site(x, p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
-        parts.append((y - model) / yerr)
+        parts.append((y - model) / yerrs[i])
     return np.concatenate(parts) if parts else np.zeros(0)
 
 
+def _calibrate_noise(
+    prob: _Problem,
+    p: np.ndarray,
+    scales: Mapping[str, float],
+    yerrs: Sequence[np.ndarray],
+    current: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Re-estimate gain and alpha per label from this pass's residuals.
+
+    The plate's own residuals say how the noise grows with signal, so the
+    weights need not be guessed. ``sigma^2 = floor^2 + gain * yhat +
+    (alpha * yhat)^2`` is fitted by non-negative least squares, with the floor
+    pinned to the measured read noise: over a titration's narrow dynamic range
+    ``yhat`` and ``yhat^2`` are close to collinear, and letting all three float
+    trades a real floor against a spurious gain.
+
+    This is the feasible-generalised-least-squares step - estimate the weights
+    from a fit, refit under them - reusing the estimator the per-well FGLS path
+    already uses, so both paths calibrate the same way.
+
+    Parameters
+    ----------
+    prob : _Problem
+        Assembled problem.
+    p : np.ndarray
+        Current parameter vector.
+    scales : Mapping[str, float]
+        Current per-label noise multiplier.
+    yerrs : Sequence[np.ndarray]
+        Per-observation y_err for this pass.
+    current : Mapping[str, Any] | None
+        Noise model in force, supplying the floors to pin.
+
+    Returns
+    -------
+    Mapping[str, Any] | None
+        Recalibrated model, or *current* unchanged when the estimate fails -
+        a plate that cannot support the estimate keeps the weights it had
+        rather than taking a degenerate one.
+    """
+    floors = {
+        lbl: float(getattr(params, "sigma_floor", 0.0))
+        for lbl, params in (current or {}).items()
+    }
+    if not floors:
+        return current
+    table = _residual_table(prob, p, scales, yerrs)
+    if not table:
+        return current
+    df = pd.DataFrame(table)
+    # The estimator keys on label, raw_res and yhat, which the table carries.
+    df["label"] = df["label"].astype(str)
+    try:
+        fitted_floors, gains, alphas = fit_noise_model_nnls(
+            df, sigma_floor_fixed=floors
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        logger.debug("plate noise calibration failed; keeping current weights")
+        return current
+    return {
+        lbl: NoiseModelParams(
+            sigma_floor=fitted_floors.get(lbl, floors.get(lbl, 0.0)),
+            gain=gains.get(lbl, 0.0),
+            alpha=alphas.get(lbl, 0.0),
+        )
+        for lbl in floors
+    }
+
+
+def _reweight(
+    prob: _Problem,
+    p: np.ndarray,
+    yerrs: list[np.ndarray],
+    noise_model: Mapping[str, Any] | None,
+) -> float:
+    """Re-evaluate a signal-dependent y_err at the model prediction.
+
+    ``sigma`` grows with signal as ``sqrt(floor^2 + gain*y + (alpha*y)^2)``, and
+    evaluating that at the *observed* y makes a point's own noise set its own
+    weight: a downward fluctuation is trusted more than an upward one, which
+    drags the curve down. Evaluating at the prediction breaks that feedback.
+    The weights are held fixed within a solve and refreshed here between
+    solves, which is the ordinary iteratively-reweighted arrangement.
+
+    Does nothing without a noise model, and nothing when the model is a flat
+    floor, since then the prediction cannot change the answer.
+
+    Parameters
+    ----------
+    prob : _Problem
+        Assembled problem.
+    p : np.ndarray
+        Current parameter vector.
+    yerrs : list[np.ndarray]
+        Per-observation y_err, updated in place.
+    noise_model : Mapping[str, Any] | None
+        Label to an object with ``compute_y_err``.
+
+    Returns
+    -------
+    float
+        Largest relative change in y_err, so the caller can fold it into its
+        own convergence test.
+    """
+    if noise_model is None:
+        return 0.0
+    moved = 0.0
+    for i, (well, lbl, x, _y, _ye) in enumerate(prob.obs):
+        params = noise_model.get(lbl)
+        if params is None:
+            continue
+        s0, s1 = p[prob.sidx[well, lbl]], p[prob.sidx[well, lbl] + 1]
+        yhat = binding_1site(x, p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
+        new = np.asarray(params.compute_y_err(yhat), dtype=float)
+        new = np.where(np.isfinite(new) & (new > 0), new, yerrs[i])
+        moved = max(moved, float(np.max(np.abs(new - yerrs[i]) / new)))
+        yerrs[i][:] = new
+    return moved
+
+
 def _residual_table(
-    prob: _Problem, p: np.ndarray, scales: Mapping[str, float]
+    prob: _Problem,
+    p: np.ndarray,
+    scales: Mapping[str, float],
+    yerrs: Sequence[np.ndarray],
 ) -> list[dict[str, Any]]:
     """Flatten the fit into the canonical residual table the metrics expect.
 
@@ -280,6 +413,8 @@ def _residual_table(
         Parameter vector at the solution.
     scales : Mapping[str, float]
         Profiled noise multiplier per label.
+    yerrs : Sequence[np.ndarray]
+        Per-observation y_err, parallel to ``prob.obs``.
 
     Returns
     -------
@@ -289,7 +424,10 @@ def _residual_table(
         shift the numbering of the ones that survive.
     """
     rows: list[dict[str, Any]] = []
-    for (well, lbl, x, y, yerr), raw_idx in zip(prob.obs, prob.raw_i, strict=True):
+    for i, ((well, lbl, x, y, _ye), raw_idx) in enumerate(
+        zip(prob.obs, prob.raw_i, strict=True)
+    ):
+        yerr = yerrs[i]
         s0, s1 = p[prob.sidx[well, lbl]], p[prob.sidx[well, lbl] + 1]
         model = binding_1site(x, p[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
         sigma = yerr * scales[lbl]
@@ -381,7 +519,7 @@ def _standard_errors(jac: np.ndarray, n_params: int) -> np.ndarray:
 
 
 def _residual_fn(
-    prob: _Problem, scales: Mapping[str, float]
+    prob: _Problem, scales: Mapping[str, float], yerrs: Sequence[np.ndarray]
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Build the scaled-residual function for one plate problem.
 
@@ -391,6 +529,9 @@ def _residual_fn(
         Assembled plate problem.
     scales : Mapping[str, float]
         Current per-label noise scale.
+    yerrs : Sequence[np.ndarray]
+        Per-observation y_err, parallel to ``prob.obs``. Held separately from
+        the problem so a signal-dependent model can reweight between passes.
 
     Returns
     -------
@@ -400,17 +541,17 @@ def _residual_fn(
 
     def residuals(params: np.ndarray) -> np.ndarray:
         parts = []
-        for well, lbl, x, y, yerr in prob.obs:
+        for i, (well, lbl, x, y, _ye) in enumerate(prob.obs):
             s0, s1 = params[prob.sidx[well, lbl]], params[prob.sidx[well, lbl] + 1]
             model = binding_1site(x, params[prob.kidx[well]], s0, s1, is_ph=prob.is_ph)
-            parts.append((y - model) / (yerr * scales[lbl]))
+            parts.append((y - model) / (yerrs[i] * scales[lbl]))
         return np.concatenate(parts) if parts else np.zeros(0)
 
     return residuals
 
 
 def _jacobian_fn(
-    prob: _Problem, scales: Mapping[str, float]
+    prob: _Problem, scales: Mapping[str, float], yerrs: Sequence[np.ndarray]
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Build the exact Jacobian of the scaled residuals.
 
@@ -427,19 +568,29 @@ def _jacobian_fn(
         Assembled plate problem.
     scales : Mapping[str, float]
         Current per-label noise scale.
+    yerrs : Sequence[np.ndarray]
+        Per-observation y_err, parallel to ``prob.obs``.
 
     Returns
     -------
     Callable[[np.ndarray], np.ndarray]
         Jacobian, one row per residual.
+
+    Notes
+    -----
+    When y_err is reweighted on the model prediction it depends on the
+    parameters, and these derivatives treat it as fixed. That is the standard
+    iteratively-reweighted step: the weights are held constant within a pass
+    and updated between passes, so the fixed point is the same and only the
+    path to it differs.
     """
     n_res = sum(len(y) for *_, y, _ in prob.obs)
 
     def jacobian(params: np.ndarray) -> np.ndarray:
         jac = np.zeros((n_res, len(params)))
         row = 0
-        for well, lbl, x, y, yerr in prob.obs:
-            n = len(y)
+        for i, (well, lbl, x, y, _ye) in enumerate(prob.obs):
+            n, yerr = len(y), yerrs[i]
             ki, si = prob.kidx[well], prob.sidx[well, lbl]
             k, s0, s1 = params[ki], params[si], params[si + 1]
             # Reuse the model itself for the sigmoid, so the overflow-safe
@@ -461,13 +612,15 @@ def _jacobian_fn(
     return jacobian
 
 
-def fit_plate_lm(
+def fit_plate_lm(  # ruff: ignore[too-many-arguments]
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
     *,
     max_iter: int = 6,
     tol: float = 1e-3,
     loss: Literal["linear", "huber", "soft_l1", "cauchy"] = "linear",
+    noise_model: Mapping[str, Any] | None = None,
+    calibrate_noise: bool = False,
 ) -> PlateLMResult:
     """Fit every well of a plate jointly, profiling one noise scale per label.
 
@@ -490,6 +643,16 @@ def fit_plate_lm(
         RMS of those residuals. Screening on such a fit decides with a bent
         curve and a stretched ruler. With a robust loss the scale is taken from
         the median absolute deviation for the same reason.
+    noise_model : Mapping[str, Any] | None
+        Per-label noise parameters. When given, a signal-dependent ``y_err`` is
+        re-evaluated at the model prediction between passes instead of being
+        taken at the observation, where a point's own fluctuation would set its
+        own weight. A flat floor makes this a no-op.
+    calibrate_noise : bool
+        Estimate ``gain`` and ``alpha`` per label from each pass's residuals,
+        floor pinned, and refit under the result. Off by default: it describes
+        the residuals better and fits K worse, because down-weighting
+        high-signal points down-weights the plateaus that pin S0 and S1.
 
     Returns
     -------
@@ -501,9 +664,10 @@ def fit_plate_lm(
     p = prob.p0
     bounds = _k_bounds(prob.n_k, len(p), is_ph=prob.is_ph)
 
-    residuals = _residual_fn(prob, scales)
+    yerrs = [np.array(ye, dtype=float, copy=True) for *_, ye in prob.obs]
+    residuals = _residual_fn(prob, scales, yerrs)
 
-    jacobian = _jacobian_fn(prob, scales)
+    jacobian = _jacobian_fn(prob, scales, yerrs)
 
     fit = None
     for _ in range(max_iter):
@@ -518,10 +682,15 @@ def fit_plate_lm(
             max_nfev=None if loss == "linear" else _ROBUST_MAX_NFEV,
         )
         p = fit.x
-        moved = 0.0
+        if calibrate_noise:
+            noise_model = _calibrate_noise(prob, p, scales, yerrs, noise_model)
+        moved = _reweight(prob, p, yerrs, noise_model)
         for lbl in prob.labels:
             new = _profiled_scale(
-                prob, _raw_residuals(prob, p, lbl), lbl, robust=loss != "linear"
+                prob,
+                _raw_residuals(prob, p, lbl, yerrs),
+                lbl,
+                robust=loss != "linear",
             )
             moved = max(moved, abs(new - scales[lbl]) / new)
             scales[lbl] = new
@@ -536,7 +705,7 @@ def fit_plate_lm(
     )
     if fit is None:
         return result
-    result.residuals = _residual_table(prob, p, scales)
+    result.residuals = _residual_table(prob, p, scales, yerrs)
     err = _standard_errors(np.asarray(fit.jac, dtype=float), len(p))
     for well in datasets:
         result.k[well] = float(p[prob.kidx[well]])
@@ -555,13 +724,14 @@ def fit_plate_lm(
     return result
 
 
-def profile_k_intervals(
+def profile_k_intervals(  # ruff: ignore[too-many-arguments]
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
     wells: Sequence[str],
     *,
     level: float = 0.94,
     loss: Literal["linear", "huber", "soft_l1", "cauchy"] = "linear",
+    noise_model: Mapping[str, Any] | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Profile-likelihood interval on K, for wells the quadratic error fails.
 
@@ -589,6 +759,10 @@ def profile_k_intervals(
         Interval mass, 0.94 to match the HDI this project reports elsewhere.
     loss : Literal["linear", "huber", "soft_l1", "cauchy"]
         Loss for the refits; use the one the reported fit used.
+    noise_model : Mapping[str, Any] | None
+        Signal-dependent noise model, if the reported fit used one. The
+        profile has to weight the data the same way the fit did or its
+        criterion refers to a different likelihood.
 
     Returns
     -------
@@ -598,12 +772,15 @@ def profile_k_intervals(
         data does not bound K on that side, which is the honest answer and the
         one a standard error cannot express.
     """
-    base = fit_plate_lm(datasets, groups, loss=loss)
+    base = fit_plate_lm(datasets, groups, loss=loss, noise_model=noise_model)
     prob = _assemble(datasets, groups)
     scales = base.ye_mag
-    residuals = _residual_fn(prob, scales)
-    jacobian = _jacobian_fn(prob, scales)
-    p_hat = np.asarray(_params_from(base, prob), dtype=float)
+    p_base = np.asarray(_params_from(base, prob), dtype=float)
+    yerrs = [np.array(ye, dtype=float, copy=True) for *_, ye in prob.obs]
+    _reweight(prob, p_base, yerrs, noise_model)
+    residuals = _residual_fn(prob, scales, yerrs)
+    jacobian = _jacobian_fn(prob, scales, yerrs)
+    p_hat = p_base
     lo_b, hi_b = _k_bounds(prob.n_k, len(p_hat), is_ph=prob.is_ph)
     # 2 * cost is the sum of squared residuals, so the usual chi-square
     # threshold on one profiled parameter applies directly.
