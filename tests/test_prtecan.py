@@ -1450,8 +1450,11 @@ class TestTitrationAnalysis:
         ("folder", "expected"),
         [
             ("140220", []),
-            # L2: B03 fails label 1 only, so it is kept single-label.
-            ("L2", []),
+            # L2: C05 has no usable label. Its 400 nm channel is dim and its
+            # 485 nm channel swings 1.7 read-noise widths, which is a drift
+            # rather than a titration - the fit puts K at 7.138 +- 254 pH.
+            # B03 fails label 1 only, so it is kept single-label.
+            ("L2", ["C05"]),
             # L4: G12 fails every label, so there is nothing left to fit.
             ("L4", ["G12"]),
         ],
@@ -1908,6 +1911,23 @@ class TestSigmaFloorOverride:
             titan.bg_noise[labels[0]], rel=1e-6
         )
         assert titan.bg_noise[labels[0]] > titan.bg_read_noise[labels[0]]
+
+    def test_the_override_reaches_the_plate_fit_noise_model(self) -> None:
+        """The plate fitters must use the same floor as everything else.
+
+        ``_plate_noise_model`` read ``bg_noise`` directly, so a supplied
+        ``--noise-floor`` reached y_err, the FGLS calibration and the sampler
+        but silently not ``--plate-fit`` -- the one fitter that re-evaluates a
+        signal-dependent sigma at its own prediction, and so the one where the
+        floor matters most.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        model = export._plate_noise_model(titan)  # ruff: ignore[private-member-access]
+        assert model is not None
+        assert model[labels[0]].sigma_floor == pytest.approx(3.59)
+        assert model[labels[1]].sigma_floor == pytest.approx(0.42)
 
     def test_the_override_reaches_the_structured_mcmc_noise(self) -> None:
         """And the sampler's floor hint, which is the other consumer."""
@@ -2708,3 +2728,111 @@ def test_create_global_ds_honours_mask_outliers() -> None:
     n_dict = sum(int(np.asarray(da.mask).sum()) for da in via_dict.values())
     assert n_on == n_dict, "the two builders disagree about masking"
     assert n_on <= n_off
+
+
+class TestDimLabelExemption:
+    """A dim second channel is only uninformative when its curve is noise-shaped.
+
+    Every well on these plates has a dim 400 nm channel by construction, so
+    dimness alone cannot condemn a well. The question is whether the channel
+    still traces a titration. The arrays below are the measured 485 nm curves of
+    two wells on plate L8, both dim, adjudicated opposite ways by the reviewer:
+    H11 is kept and E12 discarded.
+    """
+
+    X = np.array([8.97, 8.28, 7.53, 6.97, 6.19, 5.62])
+    BG_NOISE = 1.0099
+    # H11: monotone 5.0 -> -1.2, no point masked, K resolved to sK = 0.193.
+    H11_RAW = np.array([5.00, 4.06, 2.04, 0.44, -0.48, -1.23])
+    H11_MASKED = H11_RAW
+    # E12: spikes to 22.8 then decays; outlier masking keeps only three points.
+    E12_RAW = np.array([-0.78, -0.64, 22.84, 11.04, 6.61, 4.49])
+    E12_MASKED = np.array([-0.78, -0.64, 4.49])
+
+    def test_a_dim_but_monotone_channel_still_carries_k(self) -> None:
+        """H11 is dim yet fits K to 0.193 pH, so it must not be failed."""
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            self.H11_MASKED,
+            self.H11_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_dim_and_noise_shaped_channel_is_failed(self) -> None:
+        """E12 turns over mid-curve, which no single-pKa titration does."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            self.E12_MASKED,
+            self.E12_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_turnover_is_judged_before_masking(self) -> None:
+        """The mask protects the fit; the screen has to see what it removed.
+
+        Masking E12 deletes the very spike that proves the channel is noise. Run
+        the shape test on the masked curve instead and E12 reads as clean.
+        """
+        assert not prtecan.titration.label_is_uninformative(
+            self.X[:3],
+            self.E12_MASKED,
+            self.E12_MASKED,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_bright_channel_is_never_failed(self) -> None:
+        """Brightness settles it: no shape test is applied above the floor."""
+        bright = self.E12_RAW * 100.0
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            bright,
+            bright,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_no_exemption_without_a_turnover_limit(self) -> None:
+        """Label 1 gets no exemption: its acid turnover is real, not a defect."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            self.H11_MASKED,
+            self.H11_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=None,
+        )
+
+    def test_too_few_points_is_uninformative(self) -> None:
+        """One surviving point cannot describe a titration."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X[:1],
+            np.array([5.0]),
+            np.array([5.0]),
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_monotone_drift_below_the_read_noise_is_not_a_titration(self) -> None:
+        """Monotone is not enough; the curve has to move further than the noise.
+
+        This is L4 G12 as bundled: a clean monotone drift of 3.2 counts against a
+        read noise of 4.0. H11 is kept on a swing of 6.2 against a noise of 1.0,
+        six widths against this one's less than one.
+        """
+        drift = np.array([-2.64, -2.53, -1.64, -0.78, -0.20, 0.26, 0.61])
+        assert prtecan.titration.label_is_uninformative(
+            np.linspace(9.0, 5.0, 7),
+            drift,
+            drift,
+            floor=4.0405,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )

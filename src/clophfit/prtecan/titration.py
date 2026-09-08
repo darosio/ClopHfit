@@ -28,6 +28,7 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
     ResidualsMixin,
 )
+from clophfit.fitting.diagnostics import curve_turnover
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.model_validation import (
     RESIDUAL_TABLE_COLUMNS,
@@ -80,6 +81,80 @@ _PH_K_MAX: float = 11.0
 # same law at a decade per 38.3 (r = 0.906). The two agree to 12%, which is why
 # a floor quoted at one Gain can be moved to another at all.
 _FLOOR_GAIN_DECADE = 34.1
+
+
+_MIN_TITRATION_POINTS = 2
+# A dim channel is exempted from failing when its curve turns over by no more
+# than this fraction of its own range - i.e. when it is still monotone within
+# noise. Measured on L8: the kept well H11 scores 0.000, the discarded E12 0.777.
+_MONOTONE_TURNOVER = 0.2
+# ... and it must actually move: the swing of a dim channel has to clear this
+# many read-noise widths. L4 G12 swings 1.2 widths and is discarded, while the
+# dimmest well kept anywhere swings 2.8.
+_MIN_AMPLITUDE_RATIO = 2.0
+
+
+def label_is_uninformative(  # ruff: ignore[too-many-arguments] - four independent thresholds, each named
+    x: ArrayF,
+    y_masked: ArrayF,
+    y_raw: ArrayF,
+    *,
+    floor: float,
+    bg_multiplier: float,
+    turnover_limit: float | None,
+) -> bool:
+    """Whether one label of one well carries no usable titration.
+
+    Dimness alone does not condemn a channel. Every well here has a dim 400 nm
+    channel by construction, and a 485 nm channel can sit only a few counts
+    above background and still trace a clean titration - L8 H11 runs 5.0 to -1.2
+    and pins K to 0.193 pH. What makes a dim channel useless is its curve being
+    noise-shaped: a single-pKa titration is monotone, so an interior turnover is
+    evidence there is no titration to fit.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant axis, matching *y_raw*.
+    y_masked : ArrayF
+        Signal after outlier masking, used for the brightness test.
+    y_raw : ArrayF
+        Signal before masking, used for the shape test. The mask exists to
+        protect the fit from a bad point, so screening the masked curve would
+        delete the very evidence the screen is looking for: masking L8 E12
+        removes the spike to 22.8 that proves its channel is noise.
+    floor : float
+        Read-noise scatter for this label, i.e. ``bg_noise``.
+    bg_multiplier : float
+        Multiples of *floor* the masked mean must reach.
+    turnover_limit : float | None
+        Largest turnover a dim channel may show and still count as informative.
+        ``None`` disables the exemption, which is right for label 1: its acid
+        turnover is a real feature of the fluorophore in roughly 60% of wells,
+        so monotonicity says nothing there.
+
+    Returns
+    -------
+    bool
+        True when the label carries no usable titration.
+    """
+    valid = y_masked[~np.isnan(y_masked)]
+    if len(valid) < _MIN_TITRATION_POINTS:
+        return True
+    if float(np.nanmean(valid)) >= bg_multiplier * floor:
+        return False
+    if turnover_limit is None:
+        return True
+    # Monotone is not enough: a drift smaller than the read noise is a random
+    # walk, not a titration. L8 H11 swings 6.2 counts against a floor of 1.0 and
+    # fits K; L4 G12 swings 3.2 against a floor of 4.0 and does not.
+    finite = y_raw[~np.isnan(y_raw)]
+    if len(finite) < _MIN_TITRATION_POINTS:
+        return True
+    amplitude = float(np.nanmax(finite) - np.nanmin(finite))
+    if amplitude < _MIN_AMPLITUDE_RATIO * floor:
+        return True
+    return float(curve_turnover(x, y_raw)) > turnover_limit
 
 
 def _interaction_rms(values: ArrayF) -> float:
@@ -921,6 +996,7 @@ class Titration(TecanfilesGroup):
         outlier_threshold: float | None = 0.2,
         bg_multiplier: float | None = 3.0,
         max_k_stderr: float | None = None,
+        monotone_turnover: float | None = _MONOTONE_TURNOVER,
     ) -> list[str]:
         """Detect and discard bad wells from masked per-label signal quality.
 
@@ -930,11 +1006,13 @@ class Titration(TecanfilesGroup):
         background-derived floor. The floor uses ``bg_err`` when available and
         falls back to ``bg_noise``.
 
-        A signal test alone cannot catch a well that is bright but
-        uninformative. On L2, C05 has ample signal and a meaningless titration -
-        K = 7.138 +- 254 pH - and survives every ``bg_multiplier`` from 2.0 to
-        4.0, all of which discard the same single well. So a fit-quality test
-        runs alongside it: fit the well and ask how well K is pinned.
+        The signal test asks two things of a dim label, not one: that it clears
+        the background, and failing that, that its curve still moves further
+        than the read noise and moves monotonically. The second question is what
+        separates a faint titration from a drift - L8 H11 swings six noise
+        widths and pins K to 0.193 pH, while L2 C05 swings 1.7 and puts K at
+        7.138 +- 254 pH. A fit-quality test still runs alongside, for a well
+        that is bright and uninformative, which no signal test can reach.
 
         The smoothness, roughness and trendline criteria that used to sit here
         were removed. They were disabled by default, no caller ever passed them,
@@ -956,6 +1034,10 @@ class Titration(TecanfilesGroup):
             the scale-free form of the rule: a well whose midpoint cannot be
             located inside the window actually titrated carries no information
             about K, however bright it is. Pass ``math.inf`` to disable.
+        monotone_turnover : float | None
+            Largest turnover a dim label past the first may show and still count
+            as informative. ``None`` disables the exemption, restoring the rule
+            that any dim label fails.
 
         Returns
         -------
@@ -994,23 +1076,32 @@ class Titration(TecanfilesGroup):
                 if outlier_threshold is not None:
                     ds = apply_outlier_mask(ds, threshold=outlier_threshold)
                 y = np.asarray(ds[str(label)].y, dtype=float)
-                valid_y = y[~np.isnan(y)]
-                if len(valid_y) < 2:  # ruff: ignore[magic-value-comparison]
+                if len(y[~np.isnan(y)]) < _MIN_TITRATION_POINTS:
                     failed_labels.add(str(label))
                     continue
-
-                if bg_multiplier is not None:
-                    floor_values = self.bg_err.get(label)
-                    if floor_values is None or np.asarray(floor_values).size == 0:
-                        floor = self.bg_noise.get(label)
-                    else:
-                        floor = float(np.nanmean(np.asarray(floor_values, dtype=float)))
-
-                    if floor is not None and (
-                        np.isfinite(floor)
-                        and float(np.nanmean(valid_y)) < bg_multiplier * floor
-                    ):
-                        failed_labels.add(str(label))
+                if bg_multiplier is None:
+                    continue
+                # The read scatter, not bg_err. With --bg-mth fit, bg_err is the
+                # standard error of the fitted background - a precision of the
+                # mean - and comparing a well's signal to three of those asks
+                # the wrong question. It is also far smaller, which made this
+                # rule discard nothing on any of eleven plates.
+                floor = self.bg_noise.get(label)
+                if floor is None or not np.isfinite(floor):
+                    continue
+                if label_is_uninformative(
+                    np.asarray(self.x, dtype=float),
+                    y,
+                    np.asarray(self.data[label].get(well, y), dtype=float),
+                    floor=float(floor),
+                    bg_multiplier=bg_multiplier,
+                    # Label 1 turns over in acid for real, so it gets no
+                    # exemption; a dim label 2 that is still monotone does.
+                    turnover_limit=(
+                        None if str(label) == str(label_ids[0]) else monotone_turnover
+                    ),
+                ):
+                    failed_labels.add(str(label))
 
             discard_well = failed_labels >= {str(i) for i in label_ids}
             if not discard_well and failed_labels:
