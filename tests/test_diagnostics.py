@@ -1,9 +1,10 @@
 """Tests for clophfit.fitting.diagnostics."""
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from clophfit.fitting.diagnostics import detect_bad_wells
+from clophfit.fitting.diagnostics import curve_turnover, detect_bad_wells, screen_wells
 
 
 @pytest.fixture
@@ -255,3 +256,225 @@ def test_ctr_cols_k_stats_use_samples_only() -> None:
     assert not flags[flags["well"] == "A01"].iloc[0]["flag_any"]
     # E02 is a sample outlier — must be flagged
     assert flags[flags["well"] == "E02"].iloc[0]["flag_k_outlier"]
+
+
+class TestCurveTurnover:
+    """``curve_turnover``: how far a curve comes back down from its own peak.
+
+    The 400 nm neutral-form channel does not fall monotonically with pH -- it
+    turns over at the acid end. Any rule that infers a channel's direction from
+    its endpoints is therefore wrong on those wells, which is how a
+    plate-by-plate direction test produced 44 phantom "inverted" wells whose
+    maxima were simply interior.
+
+    The measure is the smaller of the two drops from the peak, over the
+    observed range. A monotone curve has its peak at an end, so one drop is
+    zero and so is the metric; a genuine interior peak scores by how far it
+    returns on the side it need not. Normalising by the range rather than by
+    the peak keeps it meaningful when the signal is negative, which it is on
+    the dimmest wells.
+    """
+
+    @staticmethod
+    def _x() -> np.ndarray:
+        return np.array([5.0, 6.0, 7.0, 8.0, 9.0])
+
+    def test_monotone_decreasing_curve_has_no_turnover(self) -> None:
+        """A healthy label-1 curve falls across the range and scores zero."""
+        y = np.array([1000.0, 800.0, 500.0, 200.0, 100.0])
+        assert curve_turnover(self._x(), y) == pytest.approx(0.0)
+
+    def test_monotone_increasing_curve_has_no_turnover(self) -> None:
+        """A healthy label-2 curve rises across the range and scores zero."""
+        y = np.array([100.0, 200.0, 500.0, 800.0, 1000.0])
+        assert curve_turnover(self._x(), y) == pytest.approx(0.0)
+
+    def test_symmetric_peak_scores_one(self) -> None:
+        """A curve returning fully to both ends is entirely turnover."""
+        y = np.array([100.0, 500.0, 1000.0, 500.0, 100.0])
+        assert curve_turnover(self._x(), y) == pytest.approx(1.0)
+
+    def test_acid_turnover_is_measured_against_the_shallower_side(self) -> None:
+        """L4/G01: rises 640 -> 1570, returns to 1130. 440/930 of its range."""
+        x = np.array([5.0, 6.0, 7.08, 8.0, 8.97])
+        y = np.array([640.0, 1050.0, 1570.0, 1300.0, 1130.0])
+        assert curve_turnover(x, y) == pytest.approx(440.0 / 930.0, rel=1e-6)
+
+    def test_a_rising_curve_that_barely_dips_scores_low(self) -> None:
+        """L4/E05 is concordant with label 2, not peaked: 90/1838 of its range."""
+        x = np.array([5.0, 6.0, 7.0, 8.32, 8.97])
+        y = np.array([132.0, 600.0, 1200.0, 1970.0, 1880.0])
+        assert curve_turnover(x, y) == pytest.approx(90.0 / 1838.0, rel=1e-6)
+
+    def test_negative_signals_do_not_break_the_metric(self) -> None:
+        """L2/B03's label 1 sits below zero; normalising by range keeps it finite."""
+        y = np.array([-8.9, -6.0, -11.5, -13.0, -2.5])
+        got = curve_turnover(self._x(), y)
+        assert np.isfinite(got)
+        assert 0.0 <= got <= 1.0
+
+    def test_unsorted_x_is_handled(self) -> None:
+        """Tecan files store pH descending; the metric must not depend on order."""
+        x = np.array([9.0, 8.0, 7.0, 6.0, 5.0])
+        y = np.array([100.0, 500.0, 1000.0, 500.0, 100.0])
+        assert curve_turnover(x, y) == pytest.approx(1.0)
+
+    def test_a_flat_curve_has_no_turnover(self) -> None:
+        """A dead channel has no range, so there is nothing to come back from."""
+        y = np.full(5, 42.0)
+        assert curve_turnover(self._x(), y) == pytest.approx(0.0)
+
+
+class TestScreenWells:
+    """``screen_wells``: quality signatures read from the data, before any fit.
+
+    Every badly-fitted well in the eleven-plate campaign has a dim 485 nm
+    channel -- all 55 with sK/K > 0.3, without exception -- so a poor fit is a
+    consequence of weak signal and the signal can be read directly. Screening
+    first therefore avoids having to fit a well to learn whether it was worth
+    fitting.
+
+    Quality is judged on the 485 nm anion channel, not the 400 nm neutral one.
+    Label 1's amplitude varies for reasons that are properties of the construct
+    rather than faults -- it turns over at the acid end in 60% of wells -- and
+    on adjudicated data a label-1 brightness rule cost roughly half the
+    precision for no extra recall.
+
+    The amplitude is the upper quartile against the *background level* the
+    signal sits on. Against the level rather than its scatter, because the
+    ratio is then dimensionless and needs no per-plate normalisation across a
+    campaign whose plate brightness spans fifteenfold; the upper quartile
+    rather than the maximum, because a single spike put a dead well (L5a E12,
+    label 2 reading 4.5, 12, 21, 11, 1, 0.5) above a maximum-based threshold.
+    """
+
+    @staticmethod
+    def _ph() -> np.ndarray:
+        return np.array([5.0, 6.0, 7.0, 8.0, 9.0])
+
+    def _well(self, y1: list[float], y2: list[float]) -> dict[str, dict[str, object]]:
+        return {"A01": {"1": np.array(y1, dtype=float), "2": np.array(y2, dtype=float)}}
+
+    def test_a_healthy_well_is_not_flagged(self) -> None:
+        """Label 1 falls, label 2 rises well above background: nothing fires."""
+        wells = self._well([900, 800, 500, 200, 100], [100, 200, 500, 800, 900])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert not row["flag_low_signal"]
+        assert not row["flag_concordant"]
+        assert not row["flag_flat_curve"]
+
+    def test_a_channel_near_its_background_is_flagged(self) -> None:
+        """The 485 nm upper quartile below twice its background is too dim."""
+        wells = self._well([900, 800, 500, 200, 100], [8, 9, 10, 11, 12])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert bool(row["flag_low_signal"])
+
+    def test_the_ratio_is_dimensionless_so_plate_brightness_cancels(self) -> None:
+        """Scaling signal and background together must not change the verdict.
+
+        This is what lets one threshold serve plates whose brightness spans
+        fifteenfold without a per-plate percentile.
+        """
+        dim = self._well([90, 80, 50, 20, 10], [10, 20, 50, 80, 90])
+        bright = self._well(
+            [9000, 8000, 5000, 2000, 1000], [1000, 2000, 5000, 8000, 9000]
+        )
+        a = (
+            screen_wells(dim, self._ph(), bg_level={"1": 1.0, "2": 1.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        b = (
+            screen_wells(bright, self._ph(), bg_level={"1": 100.0, "2": 100.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert bool(a["flag_low_signal"]) == bool(b["flag_low_signal"])
+        assert a["signal_ratio_2"] == pytest.approx(b["signal_ratio_2"])
+
+    def test_a_single_spike_does_not_rescue_a_dead_channel(self) -> None:
+        """One bright point must not lift a flat channel over the threshold.
+
+        The maximum is not a safe amplitude: a channel sitting at background
+        with a single excursion has a healthy-looking maximum. The upper
+        quartile ignores it.
+
+        Note this does not rescue every such well -- L5a E12 reads
+        4.5/12/21/11/1/0.5, whose upper quartile is still 11.75, or 3.6x its
+        background. Wells that are noisy rather than flat need the fit to
+        expose them, which is what ``sK/K`` is for.
+        """
+        wells = self._well([900, 800, 500, 200, 100], [10, 11, 10, 11, 60])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        # max would be 60 -> 6.0x and pass; the upper quartile is 11 -> 1.1x.
+        assert row["signal_ratio_2"] == pytest.approx(1.1)
+        assert bool(row["flag_low_signal"])
+
+    def test_quality_is_judged_on_label_2_not_label_1(self) -> None:
+        """A dim 400 nm channel beside a healthy 485 nm one is not a bad well.
+
+        L6b F04 is exactly this: label 1 at 0.02x its background while label 2
+        titrates, and the reviewer kept the well with only label 1 excluded.
+        """
+        wells = self._well([1, 1, 1, 1, 1], [100, 200, 500, 800, 900])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 50.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert not row["flag_low_signal"]
+        assert bool(row["flag_low_signal_1"])
+
+    def test_concordant_labels_are_flagged(self) -> None:
+        """Both channels moving together is notable: they should be opposed.
+
+        The neutral form falls with pH as the anion rises, so a healthy well is
+        strongly anti-correlated -- median -0.955 across the campaign. This
+        needs no direction test on either channel alone, which is what the old
+        inverted-curve check could not survive.
+        """
+        wells = self._well([100, 200, 500, 800, 900], [100, 200, 500, 800, 900])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert bool(row["flag_concordant"])
+
+    def test_a_flat_channel_is_flagged_but_is_not_low_signal(self) -> None:
+        """Flatness and dimness are different questions and must not collapse.
+
+        They were one Series under two names, which is why a flat but bright
+        channel and a dim one were indistinguishable.
+        """
+        wells = self._well([500, 500, 501, 500, 499], [100, 200, 500, 800, 900])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert bool(row["flag_flat_curve_1"])
+        assert not row["flag_low_signal"]
+
+    def test_turnover_is_reported_per_label(self) -> None:
+        """The acid turnover is a property worth carrying, not a fault."""
+        wells = self._well([100, 500, 1000, 500, 100], [100, 200, 500, 800, 900])
+        row = (
+            screen_wells(wells, self._ph(), bg_level={"1": 10.0, "2": 10.0})
+            .set_index("well")
+            .loc["A01"]
+        )
+        assert row["turnover_1"] == pytest.approx(1.0)
+        assert row["turnover_2"] == pytest.approx(0.0)
