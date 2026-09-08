@@ -794,12 +794,26 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
     fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
     assert any(fit_dir.glob("residuals_*.csv")), "residuals CSV missing"
     assert any(fit_dir.glob("residual_stats_*.csv")), "residual_stats CSV missing"
-    # Bad-well CSV written by default
-    assert (fit_dir / "bad_wells.csv").exists(), "bad_wells.csv missing"
+    # Screening output lands in fit/ beside the other per-run artefacts, and
+    # replaces bad_wells.csv, which flagged 88 of 88 wells on a real plate
+    # because it ORed a polarity test across two channels that move oppositely
+    # by design.
+    assert (fit_dir / "atypical_wells.csv").exists(), "atypical_wells.csv missing"
+    assert (fit_dir / "discarded_wells.txt").exists(), "discarded_wells.txt missing"
+    assert not (fit_dir / "bad_wells.csv").exists(), "bad_wells.csv is retired"
+    # Highlighted wells ride along in the discard list under a heading per
+    # reason, so one file answers "what happened to my wells, and why" without
+    # a join. Empty reasons are omitted rather than shown bare.
+    text = (fit_dir / "discarded_wells.txt").read_text()
+    headings = [ln for ln in text.splitlines() if ln.startswith("#")]
+    assert headings, "no reason headings written"
+    assert all(
+        h.lstrip("# ") in {"low_signal", "concordant", "flat_curve"} for h in headings
+    ), f"unexpected heading in {headings}"
 
 
 def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
-    """When detect_bad=False, bad_wells.csv and discarded_wells.txt must not be written."""
+    """When detect_bad=False, no screening output is written at all."""
     tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     tit.load_additions(data_tests / "140220/additions.pH")
     tit.load_scheme(data_tests / "140220/scheme.txt")
@@ -823,7 +837,7 @@ def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
         "bad_wells.csv must not be written when detect_bad=False"
     )
     subfolder = tmp_path / "dat_bg_dil_nrm"
-    assert not (subfolder / "discarded_wells.txt").exists(), (
+    assert not (subfolder / "fit" / "discarded_wells.txt").exists(), (
         "discarded_wells.txt must not be written when detect_bad=False"
     )
 

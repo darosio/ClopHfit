@@ -172,7 +172,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--mcmc-target-accept", default=None, type=float, help="NUTS target acceptance for --mcmc. Default is latent-x aware.")  # fmt: skip
 @click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
-@click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard outlier wells before fitting and write bad_wells.csv after fitting.")  # fmt: skip
+@click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard unusable wells before fitting, writing discarded_wells.txt, and record everything atypical in atypical_wells.csv beside it.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
 @click.option("--outlier-threshold", default=0.2, type=float, show_default=True, help="Threshold for geometric point outlier scoring (0-1).")  # fmt: skip
 def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-statements]

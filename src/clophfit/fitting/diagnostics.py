@@ -123,10 +123,9 @@ def screen_wells(  # ruff: ignore[too-many-arguments] - four independent thresho
     -------
     pd.DataFrame
         One row per well: ``well``; per label ``signal_ratio_{lbl}``,
-        ``flag_low_signal_{lbl}``, ``flag_flat_curve_{lbl}`` and
-        ``turnover_{lbl}``; and well-level ``flag_low_signal`` (on
-        *quality_label*), ``flag_flat_curve``, ``label_corr`` and
-        ``flag_concordant``.
+        ``flag_flat_curve_{lbl}`` and ``turnover_{lbl}``; and well-level
+        ``flag_low_signal`` (on *quality_label* alone), ``flag_flat_curve``,
+        ``label_corr`` and ``flag_concordant``.
     """
     xa = np.asarray(x, dtype=float)
     order = np.argsort(xa)
@@ -139,7 +138,6 @@ def screen_wells(  # ruff: ignore[too-many-arguments] - four independent thresho
             y = np.asarray(per_label.get(lbl, []), dtype=float)
             if y.size != xa.size or not np.isfinite(y).any():
                 row[f"signal_ratio_{lbl}"] = float("nan")
-                row[f"flag_low_signal_{lbl}"] = False
                 row[f"flag_flat_curve_{lbl}"] = False
                 row[f"turnover_{lbl}"] = float("nan")
                 continue
@@ -150,8 +148,11 @@ def screen_wells(  # ruff: ignore[too-many-arguments] - four independent thresho
             ratio = upper / background if background > 0 else np.inf
             peak = float(np.nanmax(np.abs(y)))
             span = float(np.nanmax(y) - np.nanmin(y))
+            # Only *quality_label* gets a verdict. The threshold is calibrated
+            # on the anion channel; the neutral one runs one to two orders
+            # dimmer relative to its background, so the same cut would fire on
+            # nearly every well and say nothing.
             row[f"signal_ratio_{lbl}"] = ratio
-            row[f"flag_low_signal_{lbl}"] = bool(ratio < low_signal_ratio)
             row[f"flag_flat_curve_{lbl}"] = bool(
                 peak > 0 and span / peak < flat_span_fraction
             )
@@ -165,7 +166,10 @@ def screen_wells(  # ruff: ignore[too-many-arguments] - four independent thresho
         row["label_corr"] = corr
         row["flag_concordant"] = bool(np.isfinite(corr) and corr > concordant_corr)
         # The well-level verdict rests on the anion channel alone.
-        row["flag_low_signal"] = bool(row.get(f"flag_low_signal_{quality_label}"))
+        quality_ratio = row.get(f"signal_ratio_{quality_label}", float("nan"))
+        row["flag_low_signal"] = bool(
+            np.isfinite(quality_ratio) and quality_ratio < low_signal_ratio
+        )
         row["flag_flat_curve"] = any(
             bool(row.get(f"flag_flat_curve_{lbl}")) for lbl in labels
         )

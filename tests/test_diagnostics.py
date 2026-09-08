@@ -435,7 +435,11 @@ class TestScreenWells:
             .loc["A01"]
         )
         assert not row["flag_low_signal"]
-        assert bool(row["flag_low_signal_1"])
+        # The ratio is reported for every label, but only the quality label
+        # carries a verdict: the threshold is calibrated on the anion channel,
+        # and applying it to the neutral one fires on nearly every well.
+        assert row["signal_ratio_1"] == pytest.approx(0.02)
+        assert "flag_low_signal_1" not in row.index
 
     def test_concordant_labels_are_flagged(self) -> None:
         """Both channels moving together is notable: they should be opposed.

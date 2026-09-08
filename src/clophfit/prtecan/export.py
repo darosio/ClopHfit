@@ -25,7 +25,7 @@ from clophfit.fitting.bayes import (
 )
 from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConfig
 from clophfit.fitting.data_structures import Dataset, FitResult, NoiseModelParams
-from clophfit.fitting.diagnostics import detect_bad_wells
+from clophfit.fitting.diagnostics import screen_wells
 from clophfit.fitting.model_validation import (
     OutlierCriterion,
     ResidualTail,
@@ -172,22 +172,105 @@ def export_trace_summary(trace: object, outfit: Path, tag: str) -> None:
         logger.warning("Could not write the %s trace to NetCDF", tag, exc_info=True)
 
 
-def export_bad_wells(outfit: Path, global_res: TitrationResults) -> None:
-    """Export a list of bad wells flagged during global fits."""
-    df_fit = global_res.dataframe.reset_index(names="well")
-    df = detect_bad_wells(df_fit)
-    bad = df[df["flag_any"]].sort_values("flag_count", ascending=False)
-    bad.to_csv(outfit / "bad_wells.csv", index=False)
+def screen_atypical_wells(titration: Titration) -> pd.DataFrame:
+    """Screen every well on the plate, before anything is discarded or fitted.
+
+    Replaces ``bad_wells.csv``, which was unusable: it ORed a single expected
+    polarity across two channels that move oppositely by design, so on a real
+    plate it reported all 88 of 88 wells as bad, and its "low signal" and "flat
+    curve" columns were the same Series under two names.
+
+    "Atypical" rather than "bad" because most of what lands here is not a
+    fault. A flat 400 nm channel and a concordant pair are properties of the
+    construct; only the dim ones are quality problems, and even those are
+    highlighted rather than discarded.
+
+    Parameters
+    ----------
+    titration : Titration
+        Titration whose data and background levels are screened.
+
+    Returns
+    -------
+    pd.DataFrame
+        The atypical wells only, empty when the plate is unremarkable.
+    """
+    labels = sorted(titration.data)
+    if not labels:
+        return pd.DataFrame()
+    skip = set(titration.scheme.buffer) | set(titration.scheme.nofit_keys)
+    wells = {
+        well: {
+            str(lbl): np.asarray(titration.data[lbl].get(well, []), dtype=float)
+            for lbl in labels
+        }
+        for well in titration.data[labels[0]]
+        if well not in skip
+    }
+    if not wells:
+        return pd.DataFrame()
+    bg_level = {
+        str(lbl): float(np.nanmean(np.asarray(titration.bg.get(lbl, []), dtype=float)))
+        if len(titration.bg.get(lbl, []))
+        else 0.0
+        for lbl in labels
+    }
+    screened = screen_wells(
+        wells, np.asarray(titration.x, dtype=float), bg_level=bg_level
+    )
+    flags = ["flag_low_signal", "flag_flat_curve", "flag_concordant"]
+    present = [c for c in flags if c in screened.columns]
+    if not present:
+        return pd.DataFrame()
+    return screened[screened[present].fillna(value=False).astype(bool).any(axis=1)]
 
 
-def run_pre_fit_detection(titration: Titration, subfolder: Path) -> None:
-    """Run pre-fit detection of bad wells and write discarded_wells.txt."""
+def run_pre_fit_detection(titration: Titration, outfit: Path) -> None:
+    """Discard unusable wells and record everything atypical beside them.
+
+    Both files land in the fit folder, and the discard list carries the
+    highlighted wells under their own heading: one file then answers "what
+    happened to my wells" without joining it to another.
+
+    Parameters
+    ----------
+    titration : Titration
+        Titration to screen and then discard from.
+    outfit : Path
+        Fit output folder.
+    """
+    # Screened *before* discarding: a discarded well is atypical by
+    # construction and belongs in both lists, and discarding first would drop
+    # it from the titration and hide the evidence.
+    atypical = screen_atypical_wells(titration)
     discards = titration.detect_and_discard_bad_wells()
-    if discards:
-        logger.info("Pre-fit bad-well detection: discarding %s", discards)
-        (subfolder / "discarded_wells.txt").write_text(
-            "\n".join(sorted(discards)) + "\n", encoding="utf-8"
+    if not discards and atypical.empty:
+        return
+    outfit.mkdir(parents=True, exist_ok=True)
+    if not atypical.empty:
+        atypical.to_csv(outfit / "atypical_wells.csv", index=False)
+        logger.info(
+            "Pre-fit screening: %d atypical well(s) -> atypical_wells.csv",
+            len(atypical),
         )
+    lines = sorted(discards)
+    # A heading per reason, so the file says why each well was singled out and
+    # not merely that it was. A well answering to two reasons appears under
+    # both; an empty reason is omitted, since a bare heading tells nobody
+    # anything.
+    if not atypical.empty:
+        kept = atypical[~atypical["well"].isin(discards)]
+        for flag in ("flag_low_signal", "flag_concordant", "flag_flat_curve"):
+            if flag not in kept.columns:
+                continue
+            wells = sorted(
+                kept.loc[kept[flag].fillna(value=False).astype(bool), "well"]
+            )
+            if wells:
+                lines += ["", f"# {flag.removeprefix('flag_')}", *wells]
+    (outfit / "discarded_wells.txt").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def _ye_mag_screening_noise(
@@ -1112,9 +1195,6 @@ def export_fit(
         f.savefig(outfit / f"K{i}.png")
         export_residuals(outfit, results.results, i)
 
-    if config.detect_bad:
-        export_bad_wells(outfit, global_res)
-
 
 def export_data_fit(
     titration: Titration,
@@ -1143,7 +1223,7 @@ def export_data_fit(
             write(titration.x, titration.data, subfolder)
             if tecan_config.fit:
                 if tecan_config.detect_bad:
-                    run_pre_fit_detection(titration, subfolder)
+                    run_pre_fit_detection(titration, subfolder / "fit")
                 export_fit(titration, subfolder, tecan_config, mcmc, plate_fit)
         titration.params = saved_p
     else:
@@ -1151,5 +1231,5 @@ def export_data_fit(
         write(titration.x, titration.data, subfolder)
         if tecan_config.fit:
             if tecan_config.detect_bad:
-                run_pre_fit_detection(titration, subfolder)
+                run_pre_fit_detection(titration, subfolder / "fit")
             export_fit(titration, subfolder, tecan_config, mcmc, plate_fit)
