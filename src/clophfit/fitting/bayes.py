@@ -9,7 +9,7 @@ import re
 import typing
 import warnings
 from collections.abc import Mapping, Mapping as MappingABC
-from typing import Literal
+from typing import Any, Literal
 
 import arviz as az  # type: ignore[import-untyped]
 import numpy as np
@@ -2004,7 +2004,40 @@ def _default_floor_from_data(da: DataArray) -> float:
     return scale if np.isfinite(scale) and scale > 0.0 else 1.0
 
 
-def _resolve_structured_noise_model(noise: NoiseConfig, ds: Dataset) -> PlateNoiseModel:
+def label_representatives(
+    datasets: typing.Iterable[Mapping[str, Any] | None],
+) -> dict[str, Any]:
+    """One representative curve per label, taken across every well.
+
+    The structured noise path needs a curve per label to fall back on when no
+    floor hint is supplied. Taking them from a single well is wrong once
+    per-label detection is active: that well may be single-label, and the model
+    then carries no entry for a label the plate is still fitting. The label list
+    is already a union over wells, so the noise model has to be one too.
+
+    Parameters
+    ----------
+    datasets : typing.Iterable[Mapping[str, Any] | None]
+        Per-well datasets, in a deterministic order. ``None`` entries - wells
+        with no usable fit - are skipped.
+
+    Returns
+    -------
+    dict[str, Any]
+        Label to the first data array carrying it, keyed by string.
+    """
+    reps: dict[str, Any] = {}
+    for ds in datasets:
+        if ds is None:
+            continue
+        for lbl, da in ds.items():
+            reps.setdefault(str(lbl), da)
+    return reps
+
+
+def _resolve_structured_noise_model(
+    noise: NoiseConfig, ds: Mapping[str, Any]
+) -> PlateNoiseModel:
     """Return the explicit noise model or synthesize one from the dataset.
 
     Used by the ``"structured"`` noise path so the ``*_mode`` selectors work
@@ -3174,8 +3207,17 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     if ds is None:
         msg = "No valid dataset found in results."
         raise ValueError(msg)
+    # Across every well, not this one: the well ``next()`` returned may be
+    # single-label after per-label detection, and a noise model built from it
+    # would omit a label the plate is still fitting. The label list below is a
+    # union for exactly this reason; the model has to match it. Which well came
+    # first depended on set iteration order, so omitting this failed
+    # intermittently rather than always.
     noise_model = (
-        _resolve_structured_noise_model(noise, ds)
+        _resolve_structured_noise_model(
+            noise,
+            label_representatives(r.dataset for r in fit_results.values()),
+        )
         if noise.kind == "structured"
         else None
     )
