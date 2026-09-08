@@ -1834,6 +1834,23 @@ class TestStructuredMcmcNoise:
         assert isinstance(noise.floor, dict)
         assert set(noise.floor) == set(titan.data)
 
+    def test_floor_hint_is_read_noise_not_pooled_buffer_spread(self) -> None:
+        """The floor is pinned to measurement scatter, not to ``bg_noise``.
+
+        ``bg_noise`` pools the buffer wells' fixed positional offsets in with
+        their scatter. Those offsets are absorbed by each well's own plateaus,
+        so pinning the floor there counts them twice and over-pins -- by up to
+        12x the observed dim-end variance on the campaign plates.
+        """
+        titan = self._titration()
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
+            titan, noise_mode="fixed"
+        )
+        assert noise.floor == pytest.approx(titan.bg_read_noise)
+        # Direction guard: equality with bg_noise would mean nothing changed.
+        for label, value in noise.floor.items():
+            assert value < titan.bg_noise[label]
+
     def test_supplied_hints_take_the_configured_mode(self) -> None:
         """A supplied value becomes a per-label hint under ``noise_mode``."""
         titan = self._titration()

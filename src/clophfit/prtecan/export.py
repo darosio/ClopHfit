@@ -220,7 +220,7 @@ def _structured_noise(
 ) -> NoiseConfig:
     """Build the physical floor/gain/alpha noise config from titration.
 
-    Floors always come from the measured ``bg_noise``; gain and alpha come
+    Floors always come from the measured ``bg_read_noise``; gain and alpha come
     from ``titration.params``. Gain and alpha are
     ``"free"`` when no value was supplied -- there is no hint to centre on, so
     the sampler learns them -- and otherwise take ``noise_mode`` (``"centered"``
@@ -229,7 +229,7 @@ def _structured_noise(
     Parameters
     ----------
     titration : Titration
-        Titration whose ``bg_noise`` and ``params.noise_gain``/
+        Titration whose ``bg_read_noise`` and ``params.noise_gain``/
         ``params.noise_alpha`` supply the hints.
     noise_mode : Literal["centered", "fixed"]
         How supplied floor/gain/alpha values are treated by the sampler. The
@@ -249,18 +249,23 @@ def _structured_noise(
 
     gains = _per_label(titration.params.noise_gain)
     alphas = _per_label(titration.params.noise_alpha)
-    floors = {str(lbl): float(v) for lbl, v in dict(titration.bg_noise).items()}
+    # bg_read_noise, not bg_noise: the pooled figure folds in each buffer
+    # well's fixed positional offset, which a per-well fit absorbs into that
+    # well's own plateaus. Pinning the floor to it counts those offsets twice
+    # and over-pins by a median 2.9x, enough that on 8 of 22 plate/label cells
+    # the floor alone exceeded the residual scatter at the dimmest signal.
+    floors = {str(lbl): float(v) for lbl, v in dict(titration.bg_read_noise).items()}
     return NoiseConfig.structured(
         floor=floors or None,
         gain=gains or 0.0,
         alpha=alphas or 0.0,
         # The floor was the one term never pinned, and it is the term that
         # decides whether the model is structured at all. Left free it drifts
-        # to several times the measured bg_noise and swallows the variance the
-        # signal-dependent terms exist to describe: on L2 label 1 the sampler
-        # put the floor at 52.6 against a measured 11.8, leaving gain and alpha
-        # under 1% of the variance at every signal level. A "structured" model
-        # that reports a flat sigma is not one.
+        # to several times the measured read noise and swallows the variance
+        # the signal-dependent terms exist to describe: on L2 label 1 the
+        # sampler put the floor at 52.6 against a measured 11.8, leaving gain
+        # and alpha under 1% of the variance at every signal level. A
+        # "structured" model that reports a flat sigma is not one.
         floor_mode=noise_mode if floors else "free",
         gain_mode=noise_mode if gains else "free",
         alpha_mode=noise_mode if alphas else "free",
