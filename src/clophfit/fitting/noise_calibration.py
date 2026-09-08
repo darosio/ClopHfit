@@ -302,6 +302,153 @@ def fit_noise_model_nnls(
     return sigma_floor_out, gain_out, alpha_out
 
 
+_MERGED_MIN_BIN = 5
+_MAD_TO_SIGMA = 1.4826
+
+
+def _binned_variance(
+    yhat: np.ndarray, raw_res: np.ndarray, n_bins: int, dof_scale: float
+) -> pd.DataFrame:
+    """Robust residual variance per equal-count signal bin.
+
+    Parameters
+    ----------
+    yhat : np.ndarray
+        Fitted signal per observation.
+    raw_res : np.ndarray
+        Raw residual per observation.
+    n_bins : int
+        Equal-count bins across the signal range.
+    dof_scale : float
+        ``sqrt(n / (n - p))``, undoing the variance the fit absorbed.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``y``, ``var`` and ``n`` per bin; bins below five points are dropped.
+    """
+    order = np.argsort(yhat)
+    y_sorted, r_sorted = yhat[order], raw_res[order]
+    rows: list[dict[str, float]] = []
+    for idx in np.array_split(np.arange(len(y_sorted)), n_bins):
+        if len(idx) < _MERGED_MIN_BIN:
+            continue
+        chunk = r_sorted[idx]
+        # MAD**2 rather than the plain variance: these plates carry real
+        # outliers, and one of them in a bin moves the variance further than
+        # the noise level it is meant to measure.
+        mad = _MAD_TO_SIGMA * np.median(np.abs(chunk - np.median(chunk)))
+        rows.append({
+            "y": float(np.median(y_sorted[idx])),
+            "var": float((mad * dof_scale) ** 2),
+            "n": float(len(idx)),
+        })
+    return pd.DataFrame(rows)
+
+
+def fit_noise_model_merged(df: pd.DataFrame, *, n_bins: int = 10) -> pd.DataFrame:
+    r"""Fit one gain and one alpha per label, on every plate's residuals at once.
+
+    The pooled estimator in its literal sense: the residual tables from all
+    plates are concatenated and a single ``gain`` and ``alpha`` are fitted to
+    the lot, rather than fitting each plate and averaging the answers. Fitting
+    per plate and summarising cannot recover a shared value when the per-plate
+    fits are themselves at a boundary, which they routinely are - ``y`` and
+    ``y**2`` are near-collinear over the range one plate covers.
+
+    The floor is supplied, never fitted, and differs per plate when it is scaled
+    to that plate's reader Gain. Each plate's own floor variance is therefore
+    removed before pooling, and what is fitted is the remainder:
+
+    .. math:: \sigma^2 - \text{floor}^2 = \text{gain} \cdot a \cdot y
+              + (\alpha \cdot y)^2
+
+    where :math:`a` is ``gain_amp``. Binning happens within a plate, so a bin
+    never mixes plates of different brightness, and bins are weighted by count.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Residual table with columns ``plate``, ``label``, ``yhat``, ``raw_res``
+        and ``sigma_floor``. Two columns are optional: ``gain_amp``, the
+        amplification the gain term is quoted against (default 1.0), and
+        ``dof_scale`` (default 1.0). Pass ``gain_amp`` only for a label whose
+        noise actually tracks reader Gain - scaling a label whose floor is
+        supplied unscaled quotes the two terms at different references.
+    n_bins : int
+        Equal-count signal bins per plate and label.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per label: ``label``, ``n_bins``, ``n_plates``, ``gain`` and
+        ``alpha`` (both at ``gain_amp == 1``), ``log_misfit`` and
+        ``negative_bins``.
+
+    Raises
+    ------
+    ValueError
+        If a required column is missing. The floor in particular is an input,
+        because a fit that frees all three terms drives one to its boundary.
+    """
+    required = {"plate", "label", "yhat", "raw_res", "sigma_floor"}
+    missing = required - set(df.columns)
+    if missing:
+        msg = f"residual table is missing required column(s): {sorted(missing)}"
+        raise ValueError(msg)
+
+    work = df.copy()
+    work["label"] = work["label"].astype(str)
+    for col, default in (("gain_amp", 1.0), ("dof_scale", 1.0)):
+        if col not in work.columns:
+            work[col] = default
+
+    bins: list[pd.DataFrame] = []
+    for (plate, label), grp in work.groupby(["plate", "label"], sort=True):
+        binned = _binned_variance(
+            grp["yhat"].to_numpy(dtype=float),
+            grp["raw_res"].to_numpy(dtype=float),
+            n_bins,
+            float(grp["dof_scale"].iloc[0]),
+        )
+        if binned.empty:
+            continue
+        binned["plate"] = str(plate)
+        binned["label"] = str(label)
+        binned["floor"] = float(grp["sigma_floor"].iloc[0])
+        binned["gain_amp"] = float(grp["gain_amp"].iloc[0])
+        bins.append(binned)
+    if not bins:
+        msg = "no signal bin held enough observations to estimate a variance"
+        raise ValueError(msg)
+
+    allbins = pd.concat(bins, ignore_index=True)
+    rows: list[dict[str, object]] = []
+    for label, cells in allbins.groupby("label", sort=True):
+        y = cells["y"].to_numpy()
+        floor = cells["floor"].to_numpy()
+        amp = cells["gain_amp"].to_numpy()
+        # Each plate's own supplied floor comes off before pooling, so what
+        # remains is only the signal-dependent part the shared terms describe.
+        remainder = cells["var"].to_numpy() - floor**2
+        weight = np.sqrt(cells["n"].to_numpy())
+        design = np.column_stack([amp * y, y**2])
+        coeffs, _ = optimize.nnls(design * weight[:, None], remainder * weight)
+        gain, alpha = float(coeffs[0]), float(np.sqrt(coeffs[1]))
+        pred = floor**2 + gain * amp * y + (alpha * y) ** 2
+        misfit = float(np.sqrt(np.mean((np.log(pred) - np.log(cells["var"])) ** 2)))
+        rows.append({
+            "label": str(label),
+            "n_bins": len(cells),
+            "n_plates": int(cells["plate"].nunique()),
+            "gain": gain,
+            "alpha": alpha,
+            "log_misfit": misfit,
+            "negative_bins": int((remainder < 0).sum()),
+        })
+    return pd.DataFrame(rows)
+
+
 # ------------------------------------------------------------------
 # pH-dependent noise (pipetting error amplified by titration slope)
 # ------------------------------------------------------------------
