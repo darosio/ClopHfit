@@ -2235,8 +2235,10 @@ def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
 
     out = export_plate_fit(tit, datasets, tmp_path, "lm")  # type: ignore[arg-type]  # SimpleNamespace test double
 
+    # The fit result is returned, not the path: the caller needs its
+    # excluded_points to hand the screen's verdict to whatever fits next.
     assert out is not None
-    table = pd.read_csv(out).set_index("well")
+    table = pd.read_csv(tmp_path / "plate_lm_K.csv").set_index("well")
     assert set(table.index) == set(wells)
     assert table.loc["A01", "K"] == pytest.approx(table.loc["A12", "K"])
     assert bool(table.loc["A01", "k_shared"])

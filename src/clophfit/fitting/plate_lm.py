@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "PlateLMResult",
+    "apply_excluded_points",
     "fit_plate_lm",
     "fit_plate_lm_screened",
     "profile_k_intervals",
@@ -1107,6 +1108,57 @@ def _k_bounds(n_k: int, n_params: int, *, is_ph: bool) -> tuple[np.ndarray, np.n
     if is_ph:
         hi[:n_k] = _K_MAX_PH
     return lo, hi
+
+
+def apply_excluded_points(
+    datasets: Mapping[str, Any],
+    excluded_points: Mapping[str, Mapping[str, Sequence[int]]],
+    *,
+    min_keep: int = 4,
+) -> dict[str, Any]:
+    """Mask the points a screen rejected, so the next fit inherits its verdict.
+
+    :func:`fit_plate_lm_screened` builds its masked copies internally and hands
+    the caller's datasets back untouched, which is right for it and wrong for a
+    pipeline: a Bayesian fit that runs afterwards would otherwise see every
+    point the screen threw out. This applies the screen's ``excluded_points`` to
+    a fresh copy, under the same ``min_keep`` guard the screen itself uses, so
+    the two agree about which drops were actually taken.
+
+    Parameters
+    ----------
+    datasets : Mapping[str, Any]
+        Well key to dataset. Not modified.
+    excluded_points : Mapping[str, Mapping[str, Sequence[int]]]
+        Well to label to positional indices, as ``PlateLMResult.excluded_points``
+        records them. Unknown wells, labels and out-of-range indices are
+        ignored: a screen may have run over a superset of what is fitted here.
+    min_keep : int
+        Never leave a label with fewer unmasked points than this.
+
+    Returns
+    -------
+    dict[str, Any]
+        A copy with the rejected points masked out.
+    """
+    out: dict[str, Any] = {}
+    for well, ds in datasets.items():
+        arrays = {}
+        for lbl, da in ds.items():
+            bad = set(excluded_points.get(well, {}).get(str(lbl), ()))
+            mask = np.asarray(da.mask).copy()
+            if bad:
+                keep = mask.copy()
+                for i in bad:
+                    if 0 <= i < len(keep):
+                        keep[i] = False
+                if int(keep.sum()) >= min_keep:
+                    mask = keep
+            new = copy.deepcopy(da)
+            new.mask = mask
+            arrays[lbl] = new
+        out[well] = type(ds)(arrays, is_ph=ds.is_ph)
+    return out
 
 
 def fit_plate_lm_screened(

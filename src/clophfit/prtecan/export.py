@@ -36,6 +36,7 @@ from clophfit.fitting.model_validation import (
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.plate_lm import (
     PlateLMResult,
+    apply_excluded_points,
     ctr_holdout,
     fit_plate_lm,
     fit_plate_lm_screened,
@@ -1086,8 +1087,7 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         }
         for well in sorted(result.k)
     ]
-    out = outfit / f"plate_{method}_K.csv"
-    pd.DataFrame(rows).to_csv(out, index=False)
+    pd.DataFrame(rows).to_csv(outfit / f"plate_{method}_K.csv", index=False)
     _export_plate_fit_plots(titration, datasets, result, outfit, method, png=png)
     pd.DataFrame([
         {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())
@@ -1115,7 +1115,7 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         result.success,
         {k: round(v, 3) for k, v in result.ye_mag.items()},
     )
-    return out
+    return result
 
 
 def export_fit(
@@ -1163,19 +1163,33 @@ def export_fit(
     )
     export_list.append(odr_res)
 
+    mcmc_datasets = datasets
     if plate_fit is not None:
-        export_plate_fit(
+        screen_z = getattr(config, "plate_screen_z", None)
+        plate_res = export_plate_fit(
             titration,
             datasets,
             outfit,
             plate_fit,
             png=config.png,
             calibrate_noise=getattr(config, "plate_noise", "fixed") == "calibrated",
-            screen_z=getattr(config, "plate_screen_z", None),
+            screen_z=screen_z,
             ctr_free_k=getattr(config, "ctr_free_k", False),
         )
+        # The hybrid: the classical screen decides what is an outlier, on a
+        # calibrated ruler, and the Bayesian fit inherits that verdict. Without
+        # this the two fit different data and neither result explains the other.
+        excluded = getattr(plate_res, "excluded_points", None) if screen_z else None
+        if excluded:
+            mcmc_datasets = apply_excluded_points(datasets, excluded)
+            logger.info(
+                "plate screen |z|>%s excluded points in %d well(s); the MCMC "
+                "inherits them",
+                screen_z,
+                len(excluded),
+            )
 
-    mcmc_res = fit_single_mcmc(titration, datasets, outfit, spec)
+    mcmc_res = fit_single_mcmc(titration, mcmc_datasets, outfit, spec)
     if mcmc_res is not None:
         export_list.append(mcmc_res)
 
