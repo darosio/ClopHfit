@@ -850,7 +850,7 @@ def _plate_noise_model(titration: Titration) -> dict[str, NoiseModelParams] | No
     Parameters
     ----------
     titration : Titration
-        Supplies ``bg_noise`` and the configured gain/alpha.
+        Supplies ``sigma_floor`` and the configured gain/alpha.
 
     Returns
     -------
@@ -865,7 +865,10 @@ def _plate_noise_model(titration: Titration) -> dict[str, NoiseModelParams] | No
     params = getattr(titration, "params", None)
     gain = getattr(params, "noise_gain", ()) or ()
     alpha = getattr(params, "noise_alpha", ()) or ()
-    floors = getattr(titration, "bg_noise", None) or {}
+    # sigma_floor, not bg_noise: an explicit --noise-floor has to reach the
+    # plate fitters too. They are the ones that re-evaluate a signal-dependent
+    # sigma at their own prediction, so the floor bites hardest here.
+    floors = getattr(titration, "sigma_floor", None) or {}
     return {
         lbl: NoiseModelParams(
             sigma_floor=float(floors.get(lbl, 0.0)),
