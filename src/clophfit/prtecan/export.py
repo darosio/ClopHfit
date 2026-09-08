@@ -232,8 +232,8 @@ def _structured_noise(
         Titration whose ``bg_noise`` and ``params.noise_gain``/
         ``params.noise_alpha`` supply the hints.
     noise_mode : Literal["centered", "fixed"]
-        How a supplied ``noise_gain``/``noise_alpha`` value is treated by the
-        sampler.
+        How supplied floor/gain/alpha values are treated by the sampler. The
+        floor hint always exists, since it is measured, so ``"fixed"`` pins it.
 
     Returns
     -------
@@ -254,6 +254,14 @@ def _structured_noise(
         floor=floors or None,
         gain=gains or 0.0,
         alpha=alphas or 0.0,
+        # The floor was the one term never pinned, and it is the term that
+        # decides whether the model is structured at all. Left free it drifts
+        # to several times the measured bg_noise and swallows the variance the
+        # signal-dependent terms exist to describe: on L2 label 1 the sampler
+        # put the floor at 52.6 against a measured 11.8, leaving gain and alpha
+        # under 1% of the variance at every signal level. A "structured" model
+        # that reports a flat sigma is not one.
+        floor_mode=noise_mode if floors else "free",
         gain_mode=noise_mode if gains else "free",
         alpha_mode=noise_mode if alphas else "free",
     )

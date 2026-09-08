@@ -1761,6 +1761,10 @@ class TestStructuredMcmcNoise:
         assert noise.kind == "structured"
         assert noise.gain_mode == "free"
         assert noise.alpha_mode == "free"
+        # The floor hint is always measured, so it takes the configured mode
+        # even when gain and alpha have nothing to centre on. Left "free" it
+        # drifts well above bg_noise and flattens the structured model.
+        assert noise.floor_mode == "centered"
         assert isinstance(noise.floor, dict)
         assert set(noise.floor) == set(titan.data)
 
@@ -1790,6 +1794,8 @@ class TestStructuredMcmcNoise:
         assert noise.alpha_mode == "fixed"
         # Gain got no value, so it stays free regardless of noise_mode.
         assert noise.gain_mode == "free"
+        # The floor is measured, so "fixed" pins it to bg_noise.
+        assert noise.floor_mode == "fixed"
 
     def test_structured_noise_takes_mode_as_argument(self) -> None:
         """The mode is passed in, not read off titration.params.
