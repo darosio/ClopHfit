@@ -74,6 +74,42 @@ _PH_K_MIN: float = 3.0
 _PH_K_MAX: float = 11.0
 
 
+def _interaction_rms(values: ArrayF) -> float:
+    """Scatter left in a step-by-well matrix once both main effects are removed.
+
+    A two-way layout with one observation per cell: subtracting the step mean
+    and the well mean and adding back the grand mean leaves the interaction,
+    which for buffer wells is the measurement scatter. A well reading
+    consistently high is a well effect, not noise -- a per-well fit absorbs it
+    into that well's plateaus -- and a background drifting across the titration
+    is a step effect, not noise.
+
+    Parameters
+    ----------
+    values : ArrayF
+        Buffer readings, steps down the rows and wells across the columns.
+
+    Returns
+    -------
+    float
+        Root mean square interaction on ``(n_steps - 1) * (n_wells - 1)``
+        degrees of freedom, or 0.0 when either dimension is too small to
+        separate an interaction from the main effects.
+    """
+    arr = np.asarray(values, dtype=float)
+    n_steps, n_wells = arr.shape
+    if n_steps < 2 or n_wells < 2:  # ruff: ignore[magic-value-comparison]
+        return 0.0
+    interaction = (
+        arr
+        - arr.mean(axis=1, keepdims=True)
+        - arr.mean(axis=0, keepdims=True)
+        + arr.mean()
+    )
+    dof = (n_steps - 1) * (n_wells - 1)
+    return float(np.sqrt(np.sum(interaction**2) / dof))
+
+
 def _fit_datasets(
     datasets: dict[str, Dataset],
     method: str,
@@ -293,6 +329,34 @@ class Buffer:
             else:
                 # noise is a scalar per label for the whole dataset
                 noise[label] = float(bdf[noise_col].iloc[0])
+        return noise
+
+    @property
+    def bg_read_noise(self) -> dict[str, float]:
+        """Buffer measurement scatter, with fixed per-well offsets removed.
+
+        ``bg_noise`` pools the scatter of the buffer wells about the background
+        trend, and on these plates that pooled number is dominated by fixed
+        positional differences between buffer wells rather than by measurement
+        noise -- it runs 1.1x to 6.6x this value across the campaign. A
+        positional offset is absorbed by a well's own plateaus in any per-well
+        fit, so it does not show up as point-to-point residual scatter and does
+        not belong in a noise-model floor. This is the part that does.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label RMS interaction of the buffer readings, 0.0 for a label
+            with no buffer wells.
+        """
+        buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
+        noise = {}
+        for label, bdf in buffers.items():
+            cols = [w for w in self.wells if w in bdf.columns]
+            if bdf.empty or not cols:
+                noise[label] = 0.0
+            else:
+                noise[label] = _interaction_rms(bdf[cols].to_numpy(dtype=float))
         return noise
 
     def _compute_bg_and_sd(self) -> tuple[dict[str, ArrayF], dict[str, ArrayF]]:
@@ -1015,6 +1079,22 @@ class Titration(TecanfilesGroup):
     def bg_noise(self) -> dict[str, float]:
         """Intrinsic well noise (RMSE/pooled SD) values."""
         return self.buffer.bg_noise
+
+    @property
+    def bg_read_noise(self) -> dict[str, float]:
+        """Buffer measurement scatter, with fixed per-well offsets removed.
+
+        See :attr:`Buffer.bg_read_noise`. Reported alongside :attr:`bg_noise`
+        rather than replacing it: ``bg_noise`` is what ``y_err`` and the
+        classical ``--plate-noise fixed`` path are built on and calibrated
+        against, while this is the candidate for a structured-noise floor.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label measurement scatter of the buffer wells.
+        """
+        return self.buffer.bg_read_noise
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""

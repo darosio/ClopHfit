@@ -51,6 +51,7 @@ from clophfit.prtecan import (
     extract_metadata,
     merge_md,
     strip_lines,
+    titration as titration_module,
 )
 from clophfit.prtecan.export import (
     export_data_fit,
@@ -1737,6 +1738,71 @@ def test_titration_results_noise_model_is_last_positional() -> None:
     # And it is settable by keyword.
     nm = PlateNoiseModel()
     assert TitrationResults(scheme, fit_keys, results, noise_model=nm).noise_model is nm
+
+
+class TestBufferReadNoise:
+    """``bg_read_noise``: buffer scatter with fixed well offsets taken out.
+
+    ``bg_noise`` pools two things a titration fit treats very differently. A
+    buffer well sitting consistently high is a positional offset, and in a
+    per-well fit it is absorbed by that well's ``S0``/``S1`` plateaus, so it
+    contributes nothing to point-to-point residual scatter. Only what is left
+    once step and well effects are removed is measurement noise, and only that
+    belongs in a noise-model floor.
+    """
+
+    @staticmethod
+    def _titration() -> Titration:
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    def test_pure_well_offsets_are_not_read_noise(self) -> None:
+        """Wells that differ only by a constant offset carry no read noise.
+
+        This is the whole point of the statistic: three buffer wells reading a
+        flat background at 100, 110 and 120 have a large pooled SD and zero
+        measurement scatter.
+        """
+        values = np.array([[100.0, 110.0, 120.0]] * 5)
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(0.0)
+
+    def test_pure_step_drift_is_not_read_noise(self) -> None:
+        """A background that drifts identically in every well is not noise."""
+        drift = np.array([10.0, 20.0, 30.0, 40.0, 50.0])
+        values = np.tile(drift[:, None], (1, 4))
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(0.0)
+
+    def test_recovers_injected_scatter(self) -> None:
+        """With offsets and drift on top, the injected sigma is what comes back."""
+        rng = np.random.default_rng(20260908)
+        n_steps, n_wells, sigma = 40, 8, 3.0
+        offsets = np.array([0.0, 5.0, -5.0, 12.0, -8.0, 3.0, -2.0, 9.0])
+        drift = np.linspace(200.0, 260.0, n_steps)
+        values = (
+            drift[:, None]
+            + offsets[None, :]
+            + rng.normal(0.0, sigma, size=(n_steps, n_wells))
+        )
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(sigma, rel=0.1)
+
+    def test_bg_read_noise_matches_bg_noise_labels(self) -> None:
+        """The new statistic is reported for exactly the labels bg_noise is."""
+        titan = self._titration()
+        assert set(titan.bg_read_noise) == set(titan.bg_noise)
+
+    def test_bg_read_noise_is_below_bg_noise_on_real_buffers(self) -> None:
+        """Real buffer wells carry positional offsets, so removing them lowers it.
+
+        Guards the direction of the correction: a ``bg_read_noise`` that came
+        back equal to ``bg_noise`` would mean the well effect was never removed.
+        """
+        titan = self._titration()
+        for label, read in titan.bg_read_noise.items():
+            assert 0.0 < read < titan.bg_noise[label]
 
 
 class TestStructuredMcmcNoise:
