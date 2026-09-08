@@ -249,7 +249,7 @@ def _structured_noise(
 
     gains = _per_label(titration.params.noise_gain)
     alphas = _per_label(titration.params.noise_alpha)
-    floors = {str(lbl): float(v) for lbl, v in dict(titration.bg_noise).items()}
+    floors = {str(lbl): float(v) for lbl, v in dict(titration.sigma_floor).items()}
     return NoiseConfig.structured(
         floor=floors or None,
         gain=gains or 0.0,

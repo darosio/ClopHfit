@@ -74,6 +74,14 @@ _PH_K_MIN: float = 3.0
 _PH_K_MAX: float = 11.0
 
 
+# Gain units per decade of amplification. Measured on this instrument: the
+# buffer level tracks the reader Gain at r = 0.991 across eleven plates with a
+# decade per 34.1 units, and the label-1 read noise independently follows the
+# same law at a decade per 38.3 (r = 0.906). The two agree to 12%, which is why
+# a floor quoted at one Gain can be moved to another at all.
+_FLOOR_GAIN_DECADE = 34.1
+
+
 def _interaction_rms(values: ArrayF) -> float:
     """Scatter left in a step-by-well matrix once both main effects are removed.
 
@@ -181,6 +189,28 @@ class TitrationConfig:
 
     Values typically from MCMC multi-noise shared_noise_params.csv.
     Empty tuple keeps gain=1 (legacy behaviour).
+    """
+    noise_floor: tuple[float, ...] = ()
+    """Read-noise floor per label, overriding the measured ``bg_noise``.
+
+    ``bg_noise`` is whatever one plate's three to six buffer wells happened to
+    scatter by, and it is estimated on far fewer degrees of freedom than a
+    value pooled over a campaign. Supplying the floor lets a calibration fitted
+    across plates be used instead.
+
+    Empty tuple keeps ``bg_noise`` (legacy behaviour).
+    """
+    noise_floor_ref_gain: tuple[float, ...] = ()
+    """Reader Gain each ``noise_floor`` was quoted at, per label.
+
+    Read noise is amplified along with the signal, so a floor measured at one
+    PMT setting means nothing at another until it is moved there. Given a
+    reference, the floor is scaled by ``10 ** ((gain - ref) / 34.1)`` using the
+    plate's own Gain metadata, which makes one calibration portable across
+    plates that were read at different settings.
+
+    ``0.0`` disables scaling for that label, which is the right choice where no
+    Gain dependence was measured. Empty tuple disables it for every label.
     """
 
     mask_outliers: bool = field(default=False)
@@ -1096,6 +1126,47 @@ class Titration(TecanfilesGroup):
         """
         return self.buffer.bg_read_noise
 
+    @property
+    def sigma_floor(self) -> dict[str, float]:
+        """The read-noise floor per label that the error models actually use.
+
+        ``params.noise_floor`` when supplied, otherwise the measured
+        :attr:`bg_read_noise`. A supplied floor carrying a non-zero
+        ``params.noise_floor_ref_gain`` is scaled from that reference to this
+        plate's own reader Gain, so one campaign-wide calibration serves plates
+        read at different settings; a reference of ``0.0`` leaves the value
+        alone, which is right for a label whose floor showed no Gain
+        dependence.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label floor. Falls back to the measured value for any label the
+            override does not cover.
+        """
+        labels = sorted(self.data.keys())
+        measured = self.bg_read_noise
+        floors: dict[str, float] = {}
+        for i, lbl in enumerate(labels):
+            key = str(lbl)
+            if not self.params.noise_floor or i >= len(self.params.noise_floor):
+                floors[key] = float(measured.get(key, 0.0))
+                continue
+            value = float(self.params.noise_floor[i])
+            ref = (
+                float(self.params.noise_floor_ref_gain[i])
+                if self.params.noise_floor_ref_gain
+                and i < len(self.params.noise_floor_ref_gain)
+                else 0.0
+            )
+            if ref > 0.0:
+                meta = getattr(self.labelblocksgroups.get(key), "metadata", {}) or {}
+                gain = getattr(meta.get("Gain"), "value", None)
+                if gain is not None:
+                    value *= 10.0 ** ((float(gain) - ref) / _FLOOR_GAIN_DECADE)
+            floors[key] = value
+        return floors
+
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
         return (
@@ -1308,8 +1379,18 @@ class Titration(TecanfilesGroup):
         """Apply the physical error model from TitrationConfig to the Dataset."""
         labels = sorted(self.data.keys())
         noise_model = PlateNoiseModel()
+        # An explicit --noise-floor governs here too, but the *default* stays
+        # bg_noise rather than the read noise the noise-model paths use. With
+        # no gain/alpha this y_err is homoscedastic, and the best single sigma
+        # for that is the typical noise over the signal range, not the floor at
+        # zero signal: bg_noise sits 4x below it on label 1 where bg_read_noise
+        # sits 14x below. Least squares does not care -- a uniform scale
+        # cancels -- but huber's transition point is absolute, so the smaller
+        # value down-weights harder, and switching this default to read noise
+        # left 29 of 731 well-fits unconstrained that had been fine.
+        resolved = self.sigma_floor if self.params.noise_floor else self.bg_noise
         for i, lbl in enumerate(labels):
-            floor = float(self.bg_noise.get(lbl, 0.0)) if self.bg_noise else 0.0
+            floor = float(resolved.get(str(lbl), 0.0))
 
             gain = (
                 self.params.noise_gain[i]
@@ -1500,7 +1581,7 @@ class Titration(TecanfilesGroup):
             Build per-label datasets for this label instead of global ones.
             Only valid when *datasets* is ``None``.
         sigma_floor : dict[str, float] | None
-            Known read-noise floor per label. Defaults to :attr:`bg_noise`.
+            Known read-noise floor per label. Defaults to :attr:`sigma_floor`.
         first_pass_method : str
             Method for the first-pass fit.
         second_pass_method : str
@@ -1527,7 +1608,7 @@ class Titration(TecanfilesGroup):
             raise ValueError(msg)
         if datasets is None:
             datasets = self.create_dataset_dict(label)
-        floors_in = dict(self.bg_noise) if sigma_floor is None else dict(sigma_floor)
+        floors_in = dict(self.sigma_floor) if sigma_floor is None else dict(sigma_floor)
 
         noise_model: PlateNoiseModel | None = None
         results: dict[str, FitResult] = {}

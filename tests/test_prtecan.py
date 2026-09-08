@@ -1805,6 +1805,107 @@ class TestBufferReadNoise:
             assert 0.0 < read < titan.bg_noise[label]
 
 
+class TestSigmaFloorOverride:
+    """``--noise-floor``: supply the read-noise floor instead of measuring it.
+
+    ``bg_noise`` is what the buffer wells happen to scatter by on one plate.
+    Across eleven plates the label-1 floor tracks the reader Gain at r = 0.906,
+    with a slope of a decade per 38 gain units against the 34.1 predicted by the
+    amplification law -- so one floor quoted at a reference Gain describes every
+    plate, and is a better estimate for any single plate than its own four
+    buffer wells.
+    """
+
+    @staticmethod
+    def _titration() -> Titration:
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    def test_unset_floor_falls_back_to_measured_read_noise(self) -> None:
+        """With no override the floor is the measured read noise, not the pooled SD.
+
+        ``bg_noise`` pools the buffer wells' fixed positional offsets in with
+        their scatter, and those offsets are absorbed by each well's own
+        plateaus, so they are not floor. Against the pooled calibration the
+        read-noise figure is the right order -- 0.81x for label 1, 2.28x for
+        label 2 -- where ``bg_noise`` is 4.5x too large for label 1.
+        """
+        titan = self._titration()
+        assert titan.sigma_floor == pytest.approx(titan.bg_read_noise)
+        assert titan.sigma_floor != pytest.approx(titan.bg_noise)
+
+    def test_supplied_floor_is_used_verbatim_without_a_reference_gain(self) -> None:
+        """A floor with no reference Gain is an absolute value, not a hint."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        assert titan.sigma_floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+    def test_reference_gain_scales_the_floor_by_the_amplification_law(self) -> None:
+        """A floor quoted at a reference Gain is scaled to the plate's own Gain.
+
+        Read noise is amplified with the signal, so a floor measured at one PMT
+        setting has to be moved to another before it means anything.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        gain = float(titan.labelblocksgroups[labels[0]].metadata["Gain"].value)
+        decade = titration_module._FLOOR_GAIN_DECADE  # ruff: ignore[private-member-access]
+        titan.params.noise_floor = (3.59, 0.42)
+        titan.params.noise_floor_ref_gain = (gain - decade, 0.0)
+        # One decade of gain units above the reference is exactly 10x.
+        assert titan.sigma_floor[labels[0]] == pytest.approx(35.9)
+
+    def test_zero_reference_gain_disables_scaling_for_that_label(self) -> None:
+        """Label 2's floor showed no Gain dependence, so it must be able to opt out."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        titan.params.noise_floor_ref_gain = (0.0, 0.0)
+        assert titan.sigma_floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+    def test_an_explicit_override_reaches_y_err(self) -> None:
+        """An explicit floor governs the classical weighting, not only the sampler."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        well = min(titan.data[labels[0]])
+        titan.params.noise_floor = (500.0, 500.0)
+        y_err = np.asarray(titan.create_ds(well, labels[0])[labels[0]].y_err)
+        # A floor far above every other term dominates the error model.
+        assert float(np.min(y_err)) >= 500.0
+
+    def test_y_err_defaults_to_bg_noise_not_the_read_noise(self) -> None:
+        """Unset, y_err keeps the pooled figure the classical path was tuned on.
+
+        With no gain or alpha this y_err is homoscedastic, and the best single
+        sigma for that is the typical noise over the signal range, not the
+        floor at zero signal: ``bg_noise`` sits 4x below it on label 1 where
+        ``bg_read_noise`` sits 14x below. Least squares does not care, since a
+        uniform scale cancels, but huber's transition point is absolute -- and
+        defaulting this to the read noise left 29 of 731 well-fits with an
+        unconstrained K that had been fine.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        well = min(titan.data[labels[0]])
+        y_err = np.asarray(titan.create_ds(well, labels[0])[labels[0]].y_err)
+        assert float(np.median(y_err)) == pytest.approx(
+            titan.bg_noise[labels[0]], rel=1e-6
+        )
+        assert titan.bg_noise[labels[0]] > titan.bg_read_noise[labels[0]]
+
+    def test_the_override_reaches_the_structured_mcmc_noise(self) -> None:
+        """And the sampler's floor hint, which is the other consumer."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
+            titan, noise_mode="fixed"
+        )
+        assert noise.floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+
 class TestStructuredMcmcNoise:
     """CLI-selectable structured noise for ``--mcmc single-refit``."""
 

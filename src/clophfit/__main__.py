@@ -155,6 +155,8 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--mcmc-samples", default=2000, show_default=True, type=int, help="Number of posterior draws per chain (tune = samples // 2).")  # fmt: skip
 @click.option("--noise-alpha", multiple=True, type=float, default=(), help="Proportional noise coefficient per label. Adds proportional term to y_err variance. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
 @click.option("--noise-gain", multiple=True, type=float, default=(), help="Poisson gain per label. Replaces hardcoded gain=1 in shot-noise term. Obtain from MCMC multi-noise shared_noise_params.csv.")  # fmt: skip
+@click.option("--noise-floor", multiple=True, type=float, default=(), help="Read-noise floor per label, overriding the measured bg_read_noise. Reaches y_err, the FGLS/NNLS calibration and the --mcmc-noise structured floor alike. Use it to apply a floor pooled across plates rather than one estimated from a single plate's three to six buffer wells.")  # fmt: skip
+@click.option("--noise-floor-ref-gain", multiple=True, type=float, default=(), help="Reader Gain each --noise-floor was quoted at, per label. The floor is then scaled to this plate's own Gain by 10**((gain-ref)/34.1), so one calibration serves plates read at different settings. Pass 0 to leave a label's floor unscaled, which is right where no Gain dependence was measured.")  # fmt: skip
 @click.option("--mcmc-noise", type=click.Choice(["ye_mag", "structured"], case_sensitive=False), default="ye_mag", show_default=True, help="Observation-noise family for --mcmc single-refit and multi. ye_mag scales y_err by a learned multiplier; structured builds floor+gain*y+(alpha*y)^2 with floors from bg_noise and gain/alpha from --noise-gain/--noise-alpha.")  # fmt: skip
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a hint is treated: centered (a prior the posterior may leave) or fixed (pinned). It governs the floor, which is always hinted because it comes from the measured buffer noise, and any --noise-gain/--noise-alpha supplied. Gain and alpha given no value stay free, so --noise-mode fixed on its own means a pinned floor with both signal-dependent terms learned.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
@@ -196,6 +198,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     mcmc_samples: int,
     noise_alpha: tuple[float, ...],
     noise_gain: tuple[float, ...],
+    noise_floor: tuple[float, ...],
+    noise_floor_ref_gain: tuple[float, ...],
     mcmc_noise: str,
     per_well_ye_mags: bool | None,
     ye_mag_parameterization: str,
@@ -318,6 +322,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "noise_mode": noise_mode,
             "noise_alpha": tuple(noise_alpha),
             "noise_gain": tuple(noise_gain),
+            "noise_floor": tuple(noise_floor),
+            "noise_floor_ref_gain": tuple(noise_floor_ref_gain),
             "per_well_ye_mags": per_well_ye_mags,
             "ye_mag_parameterization": ye_mag_parameterization,
             "mcmc_robust": mcmc_robust,
@@ -338,6 +344,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     tit.params.outlier = outlier
     tit.params.noise_alpha = noise_alpha
     tit.params.noise_gain = noise_gain
+    tit.params.noise_floor = noise_floor
+    tit.params.noise_floor_ref_gain = noise_floor_ref_gain
     tit.params.mask_outliers = mask_outliers
     tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
