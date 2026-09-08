@@ -27,7 +27,7 @@ Detection criteria
 
 import logging
 import typing
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 import numpy as np
 import pandas as pd
@@ -175,6 +175,64 @@ def screen_wells(  # ruff: ignore[too-many-arguments] - four independent thresho
         )
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+# Post-fit K precision, in pH. Anchored on measured scales: the ROPE is 0.10 pH
+# and replicate repeatability 0.074, so a control uncertain by a quarter of a pH
+# unit cannot anchor accuracy. Controls are held tighter because they are what
+# the known pK values are compared against.
+_CONTROL_SK_LIMIT = 0.25
+_WELL_SK_LIMIT = 0.60
+
+
+def flag_imprecise_k(
+    fits: pd.DataFrame,
+    control_wells: Collection[str] = (),
+    *,
+    control_limit: float = _CONTROL_SK_LIMIT,
+    well_limit: float = _WELL_SK_LIMIT,
+) -> list[str]:
+    """Wells whose fitted K is too uncertain to use, judged in pH units.
+
+    The cut is on ``sK`` itself, never on ``sK / K``. K here is a pKa on an
+    interval scale with an arbitrary origin, so a ratio to it carries no
+    meaning and, in practice, never fires: over eleven plates and 1002 wells the
+    largest ``sK / K`` observed is 0.255, so even a 0.3 threshold is inert.
+
+    Parameters
+    ----------
+    fits : pd.DataFrame
+        Fit table with columns ``well`` and ``sK`` (the latter in pH).
+    control_wells : Collection[str]
+        Wells carrying a known pK. They anchor accuracy, so they are held to
+        the tighter limit.
+    control_limit : float
+        Largest ``sK`` a control well may carry, in pH.
+    well_limit : float
+        Largest ``sK`` any other well may carry, in pH.
+
+    Returns
+    -------
+    list[str]
+        Wells to discard, sorted. A non-finite ``sK`` is always included: a fit
+        that cannot report an uncertainty has not constrained K.
+
+    Raises
+    ------
+    ValueError
+        If *fits* carries no ``well`` or ``sK`` column.
+    """
+    missing = {"well", "sK"} - set(fits.columns)
+    if missing:
+        msg = f"fit table is missing required column(s): {sorted(missing)}"
+        raise ValueError(msg)
+    controls = set(control_wells)
+    sk = pd.to_numeric(fits["sK"], errors="coerce").to_numpy(dtype=float)
+    limits = np.array([
+        control_limit if well in controls else well_limit for well in fits["well"]
+    ])
+    over = ~np.isfinite(sk) | (sk > limits)
+    return sorted(fits.loc[over, "well"].astype(str))
 
 
 def curve_turnover(x: np.ndarray, y: np.ndarray) -> float:
