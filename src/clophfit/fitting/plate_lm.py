@@ -49,6 +49,7 @@ __all__ = [
     "fit_plate_lm",
     "fit_plate_lm_screened",
     "profile_k_intervals",
+    "screening_sigma_floor",
 ]
 
 # Below this many unmasked points a well cannot suggest its own midpoint.
@@ -1114,7 +1115,7 @@ def apply_excluded_points(
     datasets: Mapping[str, Any],
     excluded_points: Mapping[str, Mapping[str, Sequence[int]]],
     *,
-    min_keep: int = 4,
+    min_keep: int = 5,
 ) -> dict[str, Any]:
     """Mask the points a screen rejected, so the next fit inherits its verdict.
 
@@ -1161,13 +1162,66 @@ def apply_excluded_points(
     return out
 
 
-def fit_plate_lm_screened(
+# The screen's ruler must admit that the model is imperfect. sigma is the
+# physical measurement noise, and at the dim end of a falling channel it
+# collapses onto the read-noise floor -- the Poisson term is clamped at zero for
+# a non-positive prediction, so a label with no proportional term has variance
+# exactly floor^2, which is 0.42 counts here. A 1.3-count model error is then a
+# 3-sigma event, and the screen deletes the transition points that pin the
+# plateaus. Campaign-wide, 34% of |z|>3 flags miss by under 10% of their curve's
+# range; 3% of the fitted span removes those and leaves the genuine ones.
+_SCREEN_AMPLITUDE_FRACTION = 0.03
+
+
+def screening_sigma_floor(
+    residuals: Sequence[Mapping[str, Any]],
+    *,
+    fraction: float = _SCREEN_AMPLITUDE_FRACTION,
+) -> dict[tuple[str, str], float]:
+    """Smallest sigma the screen may judge a point by, per well and label.
+
+    The amplitude is the span of the *fitted* curve over the observed points,
+    ``max(yhat) - min(yhat)``, not the span of the data. An outlier inflates the
+    observed span -- on these plates 31 cells of 1904 have a fitted span below
+    half the observed one -- which would raise the floor and make the screen
+    inert on exactly the curve that needed it. It is also not ``|S1 - S0|``,
+    which is the range extrapolated beyond the titrated window and can far
+    exceed anything the curve actually traverses.
+
+    Parameters
+    ----------
+    residuals : Sequence[Mapping[str, Any]]
+        Rows from a first-pass fit, carrying ``well``, ``label`` and ``yhat``.
+    fraction : float
+        Fraction of the amplitude to floor sigma at. ``0`` disables the floor
+        and restores judging purely on the physical sigma.
+
+    Returns
+    -------
+    dict[tuple[str, str], float]
+        ``(well, label)`` to the floor, ``0.0`` where the fitted curve is flat
+        and there is no amplitude to take a fraction of.
+    """
+    spans: dict[tuple[str, str], list[float]] = {}
+    for row in residuals:
+        yhat = float(row.get("yhat", float("nan")))
+        if not np.isfinite(yhat):
+            continue
+        spans.setdefault((str(row["well"]), str(row["label"])), []).append(yhat)
+    return {
+        key: float(fraction * (max(v) - min(v))) if len(v) > 1 else 0.0
+        for key, v in spans.items()
+    }
+
+
+def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an independent screening choice
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
     *,
     noise_model: Mapping[str, Any] | None = None,
     threshold: float = 3.0,
-    min_keep: int = 4,
+    min_keep: int = 5,
+    amplitude_fraction: float = _SCREEN_AMPLITUDE_FRACTION,
 ) -> PlateLMResult:
     """Find outliers with a calibrated ruler, then fit K with the plain one.
 
@@ -1207,8 +1261,15 @@ def fit_plate_lm_screened(
         on the calibrated scale.
     min_keep : int
         Never leave a label with fewer points than this, whatever their
-        residuals - a curve through three points is not an improvement on one
-        through seven with an outlier in it.
+        residuals. Four cannot locate a midpoint and two plateaus: on L4, E03
+        lost three of seven, landed exactly on the old default of four, and its
+        fit collapsed to a flat line - taking the well's other label with it,
+        since K is shared between them.
+    amplitude_fraction : float
+        Floor the screening sigma at this fraction of each curve's fitted span,
+        so a point is judged against model error and not only against
+        measurement noise. ``0`` restores judging on the physical sigma alone.
+        See :func:`screening_sigma_floor`.
 
     Returns
     -------
@@ -1223,10 +1284,14 @@ def fit_plate_lm_screened(
         noise_model=noise_model,
         calibrate_noise=noise_model is not None,
     )
+    floors = screening_sigma_floor(first.residuals, fraction=amplitude_fraction)
     drop: dict[tuple[str, str], set[int]] = {}
     for row in first.residuals:
-        if abs(float(row["std_res"])) > threshold:
-            key = (str(row["well"]), str(row["label"]))
+        key = (str(row["well"]), str(row["label"]))
+        # Judge on sigma or the amplitude floor, whichever is larger. The refit
+        # below still weights by the physical sigma: only the decision changes.
+        sigma = max(float(row["sigma"]), floors.get(key, 0.0))
+        if abs(float(row["raw_res"])) / sigma > threshold:
             drop.setdefault(key, set()).add(int(row["raw_i"]))
     if not drop:
         return fit_plate_lm(datasets, groups)
