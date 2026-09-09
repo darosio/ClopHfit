@@ -92,9 +92,15 @@ _MONOTONE_TURNOVER = 0.2
 # many read-noise widths. L4 G12 swings 1.2 widths and is discarded, while the
 # dimmest well kept anywhere swings 2.8.
 _MIN_AMPLITUDE_RATIO = 2.0
+# "Above background" is the wrong question when the background is 0.3 counts.
+# On L5b, 3 x bg_noise for the 485 nm channel is 0.926, so a well reading 1.0
+# passes while a healthy well on the same plate gives 97. A label whose swing is
+# below this fraction of the plate's median swing is dim whatever the read noise
+# says, and is then judged on its curve shape like any other dim label.
+_MIN_PLATE_AMPLITUDE_RATIO = 0.03
 
 
-def label_is_uninformative(  # ruff: ignore[too-many-arguments] - four independent thresholds, each named
+def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold is an independent criterion
     x: ArrayF,
     y_masked: ArrayF,
     y_raw: ArrayF,
@@ -102,6 +108,9 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - four independe
     floor: float,
     bg_multiplier: float,
     turnover_limit: float | None,
+    amplitude: float | None = None,
+    plate_amplitude: float | None = None,
+    plate_amplitude_ratio: float = _MIN_PLATE_AMPLITUDE_RATIO,
 ) -> bool:
     """Whether one label of one well carries no usable titration.
 
@@ -132,6 +141,15 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - four independe
         ``None`` disables the exemption, which is right for label 1: its acid
         turnover is a real feature of the fluorophore in roughly 60% of wells,
         so monotonicity says nothing there.
+    amplitude : float | None
+        This label's own swing, for the plate comparison below.
+    plate_amplitude : float | None
+        Median swing of this label across the plate. When both are given, a
+        label swinging less than *plate_amplitude_ratio* of it counts as dim
+        however it compares with the read noise - which is what catches a well
+        reading 1.0 count where the plate median is 93.
+    plate_amplitude_ratio : float
+        Fraction of the plate median below which a label is dim.
 
     Returns
     -------
@@ -141,7 +159,13 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - four independe
     valid = y_masked[~np.isnan(y_masked)]
     if len(valid) < _MIN_TITRATION_POINTS:
         return True
-    if float(np.nanmean(valid)) >= bg_multiplier * floor:
+    faint_for_plate = (
+        amplitude is not None
+        and plate_amplitude is not None
+        and plate_amplitude > 0
+        and amplitude < plate_amplitude_ratio * plate_amplitude
+    )
+    if float(np.nanmean(valid)) >= bg_multiplier * floor and not faint_for_plate:
         return False
     if turnover_limit is None:
         return True
@@ -1058,6 +1082,20 @@ class Titration(TecanfilesGroup):
             return []
 
         label_ids = sorted(self.labelblocksgroups)
+        # Median swing per label across the plate, so a well can be judged
+        # against its neighbours and not only against the read noise.
+        skip_keys = set(self.scheme.buffer) | set(self.scheme.nofit_keys)
+        plate_amplitude: dict[typing.Any, float] = {}
+        for label in label_ids:
+            swings = [
+                float(np.nanmax(arr) - np.nanmin(arr))
+                for well_key, values in self.data[label].items()
+                if well_key not in skip_keys
+                and len(arr := np.asarray(values, dtype=float)) > 1
+                and np.isfinite(arr).any()
+            ]
+            if swings:
+                plate_amplitude[label] = float(np.median(swings))
         new_discards: set[str] = set()
         # None means the titration's own x span - see the docstring.
         k_stderr_limit = (
@@ -1092,12 +1130,20 @@ class Titration(TecanfilesGroup):
                 floor = self.bg_noise.get(label)
                 if floor is None or not np.isfinite(floor):
                     continue
+                raw_y = np.asarray(self.data[label].get(well, y), dtype=float)
+                own = (
+                    float(np.nanmax(raw_y) - np.nanmin(raw_y))
+                    if np.isfinite(raw_y).any()
+                    else None
+                )
                 if label_is_uninformative(
                     np.asarray(self.x, dtype=float),
                     y,
-                    np.asarray(self.data[label].get(well, y), dtype=float),
+                    raw_y,
                     floor=float(floor),
                     bg_multiplier=bg_multiplier,
+                    amplitude=own,
+                    plate_amplitude=plate_amplitude.get(label),
                     # Label 1 turns over in acid for real, so it gets no
                     # exemption; a dim label 2 that is still monotone does.
                     turnover_limit=(

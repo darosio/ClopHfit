@@ -2908,3 +2908,81 @@ def test_export_plate_fit_excluded_file_is_written_even_when_empty(
     path = tmp_path / "plate_lm_excluded.csv"
     assert path.exists()
     assert pd.read_csv(path).empty
+
+
+class TestPlateRelativeDimness:
+    """Dimness is relative to the plate, not only to the read noise.
+
+    The signal test compares a label's mean against ``3 x bg_noise``. On L5b
+    that is 0.926 counts for the 485 nm channel, so E01 passes at 1.0 counts
+    while a healthy well on the same plate gives 97. The threshold is absolute;
+    what matters is how the well compares with the plate it sits on.
+
+    With a plate-relative clause E01 becomes dim, reaches the curve-shape test
+    it never reached before, and is condemned there on a turnover of 0.63 --
+    while L6a B02 and G05, equally faint but perfectly monotone, are still
+    spared. The known-good L2 B03 (0.8% of its plate's median amplitude, and
+    monotone) is spared too.
+    """
+
+    X = np.linspace(9.0, 5.0, 7)
+
+    @staticmethod
+    def _curve(top: float, bottom: float) -> np.ndarray:
+        return np.linspace(top, bottom, 7)
+
+    def test_a_well_far_below_its_plate_is_dim_however_it_compares_to_noise(
+        self,
+    ) -> None:
+        """L5b E01: 1.9% of the plate median, and noise-shaped, so it fails."""
+        noisy = np.array([1.9, 1.4, 2.1, 1.2, 1.8, 1.3, 1.7])  # turnover ~0.6
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            noisy,
+            noisy,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=float(noisy.max() - noisy.min()),
+            plate_amplitude=93.0,
+        )
+
+    def test_a_faint_but_monotone_well_is_still_spared(self) -> None:
+        """L6a B02: 0.9% of the plate median, but a clean curve, so it stands."""
+        clean = self._curve(2.65, -0.34)
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            clean,
+            clean,
+            floor=0.407,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=float(clean.max() - clean.min()),
+            plate_amplitude=327.1,
+        )
+
+    def test_a_normal_well_is_never_made_dim_by_the_plate_comparison(self) -> None:
+        """A well at plate strength cannot be condemned by this clause."""
+        bright = self._curve(900.0, 20.0)
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            bright,
+            bright,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=880.0,
+            plate_amplitude=93.0,
+        )
+
+    def test_the_clause_is_off_when_no_plate_amplitude_is_given(self) -> None:
+        """Absent the plate context the rule must behave exactly as before."""
+        noisy = np.array([1.9, 1.4, 2.1, 1.2, 1.8, 1.3, 1.7])
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            noisy,
+            noisy,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
