@@ -66,16 +66,18 @@ def test_leaves_the_input_untouched() -> None:
     assert np.all(np.asarray(original["A01"]["1"].mask))
 
 
-def test_refuses_to_mask_below_min_keep() -> None:
-    """A curve through three points is no improvement on one with an outlier.
+def test_a_label_too_damaged_to_clean_is_dropped_not_kept_dirty() -> None:
+    """Below min_keep the label leaves the fit entirely.
 
-    Same rule the screen applies when it builds its own masked copies, so the
-    two agree about which drops were actually taken.
+    Keeping its points was the old behaviour and it was the failure min_keep
+    exists to prevent, pointing the other way: the label stays in the fit *with*
+    the outliers the screen just identified. See test_uncleanable_label.py.
     """
     out = apply_excluded_points(
         _datasets(), {"A01": {"1": [0, 1, 2, 3, 4]}}, min_keep=4
     )
-    assert int(np.asarray(out["A01"]["1"].mask).sum()) == 7
+    assert "1" not in out["A01"]
+    assert "2" in out["A01"]
 
 
 def test_ignores_wells_and_labels_that_are_not_there() -> None:

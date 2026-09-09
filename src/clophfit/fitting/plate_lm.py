@@ -1144,7 +1144,8 @@ def apply_excluded_points(
     """
     out: dict[str, Any] = {}
     for well, ds in datasets.items():
-        arrays = {}
+        arrays: dict[Any, Any] = {}
+        uncleanable: list[Any] = []
         for lbl, da in ds.items():
             bad = set(excluded_points.get(well, {}).get(str(lbl), ()))
             mask = np.asarray(da.mask).copy()
@@ -1155,9 +1156,22 @@ def apply_excluded_points(
                         keep[i] = False
                 if int(keep.sum()) >= min_keep:
                     mask = keep
+                elif int(keep.sum()) < int(mask.sum()):
+                    # Too few would survive to fit a curve. Refusing to remove
+                    # them leaves the label in the fit *with* its outliers,
+                    # which is the failure min_keep exists to prevent, pointing
+                    # the other way: on L4, H10's 400 nm channel has three
+                    # points 39-73% of its range off the sigmoid and all three
+                    # were kept. Drop the label instead, as per-label bad-well
+                    # detection already does, and fit the well on what is left.
+                    uncleanable.append(lbl)
             new = copy.deepcopy(da)
             new.mask = mask
             arrays[lbl] = new
+        # Never leave a well with nothing: a poor fit reports its own error
+        # bars, an empty well says nothing and may break the caller.
+        for lbl in uncleanable[: max(len(arrays) - 1, 0)]:
+            del arrays[lbl]
         out[well] = type(ds)(arrays, is_ph=ds.is_ph)
     return out
 
@@ -1296,25 +1310,17 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
     if not drop:
         return fit_plate_lm(datasets, groups)
 
-    screened: dict[str, Any] = {}
-    n_excluded = 0
-    for well, ds in datasets.items():
-        arrays = {}
-        for lbl, da in ds.items():
-            bad = drop.get((well, str(lbl)), set())
-            mask = np.asarray(da.mask).copy()
-            if bad:
-                keep = mask.copy()
-                for i in bad:
-                    if 0 <= i < len(keep):
-                        keep[i] = False
-                if int(keep.sum()) >= min_keep:
-                    n_excluded += int(mask.sum() - keep.sum())
-                    mask = keep
-            new = copy.deepcopy(da)
-            new.mask = mask
-            arrays[lbl] = new
-        screened[well] = type(ds)(arrays, is_ph=ds.is_ph)
+    # One implementation, so the screen's own refit and any fit downstream of it
+    # agree about which points were taken and which labels were dropped whole.
+    by_well: dict[str, dict[str, list[int]]] = {}
+    for (well, lbl), idx in drop.items():
+        by_well.setdefault(well, {})[lbl] = sorted(idx)
+    screened = apply_excluded_points(datasets, by_well, min_keep=min_keep)
+    n_excluded = sum(
+        int(np.asarray(da.mask).sum()) for ds in datasets.values() for da in ds.values()
+    ) - sum(
+        int(np.asarray(da.mask).sum()) for ds in screened.values() for da in ds.values()
+    )
 
     out = fit_plate_lm(screened, groups)
     out.n_excluded = n_excluded
