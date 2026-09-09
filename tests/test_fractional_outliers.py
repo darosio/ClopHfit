@@ -25,16 +25,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from clophfit.fitting.plate_lm import fractional_outliers
+from clophfit.fitting.plate_lm import fractional_outliers, ratiometric_exempt
 
 
 def _row(well: str, label: str, step: int, y: float, yhat: float) -> dict[str, Any]:
+    """Build a residual row in the schema ``fit_plate_lm`` actually emits.
+
+    Note there is no ``y``: the deviation is carried by ``raw_res`` alone. An
+    earlier version of this helper invented a ``y`` key, so the tests passed
+    against a schema the fitter does not produce and the CLI failed with
+    KeyError on the first real plate.
+    """
     return {
         "well": well,
         "label": label,
         "step": step,
         "raw_i": step,
-        "y": y,
         "yhat": yhat,
         "sigma": 1.0,
         "raw_res": y - yhat,
@@ -99,3 +105,35 @@ def test_thresholds_are_adjustable() -> None:
     rows = [_row("A01", "1", 0, 890.0, 1000.0), _row("A01", "2", 0, 100.0, 100.0)]
     assert fractional_outliers(rows) == {}
     assert fractional_outliers(rows, frac_threshold=0.05) == {("A01", "1"): {0}}
+
+
+def test_ratiometric_points_are_exempt_from_any_screen() -> None:
+    """The exemption is a veto, not a clause of one criterion.
+
+    On L3 C06 the z-screen takes label 2 steps 0 and 1 at |z| 6.8 and 6.7, and
+    label 1 step 0 at 3.4. All three are the same well-level multiplicative
+    shift -- both channels ~15% high at step 0 and ~15% low at step 1 -- which
+    the ratio cancels. The reviewer asked for label 2's to be kept. Sparing them
+    only within the fractional criterion leaves the z-screen free to take them
+    anyway, which is what the first run did.
+    """
+    rows = [
+        _row("C06", "1", 0, 805.63, 694.14),
+        _row("C06", "2", 0, 1169.86, 1018.57),
+        _row("C06", "1", 1, 592.83, 707.39),
+        _row("C06", "2", 1, 839.51, 985.95),
+    ]
+    exempt = ratiometric_exempt(rows)
+    assert exempt == {("C06", "1"): {0, 1}, ("C06", "2"): {0, 1}}
+
+
+def test_a_single_channel_deviation_is_not_exempt() -> None:
+    """L3 A09 step 0: label 2 does not move, so nothing cancels."""
+    rows = [_row("A09", "1", 0, 869.27, 996.46), _row("A09", "2", 0, 1323.5, 1322.53)]
+    assert ratiometric_exempt(rows) == {}
+
+
+def test_small_shared_moves_are_not_exempt() -> None:
+    """Ordinary noise moves both channels a little; that is not an artefact."""
+    rows = [_row("A01", "1", 0, 101.0, 100.0), _row("A01", "2", 0, 101.0, 100.0)]
+    assert ratiometric_exempt(rows) == {}

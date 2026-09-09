@@ -50,6 +50,7 @@ __all__ = [
     "fit_plate_lm_screened",
     "fractional_outliers",
     "profile_k_intervals",
+    "ratiometric_exempt",
     "screening_sigma_floor",
 ]
 
@@ -1258,8 +1259,9 @@ def fractional_outliers(
     Parameters
     ----------
     residuals : Sequence[Mapping[str, Any]]
-        Rows from a fit, carrying ``well``, ``label``, ``raw_i``, ``y``,
-        ``yhat``.
+        Rows from a fit, carrying ``well``, ``label``, ``step``, ``raw_i``,
+        ``raw_res`` and ``yhat`` -- the schema ``fit_plate_lm`` produces, which
+        has no separate ``y``.
     frac_threshold : float
         Largest ``|y - yhat| / yhat`` treated as ordinary.
     ratiometric_ratio : float
@@ -1288,7 +1290,8 @@ def fractional_outliers(
         if row is None:
             return float("nan")
         yhat = float(row["yhat"])
-        return float("nan") if yhat == 0 else (float(row["y"]) - yhat) / yhat
+        # raw_res is y - yhat; the rows carry no separate y.
+        return float("nan") if yhat == 0 else float(row["raw_res"]) / yhat
 
     out: dict[tuple[str, str], set[int]] = {}
     for (well, _step), per_label in by_key.items():
@@ -1307,6 +1310,70 @@ def fractional_outliers(
         )
         if not shared:
             out.setdefault((well, target), set()).add(int(target_row["raw_i"]))
+    return out
+
+
+def ratiometric_exempt(
+    residuals: Sequence[Mapping[str, Any]],
+    *,
+    frac_threshold: float = _FRACTIONAL_THRESHOLD,
+    ratiometric_ratio: float = _RATIOMETRIC_RATIO,
+) -> dict[tuple[str, str], set[int]]:
+    """Points no screen should take, because the ratio already cancels them.
+
+    When both channels of a well shift the same way at the same step by a
+    comparable fraction, the cause is a well-level multiplicative artefact -- a
+    volume or read error -- and a ratiometric measurement is immune to it.
+    Removing such points biases the plateau instead of cleaning it.
+
+    This is a veto over every screening criterion, not a clause of one. On L3
+    C06 the z-screen takes label 2 at |z| 6.8 and 6.7 while both channels are
+    simply reading 15% high then 15% low; sparing those points only inside the
+    fractional criterion leaves the z-screen free to take them anyway.
+
+    Parameters
+    ----------
+    residuals : Sequence[Mapping[str, Any]]
+        Rows from a fit, carrying ``well``, ``label``, ``step``, ``raw_i``,
+        ``raw_res`` and ``yhat``.
+    frac_threshold : float
+        Only shifts larger than this are treated as artefacts; ordinary noise
+        moves both channels a little and is not exempted.
+    ratiometric_ratio : float
+        How closely the two channels must agree, as a fraction of the larger
+        move.
+
+    Returns
+    -------
+    dict[tuple[str, str], set[int]]
+        ``(well, label)`` to the ``raw_i`` values to spare, for every label
+        involved in the shared shift.
+    """
+    by_key: dict[tuple[str, int], dict[str, Mapping[str, Any]]] = {}
+    for row in residuals:
+        by_key.setdefault((str(row["well"]), int(row["step"])), {})[
+            str(row["label"])
+        ] = row
+
+    def frac(row: Mapping[str, Any]) -> float:
+        yhat = float(row["yhat"])
+        return float("nan") if yhat == 0 else float(row["raw_res"]) / yhat
+
+    out: dict[tuple[str, str], set[int]] = {}
+    for (well, _step), per_label in by_key.items():
+        fracs = {lbl: frac(row) for lbl, row in per_label.items()}
+        usable = {k: v for k, v in fracs.items() if np.isfinite(v)}
+        if len(usable) < 2:  # ruff: ignore[magic-value-comparison] - a ratio needs two channels
+            continue
+        big = max(usable.values(), key=abs)
+        if abs(big) <= frac_threshold:
+            continue
+        if all(
+            np.sign(v) == np.sign(big) and abs(v) >= ratiometric_ratio * abs(big)
+            for v in usable.values()
+        ):
+            for lbl in usable:
+                out.setdefault((well, lbl), set()).add(int(per_label[lbl]["raw_i"]))
     return out
 
 
@@ -1399,6 +1466,14 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
             first.residuals, frac_threshold=frac_threshold
         ).items():
             drop.setdefault(key, set()).update(idx)
+        # A veto over every criterion above, including the z-screen.
+        for key, idx in ratiometric_exempt(
+            first.residuals, frac_threshold=frac_threshold
+        ).items():
+            if key in drop:
+                drop[key] -= idx
+                if not drop[key]:
+                    del drop[key]
     if not drop:
         return fit_plate_lm(datasets, groups)
 
