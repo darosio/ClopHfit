@@ -1233,10 +1233,14 @@ def screening_sigma_floor(
 # A z-score fails at both ends of a titration: sigma tracks the signal while
 # model error tracks the curve, so a 5% miss at the dim end reads as 3.6 sigma
 # and a 36% miss at the bright end reads as 2.7. Reviewer calls over three
-# plates separate instead on |residual / prediction| -- keeps at 0.097-0.111,
-# discards from 0.126 up -- which matches a multiplicative noise term and the
-# documented uniform ~7% step-0 deficit.
-_FRACTIONAL_THRESHOLD = 0.12
+# plates separate instead on the *signed* residual over the prediction. Only
+# deficits are screened: both documented label-1 artefacts are shortfalls -- the
+# acidic turnover falls below its peak, and the step-0 effect is a uniform ~7%
+# multiplicative deficit -- while a positive excursion is scatter. Restricting
+# to deficits is what makes the threshold work at all: reviewer keeps run from
+# +0.097 to +0.112 and a discard sits at -0.093, so no cut on |frac| can order
+# them. Over 50 adjudicated points on four plates, -0.09 separates cleanly.
+_FRACTIONAL_THRESHOLD = 0.09
 # Both channels moving the same way by a comparable fraction is a well-level
 # multiplicative artefact, which the ratiometric measurement cancels; removing
 # those points biases the plateau instead of cleaning it.
@@ -1263,7 +1267,9 @@ def fractional_outliers(
         ``raw_res`` and ``yhat`` -- the schema ``fit_plate_lm`` produces, which
         has no separate ``y``.
     frac_threshold : float
-        Largest ``|y - yhat| / yhat`` treated as ordinary.
+        Deficits deeper than this fraction of the prediction are screened;
+        ``raw_res / yhat`` must be below ``-frac_threshold``. Positive
+        excursions are never screened.
     ratiometric_ratio : float
         Spare a point when the other channel moves the same way by at least this
         fraction of the first channel's move.
@@ -1299,7 +1305,8 @@ def fractional_outliers(
         if target_row is None:
             continue
         f1 = frac(target_row)
-        if not np.isfinite(f1) or abs(f1) <= frac_threshold:
+        # Deficits only: a positive excursion is scatter, not a known artefact.
+        if not np.isfinite(f1) or f1 >= -frac_threshold:
             continue
         others = [frac(r) for lbl, r in per_label.items() if lbl != target]
         shared = any(

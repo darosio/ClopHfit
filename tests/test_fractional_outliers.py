@@ -54,10 +54,26 @@ def test_a_large_fractional_miss_is_screened() -> None:
     assert fractional_outliers(rows) == {("A03", "1"): {6}}
 
 
-def test_an_ordinary_fractional_miss_is_left_alone() -> None:
-    """L4 B02 step 3: 11% off, which is inside normal variation."""
+def test_a_positive_excursion_is_never_screened() -> None:
+    """L4 B02 step 3 is 11% high, and kept.
+
+    Reviewer keeps run to +0.112 while a discard sits at -0.093, so only the
+    sign tells them apart. Both documented label-1 artefacts are deficits.
+    """
     rows = [_row("B02", "1", 3, 697.53, 627.65), _row("B02", "2", 3, 100.0, 102.4)]
     assert fractional_outliers(rows) == {}
+
+
+def test_a_shallow_deficit_is_left_alone() -> None:
+    """L5b C04 step 6: 5.8% below prediction, inside ordinary variation."""
+    rows = [_row("C04", "1", 6, 1212.01, 1286.85), _row("C04", "2", 6, 100.0, 100.0)]
+    assert fractional_outliers(rows) == {}
+
+
+def test_the_shallowest_reviewer_discard_is_caught() -> None:
+    """L3 D03 step 5 at -0.093, the shallowest deficit marked for removal."""
+    rows = [_row("D03", "1", 5, 626.67, 690.68), _row("D03", "2", 5, 100.0, 100.3)]
+    assert fractional_outliers(rows) == {("D03", "1"): {5}}
 
 
 def test_a_well_level_artefact_is_spared() -> None:
@@ -103,7 +119,7 @@ def test_a_zero_prediction_is_skipped_rather_than_dividing() -> None:
 def test_thresholds_are_adjustable() -> None:
     """The two knobs are the reviewer's break points, not constants of nature."""
     rows = [_row("A01", "1", 0, 890.0, 1000.0), _row("A01", "2", 0, 100.0, 100.0)]
-    assert fractional_outliers(rows) == {}
+    assert fractional_outliers(rows, frac_threshold=0.2) == {}
     assert fractional_outliers(rows, frac_threshold=0.05) == {("A01", "1"): {0}}
 
 
