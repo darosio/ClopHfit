@@ -1863,6 +1863,18 @@ class TecanConfig:
     this is not a knob to sweep casually.
     """
 
+    plate_screen_frac: float | None = None
+    """Also drop 400 nm points deviating fractionally by more than this.
+
+    A z-score fails at both ends of a titration: sigma tracks the signal while
+    model error tracks the curve, so a 5% miss at the dim end reads as 3.6 sigma
+    while a 36% miss at the bright end reads as 2.7. ``|y - yhat| / yhat``
+    separates reviewer keeps (0.097-0.111) from discards (0.126 up) over three
+    plates. Points the 485 nm channel moves with are spared, since a shared
+    multiplicative shift is what the ratiometric measurement cancels. ``None``
+    leaves the z-screen alone.
+    """
+
     plate_noise: str = "fixed"
     """How ``--plate-fit`` weights its points.
 

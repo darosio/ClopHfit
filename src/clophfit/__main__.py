@@ -164,6 +164,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
 @click.option("--plate-noise", type=click.Choice(["fixed", "calibrated"], case_sensitive=False), default="fixed", show_default=True, help="How --plate-fit weights its points. fixed uses y_err as built (bg_noise floor plus any --noise-gain/--noise-alpha). calibrated estimates gain and alpha per label from the fit's own residuals and refits under them; it describes the residuals better and fits K worse, so it is not the default.")  # fmt: skip
 @click.option("--plate-screen-z", type=float, default=None, help="For --plate-fit: drop points whose calibrated |z| exceeds this and refit. The screening pass calibrates gain/alpha per label so a dim point and a bright one are judged on the same scale; the refit uses the plain weighting. 3.0 is the value measured to help; 2.5 is harmful.")  # fmt: skip
+@click.option("--plate-screen-frac", type=float, default=None, help="For --plate-fit: also drop 400 nm points whose |y-yhat|/yhat exceeds this, sparing any the 485 nm channel moves with. A z-score fails at both ends of a titration -- sigma tracks the signal while model error tracks the curve -- so a 5% miss at the dim end reads as 3.6 sigma while a 36% miss at the bright end reads as 2.7. 0.12 is where reviewer calls separate; unset leaves the z-screen alone.")  # fmt: skip
 @click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
 @click.option("--mcmc-robust-likelihood", type=click.Choice(["student_t", "mixture"], case_sensitive=False), default="student_t", show_default=True, help="Which robust likelihood --mcmc-robust selects: a heavy-tailed student_t, or a Normal/outlier contamination mixture that models the outliers rather than down-weighting them.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
@@ -207,6 +208,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     plate_fit: str | None,
     plate_noise: str,
     plate_screen_z: float | None,
+    plate_screen_frac: float | None,
     mcmc_robust: bool,
     mcmc_robust_likelihood: str,
     student_t_nu: float,
@@ -271,6 +273,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         detect_bad,
         ctr_free_k,
         plate_screen_z,
+        plate_screen_frac,
         plate_noise.lower(),
     )
 

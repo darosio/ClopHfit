@@ -48,6 +48,7 @@ __all__ = [
     "apply_excluded_points",
     "fit_plate_lm",
     "fit_plate_lm_screened",
+    "fractional_outliers",
     "profile_k_intervals",
     "screening_sigma_floor",
 ]
@@ -1228,6 +1229,87 @@ def screening_sigma_floor(
     }
 
 
+# A z-score fails at both ends of a titration: sigma tracks the signal while
+# model error tracks the curve, so a 5% miss at the dim end reads as 3.6 sigma
+# and a 36% miss at the bright end reads as 2.7. Reviewer calls over three
+# plates separate instead on |residual / prediction| -- keeps at 0.097-0.111,
+# discards from 0.126 up -- which matches a multiplicative noise term and the
+# documented uniform ~7% step-0 deficit.
+_FRACTIONAL_THRESHOLD = 0.12
+# Both channels moving the same way by a comparable fraction is a well-level
+# multiplicative artefact, which the ratiometric measurement cancels; removing
+# those points biases the plateau instead of cleaning it.
+_RATIOMETRIC_RATIO = 0.7
+
+
+def fractional_outliers(
+    residuals: Sequence[Mapping[str, Any]],
+    *,
+    frac_threshold: float = _FRACTIONAL_THRESHOLD,
+    ratiometric_ratio: float = _RATIOMETRIC_RATIO,
+    label: str | None = None,
+) -> dict[tuple[str, str], set[int]]:
+    """Points whose fractional deviation is too large to be ordinary noise.
+
+    Applied to the first label only. The second channel's plateau falls to zero,
+    where a fraction of the prediction stops being meaningful; its outliers are
+    left to the z-screen with its amplitude floor.
+
+    Parameters
+    ----------
+    residuals : Sequence[Mapping[str, Any]]
+        Rows from a fit, carrying ``well``, ``label``, ``raw_i``, ``y``,
+        ``yhat``.
+    frac_threshold : float
+        Largest ``|y - yhat| / yhat`` treated as ordinary.
+    ratiometric_ratio : float
+        Spare a point when the other channel moves the same way by at least this
+        fraction of the first channel's move.
+    label : str | None
+        Label to screen. ``None`` takes the lowest label present, which is the
+        400 nm channel on these plates.
+
+    Returns
+    -------
+    dict[tuple[str, str], set[int]]
+        ``(well, label)`` to the ``raw_i`` values to drop.
+    """
+    by_key: dict[tuple[str, int], dict[str, Mapping[str, Any]]] = {}
+    for row in residuals:
+        by_key.setdefault((str(row["well"]), int(row["step"])), {})[
+            str(row["label"])
+        ] = row
+    labels = {str(r["label"]) for r in residuals}
+    if not labels:
+        return {}
+    target = label if label is not None else min(labels)
+
+    def frac(row: Mapping[str, Any] | None) -> float:
+        if row is None:
+            return float("nan")
+        yhat = float(row["yhat"])
+        return float("nan") if yhat == 0 else (float(row["y"]) - yhat) / yhat
+
+    out: dict[tuple[str, str], set[int]] = {}
+    for (well, _step), per_label in by_key.items():
+        target_row = per_label.get(target)
+        if target_row is None:
+            continue
+        f1 = frac(target_row)
+        if not np.isfinite(f1) or abs(f1) <= frac_threshold:
+            continue
+        others = [frac(r) for lbl, r in per_label.items() if lbl != target]
+        shared = any(
+            np.isfinite(f2)
+            and np.sign(f2) == np.sign(f1)
+            and abs(f2) >= ratiometric_ratio * abs(f1)
+            for f2 in others
+        )
+        if not shared:
+            out.setdefault((well, target), set()).add(int(target_row["raw_i"]))
+    return out
+
+
 def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an independent screening choice
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
@@ -1236,6 +1318,7 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
     threshold: float = 3.0,
     min_keep: int = 5,
     amplitude_fraction: float = _SCREEN_AMPLITUDE_FRACTION,
+    frac_threshold: float | None = None,
 ) -> PlateLMResult:
     """Find outliers with a calibrated ruler, then fit K with the plain one.
 
@@ -1284,6 +1367,10 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
         so a point is judged against model error and not only against
         measurement noise. ``0`` restores judging on the physical sigma alone.
         See :func:`screening_sigma_floor`.
+    frac_threshold : float | None
+        When given, also screen the first label on ``|y - yhat| / yhat``
+        exceeding this, sparing points the second channel moves with. ``None``
+        leaves the z-screen alone. See :func:`fractional_outliers`.
 
     Returns
     -------
@@ -1307,6 +1394,11 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
         sigma = max(float(row["sigma"]), floors.get(key, 0.0))
         if abs(float(row["raw_res"])) / sigma > threshold:
             drop.setdefault(key, set()).add(int(row["raw_i"]))
+    if frac_threshold is not None:
+        for key, idx in fractional_outliers(
+            first.residuals, frac_threshold=frac_threshold
+        ).items():
+            drop.setdefault(key, set()).update(idx)
     if not drop:
         return fit_plate_lm(datasets, groups)
 

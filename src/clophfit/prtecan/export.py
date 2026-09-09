@@ -1001,8 +1001,9 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     png: bool = True,
     calibrate_noise: bool = False,
     screen_z: float | None = None,
+    frac_threshold: float | None = None,
     ctr_free_k: bool = False,
-) -> Path | None:
+) -> PlateLMResult | PlateODRResult | None:
     """Fit the whole plate at once, classically, and write K per well.
 
     The per-well fits above give each well its own noise scale; this fits every
@@ -1031,6 +1032,10 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     screen_z : float | None
         Drop points whose calibrated standardised residual exceeds this and
         refit. ``None`` fits once.
+    frac_threshold : float | None
+        Also screen the first label on ``|y - yhat| / yhat`` exceeding this,
+        sparing points the other channel moves with. See
+        :func:`~clophfit.fitting.plate_lm.fractional_outliers`.
     ctr_free_k : bool
         Give every well its own K instead of pooling each control group onto a
         shared one. The plate fitters pool by default, exactly as ``--mcmc
@@ -1039,8 +1044,10 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
 
     Returns
     -------
-    Path | None
-        The CSV written, or ``None`` when no wells were fitted.
+    PlateLMResult | PlateODRResult | None
+        The fit, or ``None`` when no wells were fitted. The result rather than
+        the path it wrote, because the caller needs ``excluded_points`` to hand
+        the screen's verdict to whatever fits next.
     """
     if not datasets:
         return None
@@ -1069,7 +1076,11 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         if screen_z is not None:
             # Screen on the calibrated ruler, fit K on the plain one.
             result = fit_plate_lm_screened(
-                datasets, groups, noise_model=noise, threshold=screen_z
+                datasets,
+                groups,
+                noise_model=noise,
+                threshold=screen_z,
+                frac_threshold=frac_threshold,
             )
         else:
             result = fit_plate_lm(
@@ -1190,6 +1201,7 @@ def export_fit(
             png=config.png,
             calibrate_noise=getattr(config, "plate_noise", "fixed") == "calibrated",
             screen_z=screen_z,
+            frac_threshold=getattr(config, "plate_screen_frac", None),
             ctr_free_k=getattr(config, "ctr_free_k", False),
         )
         # The hybrid: the classical screen decides what is an outlier, on a
