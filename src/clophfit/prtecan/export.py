@@ -1088,6 +1088,22 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         for well in sorted(result.k)
     ]
     pd.DataFrame(rows).to_csv(outfit / f"plate_{method}_K.csv", index=False)
+    # What the screen removed, in a form one can join, sort and count. The
+    # per-well figures mark these points, but nothing listed them: the L4 wells
+    # the screen left unfittable were found by diffing residual tables between
+    # arms. Written even when empty, so an absent file means the fit did not
+    # run rather than that it dropped nothing.
+    dropped = [
+        {"well": well, "label": lbl, "raw_i": idx}
+        for well, per_label in sorted(
+            (getattr(result, "excluded_points", None) or {}).items()
+        )
+        for lbl, indices in sorted(per_label.items())
+        for idx in sorted(indices)
+    ]
+    pd.DataFrame(dropped, columns=["well", "label", "raw_i"]).to_csv(
+        outfit / f"plate_{method}_excluded.csv", index=False
+    )
     _export_plate_fit_plots(titration, datasets, result, outfit, method, png=png)
     pd.DataFrame([
         {"label": lbl, "ye_mag": mag} for lbl, mag in sorted(result.ye_mag.items())

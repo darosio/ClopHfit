@@ -873,6 +873,9 @@ class TitrationResults(ResidualsMixin):
         with sns.plotting_context("paper"):  # axes_style("whitegrid"):
             fig = plt.figure(figsize=(12, 16))
             keys_unk = list(set(dataframe.index))
+            # Bound unconditionally: a plate with no control groups still needs
+            # x-limits, and this used to raise UnboundLocalError instead.
+            df_ctr = dataframe.iloc[0:0]
             if self.scheme.names:
                 keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
                 df_ctr = dataframe.loc[dataframe.index.intersection(self.scheme.ctrl)]

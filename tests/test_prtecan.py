@@ -2838,3 +2838,73 @@ class TestDimLabelExemption:
             bg_multiplier=3.0,
             turnover_limit=0.2,
         )
+
+
+def test_export_plate_fit_writes_the_points_the_screen_removed(tmp_path: Path) -> None:
+    """A screened fit must say which points it dropped, not only that it did.
+
+    The per-well figures mark them as "excluded (not fitted)", but nothing
+    listed them in a form one could join to, sort, or count. On L4 the screen
+    removed three points from one well's 485 nm channel and left it unfittable;
+    that was found by diffing residual tables between arms, which is not a
+    review anyone should have to do.
+    """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+
+    def curve(k: float) -> np.ndarray:
+        return 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+
+    datasets = {}
+    for well, k in (("A01", 7.0), ("A12", 7.0), ("B01", 6.2)):
+        y = curve(k)
+        if well == "B01":
+            y = y.copy()
+            y[3] += 4000.0  # unmistakable, so the screen must take it
+        datasets[well] = Dataset(
+            {"1": DataArray(x, y, y_errc=np.full(7, 5.0))}, is_ph=True
+        )
+    tit = SimpleNamespace(
+        scheme=SimpleNamespace(names={"CTR": ["A01", "A12"]}), x_err=None
+    )
+
+    export_plate_fit(tit, datasets, tmp_path, "lm", screen_z=3.0)  # type: ignore[arg-type]  # SimpleNamespace test double
+
+    path = tmp_path / "plate_lm_excluded.csv"
+    assert path.exists()
+    table = pd.read_csv(path)
+    assert set(table.columns) >= {"well", "label", "raw_i"}
+    assert (table["well"] == "B01").any()
+
+
+def test_export_plate_fit_excluded_file_is_written_even_when_empty(
+    tmp_path: Path,
+) -> None:
+    """An absent file cannot be told apart from a screen that dropped nothing."""
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+    y = 100.0 + 900.0 / (1.0 + 10.0 ** (x - 7.0))
+    datasets = {
+        "A01": Dataset({"1": DataArray(x, y, y_errc=np.full(7, 5.0))}, is_ph=True)
+    }
+    tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
+
+    export_plate_fit(tit, datasets, tmp_path, "lm", screen_z=3.0)  # type: ignore[arg-type]  # SimpleNamespace test double
+
+    path = tmp_path / "plate_lm_excluded.csv"
+    assert path.exists()
+    assert pd.read_csv(path).empty
