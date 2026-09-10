@@ -159,6 +159,9 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--noise-floor-ref-gain", multiple=True, type=float, default=(), help="Reader Gain each --noise-floor was quoted at, per label. The floor is then scaled to this plate's own Gain by 10**((gain-ref)/34.1), so one calibration serves plates read at different settings. Pass 0 to leave a label's floor unscaled, which is right where no Gain dependence was measured.")  # fmt: skip
 @click.option("--mcmc-noise", type=click.Choice(["ye_mag", "structured"], case_sensitive=False), default="ye_mag", show_default=True, help="Observation-noise family for --mcmc single-refit and multi. ye_mag scales y_err by a learned multiplier; structured builds floor+gain*y+(alpha*y)^2 with floors from bg_noise and gain/alpha from --noise-gain/--noise-alpha.")  # fmt: skip
 @click.option("--noise-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc-noise structured, how a hint is treated: centered (a prior the posterior may leave) or fixed (pinned). It governs the floor, which is always hinted because it comes from the measured buffer noise, and any --noise-gain/--noise-alpha supplied. Gain and alpha given no value stay free, so --noise-mode fixed on its own means a pinned floor with both signal-dependent terms learned.")  # fmt: skip
+@click.option("--noise-floor-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for floor alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
+@click.option("--noise-gain-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for gain alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
+@click.option("--noise-alpha-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for alpha alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable", "separable_step"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), a per-label level plus one shared well factor (separable), or that plus a per-label pH axis on the noise (separable_step).")  # fmt: skip
 @click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
@@ -205,6 +208,9 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     per_well_ye_mags: bool | None,
     ye_mag_parameterization: str,
     noise_mode: str,
+    noise_floor_mode: str | None,
+    noise_gain_mode: str | None,
+    noise_alpha_mode: str | None,
     plate_fit: str | None,
     plate_noise: str,
     plate_screen_z: float | None,
@@ -323,6 +329,9 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "nuts_sampler": nuts_sampler,
             "mcmc_noise": mcmc_noise,
             "noise_mode": noise_mode,
+            "floor_mode": noise_floor_mode,
+            "gain_mode": noise_gain_mode,
+            "alpha_mode": noise_alpha_mode,
             "noise_alpha": tuple(noise_alpha),
             "noise_gain": tuple(noise_gain),
             "noise_floor": tuple(noise_floor),
@@ -450,6 +459,9 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
                 ye_mag_parameterization,
             ),
             noise_mode=cast('Literal["centered", "fixed"]', noise_mode),
+            floor_mode=cast('Literal["centered", "fixed"] | None', noise_floor_mode),
+            gain_mode=cast('Literal["centered", "fixed"] | None', noise_gain_mode),
+            alpha_mode=cast('Literal["centered", "fixed"] | None', noise_alpha_mode),
         )
     )
     logger.info("mcmc: %s", mcmc_spec)

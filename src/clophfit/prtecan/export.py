@@ -300,7 +300,12 @@ def _ye_mag_screening_noise(
 
 
 def _structured_noise(
-    titration: Titration, *, noise_mode: Literal["centered", "fixed"]
+    titration: Titration,
+    *,
+    noise_mode: Literal["centered", "fixed"],
+    floor_mode: Literal["centered", "fixed"] | None = None,
+    gain_mode: Literal["centered", "fixed"] | None = None,
+    alpha_mode: Literal["centered", "fixed"] | None = None,
 ) -> NoiseConfig:
     """Build the physical floor/gain/alpha noise config from titration.
 
@@ -318,6 +323,16 @@ def _structured_noise(
     noise_mode : Literal["centered", "fixed"]
         How supplied floor/gain/alpha values are treated by the sampler. The
         floor hint always exists, since it is measured, so ``"fixed"`` pins it.
+    floor_mode : Literal["centered", "fixed"] | None
+        Override for the floor alone. One mode for all three terms cannot ask
+        the question the terms need: pinning alpha at zero also pinned the
+        floor, so a cell meant to isolate gain instead measured a sigma that
+        could not rescale at all, and came back understating the noise
+        threefold.
+    gain_mode : Literal["centered", "fixed"] | None
+        Override for gain alone.
+    alpha_mode : Literal["centered", "fixed"] | None
+        Override for alpha alone.
 
     Returns
     -------
@@ -345,9 +360,11 @@ def _structured_noise(
         # put the floor at 52.6 against a measured 11.8, leaving gain and alpha
         # under 1% of the variance at every signal level. A "structured" model
         # that reports a flat sigma is not one.
-        floor_mode=noise_mode if floors else "free",
-        gain_mode=noise_mode if gains else "free",
-        alpha_mode=noise_mode if alphas else "free",
+        # A term with no hint stays free whatever the mode says: there is
+        # nothing to centre on or pin to.
+        floor_mode=(floor_mode or noise_mode) if floors else "free",
+        gain_mode=(gain_mode or noise_mode) if gains else "free",
+        alpha_mode=(alpha_mode or noise_mode) if alphas else "free",
     )
 
 
@@ -506,7 +523,13 @@ def fit_single_mcmc(
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
             noise=(
-                _structured_noise(titration, noise_mode=spec.noise_mode)
+                _structured_noise(
+                    titration,
+                    noise_mode=spec.noise_mode,
+                    floor_mode=spec.floor_mode,
+                    gain_mode=spec.gain_mode,
+                    alpha_mode=spec.alpha_mode,
+                )
                 if spec.structured_noise
                 else _DEFAULT_NOISE
             ),
@@ -527,7 +550,13 @@ def fit_single_mcmc(
         # One config for both passes: unlike ye_mag, whose refit prior is
         # recentred on the screening pass's learned multiplier, the structured
         # model's floor/gain/alpha hints do not shift between passes.
-        noise = _structured_noise(titration, noise_mode=spec.noise_mode)
+        noise = _structured_noise(
+            titration,
+            noise_mode=spec.noise_mode,
+            floor_mode=spec.floor_mode,
+            gain_mode=spec.gain_mode,
+            alpha_mode=spec.alpha_mode,
+        )
         screening_noise, refit_noise = noise, noise
     else:
         screening_noise = _ye_mag_screening_noise(titration.bg_noise)

@@ -1948,6 +1948,12 @@ class McmcSpec:
     structured_noise : bool
         Build the physical ``floor + gain * y + (alpha * y) ** 2`` observation
         noise instead of scaling ``y_err`` by a learned ``ye_mag`` multiplier.
+    floor_mode : Literal["centered", "fixed"] | None
+        Override the mode for the floor alone; ``None`` follows *noise_mode*.
+    gain_mode : Literal["centered", "fixed"] | None
+        Override the mode for gain alone; ``None`` follows *noise_mode*.
+    alpha_mode : Literal["centered", "fixed"] | None
+        Override the mode for alpha alone; ``None`` follows *noise_mode*.
     noise_mode : Literal["centered", "fixed"]
         How a supplied gain/alpha hint is treated when *structured_noise* is
         set: centred on (a hint the posterior may leave) or pinned to it. A
@@ -1977,6 +1983,12 @@ class McmcSpec:
     sampler: SamplerConfig
     structured_noise: bool = False
     noise_mode: Literal["centered", "fixed"] = "centered"
+    # Per-term overrides. One mode for all three cannot separate the terms:
+    # pinning alpha at zero also pins the floor, so sigma cannot rescale and the
+    # cell measures that rather than the term it meant to isolate.
+    floor_mode: Literal["centered", "fixed"] | None = None
+    gain_mode: Literal["centered", "fixed"] | None = None
+    alpha_mode: Literal["centered", "fixed"] | None = None
     per_well_ye_mags: bool | None = None
     ye_mag_parameterization: Literal[
         "centered", "hierarchical", "separable", "separable_step"
