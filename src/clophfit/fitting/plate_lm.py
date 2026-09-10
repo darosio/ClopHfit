@@ -293,14 +293,16 @@ def _raw_residuals(
     return np.concatenate(parts) if parts else np.zeros(0)
 
 
-def _calibrate_noise(
+def _calibrate_noise(  # ruff: ignore[too-many-arguments] - one per fit input
     prob: _Problem,
     p: np.ndarray,
     scales: Mapping[str, float],
     yerrs: Sequence[np.ndarray],
     current: Mapping[str, Any] | None,
+    *,
+    noise_free: Sequence[str] = ("gain", "alpha"),
 ) -> Mapping[str, Any] | None:
-    """Re-estimate gain and alpha per label from this pass's residuals.
+    """Re-estimate the free noise terms per label from this pass's residuals.
 
     The plate's own residuals say how the noise grows with signal, so the
     weights need not be guessed. ``sigma^2 = floor^2 + gain * yhat +
@@ -324,7 +326,13 @@ def _calibrate_noise(
     yerrs : Sequence[np.ndarray]
         Per-observation y_err for this pass.
     current : Mapping[str, Any] | None
-        Noise model in force, supplying the floors to pin.
+        Noise model in force, supplying the floors to pin and the values any
+        held term keeps.
+    noise_free : Sequence[str]
+        Which of ``"floor"``, ``"gain"`` and ``"alpha"`` may move. Anything
+        absent keeps the value *current* gave it, so holding a term at zero
+        disables it and holding it at a supplied value pins it there. An empty
+        sequence returns *current* unchanged.
 
     Returns
     -------
@@ -339,6 +347,17 @@ def _calibrate_noise(
     }
     if not floors:
         return current
+    free = set(noise_free)
+    held_gain = {
+        lbl: float(getattr(params, "gain", 0.0))
+        for lbl, params in (current or {}).items()
+    }
+    held_alpha = {
+        lbl: float(getattr(params, "alpha", 0.0))
+        for lbl, params in (current or {}).items()
+    }
+    if not free:
+        return current
     table = _residual_table(prob, p, scales, yerrs)
     if not table:
         return current
@@ -347,7 +366,10 @@ def _calibrate_noise(
     df["label"] = df["label"].astype(str)
     try:
         fitted_floors, gains, alphas = fit_noise_model_nnls(
-            df, sigma_floor_fixed=floors
+            df,
+            sigma_floor_fixed=None if "floor" in free else floors,
+            gain_fixed=None if "gain" in free else held_gain,
+            rel_error_fixed=None if "alpha" in free else held_alpha,
         )
     except (ValueError, np.linalg.LinAlgError):
         logger.debug("plate noise calibration failed; keeping current weights")
@@ -637,6 +659,7 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
     loss: Literal["linear", "huber", "soft_l1", "cauchy"] = "linear",
     noise_model: Mapping[str, Any] | None = None,
     calibrate_noise: bool = False,
+    noise_free: Sequence[str] = ("gain", "alpha"),
 ) -> PlateLMResult:
     """Fit every well of a plate jointly, profiling one noise scale per label.
 
@@ -669,6 +692,12 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
         floor pinned, and refit under the result. Off by default: it describes
         the residuals better and fits K worse, because down-weighting
         high-signal points down-weights the plateaus that pin S0 and S1.
+    noise_free : Sequence[str]
+        Which noise terms ``calibrate_noise`` may move: any of ``"floor"``,
+        ``"gain"`` and ``"alpha"``. The default frees both signal terms with
+        the floor pinned, which is the only case the estimator could express
+        before and the one where gain and alpha are collinear. Holding one of
+        them lets the iteration converge instead of wandering along that ridge.
 
     Returns
     -------
@@ -699,7 +728,9 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
         )
         p = fit.x
         if calibrate_noise:
-            noise_model = _calibrate_noise(prob, p, scales, yerrs, noise_model)
+            noise_model = _calibrate_noise(
+                prob, p, scales, yerrs, noise_model, noise_free=noise_free
+            )
         moved = _reweight(prob, p, yerrs, noise_model)
         for lbl in prob.labels:
             new = _profiled_scale(
