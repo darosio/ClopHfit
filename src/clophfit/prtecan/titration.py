@@ -1928,7 +1928,18 @@ class TecanConfig:
     ``--noise-gain``/``--noise-alpha`` supplied. ``"calibrated"`` estimates gain
     and alpha per label from the fit's own residuals and refits under them.
     Calibration describes the residuals better and fits K worse, so it is not
-    the default; see ``fit_plate_lm``.
+    the default; see ``fit_plate_lm``. It sets the weights K is fitted with
+    whether or not ``plate_screen_z`` is given.
+    """
+
+    plate_screen_noise: str = "calibrated"
+    """The ruler ``--plate-screen-z`` judges points on.
+
+    ``"calibrated"`` (the default) calibrates gain and alpha from the screening
+    pass's own residuals so bright and dim points are judged on a comparable
+    scale; ``"fixed"`` judges on the weights as built. Independent of
+    ``plate_noise``: before the two were separate options, ``plate_noise`` meant
+    the fit's weights without a screen but not after one.
     """
 
 

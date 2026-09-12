@@ -1038,6 +1038,7 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     screen_z: float | None = None,
     frac_threshold: float | None = None,
     ctr_free_k: bool = False,
+    calibrate_screen: bool = True,
 ) -> PlateLMResult | PlateODRResult | None:
     """Fit the whole plate at once, classically, and write K per well.
 
@@ -1076,6 +1077,10 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         shared one. The plate fitters pool by default, exactly as ``--mcmc
         multi`` does, so the flag has to reach here or the two fitters answer
         different questions from the same command line.
+    calibrate_screen : bool
+        With *screen_z*, judge points on the calibrated ruler (default) rather
+        than on the weights as built. The weights K is then fitted with follow
+        *calibrate_noise*, screened or not.
 
     Returns
     -------
@@ -1109,13 +1114,17 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         # pass unconditionally.
         noise = _plate_noise_model(titration)
         if screen_z is not None:
-            # Screen on the calibrated ruler, fit K on the plain one.
+            # The screen's ruler and the fit's weights are separate choices
+            # (--plate-screen-noise, --plate-noise); --plate-noise used to be
+            # overridden here, so "calibrated" meant plain weights after a screen.
             result = fit_plate_lm_screened(
                 datasets,
                 groups,
                 noise_model=noise,
                 threshold=screen_z,
                 frac_threshold=frac_threshold,
+                calibrate_screen=calibrate_screen,
+                calibrate_refit=calibrate_noise,
             )
         else:
             result = fit_plate_lm(
@@ -1238,6 +1247,8 @@ def export_fit(
             screen_z=screen_z,
             frac_threshold=getattr(config, "plate_screen_frac", None),
             ctr_free_k=getattr(config, "ctr_free_k", False),
+            calibrate_screen=getattr(config, "plate_screen_noise", "calibrated")
+            == "calibrated",
         )
         # The hybrid: the classical screen decides what is an outlier, on a
         # calibrated ruler, and the Bayesian fit inherits that verdict. Without

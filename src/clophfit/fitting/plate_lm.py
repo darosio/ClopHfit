@@ -70,13 +70,33 @@ _ROBUST_F_SCALE = 2.0
 # MAD -> sigma for a normal distribution.
 _MAD_TO_SIGMA = 1.4826
 _LN10 = float(np.log(10.0))
-# A robust loss never satisfies scipy's termination tests on this problem:
-# the plateau parameters keep micro-adjusting, so the cost creeps downward
-# forever and the fit runs to the default budget of 100 * n_params - over
-# 40000 evaluations, around two hours for one plate. K settles long before
-# that. Measured on L2, this cap puts every well within 0.0095 pH of a fit
-# ten times longer, an order of magnitude inside the 0.1 ROPE.
-_ROBUST_MAX_NFEV = 200
+# A robust loss never met scipy's termination tests here because the
+# parameters were unscaled: K near 7 beside plateaus near 1000, so the step and
+# gradient tests, built for comparably sized parameters, never tripped and the
+# fit crept on to 100 * n_params evaluations. A cap of 200 hid that on L2, but on
+# L5b K was still moving after 5000 evaluations (0.23 pH on one well, the bench
+# score getting worse). Scaling by the Jacobian (x_scale="jac") lets the robust
+# fit converge by scipy's own criteria: over eleven plates the first solve of a
+# fit needs 600-1087 evaluations and every later one under 40. The cap is only a
+# safety net, set at about five times that, and reaching it is reported. The
+# step-size test (xtol) is switched off for these solves: it compares the raw
+# step with norm(x), which the plateaus dominate, so once a few rejected huber
+# steps shrink the trust region it fired while K was still moving (a planted-
+# outlier well 0.09 pH off after 20 evaluations; 0.014, as unscaled, once the
+# cost test decides).
+_ROBUST_MAX_NFEV = 5000
+# The same safety net for linear loss, which terminates in well under 200
+# evaluations unless the weights have degenerated: a calibrated floor driven to
+# zero leaves dim points with near-infinite weight, and one such solve took 8713
+# evaluations (202 s of dense SVDs). Reaching it is reported, not hidden.
+_LINEAR_MAX_NFEV = 1000
+# Step fraction applied to a calibrated noise term after its update reverses
+# direction. With the floor free, floor and gain are near-collinear and the
+# undamped iteration cycled (floor 0 -> 126 -> 27 -> 15 -> 0.3 -> 0 on L6b)
+# without converging; halving the step at each reversal turns the cycle into a
+# converging oscillation, and a term that moves monotonically is untouched.
+_CALIBRATION_REVERSAL_DAMPING = 0.5
+_NOISE_TERMS = ("sigma_floor", "gain", "alpha")
 # Largest number of refits spent walking out one side of one profile.
 _PROFILE_MAX_STEPS = 12
 # First step out from K-hat, in standard errors.
@@ -128,6 +148,11 @@ class PlateLMResult:
         ``std_res`` has per-label SD ~1 by construction and only its shape -
         tails, step dependence - carries information; ``raw_res`` and ``yhat``
         are the signal-scale pair the noise-calibration estimators read.
+    budget_reached : bool
+        Whether any solve stopped on its evaluation cap rather than on scipy's
+        own convergence tests. Kept apart from ``success``: the caps are safety
+        nets, and a caller deciding whether to trust a fit needs to know which
+        of the two it is looking at.
     """
 
     k: dict[str, float] = field(default_factory=dict)
@@ -141,6 +166,98 @@ class PlateLMResult:
     noise: dict[str, dict[str, float]] = field(default_factory=dict)
     excluded_points: dict[str, dict[str, list[int]]] = field(default_factory=dict)
     residuals: list[dict[str, Any]] = field(default_factory=list)
+    budget_reached: bool = False
+
+
+def _solver_kwargs(loss: str) -> dict[str, Any]:
+    """Loss-specific ``least_squares`` settings, shared by every solve.
+
+    Parameters
+    ----------
+    loss : str
+        ``"linear"`` or a robust loss name.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``loss``, ``f_scale`` and ``max_nfev``, plus ``x_scale="jac"`` and
+        ``xtol=None`` for a robust loss, which needs both to converge on the
+        cost test (see ``_ROBUST_MAX_NFEV``). Linear keeps scipy's defaults so
+        its fits are unchanged.
+    """
+    if loss == "linear":
+        return {"loss": loss, "f_scale": 1.0, "max_nfev": _LINEAR_MAX_NFEV}
+    return {
+        "loss": loss,
+        "f_scale": _ROBUST_F_SCALE,
+        "max_nfev": _ROBUST_MAX_NFEV,
+        "x_scale": "jac",
+        "xtol": None,
+    }
+
+
+@dataclass
+class _DampingState:
+    """Per (label, term): the last applied change and the current step fraction."""
+
+    last: dict[tuple[str, str], float] = field(default_factory=dict)
+    step: dict[tuple[str, str], float] = field(default_factory=dict)
+
+
+def _damped_update(
+    current: Mapping[str, Any] | None,
+    proposed: Mapping[str, Any] | None,
+    state: _DampingState,
+) -> Mapping[str, Any] | None:
+    """Move each calibrated noise term toward its proposal, halving on reversal.
+
+    A term whose update keeps its direction takes the proposal exactly, so a
+    calibration that never oscillates is unchanged. When a term's change
+    reverses sign, its step fraction halves from then on; that is what stops
+    the floor/gain cycle a free floor produced.
+
+    Parameters
+    ----------
+    current : Mapping[str, Any] | None
+        Noise model in force before this pass.
+    proposed : Mapping[str, Any] | None
+        What ``_calibrate_noise`` estimated from this pass's residuals.
+    state : _DampingState
+        Carried across the passes of one fit; updated in place.
+
+    Returns
+    -------
+    Mapping[str, Any] | None
+        The noise model to use for the next pass.
+    """
+    if current is None or proposed is None or proposed is current:
+        return proposed
+    out: dict[str, Any] = {}
+    for lbl, new in proposed.items():
+        old = current.get(lbl)
+        if old is None:
+            out[lbl] = new
+            continue
+        values = {}
+        for term in _NOISE_TERMS:
+            o, n = float(getattr(old, term, 0.0)), float(getattr(new, term, 0.0))
+            key = (str(lbl), term)
+            delta = n - o
+            if delta * state.last.get(key, 0.0) < 0:
+                state.step[key] = (
+                    state.step.get(key, 1.0) * _CALIBRATION_REVERSAL_DAMPING
+                )
+            # Never reversed: take the proposal itself, not o + 1.0 * delta.
+            values[term] = o + state.step[key] * delta if key in state.step else n
+            if delta != 0:
+                state.last[key] = delta
+        out[lbl] = NoiseModelParams(
+            sigma_floor=values["sigma_floor"],
+            gain=values["gain"],
+            alpha=values["alpha"],
+            sigma_ph=float(getattr(new, "sigma_ph", 0.0)),
+        )
+    return out
 
 
 def _k_index(
@@ -715,6 +832,8 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
     jacobian = _jacobian_fn(prob, scales, yerrs)
 
     fit = None
+    budget_reached = False
+    damping = _DampingState()
     for _ in range(max_iter):
         fit = least_squares(
             residuals,
@@ -722,15 +841,15 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
             jac=jacobian,
             method="trf",
             bounds=bounds,
-            loss=loss,
-            f_scale=_ROBUST_F_SCALE if loss != "linear" else 1.0,
-            max_nfev=None if loss == "linear" else _ROBUST_MAX_NFEV,
+            **_solver_kwargs(loss),
         )
+        budget_reached = budget_reached or fit.status == 0
         p = fit.x
         if calibrate_noise:
-            noise_model = _calibrate_noise(
+            proposed = _calibrate_noise(
                 prob, p, scales, yerrs, noise_model, noise_free=noise_free
             )
+            noise_model = _damped_update(noise_model, proposed, damping)
         moved = _reweight(prob, p, yerrs, noise_model)
         for lbl in prob.labels:
             new = _profiled_scale(
@@ -757,6 +876,7 @@ def fit_plate_lm(  # ruff: ignore[too-many-arguments]
         n_points=prob.n_points,
         n_params=len(p),
         success=bool(fit.success) if fit is not None else False,
+        budget_reached=budget_reached,
     )
     if fit is None:
         return result
@@ -931,9 +1051,7 @@ def _profile_side(ctx: _ProfileCtx, ki: int, step: float, edge: float) -> float:
             jac=jac,
             method="trf",
             bounds=bounds,
-            loss=ctx.loss,
-            f_scale=_ROBUST_F_SCALE if ctx.loss != "linear" else 1.0,
-            max_nfev=None if ctx.loss == "linear" else _ROBUST_MAX_NFEV,
+            **_solver_kwargs(ctx.loss),
         )
         return float(np.sum(fit.fun**2))
 
@@ -1415,6 +1533,32 @@ def ratiometric_exempt(
     return out
 
 
+def _screen_refit(
+    data: Mapping[str, Any],
+    groups: Mapping[str, Sequence[str]],
+    noise_model: Mapping[str, Any] | None,
+) -> PlateLMResult:
+    """Fit K after a screen: calibrated on ``noise_model`` if given, else plain.
+
+    Parameters
+    ----------
+    data : Mapping[str, Any]
+        Well identifier to `Dataset`, screened or not.
+    groups : Mapping[str, Sequence[str]]
+        Control group name to member wells.
+    noise_model : Mapping[str, Any] | None
+        Starting noise model for a calibrated refit; ``None`` for the plain one.
+
+    Returns
+    -------
+    PlateLMResult
+        The refit.
+    """
+    if noise_model is None:
+        return fit_plate_lm(data, groups)
+    return fit_plate_lm(data, groups, noise_model=noise_model, calibrate_noise=True)
+
+
 def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an independent screening choice
     datasets: Mapping[str, Any],
     groups: Mapping[str, Sequence[str]],
@@ -1424,6 +1568,8 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
     min_keep: int = 5,
     amplitude_fraction: float = _SCREEN_AMPLITUDE_FRACTION,
     frac_threshold: float | None = None,
+    calibrate_screen: bool = True,
+    calibrate_refit: bool = False,
 ) -> PlateLMResult:
     """Find outliers with a calibrated ruler, then fit K with the plain one.
 
@@ -1476,6 +1622,16 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
         When given, also screen the first label on ``|y - yhat| / yhat``
         exceeding this, sparing points the second channel moves with. ``None``
         leaves the z-screen alone. See :func:`fractional_outliers`.
+    calibrate_screen : bool
+        Judge points on the calibrated ruler (the default, and the reason this
+        function exists) or on the weights as built.
+    calibrate_refit : bool
+        Fit K with calibrated weights instead of the plain ones. The two jobs
+        used to be fixed to one choice each, and the CLI then reused
+        ``--plate-noise calibrated`` to mean calibrated weights without a
+        screen but plain weights after one -- a confound worth ~1.1 in the
+        eleven-plate bench score, credited to the screen. Each is now its own
+        switch; the defaults keep the split described above.
 
     Returns
     -------
@@ -1488,7 +1644,7 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
         datasets,
         groups,
         noise_model=noise_model,
-        calibrate_noise=noise_model is not None,
+        calibrate_noise=calibrate_screen and noise_model is not None,
     )
     floors = screening_sigma_floor(first.residuals, fraction=amplitude_fraction)
     drop: dict[tuple[str, str], set[int]] = {}
@@ -1512,8 +1668,9 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
                 drop[key] -= idx
                 if not drop[key]:
                     del drop[key]
+    refit_noise = noise_model if calibrate_refit else None
     if not drop:
-        return fit_plate_lm(datasets, groups)
+        return _screen_refit(datasets, groups, refit_noise)
 
     # One implementation, so the screen's own refit and any fit downstream of it
     # agree about which points were taken and which labels were dropped whole.
@@ -1527,7 +1684,7 @@ def fit_plate_lm_screened(  # ruff: ignore[too-many-arguments] - each knob is an
         int(np.asarray(da.mask).sum()) for ds in screened.values() for da in ds.values()
     )
 
-    out = fit_plate_lm(screened, groups)
+    out = _screen_refit(screened, groups, refit_noise)
     out.n_excluded = n_excluded
     for (well, lbl), idx in drop.items():
         out.excluded_points.setdefault(well, {})[lbl] = sorted(idx)
