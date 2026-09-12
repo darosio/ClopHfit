@@ -2203,6 +2203,58 @@ def test_mcmc_spec_knobs_reach_the_multi_model(
     assert seen["sampler"].n_tune == 4000  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize(
+    ("x_error_model", "between", "expected"),
+    [
+        # The default must stay the shared axis and leave the offset SD to the
+        # library, so existing runs fit the model they always fitted.
+        ("deterministic", None, {"x_error_model": "deterministic"}),
+        ("per_well", None, {"x_error_model": "per_well"}),
+        (
+            "per_well",
+            0.028,
+            {"x_error_model": "per_well", "x_start_between_sigma": 0.028},
+        ),
+    ],
+)
+def test_mcmc_x_error_model_reaches_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    x_error_model: str,
+    between: float | None,
+    expected: dict[str, object],
+) -> None:
+    """The latent pH axis of ``McmcSpec`` must arrive at ``fit_binding_pymc_multi``.
+
+    ``fit_single_mcmc`` never passed ``x_error_model``, so every ``ppr`` run
+    used the shared axis -- one walk for all wells -- although the model could
+    give each well its own. pH is measured in a few wells and their spread grows
+    along a titration, and on eleven plates the per-well axis took free-K
+    single-well bulk z-SD from ~1.65 to ~0.95; unreachable, it did nothing.
+    """
+    from clophfit.prtecan import export  # ruff: ignore[import-outside-top-level]
+
+    seen: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return SimpleNamespace(results={})
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    spec = prtecan.McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(),
+        x_error_model=x_error_model,  # type: ignore[arg-type]
+        x_start_between_sigma=between,
+    )
+
+    export.fit_single_mcmc(tit, {}, tmp_path, spec)
+
+    got = {k: seen[k] for k in ("x_error_model", "x_start_between_sigma") if k in seen}
+    assert got == expected
+
+
 def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
     """``--plate-fit`` must produce a K per well, with control groups pooled.
 

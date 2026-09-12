@@ -172,6 +172,8 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--mcmc-robust-likelihood", type=click.Choice(["student_t", "mixture"], case_sensitive=False), default="student_t", show_default=True, help="Which robust likelihood --mcmc-robust selects: a heavy-tailed student_t, or a Normal/outlier contamination mixture that models the outliers rather than down-weighting them.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi and --plate-fit: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
+@click.option("--mcmc-x-error", type=click.Choice(["deterministic", "per_well"], case_sensitive=False), default="deterministic", show_default=True, help="Latent pH axis for --mcmc multi. deterministic is one pipetting walk shared by every well; per_well gives each well its own walk, with step SDs from the measured pH errors (read noise plus accumulated pipetting). pH is measured in a few wells and their spread grows along the titration, so only per_well carries an unmeasured well's pH uncertainty into its K.")  # fmt: skip
+@click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
 @click.option("--mcmc-tune", default=None, type=int, help="Tuning draws per chain for --mcmc. Default is mcmc-samples // 2.")  # fmt: skip
 @click.option("--mcmc-target-accept", default=None, type=float, help="NUTS target acceptance for --mcmc. Default is latent-x aware.")  # fmt: skip
 @click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
@@ -219,6 +221,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     mcmc_robust_likelihood: str,
     student_t_nu: float,
     ctr_free_k: bool,
+    mcmc_x_error: str,
+    mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
     mcmc_target_accept: float | None,
     dry_run: bool,
@@ -259,6 +263,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         _validate_tecan_options(cl, bg, dil, add, sch, comb)
     except (DataValidationError, MissingDependencyError) as e:
         raise click.ClickException(str(e)) from e
+    # A knob that is accepted and then ignored is worse than an error: the run
+    # looks configured and is not.
+    if mcmc_x_start_between is not None and mcmc_x_error.lower() != "per_well":
+        msg = "--mcmc-x-start-between only applies with --mcmc-x-error per_well."
+        raise click.UsageError(msg)
 
     # Dry run mode: validate inputs and exit
     if dry_run:
@@ -341,6 +350,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
             "ctr_free_k": ctr_free_k,
+            "x_error_model": mcmc_x_error.lower(),
+            "x_start_between_sigma": mcmc_x_start_between,
             "mcmc_tune": mcmc_tune,
             "mcmc_target_accept": mcmc_target_accept,
             "plate_fit": plate_fit,
@@ -462,6 +473,10 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             floor_mode=cast('Literal["centered", "fixed"] | None', noise_floor_mode),
             gain_mode=cast('Literal["centered", "fixed"] | None', noise_gain_mode),
             alpha_mode=cast('Literal["centered", "fixed"] | None', noise_alpha_mode),
+            x_error_model=cast(
+                'Literal["deterministic", "per_well"]', mcmc_x_error.lower()
+            ),
+            x_start_between_sigma=mcmc_x_start_between,
         )
     )
     logger.info("mcmc: %s", mcmc_spec)

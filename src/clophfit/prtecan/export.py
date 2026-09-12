@@ -513,7 +513,12 @@ def fit_single_mcmc(
         # summarised to disk rather than dropped.
         # The noise family has to be passed explicitly: omitting it left
         # --mcmc-noise structured, --noise-gain and --noise-alpha accepted,
-        # echoed back in the run configuration, and silently ignored.
+        # echoed back in the run configuration, and silently ignored. The pH
+        # axis likewise: never passing x_error_model left every run on the
+        # shared axis whatever the model could express.
+        x_axis: dict[str, typing.Any] = {"x_error_model": spec.x_error_model}
+        if spec.x_start_between_sigma is not None:
+            x_axis["x_start_between_sigma"] = spec.x_start_between_sigma
         multi = fit_binding_pymc_multi(
             datasets,
             titration.scheme,
@@ -533,6 +538,7 @@ def fit_single_mcmc(
                 if spec.structured_noise
                 else _DEFAULT_NOISE
             ),
+            **x_axis,
         )
         export_trace_summary(getattr(multi, "trace", None), outfit, "multi")
         return TitrationResults(titration.scheme, titration.fit_keys, multi.results)

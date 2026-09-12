@@ -1977,6 +1977,21 @@ class McmcSpec:
         accuracy at the construct level and makes the stated interval too
         narrow, and the library wells have no group to pool with, so free K is
         the setting that matches what a plate is fitted for.
+    x_error_model : Literal["deterministic", "per_well"]
+        The latent pH axis of ``model="multi"``. ``"deterministic"`` is one
+        pipetting walk shared by every well; ``"per_well"`` gives each well its
+        own walk, with step SDs split from the measured pH errors into read
+        noise plus accumulated pipetting variance. pH is measured in a few wells
+        and their spread grows along a titration, so an unmeasured well's pH is
+        uncertain in a way only the per-well axis carries into its K: on eleven
+        plates it took free-K single-well bulk z-SD from ~1.65 to ~0.95 at
+        unchanged accuracy. The default keeps the historical shared axis.
+    x_start_between_sigma : float | None
+        For ``x_error_model="per_well"``, the prior SD of each well's offset at
+        the first step. A per-well offset is degenerate with that well's K, so
+        this SD passes straight into K's interval; set it to the measured
+        well-to-well spread at the first step rather than a round number.
+        ``None`` keeps the library default.
     """
 
     model: Literal["single", "single-refit", "multi"]
@@ -1995,3 +2010,5 @@ class McmcSpec:
     ] = "centered"
     robust: RobustConfig = field(default_factory=RobustConfig)
     ctr_free_k: bool = False
+    x_error_model: Literal["deterministic", "per_well"] = "deterministic"
+    x_start_between_sigma: float | None = None
