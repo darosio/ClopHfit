@@ -886,6 +886,14 @@ class TitrationResults(ResidualsMixin):
             The figure.
         """
         dataframe = self.dataframe
+        # A fit with no standard error reports sK as None, which matplotlib's
+        # errorbar rejects ("'xerr' must not contain None"): one such well on a
+        # chloride plate aborted the whole run from this diagnostic plot. As
+        # NaN it is simply drawn without an error bar.
+        if "sK" in dataframe.columns:
+            dataframe = dataframe.assign(
+                sK=pd.to_numeric(dataframe["sK"], errors="coerce")
+            )
         # A well fitted on fewer labels than its neighbours carries a K that is
         # systematically less certain - 3 parameters over 7 points instead of 6
         # over 14, and no ratiometric cancellation. Mark those so nobody reads

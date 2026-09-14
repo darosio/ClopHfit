@@ -177,6 +177,8 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
 @click.option("--mcmc-tune", default=None, type=int, help="Tuning draws per chain for --mcmc. Default is mcmc-samples // 2.")  # fmt: skip
 @click.option("--mcmc-target-accept", default=None, type=float, help="NUTS target acceptance for --mcmc. Default is latent-x aware.")  # fmt: skip
+@click.option("--mcmc-chains", default=None, type=click.IntRange(min=1), help="Number of NUTS chains for --mcmc. Unset keeps the sampler default (4).")  # fmt: skip
+@click.option("--mcmc-seed", default=None, type=int, help="Random seed for --mcmc, making the draws reproducible. Unset leaves sampling nondeterministic.")  # fmt: skip
 @click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard unusable wells before fitting, writing discarded_wells.txt, and record everything atypical in atypical_wells.csv beside it.")  # fmt: skip
@@ -227,6 +229,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
     mcmc_target_accept: float | None,
+    mcmc_chains: int | None,
+    mcmc_seed: int | None,
     dry_run: bool,
     print_spec: bool,
     detect_bad: bool,
@@ -357,6 +361,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "x_start_between_sigma": mcmc_x_start_between,
             "mcmc_tune": mcmc_tune,
             "mcmc_target_accept": mcmc_target_accept,
+            "mcmc_chains": mcmc_chains,
+            "mcmc_seed": mcmc_seed,
             "plate_fit": plate_fit,
         })
         return
@@ -455,6 +461,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
                 nuts_sampler=nuts_sampler,
                 n_tune=mcmc_tune,
                 target_accept=mcmc_target_accept,
+                chains=mcmc_chains,
+                random_seed=mcmc_seed,
             ),
             # nu=0 is the CLI's way of asking for an inferred nu, which the
             # library spells as None.

@@ -117,12 +117,21 @@ def prepare_output_folder(titration: Titration, base_path: Path) -> Path:
 def export_residuals(
     outfit: Path, fit_results: dict[str, FitResult], index: int
 ) -> None:
-    """Export fit residuals and their statistics to files."""
+    """Export fit residuals and their statistics to files.
+
+    Writes nothing when no fit produced residuals: the plots are sized by the
+    labels present, and an empty table used to raise inside matplotlib
+    ("Number of columns must be a positive integer, not 0"), aborting a
+    chloride run after its fits had succeeded. A diagnostic must not be able
+    to destroy the run it describes.
+    """
     try:
         all_res = residuals_from_fit_results(
             fit_results, trace_id="", binding_function=binding_1site
         )
     except (ValueError, KeyError):
+        return
+    if all_res.empty or "label" not in all_res or all_res["label"].nunique() == 0:
         return
     all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)
     stats = residual_statistics(all_res)

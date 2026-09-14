@@ -2748,7 +2748,11 @@ def weighted_stats(
     """Weighted mean and stderr for control priors.
 
     Filters out ``NaN``, ``inf``, and non-positive stderr, and floors
-    stderr at *min_stderr* to avoid infinite weights.
+    stderr at *min_stderr* to avoid infinite weights. A sample with no finite
+    pair is left out of the result, with a warning, rather than raised on: a
+    construct that does not respond (V224Q in a chloride titration has an
+    infinite Kd) is a legitimate control, and raising aborted the whole plate.
+    Callers must treat a sample missing from the result as unfittable.
     """
     results: dict[str, tuple[float, float]] = {}
     for sample in values:
@@ -2762,8 +2766,13 @@ def weighted_stats(
             pairs.append((float(v), s_val))
 
         if not pairs:
-            msg = f"No valid finite (value, stderr) pairs for {sample!r}"
-            raise ValueError(msg)
+            warnings.warn(
+                f"No finite (value, stderr) pair for control {sample!r}: it has "
+                "no K estimate (a construct that does not bind, or replicates "
+                "that all failed) and is left out of the control priors.",
+                stacklevel=2,
+            )
+            continue
 
         x, se = map(np.asarray, zip(*pairs, strict=True))
         w = 1.0 / se**2
@@ -2837,6 +2846,8 @@ def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
                         f"K_{name}_{well}", mu=mu, sigma=sigma
                     )
     else:
+        # A group without a K estimate has no wells in the fit (see
+        # fit_binding_pymc_multi), so it gets no shared K either.
         k_params = {
             name: pm.Normal(
                 _ctr_param_name(name),
@@ -2844,6 +2855,7 @@ def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
                 sigma=max(ctr_ks[name][1], fallback_sigma / 2),
             )
             for name in scheme.names
+            if name in ctr_ks
         }
     return k_params, k_replicate
 
@@ -3287,6 +3299,20 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
+    # A control group without any finite preliminary K -- a construct that
+    # does not bind (V224Q in a chloride titration: Kd is infinite), or one
+    # whose replicates all failed -- has no binding curve to fit and nothing to
+    # centre a K prior on. Its wells are left out of the multi-well fit, and so
+    # out of its results, as bad-well detection leaves out its discards.
+    no_k = [name for name in scheme.names if name not in ctr_ks]
+    if no_k:
+        dropped = {w for name in no_k for w in scheme.names[name]}
+        warnings.warn(
+            f"Control group(s) {no_k} have no finite K estimate; their wells "
+            f"{sorted(dropped & set(fit_results))} are left out of the multi-well fit.",
+            stacklevel=2,
+        )
+        fit_results = {k: v for k, v in fit_results.items() if k not in dropped}
     active_wells = {key for key, r in fit_results.items() if r.result and r.dataset}
     wells_list = [
         key
