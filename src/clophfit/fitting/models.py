@@ -47,6 +47,36 @@ import numpy as np
 
 from clophfit.clophfit_types import ArrayF
 
+# Smallest dissociation constant (mM) any fitter may return. Nothing below
+# ~1 mM is plausible for a chloride sensor, and a titration whose first point
+# is tens of mM cannot tell 0.1 from 1 mM: below the floor a fitter only trades
+# Kd against the bound plateau, and an unbounded one reported Kd = -2.7 mM.
+KD_MIN = 1.0
+
+# Largest Kd, as a multiple of the highest concentration titrated. At 100x the
+# top point the curve moves by under 1% across the titration, which no
+# measurement resolves, so a well that does not bind samples up here instead
+# of wandering to infinity.
+KD_MAX_FACTOR = 100.0
+
+
+def kd_bounds(x_max: float) -> tuple[float, float]:
+    """Return the range a dissociation constant is fitted in.
+
+    Parameters
+    ----------
+    x_max : float
+        Highest ligand concentration titrated (mM).
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(KD_MIN, KD_MAX_FACTOR * x_max)``; the upper bound is infinite when
+        *x_max* is not a positive finite number.
+    """
+    hi = KD_MAX_FACTOR * x_max if np.isfinite(x_max) and x_max > 0 else np.inf
+    return KD_MIN, float(max(hi, 10 * KD_MIN))
+
 
 # fmt: off
 @typing.overload

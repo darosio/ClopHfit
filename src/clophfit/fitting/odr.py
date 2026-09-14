@@ -11,7 +11,7 @@ import odrpack
 from lmfit import Parameters  # type: ignore[import-untyped]
 from matplotlib import figure
 
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import binding_1site, kd_bounds
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 from clophfit.fitting.utils import (
     identify_outliers_mad,
@@ -187,6 +187,16 @@ def fit_binding_odr(  # ruff: ignore[complex-structure, too-many-statements]
         def combined_model_odr(x: ArrayF, p: ArrayF) -> ArrayF:
             return generalized_combined_model(p, x, dataset_lengths, is_ph=ds.is_ph)
 
+        # Kd stays in the range the other fitters use; pKa is left as it was.
+        bounds = None
+        if not ds.is_ph:
+            lo, hi = kd_bounds(float(np.nanmax(x_data)))
+            n_par = len(initial_params)
+            lower = np.full(n_par, -np.inf)
+            upper = np.full(n_par, np.inf)
+            lower[0], upper[0] = lo, hi
+            initial_params[0] = float(np.clip(initial_params[0], lo, hi))
+            bounds = (lower, upper)
         output = odrpack.odr_fit(
             combined_model_odr,
             x_data,
@@ -194,6 +204,7 @@ def fit_binding_odr(  # ruff: ignore[complex-structure, too-many-statements]
             initial_params,
             weight_x=weight_x,
             weight_y=weight_y,
+            bounds=bounds,
         )
 
         start_idx = 0

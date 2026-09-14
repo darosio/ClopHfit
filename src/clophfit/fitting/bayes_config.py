@@ -188,7 +188,8 @@ class InitConfig:
         K prior family for ``strategy="data_priors"``.
     k_bounds : tuple[float, float] | None
         Lower and upper K bounds for data-derived priors. ``None`` resolves to
-        ``(4.5, 9.0)`` for pH datasets or ``(1e-6, 1e6)`` otherwise.
+        ``(4.5, 9.0)`` for pH datasets or ``(KD_MIN, 1e6)`` (1 mM floor)
+        otherwise.
     k_sigma : float
         Truncated-Normal K prior sigma for data-derived priors.
     """

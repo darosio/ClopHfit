@@ -44,7 +44,7 @@ from clophfit.fitting.model_validation import (
     apply_exclusions,
     mark_outliers,
 )
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import KD_MIN, binding_1site, kd_bounds
 from clophfit.fitting.plotting import PlotParameters, plot_fit
 
 from .core import N_BOOT, fit_binding_glob  # local to avoid circular import
@@ -656,7 +656,7 @@ def _resolve_data_prior_k_bounds(
     k_bounds: tuple[float, float] | None, *, is_ph: bool
 ) -> tuple[float, float]:
     """Return valid K bounds, falling back to an ``is_ph``-appropriate range."""
-    default = (4.5, 9.0) if is_ph else (1e-6, 1e6)
+    default = (4.5, 9.0) if is_ph else (KD_MIN, 1e6)
     if k_bounds is None:
         return default
     lo, hi = sorted(map(float, k_bounds))
@@ -1684,12 +1684,124 @@ def _safe_sigma(
     return float(sigma)
 
 
-def create_parameter_priors(
+# Smallest prior SD of log Kd: a preliminary Kd known to 1% is not a reason to
+# pin the sampler to it.
+_LOG_KD_SIGMA_MIN = 0.05
+# Largest logit slope of the log-Kd prior. A logit-normal is single-peaked up
+# to a slope of sqrt(2) and piles mass onto both bounds beyond it, which would
+# favour "binds at the floor" and "does not bind" over everything between.
+_LOGIT_SLOPE_MAX = float(np.sqrt(2.0))
+# Trace-name prefix of the standard-normal variable behind a Deterministic Kd.
+KD_RAW_PREFIX = "z_"
+
+
+def log_kd_prior_params(
+    k: float | None,
+    stderr: float | None,
+    n_sd: float,
+    bounds: tuple[float, float],
+) -> tuple[float, float]:
+    """Centre and width, in log Kd, of a prior seeded by a preliminary fit.
+
+    The pH model centres a Normal on the preliminary K with ``n_sd`` of its
+    standard errors; this is the same prior moved to the log scale by the
+    delta method (``sd(log K) = sd(K) / K``). A preliminary fit with no finite
+    positive Kd or standard error -- a well that does not bind, whose curve is
+    flat -- gets a prior spanning the whole range instead, centred on its
+    geometric middle, so neither binding nor its absence is favoured.
+
+    Parameters
+    ----------
+    k : float | None
+        Preliminary Kd (mM).
+    stderr : float | None
+        Its standard error.
+    n_sd : float
+        Prior width in preliminary standard errors.
+    bounds : tuple[float, float]
+        ``(lo, hi)`` Kd range the prior is truncated to; see ``kd_bounds``.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(mu, sigma)`` of the log-Kd Normal before truncation.
+    """
+    lo, hi = bounds
+    span = float(np.log(hi / lo))
+    wide = float(np.log(lo)) + span / 2, span
+    if k is None or stderr is None:
+        return wide
+    if not (np.isfinite(k) and np.isfinite(stderr) and k > 0 and stderr > 0):
+        return wide
+    mu = float(np.log(np.clip(k, lo, hi)))
+    return mu, float(np.clip(n_sd * stderr / k, _LOG_KD_SIGMA_MIN, span))
+
+
+def log_kd_prior(
+    name: str,
+    mu: float | np.ndarray,
+    sigma: float | np.ndarray,
+    bounds: tuple[float, float],
+    dims: str | None = None,
+) -> typing.Any:  # ruff: ignore[any-type]  # pt.TensorVariable (no stubs)
+    """Build a Kd bounded to *bounds*, sampled through a standard Normal.
+
+    ``log Kd = log lo + span * sigmoid(a + b z)`` with ``z ~ Normal(0, 1)``
+    (``z_<name>`` in the trace); ``name`` itself is a Deterministic, so traces
+    and results carry the Kd under the name they always had. The floor and
+    ceiling hold by construction: an unbounded Normal returned Kd = -2.7 mM,
+    and a well that does not bind samples the top of the range instead of
+    wandering to infinity.
+
+    Why not a truncated Normal in log Kd: NUTS starts each chain jittered by
+    +/-1 in the *transformed* space, which for an interval as wide as
+    1 mM - 16 M moves a 10 mM Kd elevenfold. On a test plate two of four
+    chains never recovered (r-hat 4-8, every variable). Here ``a`` and ``b``
+    are chosen so the slope of ``log Kd`` in ``z`` at the centre is *sigma*,
+    so the jitter is a one-prior-SD move, as it is for a pKa.
+
+    Parameters
+    ----------
+    name : str
+        Name of the Kd variable, e.g. ``"K"`` or ``"K_free"``.
+    mu : float | np.ndarray
+        Prior centre(s) in log Kd (see :func:`log_kd_prior_params`).
+    sigma : float | np.ndarray
+        Prior SD(s) in log Kd. The logit slope is capped at ``sqrt(2)``: a
+        prior as wide as the range becomes the flattest single-peaked shape
+        rather than one piled onto both bounds.
+    bounds : tuple[float, float]
+        ``(lo, hi)`` Kd range.
+    dims : str | None
+        PyMC dims, for a vector of wells.
+
+    Returns
+    -------
+    typing.Any
+        The Kd tensor.
+    """
+    lo, hi = bounds
+    log_lo = float(np.log(lo))
+    span = float(np.log(hi)) - log_lo
+    # Centre as a fraction of the range, kept off the bounds so logit is finite.
+    p = np.clip((np.asarray(mu, dtype=float) - log_lo) / span, 1e-3, 1 - 1e-3)
+    a = np.log(p / (1 - p))
+    b = np.minimum(
+        np.asarray(sigma, dtype=float) / (span * p * (1 - p)), _LOGIT_SLOPE_MAX
+    )
+    z = pm.Normal(f"{KD_RAW_PREFIX}{name}", mu=0.0, sigma=1.0, dims=dims)
+    log_k = log_lo + span * pm.math.sigmoid(a + b * z)
+    return pm.Deterministic(name, pt.exp(log_k), dims=dims)
+
+
+def create_parameter_priors(  # ruff: ignore[too-many-arguments]
     params: Parameters,
     n_sd: float,
     key: str = "",
     ctr_name: str = "",
     default_sigma: float = 1e-3,
+    *,
+    kd_range: tuple[float, float] | None = None,
 ) -> dict[str, pm.Distribution]:
     """Create PyMC parameter prior distributions from lmfit Parameters.
 
@@ -1705,6 +1817,9 @@ def create_parameter_priors(
         If specified, skip creating K prior (shared from control group).
     default_sigma : float
         Default sigma when stderr is not available (default: 1e-3).
+    kd_range : tuple[float, float] | None
+        For a dissociation constant: the ``(lo, hi)`` range K is sampled in,
+        as log Kd (see :func:`log_kd_prior`). ``None`` (pH) keeps the Normal.
 
     Returns
     -------
@@ -1724,6 +1839,10 @@ def create_parameter_priors(
             continue
         prior_name = param_name(name)
         if prior_name in priors:
+            continue
+        if name == "K" and kd_range is not None:
+            mu, log_sigma = log_kd_prior_params(p.value, p.stderr, n_sd, kd_range)
+            priors[prior_name] = log_kd_prior(prior_name, mu, log_sigma, kd_range)
             continue
         priors[prior_name] = pm.Normal(prior_name, mu=p.value, sigma=sigma)
     return priors
@@ -2158,6 +2277,9 @@ def extract_fit(  # ruff: ignore[too-many-arguments, complex-structure, too-many
     # Handle both old _well and new [well] format
     for name, row in trace_df.iterrows():
         n_str = str(name)
+        # The sampled variable behind a Deterministic Kd: K itself is reported.
+        if n_str.startswith(f"{KD_RAW_PREFIX}K"):
+            continue
         if n_str.endswith((f"_{key}", f"[{key}]")):
             extracted_name = n_str.replace(f"_{key}", "").replace(f"[{key}]", "")
             # ctr_free_k=True: K for CTR wells is named K_{ctr}_{well}.
@@ -2618,7 +2740,11 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
                 is_ph=ds.is_ph,
             )
             if init.strategy == "data_priors"
-            else create_parameter_priors(params, n_sd)
+            else create_parameter_priors(
+                params,
+                n_sd,
+                kd_range=None if ds.is_ph else kd_bounds(float(np.nanmax(xc))),
+            )
         )
         x_true = create_x_true(
             xc, x_errc, n_xerr, min_x_step=min_x_step, x_prior=x_prior
@@ -2796,6 +2922,8 @@ def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
     ctr_free_k: bool,
     well_k_init: dict[str, tuple[float, float]] | None = None,
     fallback_sigma: float = 0.6,
+    kd_range: tuple[float, float] | None = None,
+    n_sd: float = 1.0,
 ) -> tuple[dict[str, typing.Any], dict[str, typing.Any]]:
     """Build K parameters for control groups.
 
@@ -2820,6 +2948,14 @@ def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
     fallback_sigma : float
         Prior sigma used for wells absent from *well_k_init* (free CTR
         mode) or as a floor for the constrained group sigma.  Default 0.6.
+    kd_range : tuple[float, float] | None
+        For a dissociation constant, the Kd range. A shared group K is then a
+        log-Kd prior (:func:`log_kd_prior`) centred on the group estimate, and
+        a group with no estimate -- a construct that does not bind -- still
+        gets one, spanning the range, as long as it has wells in the fit.
+        ``None`` (pH) keeps the Normal and skips groups without an estimate.
+    n_sd : float
+        Prior width in group standard errors, for *kd_range* only.
 
     Returns
     -------
@@ -2845,8 +2981,15 @@ def _build_ctr_k_params(  # ruff: ignore[too-many-arguments]
                     k_replicate[well] = pm.Normal(
                         f"K_{name}_{well}", mu=mu, sigma=sigma
                     )
+    elif kd_range is not None:
+        for name, scheme_wells in scheme.names.items():
+            if not set(scheme_wells) & active_wells:
+                continue
+            k, se = ctr_ks.get(name, (None, None))
+            mu, sigma = log_kd_prior_params(k, se, n_sd, kd_range)
+            k_params[name] = log_kd_prior(_ctr_param_name(name), mu, sigma, kd_range)
     else:
-        # A group without a K estimate has no wells in the fit (see
+        # A pH group without a K estimate has no wells in the fit (see
         # fit_binding_pymc_multi), so it gets no shared K either.
         k_params = {
             name: pm.Normal(
@@ -2869,6 +3012,7 @@ def _free_k_init(  # ruff: ignore[too-many-arguments]
     *,
     ctr_free_k: bool,
     fallback_sigma: float = 0.6,
+    kd_range: tuple[float, float] | None = None,
 ) -> tuple[list[str], ArrayF, ArrayF, dict[str, str]]:
     """Classify wells for the multi-fit K prior and return free-well init.
 
@@ -2899,15 +3043,21 @@ def _free_k_init(  # ruff: ignore[too-many-arguments]
         If True, control replicates get individual priors (like unknowns).
     fallback_sigma : float
         Prior sigma for control replicates lacking a reliable preliminary fit.
+    kd_range : tuple[float, float] | None
+        For a dissociation constant, the Kd range: every free well, control
+        or not, then gets a log-Kd prior from its own preliminary fit (see
+        :func:`log_kd_prior_params`), and *mu*/*sigma* are in log Kd. The pH
+        rules above -- a 0.6 cap, a pH-at-mid-fluorescence fallback -- mean
+        nothing for a Kd in mM. ``None`` (pH) keeps them.
 
     Returns
     -------
     free_wells : list[str]
         Wells receiving an individual (vectorized) K prior, in input order.
     mu : ArrayF
-        Prior means aligned with *free_wells*.
+        Prior means aligned with *free_wells* (log Kd under *kd_range*).
     sigma : ArrayF
-        Prior sigmas aligned with *free_wells*.
+        Prior sigmas aligned with *free_wells* (log Kd under *kd_range*).
     shared_of : dict[str, str]
         Maps each shared (control-group) well to its group name.
 
@@ -2921,7 +3071,9 @@ def _free_k_init(  # ruff: ignore[too-many-arguments]
         for well in wells:
             well_to_group.setdefault(well, name)
     well_k_init = (
-        _well_k_init_from_results(fit_results, scheme, n_sd) if ctr_free_k else {}
+        _well_k_init_from_results(fit_results, scheme, n_sd)
+        if ctr_free_k and kd_range is None
+        else {}
     )
     free_wells: list[str] = []
     mus: list[float] = []
@@ -2936,7 +3088,10 @@ def _free_k_init(  # ruff: ignore[too-many-arguments]
         if result is None:
             msg = f"Fit result for well {key} is missing."
             raise ValueError(msg)
-        if group:  # ctr_free_k replicate: own preliminary fit or group fallback
+        if kd_range is not None:  # Kd: own preliminary fit, in log Kd
+            p = result.params["K"]
+            mu, sigma = log_kd_prior_params(p.value, p.stderr, n_sd, kd_range)
+        elif group:  # ctr_free_k replicate: own preliminary fit or group fallback
             mu, sigma = well_k_init.get(key, (ctr_ks[group][0], fallback_sigma))
         elif ctr_free_k:  # unknown well (free-CTR mode uses _safe_sigma default)
             p = result.params["K"]
@@ -3299,13 +3454,21 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             if v.result and well in wells
         ]
     ctr_ks = weighted_stats(values, stderr)
-    # A control group without any finite preliminary K -- a construct that
-    # does not bind (V224Q in a chloride titration: Kd is infinite), or one
-    # whose replicates all failed -- has no binding curve to fit and nothing to
-    # centre a K prior on. Its wells are left out of the multi-well fit, and so
-    # out of its results, as bad-well detection leaves out its discards.
+    is_ph = next(
+        (fr.dataset.is_ph for fr in fit_results.values() if fr.dataset is not None),
+        True,
+    )
+    # A Kd is sampled in log Kd between the floor and 100x the top
+    # concentration (log_kd_prior); a pKa keeps its Normal.
+    kd_range = None if is_ph else kd_bounds(float(np.nanmax(xc)))
+    # A pH control group without any finite preliminary K -- replicates that
+    # all failed -- has nothing to centre a K prior on, and its wells are left
+    # out of the fit. A chloride group without one is a construct that does
+    # not bind (V224Q: Kd is infinite), which is a result, not a failure: it
+    # is fitted under a log-Kd prior spanning the whole range, and the report
+    # says "does not bind" when the data put Kd beyond the titration.
     no_k = [name for name in scheme.names if name not in ctr_ks]
-    if no_k:
+    if no_k and is_ph:
         dropped = {w for name in no_k for w in scheme.names[name]}
         warnings.warn(
             f"Control group(s) {no_k} have no finite K estimate; their wells "
@@ -3324,7 +3487,13 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
 
     # Split wells into individually-fit (vectorized K_free) and shared-group K.
     free_wells, k_free_mu, k_free_sigma, shared_of = _free_k_init(
-        fit_results, wells_list, scheme, ctr_ks, n_sd, ctr_free_k=ctr_free_k
+        fit_results,
+        wells_list,
+        scheme,
+        ctr_ks,
+        n_sd,
+        ctr_free_k=ctr_free_k,
+        kd_range=kd_range,
     )
 
     coords: dict[str, list[int] | list[str]] = {
@@ -3427,13 +3596,22 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         k_params: dict[str, typing.Any] = {}
         if not ctr_free_k:
             k_params, _ = _build_ctr_k_params(
-                scheme, ctr_ks, active_wells, ctr_free_k=False
+                scheme,
+                ctr_ks,
+                active_wells,
+                ctr_free_k=False,
+                kd_range=kd_range,
+                n_sd=n_sd,
             )
-        k_free = (
-            pm.Normal("K_free", mu=k_free_mu, sigma=k_free_sigma, dims="free_well")
-            if free_wells
-            else None
-        )
+        k_free: typing.Any = None  # pt.TensorVariable
+        if free_wells and kd_range is not None:
+            k_free = log_kd_prior(
+                "K_free", k_free_mu, k_free_sigma, kd_range, dims="free_well"
+            )
+        elif free_wells:
+            k_free = pm.Normal(
+                "K_free", mu=k_free_mu, sigma=k_free_sigma, dims="free_well"
+            )
         free_pos = {well: i for i, well in enumerate(free_wells)}
         k_segments: list[typing.Any] = []
         for key in wells_list:

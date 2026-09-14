@@ -35,7 +35,7 @@ from scipy import stats as sp_stats
 from scipy.optimize import least_squares
 
 from clophfit.fitting.data_structures import NoiseModelParams
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import KD_MIN, binding_1site
 from clophfit.fitting.noise_calibration import fit_noise_model_nnls
 
 if TYPE_CHECKING:
@@ -1234,7 +1234,7 @@ def _holdout_row(  # ruff: ignore[too-many-arguments] - a flat record; every arg
 
 
 def _k_bounds(n_k: int, n_params: int, *, is_ph: bool) -> tuple[np.ndarray, np.ndarray]:
-    """Keep K on the pH scale and leave every other parameter free.
+    """Keep K on the pH scale (a Kd above ``KD_MIN``); leave the rest free.
 
     Unbounded, the solver walks K hundreds of units away from the data while the
     plateaus are still poorly seeded, which overflows the model and explores
@@ -1256,7 +1256,7 @@ def _k_bounds(n_k: int, n_params: int, *, is_ph: bool) -> tuple[np.ndarray, np.n
     """
     lo = np.full(n_params, -np.inf)
     hi = np.full(n_params, np.inf)
-    lo[:n_k] = _K_MIN_PH if is_ph else np.finfo(float).tiny
+    lo[:n_k] = _K_MIN_PH if is_ph else KD_MIN
     if is_ph:
         hi[:n_k] = _K_MAX_PH
     return lo, hi

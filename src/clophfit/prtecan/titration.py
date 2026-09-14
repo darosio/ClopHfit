@@ -50,7 +50,7 @@ from clophfit.fitting.utils import (
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterator
+    from collections.abc import Callable, Collection, Iterator, Mapping
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.fitting.bayes_config import SamplerConfig
@@ -864,7 +864,7 @@ class TitrationResults(ResidualsMixin):
         self,
         xlim: tuple[float, float] | None = None,
         title: str = "",
-        exclude: Collection[str] = (),
+        exclude: Mapping[str, Collection[str]] | None = None,
     ) -> figure.Figure:
         """Plot K values as stripplot.
 
@@ -880,9 +880,10 @@ class TitrationResults(ResidualsMixin):
             Range.
         title : str, optional
             To name the plot.
-        exclude : Collection[str], optional
-            Wells to leave off the plot, such as those whose K is undetermined;
-            the title says how many were left off.
+        exclude : Mapping[str, Collection[str]] | None, optional
+            Wells to leave off the plot, keyed by the reason (e.g.
+            ``"undetermined"``, ``"non-binding"``); the title says how many
+            were left off for each.
 
         Returns
         -------
@@ -892,8 +893,12 @@ class TitrationResults(ResidualsMixin):
         dataframe = self.dataframe
         # Left off, not drawn wide: one K of 14 +/- 9 sets the automatic
         # x-limits and squeezes every determined well into a sliver.
-        omitted = dataframe.index.intersection(list(exclude))
-        dataframe = dataframe.drop(index=omitted)
+        omitted = {
+            reason: dataframe.index.intersection(list(wells))
+            for reason, wells in (exclude or {}).items()
+        }
+        for dropped in omitted.values():
+            dataframe = dataframe.drop(index=dropped, errors="ignore")
         # A fit with no standard error reports sK as None, which matplotlib's
         # errorbar rejects ("'xerr' must not contain None"): one such well on a
         # chloride plate aborted the whole run from this diagnostic plot. As
@@ -966,8 +971,9 @@ class TitrationResults(ResidualsMixin):
                 ax2.set_xlim(xlim)
             # Set title
             note = f"  ({len(partial)} well(s) * = fewer labels)" if partial else ""
-            if len(omitted):
-                note += f"  ({len(omitted)} undetermined well(s) not shown)"
+            for reason, dropped in omitted.items():
+                if len(dropped):
+                    note += f"  ({len(dropped)} {reason} well(s) not shown)"
             fig.suptitle(title + note, fontsize=16)
             fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
             # Close the figure after returning it to avoid memory issues
@@ -1082,7 +1088,9 @@ class Titration(TecanfilesGroup):
             non-finite one. ``None`` uses the titration's own x span, which is
             the scale-free form of the rule: a well whose midpoint cannot be
             located inside the window actually titrated carries no information
-            about K, however bright it is. Pass ``math.inf`` to disable.
+            about K, however bright it is. Pass ``math.inf`` to disable. pH
+            only: a chloride well whose Kd cannot be located may not bind, and
+            is fitted and reported as such rather than discarded.
         monotone_turnover : float | None
             Largest turnover a dim label past the first may show and still count
             as informative. ``None`` disables the exemption, restoring the rule
@@ -1179,7 +1187,11 @@ class Titration(TecanfilesGroup):
                 for label in sorted(failed_labels):
                     self.exclude_label(well, label)
 
-            if not discard_well and k_stderr_limit is not None:
+            # pH only. A well whose Kd cannot be located may simply not bind,
+            # which is a result: it is fitted and reported as "does not bind"
+            # (see export.no_binding_k), not discarded - V224Q lost all its
+            # wells on four chloride plates to this rule.
+            if self.is_ph and not discard_well and k_stderr_limit is not None:
                 discard_well = self._k_is_unconstrained(well, k_stderr_limit)
 
             if discard_well:
@@ -1917,9 +1929,10 @@ class TecanConfig:
     """Run bad-well detection before fitting, and act on undetermined K after it.
 
     Before: discard unusable wells (``Titration.detect_and_discard_bad_wells``).
-    After: leave wells whose fitted K is undetermined (see ``max_k_se``) off the
-    K plot, mark their per-well figure, and list them in ``discarded_wells.txt``.
-    The ``undetermined`` column of each ``ffit*.csv`` is written either way.
+    After: leave wells whose fitted K is undetermined (see ``max_k_se``) - and,
+    for chloride, wells that do not bind - off the K plot, mark their per-well
+    figure, and list them in ``discarded_wells.txt``. The ``undetermined`` (and
+    ``no_binding``) columns of each ``ffit*.csv`` are written either way.
     """
 
     ctr_free_k: bool = False
@@ -1977,7 +1990,8 @@ class TecanConfig:
     ``sK / 7`` here and never fires. 0.30 is three times the 0.10 pH ROPE and
     four times the 0.074 pH replicate repeatability; on eleven library plates it
     catches 32 of 875 library wells and none of 123 controls. Chloride ignores
-    it: Kd is a ratio scale, undetermined when ``Kd <= 0`` or ``sKd > Kd``.
+    it: Kd is a ratio scale, undetermined when ``sKd > Kd``, and a well whose
+    94% lower bound is above the highest concentration does not bind.
     """
 
 

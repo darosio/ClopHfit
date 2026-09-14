@@ -33,7 +33,7 @@ from clophfit.fitting.model_validation import (
     mark_outliers,
     residuals_from_fit_results,
 )
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import KD_MIN, binding_1site, kd_bounds
 from clophfit.fitting.plate_lm import (
     PlateLMResult,
     apply_excluded_points,
@@ -307,7 +307,9 @@ def undetermined_k(fit: pd.DataFrame, *, is_ph: bool, max_k_se: float) -> pd.Ser
     pd.Series
         Boolean, indexed like *fit*. A missing or non-finite K or sK is
         undetermined. pH: ``sK > max_k_se``. Chloride: ``Kd <= 0``,
-        ``sKd > Kd``, or a 94% HDI that reaches zero.
+        ``sKd > Kd``, or a 94% HDI whose lower edge is the ``KD_MIN`` floor
+        (within 10%): the data then bound Kd only from above, and the lower
+        edge is the prior's - as a well saturated by the first addition is.
     """
     if not {"K", "sK"} <= set(fit.columns):
         return pd.Series(data=True, index=fit.index, dtype=bool)
@@ -319,49 +321,151 @@ def undetermined_k(fit: pd.DataFrame, *, is_ph: bool, max_k_se: float) -> pd.Ser
         return bad | sk.gt(max_k_se)
     bad |= k.le(0) | sk.gt(k)
     if "Khdi03" in fit.columns:
-        bad |= pd.Series(pd.to_numeric(fit["Khdi03"], errors="coerce")).le(0)
+        hdi_lo = pd.Series(
+            pd.to_numeric(fit["Khdi03"], errors="coerce"), index=fit.index
+        )
+        bad |= hdi_lo.le(1.1 * KD_MIN)
     return bad
 
 
-def record_undetermined(outfit: Path, wells: Sequence[str]) -> None:
-    """Append the final fit's undetermined wells to ``discarded_wells.txt``.
+# One-sided 94% bound of a Normal, for fits that report an SE but no HDI.
+_Z94 = 1.8808
 
-    Under their own heading, after the pre-fit sections: the wells were fitted
-    and are reported, so they are highlighted rather than discarded.
+
+def kd_lower_bound(fit: pd.DataFrame) -> pd.Series:
+    """Lower edge of each well's 94% Kd interval.
+
+    The sampled HDI (``Khdi03``) where there is one, otherwise the Normal
+    bound ``K - 1.88 sK``; NaN where neither can be formed.
+
+    Parameters
+    ----------
+    fit : pd.DataFrame
+        Per-well fit table indexed by well, with ``K`` and ``sK``.
+
+    Returns
+    -------
+    pd.Series
+        Float, indexed like *fit*.
+    """
+    k = pd.Series(pd.to_numeric(fit["K"], errors="coerce"), index=fit.index)
+    sk = pd.Series(pd.to_numeric(fit["sK"], errors="coerce"), index=fit.index)
+    lower = k - _Z94 * sk
+    if "Khdi03" in fit.columns:
+        hdi = pd.Series(pd.to_numeric(fit["Khdi03"], errors="coerce"), index=fit.index)
+        lower = hdi.where(hdi.notna(), lower)
+    return lower
+
+
+def no_binding_k(fit: pd.DataFrame, *, x_max: float) -> pd.Series:
+    """Flag chloride wells whose Kd lies beyond the titration: they do not bind.
+
+    A construct that does not bind has a flat curve, and a Kd the data place
+    only above the highest concentration titrated. That is a result - "does
+    not bind", Kd > the top concentration - not a failed fit, and it is kept
+    apart from :func:`undetermined_k`, which would call it undetermined (its
+    sampled Kd spans the range up to the ``kd_bounds`` ceiling, so SE > Kd).
+
+    Parameters
+    ----------
+    fit : pd.DataFrame
+        Per-well Kd table indexed by well, with ``K``, ``sK`` and, for a
+        sampled fit, ``Khdi03``.
+    x_max : float
+        Highest ligand concentration titrated.
+
+    Returns
+    -------
+    pd.Series
+        Boolean, indexed like *fit*: the 94% lower bound (see
+        :func:`kd_lower_bound`) is above *x_max*; or a least-squares Kd is
+        pinned at the ``kd_bounds`` ceiling, where a flat curve drives it (its
+        SE there is meaningless, 1e6 mM on a test plate), or sits above
+        *x_max* with no finite SE.
+    """
+    if not {"K", "sK"} <= set(fit.columns):
+        return pd.Series(data=False, index=fit.index, dtype=bool)
+    k = pd.Series(pd.to_numeric(fit["K"], errors="coerce"), index=fit.index)
+    sk = pd.Series(pd.to_numeric(fit["sK"], errors="coerce"), index=fit.index)
+    no_se = ~sk.abs().lt(np.inf)
+    ceiling = kd_bounds(x_max)[1]
+    pinned = k.ge(0.99 * ceiling) if np.isfinite(ceiling) else k.gt(np.inf)
+    return kd_lower_bound(fit).gt(x_max) | pinned | (no_se & k.gt(x_max))
+
+
+def record_post_fit(outfit: Path, sections: Mapping[str, Sequence[str]]) -> None:
+    """Append the reported fit's verdicts to ``discarded_wells.txt``.
+
+    One heading per verdict (``# undetermined_k``, ``# no_binding``), after the
+    pre-fit sections: the wells were fitted and are reported, so they are
+    highlighted rather than discarded.
 
     Parameters
     ----------
     outfit : Path
         Fit output folder.
-    wells : Sequence[str]
-        Undetermined wells; nothing is written when empty.
+    sections : Mapping[str, Sequence[str]]
+        Heading to wells; an empty one is omitted, and nothing is written
+        when all are.
     """
-    if not wells:
+    lines = []
+    for heading, wells in sections.items():
+        if wells:
+            lines += ["", f"# {heading}", *sorted(wells)]
+            logger.info("Post-fit: %d well(s) %s", len(wells), heading)
+    if not lines:
         return
-    path = outfit / "discarded_wells.txt"
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write("\n".join(["", "# undetermined_k", *sorted(wells)]) + "\n")
-    logger.info(
-        "Post-fit: %d well(s) with undetermined K -> discarded_wells.txt", len(wells)
-    )
+    with (outfit / "discarded_wells.txt").open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
-def _mark_undetermined_figure(fr: FitResult, max_k_se: float, *, is_ph: bool) -> None:
-    """Say on a well's own figure that its K is undetermined, and why."""
-    if fr.figure is None or fr.result is None or "K" not in fr.result.params:
-        return
-    par = fr.result.params["K"]
-    rule = f"SE > {max_k_se:g} pH" if is_ph else "Kd <= 0 or SE > Kd"
-    se = "n/a" if par.stderr is None else f"{par.stderr:.2g}"
-    fr.figure.text(
-        0.01,
-        0.99,
-        f"K undetermined: {par.value:.3g} +/- {se} ({rule})",
-        ha="left",
-        va="top",
-        fontsize=9,
-        color="firebrick",
-    )
+def _mark_figure(fr: FitResult, note: str) -> None:
+    """Write a post-fit verdict on a well's own figure."""
+    if fr.figure is not None:
+        fr.figure.text(
+            0.01, 0.99, note, ha="left", va="top", fontsize=9, color="firebrick"
+        )
+
+
+def _verdict_note(fit: pd.DataFrame, well: str, verdict: str) -> str:
+    """One line saying what was concluded about a well's K, and its value."""
+    k = float(pd.to_numeric(fit.loc[well, "K"], errors="coerce"))
+    sk = float(pd.to_numeric(fit.loc[well, "sK"], errors="coerce"))
+    se = "n/a" if np.isnan(sk) else f"{sk:.2g}"
+    return f"{verdict}: K = {k:.3g} +/- {se}"
+
+
+def k_verdicts(
+    fit: pd.DataFrame, *, is_ph: bool, max_k_se: float, x_max: float
+) -> pd.DataFrame:
+    """Post-fit verdicts on each well's K, as boolean columns.
+
+    Parameters
+    ----------
+    fit : pd.DataFrame
+        Per-well fit table indexed by well.
+    is_ph : bool
+        A pH titration rather than chloride.
+    max_k_se : float
+        Largest acceptable SE of a pKa (pH); see :func:`undetermined_k`.
+    x_max : float
+        Highest concentration titrated; see :func:`no_binding_k`.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``undetermined`` for pH; ``undetermined`` and ``no_binding`` for
+        chloride, exclusive: a well that does not bind is a result, not an
+        undetermined one.
+    """
+    undetermined = undetermined_k(fit, is_ph=is_ph, max_k_se=max_k_se)
+    if is_ph:
+        return pd.DataFrame({"undetermined": undetermined})
+    no_binding = no_binding_k(fit, x_max=x_max)
+    return pd.DataFrame({
+        "undetermined": undetermined & ~no_binding,
+        "no_binding": no_binding,
+    })
 
 
 def _ye_mag_screening_noise(
@@ -1357,34 +1461,98 @@ def export_fit(
     if mcmc_res is not None:
         export_list.append(mcmc_res)
 
-    undetermined: list[str] = []
+    x_max = float(np.nanmax(titration.x))
+    text = _verdict_text(is_ph=titration.is_ph, max_k_se=config.max_k_se, x_max=x_max)
+    flagged: dict[str, list[str]] = {}
     for i, results in enumerate(export_list):
-        fit = results.dataframe
-        flag = undetermined_k(fit, is_ph=titration.is_ph, max_k_se=config.max_k_se)
-        undetermined = sorted(flag.index[flag]) if config.detect_bad else []
-        png_dir = outfit / f"lb{i}"
-        data_dir = png_dir / "ds"
-        for key in results.fit_keys:
-            fr = results[key]
-            if config.png:
-                if fr.figure:
-                    if key in undetermined:
-                        _mark_undetermined_figure(
-                            fr, config.max_k_se, is_ph=titration.is_ph
-                        )
-                    png_dir.mkdir(parents=True, exist_ok=True)
-                    fr.figure.savefig(png_dir / f"{key}.png")
-                if fr.dataset:
-                    data_dir.mkdir(parents=True, exist_ok=True)
-                    fr.dataset.export(data_dir / f"{key}.csv")
-        fit.assign(undetermined=flag).sort_index().to_csv(outfit / f"ffit{i}.csv")
-        title = config.title + f"lb:{i}"
-        f = results.plot_k(xlim=config.lim, title=title, exclude=undetermined)
-        f.savefig(outfit / f"K{i}.png")
-        export_residuals(outfit, results.results, i)
-    # The last fit is the one reported (the MCMC when run), so its verdict is
-    # the one recorded beside the pre-fit discards.
-    record_undetermined(outfit, undetermined)
+        flagged = _export_one_fit(
+            i, results, outfit, config, text, is_ph=titration.is_ph, x_max=x_max
+        )
+    # The last fit is the one reported (the MCMC when run), so its verdicts
+    # are the ones recorded beside the pre-fit discards.
+    record_post_fit(outfit, {text[col][0]: wells for col, wells in flagged.items()})
+
+
+def _verdict_text(
+    *, is_ph: bool, max_k_se: float, x_max: float
+) -> dict[str, tuple[str, str, str]]:
+    """Verdict column -> (discarded_wells.txt heading, K-plot reason, figure note)."""
+    undetermined = (
+        f"K undetermined (SE > {max_k_se:g} pH)"
+        if is_ph
+        else "K undetermined (SE > Kd, or HDI down to the floor)"
+    )
+    return {
+        "undetermined": ("undetermined_k", "undetermined", undetermined),
+        "no_binding": (
+            "no_binding",
+            "non-binding",
+            f"does not bind (Kd > {x_max:g} at 94%)",
+        ),
+    }
+
+
+def _export_one_fit(  # ruff: ignore[too-many-arguments]
+    i: int,
+    results: TitrationResults,
+    outfit: Path,
+    config: TecanConfig,
+    text: Mapping[str, tuple[str, str, str]],
+    *,
+    is_ph: bool,
+    x_max: float,
+) -> dict[str, list[str]]:
+    """Write one fit's tables, figures and K plot; return its flagged wells.
+
+    Parameters
+    ----------
+    i : int
+        Index of the fit, naming ``ffit{i}.csv``, ``K{i}.png`` and ``lb{i}/``.
+    results : TitrationResults
+        The fit.
+    outfit : Path
+        Fit output folder.
+    config : TecanConfig
+        Supplies ``png``, ``detect_bad``, ``max_k_se``, ``lim`` and ``title``.
+    text : Mapping[str, tuple[str, str, str]]
+        See :func:`_verdict_text`.
+    is_ph : bool
+        A pH titration rather than chloride.
+    x_max : float
+        Highest concentration titrated.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Verdict column to the wells it flags; empty lists without
+        ``detect_bad``, whose columns are written to ``ffit{i}.csv`` regardless.
+    """
+    fit = results.dataframe
+    verdicts = k_verdicts(fit, is_ph=is_ph, max_k_se=config.max_k_se, x_max=x_max)
+    flagged = {
+        col: sorted(verdicts.index[verdicts[col]]) if config.detect_bad else []
+        for col in verdicts.columns
+    }
+    png_dir = outfit / f"lb{i}"
+    data_dir = png_dir / "ds"
+    for key in results.fit_keys:
+        fr = results[key]
+        if config.png:
+            if fr.figure:
+                for col, wells in flagged.items():
+                    if key in wells:
+                        _mark_figure(fr, _verdict_note(fit, key, text[col][2]))
+                png_dir.mkdir(parents=True, exist_ok=True)
+                fr.figure.savefig(png_dir / f"{key}.png")
+            if fr.dataset:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                fr.dataset.export(data_dir / f"{key}.csv")
+    fit.join(verdicts).sort_index().to_csv(outfit / f"ffit{i}.csv")
+    exclude = {text[col][1]: wells for col, wells in flagged.items()}
+    f = results.plot_k(xlim=config.lim, title=config.title + f"lb:{i}", exclude=exclude)
+    f.savefig(outfit / f"K{i}.png")
+    export_residuals(outfit, results.results, i)
+    return flagged
 
 
 def export_data_fit(

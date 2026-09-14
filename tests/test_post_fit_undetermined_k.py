@@ -60,14 +60,14 @@ def test_a_fit_table_without_k_flags_every_well() -> None:
 
 
 def test_chloride_cut_is_relative() -> None:
-    """Kd: non-positive, an SE larger than itself, or an HDI through zero."""
+    """Kd: non-positive, an SE larger than itself, or an HDI down to the floor."""
     fit = _fit(
         [8.0, -2.7, 3.4, 9.0, 40.0],
         [1.0, 0.6, 3.3, 10.0, 30.0],
         Khdi03=[6.2, -3.8, 0.1, 0.5, -5.0],
     )
     flag = export.undetermined_k(fit, is_ph=False, max_k_se=0.30)
-    assert flag.tolist() == [False, True, False, True, True]
+    assert flag.tolist() == [False, True, True, True, True]
 
 
 def test_chloride_ignores_the_ph_limit() -> None:
@@ -90,7 +90,7 @@ def _plate(df: pd.DataFrame) -> TitrationResults:
 def test_plot_k_leaves_excluded_wells_off_and_says_so() -> None:
     """The excluded well is not drawn, nor does it set the x-limits."""
     df = _fit([7.0, 7.1, 6.9, 14.1], [0.1, 0.1, 0.2, 8.6], n_labels=[2, 2, 2, 1])
-    fig = _plate(df).plot_k(exclude=["A04"])
+    fig = _plate(df).plot_k(exclude={"undetermined": ["A04"]})
     labels = [t.get_text() for ax in fig.axes for t in ax.get_yticklabels()]
     assert not any(lbl.startswith("A04") for lbl in labels)
     assert "1 undetermined well(s) not shown" in fig.texts[0].get_text()
@@ -100,7 +100,7 @@ def test_plot_k_leaves_excluded_wells_off_and_says_so() -> None:
 def test_plot_k_survives_every_well_excluded() -> None:
     """A plate with no determined K still gets its (empty) plot, not an abort."""
     df = _fit([7.0, 7.1, 14.1], [0.4, 0.5, 8.6], n_labels=[1, 1, 1])
-    fig = _plate(df).plot_k(exclude=list(df.index))
+    fig = _plate(df).plot_k(exclude={"undetermined": list(df.index)})
     assert "3 undetermined well(s) not shown" in fig.texts[0].get_text()
 
 
@@ -117,7 +117,7 @@ def test_undetermined_wells_are_appended_under_their_own_heading(
     """After the pre-fit sections, so the discards above stay discards."""
     path = tmp_path / "discarded_wells.txt"
     path.write_text("D06\n\n# low_signal\nD09\n", encoding="utf-8")
-    export.record_undetermined(tmp_path, ["E12", "D09"])
+    export.record_post_fit(tmp_path, {"undetermined_k": ["E12", "D09"]})
     assert path.read_text(encoding="utf-8").splitlines() == [
         "D06",
         "",
@@ -132,7 +132,7 @@ def test_undetermined_wells_are_appended_under_their_own_heading(
 
 def test_nothing_is_written_when_every_k_is_determined(tmp_path: Path) -> None:
     """No undetermined wells, no file and no empty heading."""
-    export.record_undetermined(tmp_path, [])
+    export.record_post_fit(tmp_path, {"undetermined_k": [], "no_binding": []})
     assert not (tmp_path / "discarded_wells.txt").exists()
 
 

@@ -350,7 +350,8 @@ def test_data_prior_default_k_bounds_respect_is_ph(
         k_sigma=1.5,
     )
     assert cl_fr.result is not None
-    assert cl_fr.result.params["K"].min == pytest.approx(1e-6)
+    # A Kd floor of 1 mM (KD_MIN), as every chloride fitter now uses.
+    assert cl_fr.result.params["K"].min == pytest.approx(1.0)
     assert cl_fr.result.params["K"].max == pytest.approx(1e6)
 
 
@@ -408,9 +409,9 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
     ("k_bounds", "is_ph", "expected"),
     [
         (None, True, (4.5, 9.0)),
-        (None, False, (1e-6, 1e6)),
+        (None, False, (1.0, 1e6)),  # KD_MIN floor
         ((float("nan"), 9.0), True, (4.5, 9.0)),
-        ((5.0, 5.0), False, (1e-6, 1e6)),  # lo == hi is invalid
+        ((5.0, 5.0), False, (1.0, 1e6)),  # lo == hi is invalid
         ((9.0, 4.5), True, (4.5, 9.0)),  # reversed order is sorted
         ((1.0, 50.0), False, (1.0, 50.0)),  # valid explicit bounds respected
     ],

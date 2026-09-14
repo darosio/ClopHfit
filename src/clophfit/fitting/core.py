@@ -51,7 +51,6 @@ import copy
 import logging
 import os
 import typing
-from sys import float_info
 
 import lmfit  # type: ignore[import-untyped]
 import numpy as np
@@ -62,7 +61,7 @@ from matplotlib import figure
 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import binding_1site, kd_bounds
 from clophfit.fitting.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -240,8 +239,8 @@ def _build_params_1site(ds: Dataset) -> Parameters:
     if ds.is_ph:
         params.add("K", min=3, max=11)
     else:
-        # epsilon avoids x/K raise x/0 error
-        params.add("K", min=float_info.epsilon)
+        lo, hi = kd_bounds(max(float(np.nanmax(da.x)) for da in ds.values()))
+        params.add("K", min=lo, max=hi)
 
     # Pre-allocate numpy array for better performance
     k_initial_guesses = np.empty(len(ds))
