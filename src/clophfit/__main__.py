@@ -182,6 +182,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--print-spec", is_flag=True, help="Print the resolved analysis specification and its signature, then exit. Two runs with the same signature fit the same model, whatever flags were typed.")  # fmt: skip
 @click.option("--dry-run", is_flag=True, help="Validate inputs without processing data.")  # fmt: skip
 @click.option("--detect-bad/--no-detect-bad", default=True, show_default=True, help="Run bad-well detection: discard unusable wells before fitting, writing discarded_wells.txt, and record everything atypical in atypical_wells.csv beside it.")  # fmt: skip
+@click.option("--max-k-se", default=0.30, type=float, show_default=True, help="With --detect-bad, a pKa whose standard error exceeds this (pH) is undetermined: left off the K plot, marked on its figure, listed in discarded_wells.txt. Every ffit*.csv carries an 'undetermined' column regardless. Chloride ignores it: a Kd is undetermined when Kd <= 0 or its SE exceeds it.")  # fmt: skip
 @click.option("--mask-outliers/--no-mask-outliers", default=False, show_default=True, help="Mask geometric point outliers before fitting.")  # fmt: skip
 @click.option("--outlier-threshold", default=0.2, type=float, show_default=True, help="Threshold for geometric point outlier scoring (0-1).")  # fmt: skip
 def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-arguments, too-many-statements]
@@ -234,6 +235,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     dry_run: bool,
     print_spec: bool,
     detect_bad: bool,
+    max_k_se: float,
     mask_outliers: bool,
     outlier_threshold: float,
 ) -> None:
@@ -274,6 +276,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     if mcmc_x_start_between is not None and mcmc_x_error.lower() != "per_well":
         msg = "--mcmc-x-start-between only applies with --mcmc-x-error per_well."
         raise click.UsageError(msg)
+    # Checked here, not by FloatRange(min_open=True): the installed
+    # types-click 7.1.8 stubs predate min_open and fail strict mypy.
+    if max_k_se <= 0:
+        msg = "must be positive; a limit of 0 calls every well undetermined."
+        raise click.BadParameter(msg, param_hint="--max-k-se")
 
     # Dry run mode: validate inputs and exit
     if dry_run:
@@ -297,6 +304,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         plate_screen_frac,
         plate_noise.lower(),
         plate_screen_noise.lower(),
+        max_k_se=max_k_se,
     )
 
     # Load titration with error handling

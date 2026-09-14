@@ -283,6 +283,87 @@ def run_pre_fit_detection(titration: Titration, outfit: Path) -> None:
     )
 
 
+def undetermined_k(fit: pd.DataFrame, *, is_ph: bool, max_k_se: float) -> pd.Series:
+    """Flag the wells whose fitted K the data do not pin down.
+
+    The pre-fit rule (``Titration._k_is_unconstrained``) judges a cheap fit
+    against the whole x span, about 4 pH; a well can pass it and still come
+    out of the final fit at 14 +/- 9, or widen only once sampled. This judges
+    the fit actually reported.
+
+    Parameters
+    ----------
+    fit : pd.DataFrame
+        Per-well fit table indexed by well, with ``K``, ``sK`` and, for a
+        sampled fit, ``Khdi03``.
+    is_ph : bool
+        A pH titration (K is a pKa, an interval scale) rather than chloride
+        (K is a Kd, a ratio scale).
+    max_k_se : float
+        Largest acceptable standard error of a pKa, in pH.
+
+    Returns
+    -------
+    pd.Series
+        Boolean, indexed like *fit*. A missing or non-finite K or sK is
+        undetermined. pH: ``sK > max_k_se``. Chloride: ``Kd <= 0``,
+        ``sKd > Kd``, or a 94% HDI that reaches zero.
+    """
+    if not {"K", "sK"} <= set(fit.columns):
+        return pd.Series(data=True, index=fit.index, dtype=bool)
+    k = pd.Series(pd.to_numeric(fit["K"], errors="coerce"), index=fit.index)
+    sk = pd.Series(pd.to_numeric(fit["sK"], errors="coerce"), index=fit.index)
+    # NaN compares False, so this is "finite" without np.isfinite's Any.
+    bad = ~(k.abs().lt(np.inf) & sk.abs().lt(np.inf))
+    if is_ph:
+        return bad | sk.gt(max_k_se)
+    bad |= k.le(0) | sk.gt(k)
+    if "Khdi03" in fit.columns:
+        bad |= pd.Series(pd.to_numeric(fit["Khdi03"], errors="coerce")).le(0)
+    return bad
+
+
+def record_undetermined(outfit: Path, wells: Sequence[str]) -> None:
+    """Append the final fit's undetermined wells to ``discarded_wells.txt``.
+
+    Under their own heading, after the pre-fit sections: the wells were fitted
+    and are reported, so they are highlighted rather than discarded.
+
+    Parameters
+    ----------
+    outfit : Path
+        Fit output folder.
+    wells : Sequence[str]
+        Undetermined wells; nothing is written when empty.
+    """
+    if not wells:
+        return
+    path = outfit / "discarded_wells.txt"
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(["", "# undetermined_k", *sorted(wells)]) + "\n")
+    logger.info(
+        "Post-fit: %d well(s) with undetermined K -> discarded_wells.txt", len(wells)
+    )
+
+
+def _mark_undetermined_figure(fr: FitResult, max_k_se: float, *, is_ph: bool) -> None:
+    """Say on a well's own figure that its K is undetermined, and why."""
+    if fr.figure is None or fr.result is None or "K" not in fr.result.params:
+        return
+    par = fr.result.params["K"]
+    rule = f"SE > {max_k_se:g} pH" if is_ph else "Kd <= 0 or SE > Kd"
+    se = "n/a" if par.stderr is None else f"{par.stderr:.2g}"
+    fr.figure.text(
+        0.01,
+        0.99,
+        f"K undetermined: {par.value:.3g} +/- {se} ({rule})",
+        ha="left",
+        va="top",
+        fontsize=9,
+        color="firebrick",
+    )
+
+
 def _ye_mag_screening_noise(
     bg_noise: Mapping[str, float] | float,
 ) -> NoiseConfig:
@@ -1276,24 +1357,34 @@ def export_fit(
     if mcmc_res is not None:
         export_list.append(mcmc_res)
 
+    undetermined: list[str] = []
     for i, results in enumerate(export_list):
+        fit = results.dataframe
+        flag = undetermined_k(fit, is_ph=titration.is_ph, max_k_se=config.max_k_se)
+        undetermined = sorted(flag.index[flag]) if config.detect_bad else []
         png_dir = outfit / f"lb{i}"
         data_dir = png_dir / "ds"
         for key in results.fit_keys:
             fr = results[key]
             if config.png:
                 if fr.figure:
+                    if key in undetermined:
+                        _mark_undetermined_figure(
+                            fr, config.max_k_se, is_ph=titration.is_ph
+                        )
                     png_dir.mkdir(parents=True, exist_ok=True)
                     fr.figure.savefig(png_dir / f"{key}.png")
                 if fr.dataset:
                     data_dir.mkdir(parents=True, exist_ok=True)
                     fr.dataset.export(data_dir / f"{key}.csv")
-        fit = results.dataframe
-        fit.sort_index().to_csv(outfit / f"ffit{i}.csv")
+        fit.assign(undetermined=flag).sort_index().to_csv(outfit / f"ffit{i}.csv")
         title = config.title + f"lb:{i}"
-        f = results.plot_k(xlim=config.lim, title=title)
+        f = results.plot_k(xlim=config.lim, title=title, exclude=undetermined)
         f.savefig(outfit / f"K{i}.png")
         export_residuals(outfit, results.results, i)
+    # The last fit is the one reported (the MCMC when run), so its verdict is
+    # the one recorded beside the pre-fit discards.
+    record_undetermined(outfit, undetermined)
 
 
 def export_data_fit(

@@ -50,7 +50,7 @@ from clophfit.fitting.utils import (
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Collection, Iterator
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.fitting.bayes_config import SamplerConfig
@@ -864,6 +864,7 @@ class TitrationResults(ResidualsMixin):
         self,
         xlim: tuple[float, float] | None = None,
         title: str = "",
+        exclude: Collection[str] = (),
     ) -> figure.Figure:
         """Plot K values as stripplot.
 
@@ -879,6 +880,9 @@ class TitrationResults(ResidualsMixin):
             Range.
         title : str, optional
             To name the plot.
+        exclude : Collection[str], optional
+            Wells to leave off the plot, such as those whose K is undetermined;
+            the title says how many were left off.
 
         Returns
         -------
@@ -886,6 +890,10 @@ class TitrationResults(ResidualsMixin):
             The figure.
         """
         dataframe = self.dataframe
+        # Left off, not drawn wide: one K of 14 +/- 9 sets the automatic
+        # x-limits and squeezes every determined well into a sliver.
+        omitted = dataframe.index.intersection(list(exclude))
+        dataframe = dataframe.drop(index=omitted)
         # A fit with no standard error reports sK as None, which matplotlib's
         # errorbar rejects ("'xerr' must not contain None"): one such well on a
         # chloride plate aborted the whole run from this diagnostic plot. As
@@ -949,11 +957,17 @@ class TitrationResults(ResidualsMixin):
             ax2.set_ylim(-1, len(df_unk))
             # Set x-limits
             xlim = xlim or self._determine_xlim(df_ctr, df_unk)
-            if self.scheme.ctrl:
-                ax1.set_xlim(xlim)
-            ax2.set_xlim(xlim)
+            # With every well left off (a plate where no K is determined) there
+            # is nothing to take limits from, and NaN limits abort the run;
+            # matplotlib's own then stand.
+            if np.isfinite(xlim).all():
+                if self.scheme.ctrl:
+                    ax1.set_xlim(xlim)
+                ax2.set_xlim(xlim)
             # Set title
             note = f"  ({len(partial)} well(s) * = fewer labels)" if partial else ""
+            if len(omitted):
+                note += f"  ({len(omitted)} undetermined well(s) not shown)"
             fig.suptitle(title + note, fontsize=16)
             fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
             # Close the figure after returning it to avoid memory issues
@@ -1900,7 +1914,13 @@ class TecanConfig:
     fit: bool
     png: bool
     detect_bad: bool = True
-    """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""
+    """Run bad-well detection before fitting, and act on undetermined K after it.
+
+    Before: discard unusable wells (``Titration.detect_and_discard_bad_wells``).
+    After: leave wells whose fitted K is undetermined (see ``max_k_se``) off the
+    K plot, mark their per-well figure, and list them in ``discarded_wells.txt``.
+    The ``undetermined`` column of each ``ffit*.csv`` is written either way.
+    """
 
     ctr_free_k: bool = False
     """Give every well its own K in --plate-fit, instead of pooling controls.
@@ -1948,6 +1968,16 @@ class TecanConfig:
     scale; ``"fixed"`` judges on the weights as built. Independent of
     ``plate_noise``: before the two were separate options, ``plate_noise`` meant
     the fit's weights without a screen but not after one.
+    """
+
+    max_k_se: float = 0.30
+    """Largest standard error, in pH, at which a fitted pKa counts as determined.
+
+    pH is an interval scale, so the cut is absolute; a ratio ``sK / K`` is
+    ``sK / 7`` here and never fires. 0.30 is three times the 0.10 pH ROPE and
+    four times the 0.074 pH replicate repeatability; on eleven library plates it
+    catches 32 of 875 library wells and none of 123 controls. Chloride ignores
+    it: Kd is a ratio scale, undetermined when ``Kd <= 0`` or ``sKd > Kd``.
     """
 
 
