@@ -144,7 +144,7 @@ def test_total_sigma_survives_a_split_that_does_not(seeds: tuple[int, int]) -> N
     assert _sigma(row, 1000.0) == pytest.approx(truth, rel=0.15)
 
 
-def _sigma(row: pd.Series, y: float) -> float:  # type: ignore[type-arg]
+def _sigma(row: pd.Series, y: float) -> float:
     """Signal-dependent sigma the fitted row predicts at *y*."""
     return float(np.sqrt(row["gain"] * y + (row["alpha"] * y) ** 2))
 

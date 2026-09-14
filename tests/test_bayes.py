@@ -3293,8 +3293,9 @@ def test_multi_fit_accepts_a_well_with_fewer_labels() -> None:
     )
     assert set(res.results) == set(dsd)
     for well in dsd:
-        assert res.results[well].result is not None
-        assert "K" in res.results[well].result.params
+        result = res.results[well].result
+        assert result is not None
+        assert "K" in result.params
 
 
 def test_multi_fit_uses_every_label_on_the_plate_not_just_the_first_well() -> None:
@@ -3364,7 +3365,9 @@ def test_multi_fit_exports_a_real_credible_interval() -> None:
     res = bayes.fit_binding_pymc_multi(
         dsd, PlateScheme(), sampler=SamplerConfig(n_samples=300, n_tune=300, chains=2)
     )
-    k = res.results["A01"].result.params["K"]
+    result = res.results["A01"].result
+    assert result is not None
+    k = result.params["K"]
     assert np.isfinite(k.min)
     assert np.isfinite(k.max)
     assert k.min < k.value < k.max

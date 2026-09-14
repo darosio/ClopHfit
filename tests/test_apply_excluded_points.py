@@ -25,8 +25,8 @@ def _datasets() -> dict[str, Dataset]:
     for well, scale in (("A01", 1.0), ("B02", 2.0)):
         out[well] = Dataset(
             {
-                "1": DataArrayStub(X, np.arange(7) * scale),
-                "2": DataArrayStub(X, np.arange(7) * scale * 10),
+                "1": DataArrayStub(X, np.arange(7) * scale),  # type: ignore[dict-item]  # duck-typed stub
+                "2": DataArrayStub(X, np.arange(7) * scale * 10),  # type: ignore[dict-item]  # duck-typed stub
             },
             is_ph=True,
         )

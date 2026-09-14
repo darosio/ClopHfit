@@ -47,7 +47,7 @@ def _plate() -> dict[str, Dataset]:
 
 def _model(**kw: float) -> dict[str, NoiseModelParams]:
     base = {"sigma_floor": 4.0, "gain": 0.0, "alpha": 0.0} | kw
-    return {lbl: NoiseModelParams(**base) for lbl in ("1", "2")}  # type: ignore[arg-type]
+    return {lbl: NoiseModelParams(**base) for lbl in ("1", "2")}
 
 
 def test_the_default_still_fits_both_signal_terms() -> None:

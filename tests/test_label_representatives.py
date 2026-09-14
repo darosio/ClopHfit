@@ -59,5 +59,5 @@ def test_no_datasets_is_empty_not_an_error() -> None:
 
 def test_labels_are_strings() -> None:
     """Label keys are compared against string label lists downstream."""
-    reps = label_representatives([{1: DataArrayStub(np.arange(5.0))}])
+    reps = label_representatives([{1: DataArrayStub(np.arange(5.0))}])  # type: ignore[dict-item]  # an int key, on purpose
     assert list(reps) == ["1"]

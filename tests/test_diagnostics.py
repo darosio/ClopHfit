@@ -352,7 +352,9 @@ class TestScreenWells:
     def _ph() -> np.ndarray:
         return np.array([5.0, 6.0, 7.0, 8.0, 9.0])
 
-    def _well(self, y1: list[float], y2: list[float]) -> dict[str, dict[str, object]]:
+    def _well(
+        self, y1: list[float], y2: list[float]
+    ) -> dict[str, dict[str, np.ndarray]]:
         return {"A01": {"1": np.array(y1, dtype=float), "2": np.array(y2, dtype=float)}}
 
     def test_a_healthy_well_is_not_flagged(self) -> None:

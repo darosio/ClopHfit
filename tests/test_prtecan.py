@@ -13,10 +13,10 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
-import pymc as pm
+import pymc as pm  # type: ignore[import-untyped]
 import pytest
 import seaborn as sns  # type: ignore[import-untyped]
-from lmfit import Parameters
+from lmfit import Parameters  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -1867,7 +1867,9 @@ class TestSigmaFloorOverride:
         """
         titan = self._titration()
         labels = sorted(titan.data)
-        gain = float(titan.labelblocksgroups[labels[0]].metadata["Gain"].value)
+        gain_value = titan.labelblocksgroups[labels[0]].metadata["Gain"].value
+        assert isinstance(gain_value, (int, float))
+        gain = float(gain_value)
         decade = titration_module._FLOOR_GAIN_DECADE  # ruff: ignore[private-member-access]
         titan.params.noise_floor = (3.59, 0.42)
         titan.params.noise_floor_ref_gain = (gain - decade, 0.0)
@@ -2576,7 +2578,7 @@ class TestSingleLabelWells:
         res = tit.fit_plate(datasets, method="lm")
         df = res.dataframe
         assert "n_labels" in df.columns
-        assert int(df.loc[well, "n_labels"]) == len(labels) - 1
+        assert df.loc[well, "n_labels"] == len(labels) - 1
         others = df.drop(index=well)["n_labels"]
         assert (others == len(labels)).all()
 
@@ -2621,8 +2623,7 @@ def test_hdi_columns_are_empty_when_the_fit_has_no_credible_interval() -> None:
     row = res.dataframe.loc["A01"]
     assert row["K"] == pytest.approx(7.0)
     assert row["sK"] == pytest.approx(0.05)
-    assert pd.isna(row["Khdi03"])
-    assert pd.isna(row["Khdi97"])
+    assert row[["Khdi03", "Khdi97"]].isna().all()
 
 
 def test_plate_fit_results_carry_a_figure_per_well() -> None:
@@ -2653,6 +2654,7 @@ def test_plate_fit_results_carry_a_figure_per_well() -> None:
     for well in datasets:
         fr = res[well]
         assert fr.figure is not None, f"{well} has no figure to inspect"
+        assert fr.result is not None
         assert fr.result.params["K"].value == pytest.approx(result.k[well], abs=1e-9)
 
 
@@ -2679,10 +2681,9 @@ def test_plate_fit_figures_report_k_and_residual_stats() -> None:
     res = export._plate_fit_results(  # ruff: ignore[private-member-access]
         datasets, result, tit, with_figures=True
     )
-    text = (
-        " ".join(t.get_text() for t in res["A01"].figure.axes[0].texts)
-        + res["A01"].figure.axes[0].get_title()
-    )
+    fig = res["A01"].figure
+    assert fig is not None
+    text = " ".join(t.get_text() for t in fig.axes[0].texts) + fig.axes[0].get_title()
     assert "pK" in text, "the fitted pKa is not on the figure"
     assert "±" in text or "+/-" in text, "no interval shown"
     assert "RMS" in text or "z" in text, "no residual statistic shown"
