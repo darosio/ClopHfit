@@ -32,6 +32,8 @@ from clophfit.fitting.model_validation import (
     apply_exclusions,
     mark_outliers,
     residuals_from_fit_results,
+    robust_likelihood_from_trace,
+    robust_settings_from_trace,
 )
 from clophfit.fitting.models import KD_MIN, binding_1site, kd_bounds
 from clophfit.fitting.plate_lm import (
@@ -114,6 +116,50 @@ def prepare_output_folder(titration: Titration, base_path: Path) -> Path:
     return subfolder_path
 
 
+def likelihood_residual_table(fit_results: Mapping[str, FitResult]) -> pd.DataFrame:
+    """Build the residual table of *fit_results*, standardized by each fit's likelihood.
+
+    Called without its likelihood, ``residuals_from_fit_results`` standardizes
+    every residual as Normal: a Student-t fit's ``(y - mu) / sigma`` then shows
+    t tails (5.8% beyond |3| at nu = 3) as if they were outliers, and a
+    mixture's wide component likewise. Here the family, nu and the mixture
+    weights are read from each fit's own trace. One call per distinct trace: a
+    multi-well fit shares one, while single-well samples each carry their own,
+    whose nu, mixture weights and outlier probabilities must not be pooled.
+
+    Parameters
+    ----------
+    fit_results : Mapping[str, FitResult]
+        Well to fit result; least-squares results carry no trace and stay
+        Normal.
+
+    Returns
+    -------
+    pd.DataFrame
+        The concatenated canonical residual tables.
+    """
+    groups: dict[int, dict[str, FitResult]] = {}
+    for well, fr in fit_results.items():
+        groups.setdefault(id(fr.trace), {})[well] = fr
+    tables = []
+    for group in groups.values():
+        trace = next(iter(group.values())).trace
+        robust, nu = robust_settings_from_trace(trace)
+        tables.append(
+            residuals_from_fit_results(
+                dict(group),
+                trace_id="",
+                binding_function=binding_1site,
+                robust=robust,
+                student_t_nu=nu,
+                trace=trace,
+                residual_likelihood=robust_likelihood_from_trace(trace),
+            )
+        )
+    tables = [t for t in tables if not t.empty]
+    return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+
+
 def export_residuals(
     outfit: Path, fit_results: dict[str, FitResult], index: int
 ) -> None:
@@ -126,9 +172,7 @@ def export_residuals(
     to destroy the run it describes.
     """
     try:
-        all_res = residuals_from_fit_results(
-            fit_results, trace_id="", binding_function=binding_1site
-        )
+        all_res = likelihood_residual_table(fit_results)
     except (ValueError, KeyError):
         return
     if all_res.empty or "label" not in all_res or all_res["label"].nunique() == 0:

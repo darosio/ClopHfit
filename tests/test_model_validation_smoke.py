@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 from lmfit import Parameters  # type: ignore[import-untyped]
+from scipy import stats as sp_stats
 
 from clophfit.fitting import residuals as residuals_module
 from clophfit.fitting.ctr_validation import (
@@ -887,12 +888,13 @@ def test_single_well_residuals_p_outlier_nan_without_mixture(mini: object) -> No
     assert df["p_outlier"].isna().all()
 
 
-def test_single_well_residuals_label_mixture_without_t_transform() -> None:
-    """A mixture fit is labeled 'mixture' with Normal-standardized std_res.
+def test_single_well_residuals_label_mixture_with_its_own_transform() -> None:
+    """A mixture fit is labeled 'mixture', its std_res from the mixture CDF.
 
-    The mixture uses Normal components, so ``std_res`` must be the identity of
-    ``likelihood_res`` (no Student-t transform) and ``student_t_nu`` NaN; the
-    outlier structure is reported via ``p_outlier``.
+    No Student-t transform (``student_t_nu`` NaN), and not the identity either:
+    ``(y - mu) / sigma`` under ``(1 - pi) N(0, 1) + pi N(0, (1 + inflate)^2)``
+    is heavy-tailed by construction, so ``std_res`` is ``Phi^-1`` of the mixture
+    CDF. The outlier structure is still reported via ``p_outlier``.
     """
     known = np.array([0.02, 0.10, 0.97])
     op = xr.DataArray(np.broadcast_to(known, (2, 4, 3)), dims=["chain", "draw", "obs"])
@@ -914,9 +916,16 @@ def test_single_well_residuals_label_mixture_without_t_transform() -> None:
 
     assert (df["residual_likelihood"] == "mixture").all()
     assert df["student_t_nu"].isna().all()
-    np.testing.assert_allclose(
-        df["std_res"].to_numpy(), df["likelihood_res"].to_numpy()
+    r = df["likelihood_res"].to_numpy()
+    eps = np.finfo(
+        float
+    ).eps  # probabilities are clipped, so a 20-sigma point stays finite
+    expected = sp_stats.norm.ppf(
+        np.clip(
+            0.9 * sp_stats.norm.cdf(r) + 0.1 * sp_stats.norm.cdf(r / 1.5), eps, 1 - eps
+        )
     )
+    np.testing.assert_allclose(df["std_res"].to_numpy(), expected)
     assert np.allclose(df["p_outlier"].to_numpy(), known)
 
 
