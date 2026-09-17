@@ -24,8 +24,18 @@ from clophfit.fitting.bayes import (
     fit_binding_pymc_multi,
 )
 from clophfit.fitting.bayes_config import NoiseConfig, RobustConfig, SamplerConfig
-from clophfit.fitting.data_structures import Dataset, FitResult, NoiseModelParams
+from clophfit.fitting.data_structures import (
+    Dataset,
+    FitResult,
+    NoiseModelParams,
+    PlateNoiseModel,
+)
 from clophfit.fitting.diagnostics import screen_wells
+from clophfit.fitting.gain_calibration import (
+    GainCalibration,
+    calibrate_plate_lm,
+    calibrate_single_well,
+)
 from clophfit.fitting.model_validation import (
     OutlierCriterion,
     ResidualTail,
@@ -49,6 +59,7 @@ from clophfit.fitting.plate_odr import (
     fit_plate_odr,
 )
 from clophfit.fitting.plotting import PlotParameters, plot_fit
+from clophfit.fitting.residual_tests import residual_tests
 from clophfit.fitting.residuals import (
     plot_residual_distribution,
     plot_residual_vs_predicted,
@@ -160,6 +171,44 @@ def likelihood_residual_table(fit_results: Mapping[str, FitResult]) -> pd.DataFr
     return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
 
 
+def _export_residual_tests(
+    outfit: Path, fit_results: dict[str, FitResult], all_res: pd.DataFrame, index: int
+) -> None:
+    """Write the four residual-assumption tests beside the statistics table.
+
+    Diagnostic only: a failure here is logged and skipped, never allowed to cost
+    the run whose residuals it describes.
+
+    Parameters
+    ----------
+    outfit : Path
+        Fit output directory.
+    fit_results : dict[str, FitResult]
+        The fits the residuals came from, supplying each well's parameters.
+    all_res : pd.DataFrame
+        Their residual table.
+    index : int
+        The fit's index, for ``residual_tests_<index>.csv``.
+    """
+    params: dict[str, dict[str, float]] = {}
+    is_ph = True
+    for well, fr in fit_results.items():
+        result = getattr(fr, "result", None)
+        if result is None or not hasattr(result, "params"):
+            continue
+        params[str(well)] = {
+            name: float(par.value) for name, par in result.params.items()
+        }
+        if fr.dataset is not None:
+            is_ph = bool(fr.dataset.is_ph)
+    try:
+        tests = residual_tests(all_res, params or None, is_ph=is_ph, n_mc=199)
+    except (ValueError, KeyError, np.linalg.LinAlgError) as exc:
+        logger.warning("residual tests for fit %d skipped: %s", index, exc)
+        return
+    tests.to_csv(outfit / f"residual_tests_{index}.csv")
+
+
 def export_residuals(
     outfit: Path, fit_results: dict[str, FitResult], index: int
 ) -> None:
@@ -180,6 +229,7 @@ def export_residuals(
     all_res.to_csv(outfit / f"residuals_{index}.csv", index=False)
     stats = residual_statistics(all_res)
     stats.to_csv(outfit / f"residual_stats_{index}.csv")
+    _export_residual_tests(outfit, fit_results, all_res, index)
     label = str(index)
     fig_pred = plot_residual_vs_predicted(all_res, title=label)
     fig_pred.savefig(outfit / f"residual_vs_predicted_{index}.png", dpi=150)
@@ -537,13 +587,14 @@ def _ye_mag_screening_noise(
     return NoiseConfig.ye_mag(shared=False, prior="lognormal", mu=first_mu, sigma=0.5)
 
 
-def _structured_noise(
+def _structured_noise(  # ruff: ignore[too-many-arguments] - one per noise term
     titration: Titration,
     *,
     noise_mode: Literal["centered", "fixed"],
     floor_mode: Literal["centered", "fixed"] | None = None,
     gain_mode: Literal["centered", "fixed"] | None = None,
     alpha_mode: Literal["centered", "fixed"] | None = None,
+    learn_ye_mags: bool = False,
 ) -> NoiseConfig:
     """Build the physical floor/gain/alpha noise config from titration.
 
@@ -571,6 +622,10 @@ def _structured_noise(
         Override for gain alone.
     alpha_mode : Literal["centered", "fixed"] | None
         Override for alpha alone.
+    learn_ye_mags : bool
+        Also learn a ye_mag multiplier on sigma, so the supplied terms set the
+        shape and the data the level. Per label, or per well when the caller
+        asks for per-well ye_mags.
 
     Returns
     -------
@@ -591,6 +646,7 @@ def _structured_noise(
         floor=floors or None,
         gain=gains or 0.0,
         alpha=alphas or 0.0,
+        learn_ye_mags=learn_ye_mags,
         # The floor was the one term never pinned, and it is the term that
         # decides whether the model is structured at all. Left free it drifts
         # to several times the measured bg_noise and swallows the variance the
@@ -772,6 +828,7 @@ def fit_single_mcmc(
                     floor_mode=spec.floor_mode,
                     gain_mode=spec.gain_mode,
                     alpha_mode=spec.alpha_mode,
+                    learn_ye_mags=spec.noise_ye_mag,
                 )
                 if spec.structured_noise
                 else _DEFAULT_NOISE
@@ -800,6 +857,7 @@ def fit_single_mcmc(
             floor_mode=spec.floor_mode,
             gain_mode=spec.gain_mode,
             alpha_mode=spec.alpha_mode,
+            learn_ye_mags=spec.noise_ye_mag,
         )
         screening_noise, refit_noise = noise, noise
     else:
@@ -1265,6 +1323,86 @@ def _export_plate_fit_plots(  # ruff: ignore[too-many-arguments]
         )
 
 
+def _floors(noise: Mapping[str, NoiseModelParams] | None) -> dict[str, float]:
+    """Return the read-noise floor per label, which a gain calibration holds or starts from."""
+    return {lbl: float(p.sigma_floor) for lbl, p in (noise or {}).items()}
+
+
+def _write_gain_calibration(cal: GainCalibration[typing.Any], path: Path) -> None:
+    """Write each calibration pass's floor and gain per label, and whether it settled."""
+    cal.history.drop(columns="plate").assign(
+        converged=cal.converged, n_iter=cal.n_iter
+    ).to_csv(path, index=False)
+
+
+def _gain_calibrated_plate_fit(  # ruff: ignore[too-many-arguments]
+    datasets: dict[str, Dataset],
+    groups: dict[str, list[str]],
+    noise: Mapping[str, NoiseModelParams] | None,
+    gain_terms: str,
+    *,
+    outfit: Path,
+    screen_z: float | None,
+    frac_threshold: float | None,
+    calibrate_screen: bool,
+) -> PlateLMResult:
+    """Plate fit weighted by a calibrated floor and gain, after any screen.
+
+    The screen, when asked for, runs exactly as for the other weightings and
+    only decides which points go; the gain is then calibrated on what is left.
+
+    Parameters
+    ----------
+    datasets : dict[str, Dataset]
+        Well identifier to global `Dataset`.
+    groups : dict[str, list[str]]
+        Control groups pooling one K; empty for free K.
+    noise : Mapping[str, NoiseModelParams] | None
+        The titration's noise model, supplying the floors.
+    gain_terms : str
+        ``"gain"`` or ``"floor-gain"``.
+    outfit : Path
+        Fit output directory, for ``plate_lm_noise_history.csv``.
+    screen_z : float | None
+        Screening threshold, or ``None`` for no screen.
+    frac_threshold : float | None
+        Fractional screen threshold.
+    calibrate_screen : bool
+        Judge the screen on the calibrated ruler.
+
+    Returns
+    -------
+    PlateLMResult
+        The fit under the converged weights, carrying the screen's exclusions.
+    """
+    data: Mapping[str, Dataset] = datasets
+    screened: PlateLMResult | None = None
+    if screen_z is not None:
+        screened = fit_plate_lm_screened(
+            datasets,
+            groups,
+            noise_model=noise,
+            threshold=screen_z,
+            frac_threshold=frac_threshold,
+            calibrate_screen=calibrate_screen,
+        )
+        data = apply_excluded_points(datasets, screened.excluded_points)
+    cal = calibrate_plate_lm(
+        {"": data},
+        {"": groups},
+        {"": _floors(noise)},
+        fit_floor=gain_terms == "floor-gain",
+    )
+    _write_gain_calibration(cal, outfit / "plate_lm_noise_history.csv")
+    if not cal.converged:
+        logger.warning("plate gain calibration did not settle in %d passes", cal.n_iter)
+    result = cal.fits[""]
+    if screened is not None:
+        result.excluded_points = screened.excluded_points
+        result.n_excluded = screened.n_excluded
+    return result
+
+
 def export_plate_fit(  # ruff: ignore[too-many-arguments]
     titration: Titration,
     datasets: dict[str, typing.Any],
@@ -1277,6 +1415,7 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     frac_threshold: float | None = None,
     ctr_free_k: bool = False,
     calibrate_screen: bool = True,
+    gain_terms: str | None = None,
 ) -> PlateLMResult | PlateODRResult | None:
     """Fit the whole plate at once, classically, and write K per well.
 
@@ -1319,6 +1458,13 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         With *screen_z*, judge points on the calibrated ruler (default) rather
         than on the weights as built. The weights K is then fitted with follow
         *calibrate_noise*, screened or not.
+    gain_terms : str | None
+        ``"gain"`` or ``"floor-gain"``: weight by ``floor^2 + gain * yhat`` with
+        alpha 0, the gain (and with ``"floor-gain"`` the floor) calibrated from
+        the plate's residuals between refits, corrected for the degrees of
+        freedom the fit used (:func:`~clophfit.fitting.gain_calibration.calibrate_plate_lm`).
+        Takes the place of *calibrate_noise*; after a screen it calibrates on
+        the screened points. ``None`` leaves the weights to *calibrate_noise*.
 
     Returns
     -------
@@ -1351,7 +1497,18 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
         # With a flat floor this changes nothing, which is why it is safe to
         # pass unconditionally.
         noise = _plate_noise_model(titration)
-        if screen_z is not None:
+        if gain_terms is not None:
+            result = _gain_calibrated_plate_fit(
+                datasets,
+                groups,
+                noise,
+                gain_terms,
+                outfit=outfit,
+                screen_z=screen_z,
+                frac_threshold=frac_threshold,
+                calibrate_screen=calibrate_screen,
+            )
+        elif screen_z is not None:
             # The screen's ruler and the fit's weights are separate choices
             # (--plate-screen-noise, --plate-noise); --plate-noise used to be
             # overridden here, so "calibrated" meant plain weights after a screen.
@@ -1427,6 +1584,66 @@ def export_plate_fit(  # ruff: ignore[too-many-arguments]
     return result
 
 
+def _gain_terms(noise_option: str) -> str | None:
+    """Return the gain calibration a ``--plate-noise``/``--fit-noise`` value asks for."""
+    return noise_option if noise_option in {"gain", "floor-gain"} else None
+
+
+def _gain_calibrated_single_fit(
+    titration: Titration,
+    datasets: dict[str, Dataset],
+    method: str,
+    fit_noise: str,
+    outfit: Path,
+) -> TitrationResults:
+    """Per-well global fits weighted by a floor and gain calibrated across the plate.
+
+    Parameters
+    ----------
+    titration : Titration
+        Supplies the floors, the scheme and the outlier setting.
+    datasets : dict[str, Dataset]
+        Well identifier to global `Dataset`.
+    method : str
+        ``"lm"`` or ``"huber"``.
+    fit_noise : str
+        ``"gain"`` or ``"floor-gain"``.
+    outfit : Path
+        Fit output directory, for ``noise_single_history.csv``.
+
+    Returns
+    -------
+    TitrationResults
+        The fits under the converged weights, with that noise model attached.
+
+    Raises
+    ------
+    ValueError
+        If *method* is neither ``"lm"`` nor ``"huber"``.
+    """
+    if method not in {"lm", "huber"}:
+        msg = f"--fit-noise {fit_noise} needs --fit-method lm or huber, not {method}"
+        raise ValueError(msg)
+    cal = calibrate_single_well(
+        {"": datasets},
+        {"": _floors(_plate_noise_model(titration))},
+        method="huber" if method == "huber" else "lm",
+        fit_floor=fit_noise == "floor-gain",
+        remove_outliers=titration.params.outlier,
+    )
+    _write_gain_calibration(cal, outfit / "noise_single_history.csv")
+    if not cal.converged:
+        logger.warning(
+            "single-well gain calibration did not settle in %d passes", cal.n_iter
+        )
+    return TitrationResults(
+        titration.scheme,
+        titration.fit_keys,
+        cal.fits[""],
+        noise_model=PlateNoiseModel(cal.noise[""]),
+    )
+
+
 def export_fit(
     titration: Titration,
     subfolder: Path,
@@ -1456,12 +1673,18 @@ def export_fit(
 
     method, reweight = _global_fit_method(titration.params.fit_method)
 
-    global_res = titration.fit_plate(
-        datasets,
-        method=method,
-        reweight=reweight,
-        remove_outliers=titration.params.outlier,
-    )
+    fit_noise = getattr(config, "fit_noise", "fixed")
+    if fit_noise == "fixed":
+        global_res = titration.fit_plate(
+            datasets,
+            method=method,
+            reweight=reweight,
+            remove_outliers=titration.params.outlier,
+        )
+    else:
+        global_res = _gain_calibrated_single_fit(
+            titration, datasets, method, fit_noise, outfit
+        )
     export_list.append(global_res)
 
     odr_res = titration.fit_plate(
@@ -1487,6 +1710,7 @@ def export_fit(
             ctr_free_k=getattr(config, "ctr_free_k", False),
             calibrate_screen=getattr(config, "plate_screen_noise", "calibrated")
             == "calibrated",
+            gain_terms=_gain_terms(getattr(config, "plate_noise", "fixed")),
         )
         # The hybrid: the classical screen decides what is an outlier, on a
         # calibrated ruler, and the Bayesian fit inherits that verdict. Without

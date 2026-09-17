@@ -1970,7 +1970,10 @@ class TecanConfig:
     and alpha per label from the fit's own residuals and refits under them.
     Calibration describes the residuals better and fits K worse, so it is not
     the default; see ``fit_plate_lm``. It sets the weights K is fitted with
-    whether or not ``plate_screen_z`` is given.
+    whether or not ``plate_screen_z`` is given. ``"gain"`` and ``"floor-gain"``
+    weight by ``floor^2 + gain * yhat`` with alpha 0, the gain (and the floor)
+    calibrated from dof-corrected residuals between refits; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_plate_lm`.
     """
 
     plate_screen_noise: str = "calibrated"
@@ -1992,6 +1995,15 @@ class TecanConfig:
     catches 32 of 875 library wells and none of 123 controls. Chloride ignores
     it: Kd is a ratio scale, undetermined when ``sKd > Kd``, and a well whose
     94% lower bound is above the highest concentration does not bind.
+    """
+
+    fit_noise: str = "fixed"
+    """How the per-well global lm/huber fit weights its points.
+
+    ``"fixed"`` uses ``y_err`` as built. ``"gain"`` and ``"floor-gain"`` fit
+    every well, pool all wells' dof-corrected residuals into one gain per label
+    (and with ``"floor-gain"`` one floor), and refit until it settles; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_single_well`.
     """
 
 
@@ -2068,6 +2080,15 @@ class McmcSpec:
     gain_mode: Literal["centered", "fixed"] | None = None
     alpha_mode: Literal["centered", "fixed"] | None = None
     per_well_ye_mags: bool | None = None
+    noise_ye_mag: bool = False
+    """Learn a ye_mag multiplier on top of a structured noise model.
+
+    A structured model builds sigma from floor, gain and alpha and, by default,
+    has no overall multiplier: the terms themselves carry the level. With this
+    set, sigma is also scaled by a learned ye_mag - per label, or per well when
+    ``per_well_ye_mags`` is set - which lets a calibrated shape keep its shape
+    while the data set the level. Meaningless without ``structured_noise``.
+    """
     ye_mag_parameterization: Literal[
         "centered", "hierarchical", "separable", "separable_step"
     ] = "centered"

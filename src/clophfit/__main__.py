@@ -149,6 +149,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls", "odr"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting), odr (orthogonal distance regression, x-aware).")  # fmt: skip
+@click.option("--fit-noise", type=click.Choice(["fixed", "gain", "floor-gain"], case_sensitive=False), default="fixed", show_default=True, help="Weights for the per-well global fit (--fit-method lm or huber). fixed uses y_err as built. gain weights by floor^2 + gain*yhat with alpha 0: every well is fitted, the dof-corrected residuals of all wells are pooled into one gain per label, and the wells are refitted until it settles; floor-gain calibrates the floor too. Writes noise_single_history.csv.")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit", "multi"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, single, single-refit (robust screening pass then refit), multi (all wells jointly, control K shared per group).")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
@@ -162,10 +163,11 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--noise-floor-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for floor alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
 @click.option("--noise-gain-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for gain alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
 @click.option("--noise-alpha-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for alpha alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
+@click.option("--noise-ye-mag/--no-noise-ye-mag", "noise_ye_mag", default=False, show_default=True, help="For --mcmc-noise structured: also learn a ye_mag multiplier on sigma, per label (or per well with --per-well-ye-mags). A structured model otherwise has no overall multiplier, so a supplied floor/gain sets the level as well as the shape; this separates the two.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable", "separable_step"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), a per-label level plus one shared well factor (separable), or that plus a per-label pH axis on the noise (separable_step).")  # fmt: skip
 @click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
-@click.option("--plate-noise", type=click.Choice(["fixed", "calibrated"], case_sensitive=False), default="fixed", show_default=True, help="How --plate-fit weights the points K is fitted to, with or without --plate-screen-z. fixed uses y_err as built (bg_noise floor plus any --noise-gain/--noise-alpha). calibrated estimates gain and alpha per label from the fit's own residuals and refits under them; it describes the residuals better and fits K worse, so it is not the default.")  # fmt: skip
+@click.option("--plate-noise", type=click.Choice(["fixed", "calibrated", "gain", "floor-gain"], case_sensitive=False), default="fixed", show_default=True, help="How --plate-fit weights the points K is fitted to, with or without --plate-screen-z. fixed uses y_err as built (bg_noise floor plus any --noise-gain/--noise-alpha). calibrated estimates gain and alpha per label from the fit's own residuals and refits under them; it describes the residuals better and fits K worse, so it is not the default. gain weights by floor^2 + gain*yhat with alpha 0, the floor held and the gain calibrated from the dof-corrected residuals between refits until it settles; floor-gain calibrates the floor too. Both write plate_lm_noise_history.csv.")  # fmt: skip
 @click.option("--plate-screen-noise", type=click.Choice(["calibrated", "fixed"], case_sensitive=False), default="calibrated", show_default=True, help="The ruler --plate-screen-z judges points on. calibrated fits gain and alpha to the screening pass's own residuals so bright and dim points are judged alike; fixed judges on y_err as built. Separate from --plate-noise, which sets the weights K is then fitted with.")  # fmt: skip
 @click.option("--plate-screen-z", type=float, default=None, help="For --plate-fit: drop points whose |z| exceeds this and refit. The ruler is --plate-screen-noise (calibrated by default, so a dim point and a bright one are judged on the same scale); the refit uses --plate-noise's weights. 3.0 is the value measured to help; 2.5 is harmful.")  # fmt: skip
 @click.option("--plate-screen-frac", type=float, default=None, help="For --plate-fit: also drop 400 nm points whose |y-yhat|/yhat exceeds this, sparing any the 485 nm channel moves with. A z-score fails at both ends of a titration -- sigma tracks the signal while model error tracks the curve -- so a 5% miss at the dim end reads as 3.6 sigma while a 36% miss at the bright end reads as 2.7. 0.12 is where reviewer calls separate; unset leaves the z-screen alone.")  # fmt: skip
@@ -202,6 +204,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     fit: bool,
     png: bool,
     fit_method: str,
+    fit_noise: str,
     outlier: str | None,
     mcmc: str,
     nuts_sampler: str,
@@ -212,6 +215,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     noise_floor_ref_gain: tuple[float, ...],
     mcmc_noise: str,
     per_well_ye_mags: bool | None,
+    noise_ye_mag: bool,
     ye_mag_parameterization: str,
     noise_mode: str,
     noise_floor_mode: str | None,
@@ -281,6 +285,17 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     if max_k_se <= 0:
         msg = "must be positive; a limit of 0 calls every well undetermined."
         raise click.BadParameter(msg, param_hint="--max-k-se")
+    if fit_noise.lower() != "fixed" and fit_method.lower() not in {"lm", "huber"}:
+        msg = (
+            f"--fit-noise {fit_noise} calibrates the lm or huber fit, not {fit_method}."
+        )
+        raise click.UsageError(msg)
+    if (
+        plate_noise.lower() in {"gain", "floor-gain"}
+        and (plate_fit or "").lower() != "lm"
+    ):
+        msg = f"--plate-noise {plate_noise} needs --plate-fit lm."
+        raise click.UsageError(msg)
 
     # Dry run mode: validate inputs and exit
     if dry_run:
@@ -305,6 +320,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         plate_noise.lower(),
         plate_screen_noise.lower(),
         max_k_se=max_k_se,
+        fit_noise=fit_noise.lower(),
     )
 
     # Load titration with error handling
@@ -344,6 +360,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "nrm": nrm,
             "dil": dil,
             "fit_method": fit_method,
+            "fit_noise": fit_noise,
             "outlier": outlier,
             "mask_outliers": mask_outliers,
             "outlier_threshold": outlier_threshold,
@@ -361,6 +378,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "noise_floor": tuple(noise_floor),
             "noise_floor_ref_gain": tuple(noise_floor_ref_gain),
             "per_well_ye_mags": per_well_ye_mags,
+            "noise_ye_mag": noise_ye_mag,
             "ye_mag_parameterization": ye_mag_parameterization,
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
@@ -484,6 +502,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             ctr_free_k=ctr_free_k,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
+            noise_ye_mag=noise_ye_mag,
             ye_mag_parameterization=cast(
                 'Literal["centered", "hierarchical", "separable", "separable_step"]',
                 ye_mag_parameterization,
