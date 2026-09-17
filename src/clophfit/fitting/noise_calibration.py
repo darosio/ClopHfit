@@ -41,6 +41,34 @@ def _noise_params_converged(
     return True
 
 
+def _squared_residuals(grp: pd.DataFrame) -> np.ndarray:
+    """Squared raw residuals, undoing the variance the fit absorbed.
+
+    A fitted model's residuals have variance ``sigma^2 (n - p) / n``, not
+    ``sigma^2``: every parameter spent pulls the curve towards the points. Read
+    uncorrected, a titration plate with ~5 parameters per ~14 points returns its
+    noise terms about a third low. The optional ``dof_scale`` column,
+    ``sqrt(n / (n - p))`` (see :func:`dof_scale`), puts that back; without it the
+    residuals are taken as they are.
+
+    Parameters
+    ----------
+    grp : pd.DataFrame
+        Rows with ``raw_res`` and optionally ``dof_scale``.
+
+    Returns
+    -------
+    np.ndarray
+        ``(raw_res * dof_scale) ** 2``.
+    """
+    # A copy: to_numpy can hand back the column itself, and the scaling below
+    # must not rewrite the caller's residuals.
+    r = grp["raw_res"].to_numpy(dtype=float, copy=True)
+    if "dof_scale" in grp.columns:
+        r *= grp["dof_scale"].to_numpy(dtype=float)
+    return r**2
+
+
 def _plate_noise_model_from_nnls(
     sigma_floor: dict[str, float],
     gains: dict[str, float],
@@ -84,7 +112,9 @@ def calibrate_noise_robust(
         Canonical residual table (e.g. ``MultiFitResult.residuals`` from a
         mixture fit). Must have ``label``, ``raw_res``, ``yhat`` columns; a
         ``p_outlier`` column enables screening (otherwise all points
-        are used).
+        are used), and a ``dof_scale`` column corrects the residuals for the
+        parameters the fit spent. Supply it: a mixture fit has no residual
+        degrees of freedom this function could infer.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. ``tit.bg_noise``. Used as the
         fixed floor and copied into the returned model.
@@ -133,7 +163,8 @@ def fit_rel_error_from_residuals(
     ----------
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
-        ``yhat`` (float -- the model-predicted signal at each point).
+        ``yhat`` (float -- the model-predicted signal at each point), and
+        optionally ``dof_scale`` (see :func:`_squared_residuals`).
         Typically from :func:`clophfit.fitting.model_validation.residuals_from_fit_results`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -159,7 +190,7 @@ def fit_rel_error_from_residuals(
     result: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        r2_mean = float((grp["raw_res"] ** 2).mean())
+        r2_mean = float(_squared_residuals(grp).mean())
         pred2_mean = float((grp["yhat"] ** 2).mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         alpha_sq = max(0.0, r2_mean - floor**2) / max(pred2_mean, 1e-12)
@@ -188,7 +219,8 @@ def fit_gain_from_residuals(
     ----------
     df : pd.DataFrame
         DataFrame with columns ``label`` (str), ``raw_res`` (float), and
-        ``yhat`` (float -- the model-predicted signal at each point).
+        ``yhat`` (float -- the model-predicted signal at each point), and
+        optionally ``dof_scale`` (see :func:`_squared_residuals`).
         Typically from :func:`clophfit.fitting.model_validation.residuals_from_fit_results`.
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. from ``tit.bg_noise``.
@@ -214,7 +246,7 @@ def fit_gain_from_residuals(
     result: dict[str, float] = {}
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
-        r2_mean = float((grp["raw_res"] ** 2).mean())
+        r2_mean = float(_squared_residuals(grp).mean())
         pred_mean = float(grp["yhat"].mean())
         floor = float(sigma_floor.get(lbl_str, 0.0))
         gain = max(0.0, r2_mean - floor**2) / max(pred_mean, 1e-12)
@@ -292,7 +324,11 @@ def fit_noise_model_nnls(
     Parameters
     ----------
     df : pd.DataFrame
-        Residual DataFrame with columns ``label``, ``raw_res``, ``yhat``.
+        Residual DataFrame with columns ``label``, ``raw_res``, ``yhat``, and
+        optionally ``dof_scale``, ``sqrt(n / (n - p))`` per row, which undoes
+        the variance the fit absorbed (see :func:`_squared_residuals`). Every
+        caller holding a fit should pass it; without it the terms come out
+        low by that factor squared.
     sigma_floor_fixed : dict[str, float] | None
         If given, fix floor per label and only fit gain and alpha.
     rel_error_fixed : dict[str, float] | None
@@ -314,7 +350,7 @@ def fit_noise_model_nnls(
     for lbl, grp in df.groupby("label"):
         lbl_str = str(lbl)
         y = grp["yhat"].to_numpy().astype(float)
-        target = grp["raw_res"].to_numpy().astype(float) ** 2
+        target = _squared_residuals(grp)
 
         # A fixed term contributes a known amount, which comes off the squared
         # residual; the rest are columns of the design. Zero is an ordinary
@@ -858,7 +894,8 @@ def fit_ph_slope_noise(
     ----------
     df : pd.DataFrame
         Residual DataFrame with columns ``label``, ``well``, ``raw_res``,
-        ``yhat``, and ``raw_i``.
+        ``yhat``, and ``raw_i``, and optionally ``dof_scale`` (see
+        :func:`_squared_residuals`).
     noise_model : PlateNoiseModel
         Per-label noise model (floor, gain, alpha) fitted in the same pass.
     plate_slopes : dict[str, dict[str, np.ndarray]]
@@ -880,7 +917,9 @@ def fit_ph_slope_noise(
             params.gain,
             params.alpha,
         )
-    df["var_excess"] = df["raw_res"] ** 2 - df["var_model"]
+    # The per-label model was fitted to dof-corrected residuals; the excess has
+    # to be read on the same scale or it comes out negative by construction.
+    df["var_excess"] = _squared_residuals(df) - df["var_model"]
     df["slope_sq"] = np.nan
     for (lbl, well), grp in df.groupby(["label", "well"]):
         w_slopes_dict = plate_slopes.get(str(well))

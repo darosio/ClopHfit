@@ -481,6 +481,14 @@ def _calibrate_noise(  # ruff: ignore[too-many-arguments] - one per fit input
     df = pd.DataFrame(table)
     # The estimator keys on label, raw_res and yhat, which the table carries.
     df["label"] = df["label"].astype(str)
+    # Residuals of a fit that spent parameters on them have variance
+    # sigma^2 (n - p) / n, so uncorrected the terms come out low - about a third
+    # on a plate, where p/n is ~0.38. Same per-label count as _profiled_scale.
+    counts = df["label"].value_counts()
+    df["dof_scale"] = df["label"].map({
+        lbl: float(np.sqrt(n / max(n - _label_params(prob, str(lbl), int(n)), 1.0)))
+        for lbl, n in counts.items()
+    })
     try:
         fitted_floors, gains, alphas = fit_noise_model_nnls(
             df,
@@ -629,7 +637,8 @@ def _profiled_scale(
         Estimate the scale from the median absolute deviation instead of the
         root-mean-square. A single bad point inflates the RMS, and since this
         scale is the denominator of every standardised residual, that hides the
-        very point a screen is looking for.
+        very point a screen is looking for. The MAD is shrunk by the fit exactly
+        as the RMS is, so it takes the same ``sqrt(n / (n - p))`` correction.
 
     Returns
     -------
@@ -639,12 +648,34 @@ def _profiled_scale(
     n_lbl = len(resid)
     if n_lbl == 0:
         return 1.0
+    dof = max(n_lbl - _label_params(prob, label, n_lbl), 1.0)
     if robust:
         mad = float(np.median(np.abs(resid - np.median(resid))))
-        return max(_MAD_TO_SIGMA * mad, 1e-12)
-    p_lbl = 2 * prob.n_curves[label] + prob.n_k * n_lbl / max(prob.n_points, 1)
-    dof = max(n_lbl - p_lbl, 1.0)
+        return max(_MAD_TO_SIGMA * mad * float(np.sqrt(n_lbl / dof)), 1e-12)
     return max(float(np.sqrt(np.sum(resid**2) / dof)), 1e-12)
+
+
+def _label_params(prob: _Problem, label: str, n_lbl: int) -> float:
+    """Parameters one label's residuals have spent.
+
+    Each label owns the S0 and S1 of its curves; the shared K values are
+    apportioned between labels by point count.
+
+    Parameters
+    ----------
+    prob : _Problem
+        Assembled problem.
+    label : str
+        The label.
+    n_lbl : int
+        Its number of observations.
+
+    Returns
+    -------
+    float
+        The effective parameter count, possibly fractional.
+    """
+    return 2 * prob.n_curves[label] + prob.n_k * n_lbl / max(prob.n_points, 1)
 
 
 def _standard_errors(jac: np.ndarray, n_params: int) -> np.ndarray:
