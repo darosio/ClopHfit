@@ -715,19 +715,50 @@ def residual_normal_scores(
     *,
     robust: bool = False,
     student_t_nu: float = STUDENT_T_NU,
+    mixture: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Map likelihood-scale residuals onto a Normal diagnostic scale.
 
-    For Normal likelihoods this is the identity.  For Student-t likelihoods,
-    ``(y - mu) / sigma`` follows a t distribution, so Normal QQ plots and
-    ``abs(residual) > 2`` style diagnostics should use the probability integral
-    transform to an equivalent standard-Normal score.
+    ``z = Phi^-1(F(r))`` with ``F`` the likelihood's own CDF of the scaled
+    residual ``r = (y - mu) / sigma`` (the probability integral transform), so
+    that under a correct model ``z`` is standard Normal whatever the family and
+    residuals from different likelihoods can be compared on one scale.
+
+    - Normal: ``F = Phi`` and this is the identity.
+    - Student-t (*robust*): ``r`` follows ``t_nu``, heavier-tailed by design
+      (5.8% beyond |3| at nu = 3), so ``F`` is the t CDF.
+    - Contamination mixture (*mixture* = ``(pi, inflate)``): the likelihood is
+      ``(1 - pi) N(mu, sigma) + pi N(mu, sigma (1 + inflate))``, so
+      ``F(r) = (1 - pi) Phi(r) + pi Phi(r / (1 + inflate))``. Taken as Normal,
+      the wide component's points read as outliers the model has already
+      accounted for.
+
+    Parameters
+    ----------
+    likelihood_residual : ArrayLike
+        ``(y - mu) / sigma``, with *sigma* the Normal (inlier) scale.
+    robust : bool
+        Student-t likelihood. Ignored when *mixture* is given.
+    student_t_nu : float
+        Degrees of freedom of the Student-t.
+    mixture : tuple[float, float] | None
+        ``(pi_outlier, outlier_inflate)`` of a contamination mixture.
+
+    Returns
+    -------
+    np.ndarray
+        Standard-Normal scores, NaN where the residual is.
     """
     r = np.asarray(likelihood_residual, dtype=float)
-    if not robust:
+    if mixture is not None:
+        pi, inflate = mixture
+        probs = (1.0 - pi) * sp_stats.norm.cdf(r) + pi * sp_stats.norm.cdf(
+            r / (1.0 + inflate)
+        )
+    elif robust:
+        probs = sp_stats.t.cdf(r, df=student_t_nu)
+    else:
         return r
-
-    probs = sp_stats.t.cdf(r, df=student_t_nu)
     probs = np.clip(probs, np.finfo(float).eps, 1.0 - np.finfo(float).eps)
     return np.asarray(sp_stats.norm.ppf(probs), dtype=float)
 
@@ -738,12 +769,39 @@ def robust_residual_outlier_mask(
     threshold: float = 3.0,
     robust: bool = False,
     student_t_nu: float = STUDENT_T_NU,
+    mixture: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Flag observations by calibrated Normal-score residual magnitude."""
     z = residual_normal_scores(
-        likelihood_residual, robust=robust, student_t_nu=student_t_nu
+        likelihood_residual, robust=robust, student_t_nu=student_t_nu, mixture=mixture
     )
     return np.asarray(np.isfinite(z) & (np.abs(z) > threshold), dtype=bool)
+
+
+def mixture_params_from_trace(trace: _t.Any, label: str) -> tuple[float, float] | None:
+    """Posterior-mean ``(pi_outlier, outlier_inflate)`` of one label, if a mixture.
+
+    Parameters
+    ----------
+    trace : _t.Any
+        A PyMC trace, or ``None``.
+    label : str
+        The label whose ``pi_outlier_<label>`` to read.
+
+    Returns
+    -------
+    tuple[float, float] | None
+        Plug-in mixture parameters for :func:`residual_normal_scores`, or
+        ``None`` when the trace holds no contamination mixture for *label*.
+    """
+    post = _posterior_dataset_or_none(trace)
+    if post is None:
+        return None
+    names = {str(n) for n in getattr(post, "data_vars", {})}
+    pi_name = f"pi_outlier_{label}"
+    if pi_name not in names or "outlier_inflate" not in names:
+        return None
+    return float(post[pi_name].mean()), float(post["outlier_inflate"].mean())
 
 
 def excess_tail_outlier_mask(  # ruff: ignore[too-many-arguments]
@@ -1266,9 +1324,10 @@ def robust_settings_from_trace(trace: _t.Any) -> tuple[bool, float]:
 
     ``robust`` here means specifically "standardize ``std_res`` via the Student-t
     probability-integral transform", which is correct **only** for a Student-t
-    likelihood.  A contamination mixture uses Normal components, so its residuals
-    are standardized as Normal (``robust=False``) and its outlier structure is
-    reported through ``p_outlier`` instead.  Used by
+    likelihood.  A contamination mixture returns ``robust=False``: its residuals
+    are standardized through the mixture's own CDF by the residual builders
+    (see :func:`mixture_params_from_trace`), and its per-point outlier
+    probabilities are reported through ``p_outlier``.  Used by
     ``FitResult.residuals`` / ``MultiFitResult.residuals`` so the residual table
     is standardized correctly without the caller re-supplying fit settings.
 
@@ -1787,7 +1846,10 @@ def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
 
     ``likelihood_res`` is always ``(observed - predicted) / sigma``.  For
     Student-t robust fits, ``std_res`` is the equivalent standard-Normal score
-    from the t CDF, suitable for Normal QQ plots and z-style outlier flags.
+    from the t CDF, and for a contamination mixture (``residual_likelihood``
+    ``"mixture"``) from the mixture CDF at the posterior-mean ``pi_outlier`` and
+    ``outlier_inflate`` (see :func:`residual_normal_scores`), suitable for
+    Normal QQ plots and z-style outlier flags.
     ``residual_likelihood`` labels the ``residual_likelihood`` column; when
     ``None`` it defaults to ``"student_t"`` if *robust* else ``"normal"``.
     """
@@ -1826,14 +1888,20 @@ def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
                 multi.trace, lbl, str(well), mask, multi.results
             )
             likelihood_res = (y - yhat) / sigma
+            mix = (
+                mixture_params_from_trace(multi.trace, str(lbl))
+                if family == "mixture"
+                else None
+            )
             std_res = residual_normal_scores(
-                likelihood_res, robust=robust, student_t_nu=student_t_nu
+                likelihood_res, robust=robust, student_t_nu=student_t_nu, mixture=mix
             )
             outlier = robust_residual_outlier_mask(
                 likelihood_res,
                 threshold=outlier_threshold,
                 robust=robust,
                 student_t_nu=student_t_nu,
+                mixture=mix,
             )
 
             for j in range(len(y)):
@@ -1911,7 +1979,9 @@ def residuals_from_fit_results(  # ruff: ignore[too-many-arguments]
         single-well and multi-well tables share the full schema.
     residual_likelihood : str | None
         Label for the ``residual_likelihood`` column. When ``None`` it defaults
-        to ``"student_t"`` if *robust* else ``"normal"``.
+        to ``"student_t"`` if *robust* else ``"normal"``. ``"mixture"`` with a
+        *trace* standardizes ``std_res`` through the mixture CDF at the
+        posterior-mean ``pi_outlier_<label>`` and ``outlier_inflate``.
 
     Returns
     -------
@@ -1943,14 +2013,20 @@ def residuals_from_fit_results(  # ruff: ignore[too-many-arguments]
                 sigma = np.ones_like(y, dtype=float)
             sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, np.nan)
             likelihood_res = (y - yhat) / sigma
+            mix = (
+                mixture_params_from_trace(trace, str(lbl))
+                if family == "mixture"
+                else None
+            )
             std_res = residual_normal_scores(
-                likelihood_res, robust=robust, student_t_nu=student_t_nu
+                likelihood_res, robust=robust, student_t_nu=student_t_nu, mixture=mix
             )
             outlier = robust_residual_outlier_mask(
                 likelihood_res,
                 threshold=outlier_threshold,
                 robust=robust,
                 student_t_nu=student_t_nu,
+                mixture=mix,
             )
             p_outlier = np.full(len(y), np.nan, dtype=float)
             if trace is not None and _posterior_dataset_or_none(trace) is not None:

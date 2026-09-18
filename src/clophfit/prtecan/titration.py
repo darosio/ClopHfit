@@ -28,6 +28,7 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
     ResidualsMixin,
 )
+from clophfit.fitting.diagnostics import curve_turnover
 from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.model_validation import (
     RESIDUAL_TABLE_COLUMNS,
@@ -38,6 +39,7 @@ from clophfit.fitting.noise_calibration import (
     _noise_params_converged,
     _plate_noise_model_from_nnls,
     compute_plate_slopes,
+    dof_scale,
     fit_noise_model_nnls,
     fit_ph_slope_noise,
 )
@@ -49,7 +51,7 @@ from clophfit.fitting.utils import (
 from clophfit.utils import weights_from_sigma
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Collection, Iterator, Mapping
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.fitting.bayes_config import SamplerConfig
@@ -72,6 +74,148 @@ logger = logging.getLogger(__name__)
 # pH K bounds as used by _build_params_1site in fitting/core.py
 _PH_K_MIN: float = 3.0
 _PH_K_MAX: float = 11.0
+
+
+# Gain units per decade of amplification. Measured on this instrument: the
+# buffer level tracks the reader Gain at r = 0.991 across eleven plates with a
+# decade per 34.1 units, and the label-1 read noise independently follows the
+# same law at a decade per 38.3 (r = 0.906). The two agree to 12%, which is why
+# a floor quoted at one Gain can be moved to another at all.
+_FLOOR_GAIN_DECADE = 34.1
+
+
+_MIN_TITRATION_POINTS = 2
+# A dim channel is exempted from failing when its curve turns over by no more
+# than this fraction of its own range - i.e. when it is still monotone within
+# noise. Measured on L8: the kept well H11 scores 0.000, the discarded E12 0.777.
+_MONOTONE_TURNOVER = 0.2
+# ... and it must actually move: the swing of a dim channel has to clear this
+# many read-noise widths. L4 G12 swings 1.2 widths and is discarded, while the
+# dimmest well kept anywhere swings 2.8.
+_MIN_AMPLITUDE_RATIO = 2.0
+# "Above background" is the wrong question when the background is 0.3 counts.
+# On L5b, 3 x bg_noise for the 485 nm channel is 0.926, so a well reading 1.0
+# passes while a healthy well on the same plate gives 97. A label whose swing is
+# below this fraction of the plate's median swing is dim whatever the read noise
+# says, and is then judged on its curve shape like any other dim label.
+_MIN_PLATE_AMPLITUDE_RATIO = 0.03
+
+
+def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold is an independent criterion
+    x: ArrayF,
+    y_masked: ArrayF,
+    y_raw: ArrayF,
+    *,
+    floor: float,
+    bg_multiplier: float,
+    turnover_limit: float | None,
+    amplitude: float | None = None,
+    plate_amplitude: float | None = None,
+    plate_amplitude_ratio: float = _MIN_PLATE_AMPLITUDE_RATIO,
+) -> bool:
+    """Whether one label of one well carries no usable titration.
+
+    Dimness alone does not condemn a channel. Every well here has a dim 400 nm
+    channel by construction, and a 485 nm channel can sit only a few counts
+    above background and still trace a clean titration - L8 H11 runs 5.0 to -1.2
+    and pins K to 0.193 pH. What makes a dim channel useless is its curve being
+    noise-shaped: a single-pKa titration is monotone, so an interior turnover is
+    evidence there is no titration to fit.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant axis, matching *y_raw*.
+    y_masked : ArrayF
+        Signal after outlier masking, used for the brightness test.
+    y_raw : ArrayF
+        Signal before masking, used for the shape test. The mask exists to
+        protect the fit from a bad point, so screening the masked curve would
+        delete the very evidence the screen is looking for: masking L8 E12
+        removes the spike to 22.8 that proves its channel is noise.
+    floor : float
+        Read-noise scatter for this label, i.e. ``bg_noise``.
+    bg_multiplier : float
+        Multiples of *floor* the masked mean must reach.
+    turnover_limit : float | None
+        Largest turnover a dim channel may show and still count as informative.
+        ``None`` disables the exemption, which is right for label 1: its acid
+        turnover is a real feature of the fluorophore in roughly 60% of wells,
+        so monotonicity says nothing there.
+    amplitude : float | None
+        This label's own swing, for the plate comparison below.
+    plate_amplitude : float | None
+        Median swing of this label across the plate. When both are given, a
+        label swinging less than *plate_amplitude_ratio* of it counts as dim
+        however it compares with the read noise - which is what catches a well
+        reading 1.0 count where the plate median is 93.
+    plate_amplitude_ratio : float
+        Fraction of the plate median below which a label is dim.
+
+    Returns
+    -------
+    bool
+        True when the label carries no usable titration.
+    """
+    valid = y_masked[~np.isnan(y_masked)]
+    if len(valid) < _MIN_TITRATION_POINTS:
+        return True
+    faint_for_plate = (
+        amplitude is not None
+        and plate_amplitude is not None
+        and plate_amplitude > 0
+        and amplitude < plate_amplitude_ratio * plate_amplitude
+    )
+    if float(np.nanmean(valid)) >= bg_multiplier * floor and not faint_for_plate:
+        return False
+    if turnover_limit is None:
+        return True
+    # Monotone is not enough: a drift smaller than the read noise is a random
+    # walk, not a titration. L8 H11 swings 6.2 counts against a floor of 1.0 and
+    # fits K; L4 G12 swings 3.2 against a floor of 4.0 and does not.
+    finite = y_raw[~np.isnan(y_raw)]
+    if len(finite) < _MIN_TITRATION_POINTS:
+        return True
+    amplitude = float(np.nanmax(finite) - np.nanmin(finite))
+    if amplitude < _MIN_AMPLITUDE_RATIO * floor:
+        return True
+    return float(curve_turnover(x, y_raw)) > turnover_limit
+
+
+def _interaction_rms(values: ArrayF) -> float:
+    """Scatter left in a step-by-well matrix once both main effects are removed.
+
+    A two-way layout with one observation per cell: subtracting the step mean
+    and the well mean and adding back the grand mean leaves the interaction,
+    which for buffer wells is the measurement scatter. A well reading
+    consistently high is a well effect, not noise -- a per-well fit absorbs it
+    into that well's plateaus -- and a background drifting across the titration
+    is a step effect, not noise.
+
+    Parameters
+    ----------
+    values : ArrayF
+        Buffer readings, steps down the rows and wells across the columns.
+
+    Returns
+    -------
+    float
+        Root mean square interaction on ``(n_steps - 1) * (n_wells - 1)``
+        degrees of freedom, or 0.0 when either dimension is too small to
+        separate an interaction from the main effects.
+    """
+    arr = np.asarray(values, dtype=float)
+    n_steps, n_wells = arr.shape
+    if n_steps < 2 or n_wells < 2:  # ruff: ignore[magic-value-comparison]
+        return 0.0
+    interaction = (
+        arr
+        - arr.mean(axis=1, keepdims=True)
+        - arr.mean(axis=0, keepdims=True)
+        + arr.mean()
+    )
+    dof = (n_steps - 1) * (n_wells - 1)
+    return float(np.sqrt(np.sum(interaction**2) / dof))
 
 
 def _fit_datasets(
@@ -116,6 +260,41 @@ def _fit_datasets(
     return results
 
 
+def _with_well_dof_scale(
+    table: pd.DataFrame, results: typing.Mapping[str, FitResult]
+) -> pd.DataFrame:
+    """Attach each well's ``sqrt(n / (n - p))`` to its residual rows.
+
+    The noise estimators read the variance from these residuals, and each
+    well's own fit has already absorbed ``p / n`` of it. Wells with no residual
+    degrees of freedom are dropped: their residuals are zero by construction
+    and say nothing about the noise. A result that does not report how many
+    parameters it varied (lmfit's ``nvarys``) cannot be corrected and keeps a
+    factor of 1.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Residual table with a ``well`` column.
+    results : typing.Mapping[str, FitResult]
+        The per-well fits the residuals came from.
+
+    Returns
+    -------
+    pd.DataFrame
+        *table* with ``dof_scale``, restricted to wells where it is defined.
+    """
+    counts = table.groupby("well").size()
+    scale: dict[typing.Any, float] = {}
+    for well, n in counts.items():
+        fr = results.get(str(well))
+        n_varied = getattr(fr.result, "nvarys", None) if fr is not None else None
+        scale[well] = 1.0 if n_varied is None else dof_scale(int(n), int(n_varied))
+    out = table.assign(dof_scale=table["well"].map(scale))
+    # NaN both where a well has no fit and where dof_scale has no freedom.
+    return out[out["dof_scale"].notna()]
+
+
 @dataclass
 class TitrationConfig:
     """Parameters defining the fitting data with callback support."""
@@ -145,6 +324,28 @@ class TitrationConfig:
 
     Values typically from MCMC multi-noise shared_noise_params.csv.
     Empty tuple keeps gain=1 (legacy behaviour).
+    """
+    noise_floor: tuple[float, ...] = ()
+    """Read-noise floor per label, overriding the measured ``bg_noise``.
+
+    ``bg_noise`` is whatever one plate's three to six buffer wells happened to
+    scatter by, and it is estimated on far fewer degrees of freedom than a
+    value pooled over a campaign. Supplying the floor lets a calibration fitted
+    across plates be used instead.
+
+    Empty tuple keeps ``bg_noise`` (legacy behaviour).
+    """
+    noise_floor_ref_gain: tuple[float, ...] = ()
+    """Reader Gain each ``noise_floor`` was quoted at, per label.
+
+    Read noise is amplified along with the signal, so a floor measured at one
+    PMT setting means nothing at another until it is moved there. Given a
+    reference, the floor is scaled by ``10 ** ((gain - ref) / 34.1)`` using the
+    plate's own Gain metadata, which makes one calibration portable across
+    plates that were read at different settings.
+
+    ``0.0`` disables scaling for that label, which is the right choice where no
+    Gain dependence was measured. Empty tuple disables it for every label.
     """
 
     mask_outliers: bool = field(default=False)
@@ -293,6 +494,34 @@ class Buffer:
             else:
                 # noise is a scalar per label for the whole dataset
                 noise[label] = float(bdf[noise_col].iloc[0])
+        return noise
+
+    @property
+    def bg_read_noise(self) -> dict[str, float]:
+        """Buffer measurement scatter, with fixed per-well offsets removed.
+
+        ``bg_noise`` pools the scatter of the buffer wells about the background
+        trend, and on these plates that pooled number is dominated by fixed
+        positional differences between buffer wells rather than by measurement
+        noise -- it runs 1.1x to 6.6x this value across the campaign. A
+        positional offset is absorbed by a well's own plateaus in any per-well
+        fit, so it does not show up as point-to-point residual scatter and does
+        not belong in a noise-model floor. This is the part that does.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label RMS interaction of the buffer readings, 0.0 for a label
+            with no buffer wells.
+        """
+        buffers = self.dataframes_nrm if self.tit.params.nrm else self.dataframes
+        noise = {}
+        for label, bdf in buffers.items():
+            cols = [w for w in self.wells if w in bdf.columns]
+            if bdf.empty or not cols:
+                noise[label] = 0.0
+            else:
+                noise[label] = _interaction_rms(bdf[cols].to_numpy(dtype=float))
         return noise
 
     def _compute_bg_and_sd(self) -> tuple[dict[str, ArrayF], dict[str, ArrayF]]:
@@ -580,8 +809,17 @@ class TitrationResults(ResidualsMixin):
                 for k in pars:
                     row[k] = pars[k].value
                     row[f"s{k}"] = pars[k].stderr
-                    row[f"{k}hdi03"] = pars[k].min
-                    row[f"{k}hdi97"] = pars[k].max
+                    # `min`/`max` carry the 94% HDI for a sampled fit, but the
+                    # solver's bounds for a least-squares one - which exported
+                    # K's [3, 11] pH box under an HDI column name. A bound is
+                    # not an interval, so write these only when a sampler
+                    # actually produced them.
+                    lo, hi = pars[k].min, pars[k].max
+                    finite = np.isfinite(lo) and np.isfinite(hi)
+                    inside = finite and lo <= pars[k].value <= hi
+                    from_sampler = inside and fr.trace is not None
+                    row[f"{k}hdi03"] = lo if from_sampler else np.nan
+                    row[f"{k}hdi97"] = hi if from_sampler else np.nan
             data.append(row)
         self._dataframe = pd.DataFrame(data).set_index("well")
         return self._dataframe
@@ -662,6 +900,7 @@ class TitrationResults(ResidualsMixin):
         self,
         xlim: tuple[float, float] | None = None,
         title: str = "",
+        exclude: Mapping[str, Collection[str]] | None = None,
     ) -> figure.Figure:
         """Plot K values as stripplot.
 
@@ -677,6 +916,10 @@ class TitrationResults(ResidualsMixin):
             Range.
         title : str, optional
             To name the plot.
+        exclude : Mapping[str, Collection[str]] | None, optional
+            Wells to leave off the plot, keyed by the reason (e.g.
+            ``"undetermined"``, ``"non-binding"``); the title says how many
+            were left off for each.
 
         Returns
         -------
@@ -684,6 +927,22 @@ class TitrationResults(ResidualsMixin):
             The figure.
         """
         dataframe = self.dataframe
+        # Left off, not drawn wide: one K of 14 +/- 9 sets the automatic
+        # x-limits and squeezes every determined well into a sliver.
+        omitted = {
+            reason: dataframe.index.intersection(list(wells))
+            for reason, wells in (exclude or {}).items()
+        }
+        for dropped in omitted.values():
+            dataframe = dataframe.drop(index=dropped, errors="ignore")
+        # A fit with no standard error reports sK as None, which matplotlib's
+        # errorbar rejects ("'xerr' must not contain None"): one such well on a
+        # chloride plate aborted the whole run from this diagnostic plot. As
+        # NaN it is simply drawn without an error bar.
+        if "sK" in dataframe.columns:
+            dataframe = dataframe.assign(
+                sK=pd.to_numeric(dataframe["sK"], errors="coerce")
+            )
         # A well fitted on fewer labels than its neighbours carries a K that is
         # systematically less certain - 3 parameters over 7 points instead of 6
         # over 14, and no ratiometric cancellation. Mark those so nobody reads
@@ -695,6 +954,9 @@ class TitrationResults(ResidualsMixin):
         with sns.plotting_context("paper"):  # axes_style("whitegrid"):
             fig = plt.figure(figsize=(12, 16))
             keys_unk = list(set(dataframe.index))
+            # Bound unconditionally: a plate with no control groups still needs
+            # x-limits, and this used to raise UnboundLocalError instead.
+            df_ctr = dataframe.iloc[0:0]
             if self.scheme.names:
                 keys_unk = list(set(dataframe.index) - set(self.scheme.ctrl))
                 df_ctr = dataframe.loc[dataframe.index.intersection(self.scheme.ctrl)]
@@ -736,11 +998,18 @@ class TitrationResults(ResidualsMixin):
             ax2.set_ylim(-1, len(df_unk))
             # Set x-limits
             xlim = xlim or self._determine_xlim(df_ctr, df_unk)
-            if self.scheme.ctrl:
-                ax1.set_xlim(xlim)
-            ax2.set_xlim(xlim)
+            # With every well left off (a plate where no K is determined) there
+            # is nothing to take limits from, and NaN limits abort the run;
+            # matplotlib's own then stand.
+            if np.isfinite(xlim).all():
+                if self.scheme.ctrl:
+                    ax1.set_xlim(xlim)
+                ax2.set_xlim(xlim)
             # Set title
             note = f"  ({len(partial)} well(s) * = fewer labels)" if partial else ""
+            for reason, dropped in omitted.items():
+                if len(dropped):
+                    note += f"  ({len(dropped)} {reason} well(s) not shown)"
             fig.suptitle(title + note, fontsize=16)
             fig.tight_layout(pad=1.2, w_pad=0.1, h_pad=0.5, rect=(0, 0, 1, 0.97))
             # Close the figure after returning it to avoid memory issues
@@ -818,6 +1087,7 @@ class Titration(TecanfilesGroup):
         outlier_threshold: float | None = 0.2,
         bg_multiplier: float | None = 3.0,
         max_k_stderr: float | None = None,
+        monotone_turnover: float | None = _MONOTONE_TURNOVER,
     ) -> list[str]:
         """Detect and discard bad wells from masked per-label signal quality.
 
@@ -827,11 +1097,13 @@ class Titration(TecanfilesGroup):
         background-derived floor. The floor uses ``bg_err`` when available and
         falls back to ``bg_noise``.
 
-        A signal test alone cannot catch a well that is bright but
-        uninformative. On L2, C05 has ample signal and a meaningless titration -
-        K = 7.138 +- 254 pH - and survives every ``bg_multiplier`` from 2.0 to
-        4.0, all of which discard the same single well. So a fit-quality test
-        runs alongside it: fit the well and ask how well K is pinned.
+        The signal test asks two things of a dim label, not one: that it clears
+        the background, and failing that, that its curve still moves further
+        than the read noise and moves monotonically. The second question is what
+        separates a faint titration from a drift - L8 H11 swings six noise
+        widths and pins K to 0.193 pH, while L2 C05 swings 1.7 and puts K at
+        7.138 +- 254 pH. A fit-quality test still runs alongside, for a well
+        that is bright and uninformative, which no signal test can reach.
 
         The smoothness, roughness and trendline criteria that used to sit here
         were removed. They were disabled by default, no caller ever passed them,
@@ -852,7 +1124,13 @@ class Titration(TecanfilesGroup):
             non-finite one. ``None`` uses the titration's own x span, which is
             the scale-free form of the rule: a well whose midpoint cannot be
             located inside the window actually titrated carries no information
-            about K, however bright it is. Pass ``math.inf`` to disable.
+            about K, however bright it is. Pass ``math.inf`` to disable. pH
+            only: a chloride well whose Kd cannot be located may not bind, and
+            is fitted and reported as such rather than discarded.
+        monotone_turnover : float | None
+            Largest turnover a dim label past the first may show and still count
+            as informative. ``None`` disables the exemption, restoring the rule
+            that any dim label fails.
 
         Returns
         -------
@@ -870,6 +1148,20 @@ class Titration(TecanfilesGroup):
             return []
 
         label_ids = sorted(self.labelblocksgroups)
+        # Median swing per label across the plate, so a well can be judged
+        # against its neighbours and not only against the read noise.
+        skip_keys = set(self.scheme.buffer) | set(self.scheme.nofit_keys)
+        plate_amplitude: dict[typing.Any, float] = {}
+        for label in label_ids:
+            swings = [
+                float(np.nanmax(arr) - np.nanmin(arr))
+                for well_key, values in self.data[label].items()
+                if well_key not in skip_keys
+                and len(arr := np.asarray(values, dtype=float)) > 1
+                and np.isfinite(arr).any()
+            ]
+            if swings:
+                plate_amplitude[label] = float(np.median(swings))
         new_discards: set[str] = set()
         # None means the titration's own x span - see the docstring.
         k_stderr_limit = (
@@ -891,30 +1183,51 @@ class Titration(TecanfilesGroup):
                 if outlier_threshold is not None:
                     ds = apply_outlier_mask(ds, threshold=outlier_threshold)
                 y = np.asarray(ds[str(label)].y, dtype=float)
-                valid_y = y[~np.isnan(y)]
-                if len(valid_y) < 2:  # ruff: ignore[magic-value-comparison]
+                if len(y[~np.isnan(y)]) < _MIN_TITRATION_POINTS:
                     failed_labels.add(str(label))
                     continue
-
-                if bg_multiplier is not None:
-                    floor_values = self.bg_err.get(label)
-                    if floor_values is None or np.asarray(floor_values).size == 0:
-                        floor = self.bg_noise.get(label)
-                    else:
-                        floor = float(np.nanmean(np.asarray(floor_values, dtype=float)))
-
-                    if floor is not None and (
-                        np.isfinite(floor)
-                        and float(np.nanmean(valid_y)) < bg_multiplier * floor
-                    ):
-                        failed_labels.add(str(label))
+                if bg_multiplier is None:
+                    continue
+                # The read scatter, not bg_err. With --bg-mth fit, bg_err is the
+                # standard error of the fitted background - a precision of the
+                # mean - and comparing a well's signal to three of those asks
+                # the wrong question. It is also far smaller, which made this
+                # rule discard nothing on any of eleven plates.
+                floor = self.bg_noise.get(label)
+                if floor is None or not np.isfinite(floor):
+                    continue
+                raw_y = np.asarray(self.data[label].get(well, y), dtype=float)
+                own = (
+                    float(np.nanmax(raw_y) - np.nanmin(raw_y))
+                    if np.isfinite(raw_y).any()
+                    else None
+                )
+                if label_is_uninformative(
+                    np.asarray(self.x, dtype=float),
+                    y,
+                    raw_y,
+                    floor=float(floor),
+                    bg_multiplier=bg_multiplier,
+                    amplitude=own,
+                    plate_amplitude=plate_amplitude.get(label),
+                    # Label 1 turns over in acid for real, so it gets no
+                    # exemption; a dim label 2 that is still monotone does.
+                    turnover_limit=(
+                        None if str(label) == str(label_ids[0]) else monotone_turnover
+                    ),
+                ):
+                    failed_labels.add(str(label))
 
             discard_well = failed_labels >= {str(i) for i in label_ids}
             if not discard_well and failed_labels:
                 for label in sorted(failed_labels):
                     self.exclude_label(well, label)
 
-            if not discard_well and k_stderr_limit is not None:
+            # pH only. A well whose Kd cannot be located may simply not bind,
+            # which is a result: it is fitted and reported as "does not bind"
+            # (see export.no_binding_k), not discarded - V224Q lost all its
+            # wells on four chloride plates to this rule.
+            if self.is_ph and not discard_well and k_stderr_limit is not None:
                 discard_well = self._k_is_unconstrained(well, k_stderr_limit)
 
             if discard_well:
@@ -1006,6 +1319,63 @@ class Titration(TecanfilesGroup):
     def bg_noise(self) -> dict[str, float]:
         """Intrinsic well noise (RMSE/pooled SD) values."""
         return self.buffer.bg_noise
+
+    @property
+    def bg_read_noise(self) -> dict[str, float]:
+        """Buffer measurement scatter, with fixed per-well offsets removed.
+
+        See :attr:`Buffer.bg_read_noise`. Reported alongside :attr:`bg_noise`
+        rather than replacing it: ``bg_noise`` is what ``y_err`` and the
+        classical ``--plate-noise fixed`` path are built on and calibrated
+        against, while this is the candidate for a structured-noise floor.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label measurement scatter of the buffer wells.
+        """
+        return self.buffer.bg_read_noise
+
+    @property
+    def sigma_floor(self) -> dict[str, float]:
+        """The read-noise floor per label that the error models actually use.
+
+        ``params.noise_floor`` when supplied, otherwise the measured
+        :attr:`bg_read_noise`. A supplied floor carrying a non-zero
+        ``params.noise_floor_ref_gain`` is scaled from that reference to this
+        plate's own reader Gain, so one campaign-wide calibration serves plates
+        read at different settings; a reference of ``0.0`` leaves the value
+        alone, which is right for a label whose floor showed no Gain
+        dependence.
+
+        Returns
+        -------
+        dict[str, float]
+            Per-label floor. Falls back to the measured value for any label the
+            override does not cover.
+        """
+        labels = sorted(self.data.keys())
+        measured = self.bg_read_noise
+        floors: dict[str, float] = {}
+        for i, lbl in enumerate(labels):
+            key = str(lbl)
+            if not self.params.noise_floor or i >= len(self.params.noise_floor):
+                floors[key] = float(measured.get(key, 0.0))
+                continue
+            value = float(self.params.noise_floor[i])
+            ref = (
+                float(self.params.noise_floor_ref_gain[i])
+                if self.params.noise_floor_ref_gain
+                and i < len(self.params.noise_floor_ref_gain)
+                else 0.0
+            )
+            if ref > 0.0:
+                meta = getattr(self.labelblocksgroups.get(key), "metadata", {}) or {}
+                gain = getattr(meta.get("Gain"), "value", None)
+                if gain is not None:
+                    value *= 10.0 ** ((float(gain) - ref) / _FLOOR_GAIN_DECADE)
+            floors[key] = value
+        return floors
 
     def __repr__(self) -> str:
         """Return a string representation of the instance."""
@@ -1164,8 +1534,17 @@ class Titration(TecanfilesGroup):
         def _adjust_subtracted_data(
             key: str, y: ArrayF, sd: float, label: str, alpha: float = 1 / 10
         ) -> ArrayF:
-            """Adjust negative values (alpha = F_bound/F_unbound)."""
-            if y.min() < alpha * 0 * y.max():
+            """Lift a trace that dips below zero (alpha = F_bound/F_unbound).
+
+            The test is simply whether the trace goes negative. It was written
+            ``y.min() < alpha * 0 * y.max()``, which is the same thing with a
+            multiplication by zero in the middle, so ``alpha`` looked like it
+            set the threshold while only ever sizing the shift. Written plainly
+            here; the behaviour is unchanged, and changing it to the
+            ``alpha * y.max()`` the old expression resembles would adjust far
+            more wells and move every existing ``--bg-adj`` result.
+            """
+            if y.min() < 0:
                 delta = alpha * (y.max() - y.min()) - y.min()
                 logger.warning(
                     "Buffer for '%s:%s' was adjusted by %.2f SD.",
@@ -1210,8 +1589,18 @@ class Titration(TecanfilesGroup):
         """Apply the physical error model from TitrationConfig to the Dataset."""
         labels = sorted(self.data.keys())
         noise_model = PlateNoiseModel()
+        # An explicit --noise-floor governs here too, but the *default* stays
+        # bg_noise rather than the read noise the noise-model paths use. With
+        # no gain/alpha this y_err is homoscedastic, and the best single sigma
+        # for that is the typical noise over the signal range, not the floor at
+        # zero signal: bg_noise sits 4x below it on label 1 where bg_read_noise
+        # sits 14x below. Least squares does not care -- a uniform scale
+        # cancels -- but huber's transition point is absolute, so the smaller
+        # value down-weights harder, and switching this default to read noise
+        # left 29 of 731 well-fits unconstrained that had been fine.
+        resolved = self.sigma_floor if self.params.noise_floor else self.bg_noise
         for i, lbl in enumerate(labels):
-            floor = float(self.bg_noise.get(lbl, 0.0)) if self.bg_noise else 0.0
+            floor = float(resolved.get(str(lbl), 0.0))
 
             gain = (
                 self.params.noise_gain[i]
@@ -1270,7 +1659,25 @@ class Titration(TecanfilesGroup):
         self.clear_all_data_results()
 
     def create_global_ds(self, key: str) -> Dataset:
-        """Create a global dataset for the given key."""
+        """Create a global dataset for the given key.
+
+        Applies ``mask_outliers`` like :meth:`create_dataset_dict`. It used not
+        to, and since ``ppr tecan`` builds its global datasets here, the flag
+        never reached the global, ODR, MCMC or plate fits - accepted, echoed
+        back in the run configuration, and silently confined to the per-label
+        path. Two builders of the same dataset must not disagree about what a
+        flag means.
+
+        Parameters
+        ----------
+        key : str
+            Well identifier.
+
+        Returns
+        -------
+        Dataset
+            The well's labels, masked and weighted as configured.
+        """
         dropped = self._excluded_labels.get(key, set())
         data_arrays_dict = {
             i: self._create_data_array(key, i)
@@ -1278,6 +1685,8 @@ class Titration(TecanfilesGroup):
             if str(i) not in dropped
         }
         ds = Dataset(data_arrays_dict, is_ph=self.is_ph)
+        if self.params.mask_outliers:
+            ds = apply_outlier_mask(ds, threshold=self.params.outlier_threshold)
         return self._apply_error_model(ds)
 
     def create_dataset_dict(self, label: str | None = None) -> dict[str, Dataset]:
@@ -1300,7 +1709,9 @@ class Titration(TecanfilesGroup):
                 ds_dict[key] = self.create_global_ds(key)
             else:
                 ds_dict[key] = self.create_ds(key, label)
-        if self.params.mask_outliers:
+        if self.params.mask_outliers and label is not None:
+            # The global branch masks inside create_global_ds; only the
+            # per-label datasets still need it here.
             for key, ds in ds_dict.items():
                 ds_dict[key] = apply_outlier_mask(
                     ds, threshold=self.params.outlier_threshold
@@ -1380,7 +1791,7 @@ class Titration(TecanfilesGroup):
             Build per-label datasets for this label instead of global ones.
             Only valid when *datasets* is ``None``.
         sigma_floor : dict[str, float] | None
-            Known read-noise floor per label. Defaults to :attr:`bg_noise`.
+            Known read-noise floor per label. Defaults to :attr:`sigma_floor`.
         first_pass_method : str
             Method for the first-pass fit.
         second_pass_method : str
@@ -1407,7 +1818,7 @@ class Titration(TecanfilesGroup):
             raise ValueError(msg)
         if datasets is None:
             datasets = self.create_dataset_dict(label)
-        floors_in = dict(self.bg_noise) if sigma_floor is None else dict(sigma_floor)
+        floors_in = dict(self.sigma_floor) if sigma_floor is None else dict(sigma_floor)
 
         noise_model: PlateNoiseModel | None = None
         results: dict[str, FitResult] = {}
@@ -1434,8 +1845,11 @@ class Titration(TecanfilesGroup):
                     )
                     results[well] = FitResult()
 
-            df_res = residuals_from_fit_results(
-                results, trace_id="", binding_function=binding_1site
+            df_res = _with_well_dof_scale(
+                residuals_from_fit_results(
+                    results, trace_id="", binding_function=binding_1site
+                ),
+                results,
             )
             try:
                 floors, gains, alphas = fit_noise_model_nnls(
@@ -1551,7 +1965,85 @@ class TecanConfig:
     fit: bool
     png: bool
     detect_bad: bool = True
-    """Run bad-well detection before fitting (pre-fit) and after (post-fit)."""
+    """Run bad-well detection before fitting, and act on undetermined K after it.
+
+    Before: discard unusable wells (``Titration.detect_and_discard_bad_wells``).
+    After: leave wells whose fitted K is undetermined (see ``max_k_se``) - and,
+    for chloride, wells that do not bind - off the K plot, mark their per-well
+    figure, and list them in ``discarded_wells.txt``. The ``undetermined`` (and
+    ``no_binding``) columns of each ``ffit*.csv`` are written either way.
+    """
+
+    ctr_free_k: bool = False
+    """Give every well its own K in --plate-fit, instead of pooling controls.
+
+    Mirrors what the flag already did for ``--mcmc multi``; without it the two
+    fitters answer different questions from the same command line.
+    """
+
+    plate_screen_z: float | None = None
+    """Drop points whose calibrated |z| exceeds this, then refit, for --plate-fit.
+
+    ``None`` fits once. 3.0 is the value measured to help (sum_log -5.92 against
+    -5.49 unscreened, nine plates of eleven improved); 2.5 turns harmful, so
+    this is not a knob to sweep casually.
+    """
+
+    plate_screen_frac: float | None = None
+    """Also drop 400 nm points deviating fractionally by more than this.
+
+    A z-score fails at both ends of a titration: sigma tracks the signal while
+    model error tracks the curve, so a 5% miss at the dim end reads as 3.6 sigma
+    while a 36% miss at the bright end reads as 2.7. ``|y - yhat| / yhat``
+    separates reviewer keeps (0.097-0.111) from discards (0.126 up) over three
+    plates. Points the 485 nm channel moves with are spared, since a shared
+    multiplicative shift is what the ratiometric measurement cancels. ``None``
+    leaves the z-screen alone.
+    """
+
+    plate_noise: str = "fixed"
+    """How ``--plate-fit`` weights its points.
+
+    ``"fixed"`` uses ``y_err`` as built - the ``bg_noise`` floor, plus any
+    ``--noise-gain``/``--noise-alpha`` supplied. ``"calibrated"`` estimates gain
+    and alpha per label from the fit's own residuals and refits under them.
+    Calibration describes the residuals better and fits K worse, so it is not
+    the default; see ``fit_plate_lm``. It sets the weights K is fitted with
+    whether or not ``plate_screen_z`` is given. ``"gain"`` and ``"floor-gain"``
+    weight by ``floor^2 + gain * yhat`` with alpha 0, the gain (and the floor)
+    calibrated from dof-corrected residuals between refits; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_plate_lm`.
+    """
+
+    plate_screen_noise: str = "calibrated"
+    """The ruler ``--plate-screen-z`` judges points on.
+
+    ``"calibrated"`` (the default) calibrates gain and alpha from the screening
+    pass's own residuals so bright and dim points are judged on a comparable
+    scale; ``"fixed"`` judges on the weights as built. Independent of
+    ``plate_noise``: before the two were separate options, ``plate_noise`` meant
+    the fit's weights without a screen but not after one.
+    """
+
+    max_k_se: float = 0.30
+    """Largest standard error, in pH, at which a fitted pKa counts as determined.
+
+    pH is an interval scale, so the cut is absolute; a ratio ``sK / K`` is
+    ``sK / 7`` here and never fires. 0.30 is three times the 0.10 pH ROPE and
+    four times the 0.074 pH replicate repeatability; on eleven library plates it
+    catches 32 of 875 library wells and none of 123 controls. Chloride ignores
+    it: Kd is a ratio scale, undetermined when ``sKd > Kd``, and a well whose
+    94% lower bound is above the highest concentration does not bind.
+    """
+
+    fit_noise: str = "fixed"
+    """How the per-well global lm/huber fit weights its points.
+
+    ``"fixed"`` uses ``y_err`` as built. ``"gain"`` and ``"floor-gain"`` fit
+    every well, pool all wells' dof-corrected residuals into one gain per label
+    (and with ``"floor-gain"`` one floor), and refit until it settles; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_single_well`.
+    """
 
 
 @dataclass(frozen=True)
@@ -1570,6 +2062,12 @@ class McmcSpec:
     structured_noise : bool
         Build the physical ``floor + gain * y + (alpha * y) ** 2`` observation
         noise instead of scaling ``y_err`` by a learned ``ye_mag`` multiplier.
+    floor_mode : Literal["centered", "fixed"] | None
+        Override the mode for the floor alone; ``None`` follows *noise_mode*.
+    gain_mode : Literal["centered", "fixed"] | None
+        Override the mode for gain alone; ``None`` follows *noise_mode*.
+    alpha_mode : Literal["centered", "fixed"] | None
+        Override the mode for alpha alone; ``None`` follows *noise_mode*.
     noise_mode : Literal["centered", "fixed"]
         How a supplied gain/alpha hint is treated when *structured_noise* is
         set: centred on (a hint the posterior may leave) or pinned to it. A
@@ -1593,15 +2091,58 @@ class McmcSpec:
         accuracy at the construct level and makes the stated interval too
         narrow, and the library wells have no group to pool with, so free K is
         the setting that matches what a plate is fitted for.
+    x_error_model : Literal["deterministic", "per_well"]
+        The latent pH axis of ``model="multi"``. ``"deterministic"`` is one
+        pipetting walk shared by every well; ``"per_well"`` gives each well its
+        own walk, with step SDs split from the measured pH errors into read
+        noise plus accumulated pipetting variance. pH is measured in a few wells
+        and their spread grows along a titration, so an unmeasured well's pH is
+        uncertain in a way only the per-well axis carries into its K: on eleven
+        plates it took free-K single-well bulk z-SD from ~1.65 to ~0.95 at
+        unchanged accuracy. The default keeps the historical shared axis.
+    x_start_between_sigma : float | None
+        For ``x_error_model="per_well"``, the prior SD of each well's offset at
+        the first step. A per-well offset is degenerate with that well's K, so
+        this SD passes straight into K's interval; set it to the measured
+        well-to-well spread at the first step rather than a round number.
+        ``None`` keeps the library default.
+    learn_x_start_between : bool
+        For ``x_error_model="per_well"``, estimate the between-well spread of
+        the first-step offset instead of pinning it at
+        *x_start_between_sigma*, which then becomes its prior scale.
+    ctr_sigma_w_prior : float | None
+        Prior scale, in pH, of the spread of a control group's replicates around
+        the group's own K (``K_sigma_w``). Given, each replicate keeps its own K
+        a learned distance from the group's: the middle ground between one
+        shared K and a free one. ``None`` (default) leaves the model as it was.
     """
 
     model: Literal["single", "single-refit", "multi"]
     sampler: SamplerConfig
     structured_noise: bool = False
     noise_mode: Literal["centered", "fixed"] = "centered"
+    # Per-term overrides. One mode for all three cannot separate the terms:
+    # pinning alpha at zero also pins the floor, so sigma cannot rescale and the
+    # cell measures that rather than the term it meant to isolate.
+    floor_mode: Literal["centered", "fixed"] | None = None
+    gain_mode: Literal["centered", "fixed"] | None = None
+    alpha_mode: Literal["centered", "fixed"] | None = None
     per_well_ye_mags: bool | None = None
+    noise_ye_mag: bool = False
+    """Learn a ye_mag multiplier on top of a structured noise model.
+
+    A structured model builds sigma from floor, gain and alpha and, by default,
+    has no overall multiplier: the terms themselves carry the level. With this
+    set, sigma is also scaled by a learned ye_mag - per label, or per well when
+    ``per_well_ye_mags`` is set - which lets a calibrated shape keep its shape
+    while the data set the level. Meaningless without ``structured_noise``.
+    """
     ye_mag_parameterization: Literal[
         "centered", "hierarchical", "separable", "separable_step"
     ] = "centered"
     robust: RobustConfig = field(default_factory=RobustConfig)
     ctr_free_k: bool = False
+    x_error_model: Literal["deterministic", "per_well"] = "deterministic"
+    x_start_between_sigma: float | None = None
+    ctr_sigma_w_prior: float | None = None
+    learn_x_start_between: bool = False

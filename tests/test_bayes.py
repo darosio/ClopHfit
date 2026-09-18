@@ -350,7 +350,8 @@ def test_data_prior_default_k_bounds_respect_is_ph(
         k_sigma=1.5,
     )
     assert cl_fr.result is not None
-    assert cl_fr.result.params["K"].min == pytest.approx(1e-6)
+    # A Kd floor of 1 mM (KD_MIN), as every chloride fitter now uses.
+    assert cl_fr.result.params["K"].min == pytest.approx(1.0)
     assert cl_fr.result.params["K"].max == pytest.approx(1e6)
 
 
@@ -408,9 +409,9 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
     ("k_bounds", "is_ph", "expected"),
     [
         (None, True, (4.5, 9.0)),
-        (None, False, (1e-6, 1e6)),
+        (None, False, (1.0, 1e6)),  # KD_MIN floor
         ((float("nan"), 9.0), True, (4.5, 9.0)),
-        ((5.0, 5.0), False, (1e-6, 1e6)),  # lo == hi is invalid
+        ((5.0, 5.0), False, (1.0, 1e6)),  # lo == hi is invalid
         ((9.0, 4.5), True, (4.5, 9.0)),  # reversed order is sorted
         ((1.0, 50.0), False, (1.0, 50.0)),  # valid explicit bounds respected
     ],
@@ -3292,5 +3293,83 @@ def test_multi_fit_accepts_a_well_with_fewer_labels() -> None:
     )
     assert set(res.results) == set(dsd)
     for well in dsd:
-        assert res.results[well].result is not None
-        assert "K" in res.results[well].result.params
+        result = res.results[well].result
+        assert result is not None
+        assert "K" in result.params
+
+
+def test_multi_fit_uses_every_label_on_the_plate_not_just_the_first_well() -> None:
+    """The label set is the union over wells, not whatever the first one has.
+
+    Per-label detection can leave the first well carrying only label 2 - on L1
+    it leaves 37 of 60 wells single-label - and taking the label list from that
+    well silently drops every label-1 observation on the plate. Silent, because
+    the fit still succeeds and simply ignores half the data.
+    """
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    dsd: dict[str, Dataset] = {}
+    for i, well in enumerate(("A01", "A02", "A03")):
+        k = 6.8 + 0.1 * i
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            # The FIRST well keeps only label 2.
+            if well == "A01" and lbl == "1":
+                continue
+            y = binding_1site(x, k, s0, s1, is_ph=True) + rng.normal(0.0, 5.0, len(x))
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        dsd[well] = Dataset(arrays, is_ph=True)
+    res = bayes.fit_binding_pymc_multi(
+        dsd, PlateScheme(), sampler=SamplerConfig(n_samples=60, n_tune=60, chains=2)
+    )
+    # Label 1 is present on two wells, so the model must carry its parameters.
+    assert "S0_1" in res.trace.posterior
+    assert "S0_2" in res.trace.posterior
+
+
+def test_hdi_bounds_survive_the_arviz_column_rename() -> None:
+    """The 94% HDI must reach the params, whatever ArviZ calls its columns.
+
+    ArviZ 1.x renamed the summary columns from ``hdi_3%``/``hdi_97%`` to
+    ``hdi94_lb``/``hdi94_ub`` - and defaults to an ETI, not an HDI, unless
+    asked. The old lookup silently found neither, so every PyMC fit exported
+    ``Khdi03``/``Khdi97`` as -inf/+inf: a credible interval quietly replaced by
+    a parameter bound, with nothing raised.
+    """
+    for lo_name, hi_name in (
+        ("hdi_3%", "hdi_97%"),
+        ("hdi94_lb", "hdi94_ub"),
+        ("hdi89_lb", "hdi89_ub"),
+    ):
+        row = pd.Series({"mean": 7.0, "sd": 0.1, lo_name: 6.8, hi_name: 7.2})
+        lo, hi = bayes._hdi_bounds_or_none(row)  # ruff: ignore[private-member-access]
+        assert (lo, hi) == (6.8, 7.2), f"{lo_name}/{hi_name} not read"
+    # An ETI-only summary carries no HDI, and must not be mistaken for one.
+    eti = pd.Series({"mean": 7.0, "sd": 0.1, "eti89_lb": 6.8, "eti89_ub": 7.2})
+    assert bayes._hdi_bounds_or_none(eti) == (None, None)  # ruff: ignore[private-member-access]
+
+
+def test_multi_fit_exports_a_real_credible_interval() -> None:
+    """End to end: a fitted K must carry finite HDI bounds, not the prior box."""
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    dsd = {}
+    for i, well in enumerate(("A01", "A02", "A03")):
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            y = binding_1site(x, 6.8 + 0.1 * i, s0, s1, is_ph=True) + rng.normal(
+                0.0, 5.0, len(x)
+            )
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        dsd[well] = Dataset(arrays, is_ph=True)
+    res = bayes.fit_binding_pymc_multi(
+        dsd, PlateScheme(), sampler=SamplerConfig(n_samples=300, n_tune=300, chains=2)
+    )
+    result = res.results["A01"].result
+    assert result is not None
+    k = result.params["K"]
+    assert np.isfinite(k.min)
+    assert np.isfinite(k.max)
+    assert k.min < k.value < k.max
+    # A credible interval, not the [3, 11] pH box the sampler was bounded to.
+    assert (k.max - k.min) < 1.0

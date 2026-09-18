@@ -13,9 +13,10 @@ from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
-import pymc as pm
+import pymc as pm  # type: ignore[import-untyped]
 import pytest
 import seaborn as sns  # type: ignore[import-untyped]
+from lmfit import Parameters  # type: ignore[import-untyped]
 from numpy.testing import assert_allclose, assert_almost_equal, assert_array_equal
 
 from clophfit import prtecan
@@ -29,6 +30,8 @@ from clophfit.fitting.data_structures import (
     PlateNoiseModel,
 )
 from clophfit.fitting.model_validation import RESIDUAL_TABLE_COLUMNS, RobustZMad
+from clophfit.fitting.models import binding_1site
+from clophfit.fitting.plate_lm import fit_plate_lm
 from clophfit.prtecan import (
     Buffer,
     BufferFit,
@@ -48,6 +51,7 @@ from clophfit.prtecan import (
     extract_metadata,
     merge_md,
     strip_lines,
+    titration as titration_module,
 )
 from clophfit.prtecan.export import (
     export_data_fit,
@@ -55,6 +59,12 @@ from clophfit.prtecan.export import (
     generate_combinations,
     prepare_output_folder,
 )
+from clophfit.prtecan.titration import McmcSpec
+
+
+class _StopBayesBuildError(Exception):
+    """Stop a fit once the call has been inspected, without sampling."""
+
 
 # Test data paths
 data_tests = Path(__file__).parent / "Tecan"
@@ -784,12 +794,26 @@ def test_end_to_end_titration_processing(tmp_path: Path) -> None:
     fit_dir = tmp_path / "dat_bg_dil_nrm/fit"
     assert any(fit_dir.glob("residuals_*.csv")), "residuals CSV missing"
     assert any(fit_dir.glob("residual_stats_*.csv")), "residual_stats CSV missing"
-    # Bad-well CSV written by default
-    assert (fit_dir / "bad_wells.csv").exists(), "bad_wells.csv missing"
+    # Screening output lands in fit/ beside the other per-run artefacts, and
+    # replaces bad_wells.csv, which flagged 88 of 88 wells on a real plate
+    # because it ORed a polarity test across two channels that move oppositely
+    # by design.
+    assert (fit_dir / "atypical_wells.csv").exists(), "atypical_wells.csv missing"
+    assert (fit_dir / "discarded_wells.txt").exists(), "discarded_wells.txt missing"
+    assert not (fit_dir / "bad_wells.csv").exists(), "bad_wells.csv is retired"
+    # Highlighted wells ride along in the discard list under a heading per
+    # reason, so one file answers "what happened to my wells, and why" without
+    # a join. Empty reasons are omitted rather than shown bare.
+    text = (fit_dir / "discarded_wells.txt").read_text()
+    headings = [ln for ln in text.splitlines() if ln.startswith("#")]
+    assert headings, "no reason headings written"
+    assert all(
+        h.lstrip("# ") in {"low_signal", "concordant", "flat_curve"} for h in headings
+    ), f"unexpected heading in {headings}"
 
 
 def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
-    """When detect_bad=False, bad_wells.csv and discarded_wells.txt must not be written."""
+    """When detect_bad=False, no screening output is written at all."""
     tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
     tit.load_additions(data_tests / "140220/additions.pH")
     tit.load_scheme(data_tests / "140220/scheme.txt")
@@ -813,7 +837,7 @@ def test_end_to_end_no_detect_bad(tmp_path: Path) -> None:
         "bad_wells.csv must not be written when detect_bad=False"
     )
     subfolder = tmp_path / "dat_bg_dil_nrm"
-    assert not (subfolder / "discarded_wells.txt").exists(), (
+    assert not (subfolder / "fit" / "discarded_wells.txt").exists(), (
         "discarded_wells.txt must not be written when detect_bad=False"
     )
 
@@ -1426,8 +1450,11 @@ class TestTitrationAnalysis:
         ("folder", "expected"),
         [
             ("140220", []),
-            # L2: B03 fails label 1 only, so it is kept single-label.
-            ("L2", []),
+            # L2: C05 has no usable label. Its 400 nm channel is dim and its
+            # 485 nm channel swings 1.7 read-noise widths, which is a drift
+            # rather than a titration - the fit puts K at 7.138 +- 254 pH.
+            # B03 fails label 1 only, so it is kept single-label.
+            ("L2", ["C05"]),
             # L4: G12 fails every label, so there is nothing left to fit.
             ("L4", ["G12"]),
         ],
@@ -1730,6 +1757,191 @@ def test_titration_results_noise_model_is_last_positional() -> None:
     assert TitrationResults(scheme, fit_keys, results, noise_model=nm).noise_model is nm
 
 
+class TestBufferReadNoise:
+    """``bg_read_noise``: buffer scatter with fixed well offsets taken out.
+
+    ``bg_noise`` pools two things a titration fit treats very differently. A
+    buffer well sitting consistently high is a positional offset, and in a
+    per-well fit it is absorbed by that well's ``S0``/``S1`` plateaus, so it
+    contributes nothing to point-to-point residual scatter. Only what is left
+    once step and well effects are removed is measurement noise, and only that
+    belongs in a noise-model floor.
+    """
+
+    @staticmethod
+    def _titration() -> Titration:
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    def test_pure_well_offsets_are_not_read_noise(self) -> None:
+        """Wells that differ only by a constant offset carry no read noise.
+
+        This is the whole point of the statistic: three buffer wells reading a
+        flat background at 100, 110 and 120 have a large pooled SD and zero
+        measurement scatter.
+        """
+        values = np.array([[100.0, 110.0, 120.0]] * 5)
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(0.0)
+
+    def test_pure_step_drift_is_not_read_noise(self) -> None:
+        """A background that drifts identically in every well is not noise."""
+        drift = np.array([10.0, 20.0, 30.0, 40.0, 50.0])
+        values = np.tile(drift[:, None], (1, 4))
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(0.0)
+
+    def test_recovers_injected_scatter(self) -> None:
+        """With offsets and drift on top, the injected sigma is what comes back."""
+        rng = np.random.default_rng(20260908)
+        n_steps, n_wells, sigma = 40, 8, 3.0
+        offsets = np.array([0.0, 5.0, -5.0, 12.0, -8.0, 3.0, -2.0, 9.0])
+        drift = np.linspace(200.0, 260.0, n_steps)
+        values = (
+            drift[:, None]
+            + offsets[None, :]
+            + rng.normal(0.0, sigma, size=(n_steps, n_wells))
+        )
+        rms = titration_module._interaction_rms(values)  # ruff: ignore[private-member-access]
+        assert rms == pytest.approx(sigma, rel=0.1)
+
+    def test_bg_read_noise_matches_bg_noise_labels(self) -> None:
+        """The new statistic is reported for exactly the labels bg_noise is."""
+        titan = self._titration()
+        assert set(titan.bg_read_noise) == set(titan.bg_noise)
+
+    def test_bg_read_noise_is_below_bg_noise_on_real_buffers(self) -> None:
+        """Real buffer wells carry positional offsets, so removing them lowers it.
+
+        Guards the direction of the correction: a ``bg_read_noise`` that came
+        back equal to ``bg_noise`` would mean the well effect was never removed.
+        """
+        titan = self._titration()
+        for label, read in titan.bg_read_noise.items():
+            assert 0.0 < read < titan.bg_noise[label]
+
+
+class TestSigmaFloorOverride:
+    """``--noise-floor``: supply the read-noise floor instead of measuring it.
+
+    ``bg_noise`` is what the buffer wells happen to scatter by on one plate.
+    Across eleven plates the label-1 floor tracks the reader Gain at r = 0.906,
+    with a slope of a decade per 38 gain units against the 34.1 predicted by the
+    amplification law -- so one floor quoted at a reference Gain describes every
+    plate, and is a better estimate for any single plate than its own four
+    buffer wells.
+    """
+
+    @staticmethod
+    def _titration() -> Titration:
+        titan = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+        titan.load_scheme(data_tests / "140220/scheme.txt")
+        return titan
+
+    def test_unset_floor_falls_back_to_measured_read_noise(self) -> None:
+        """With no override the floor is the measured read noise, not the pooled SD.
+
+        ``bg_noise`` pools the buffer wells' fixed positional offsets in with
+        their scatter, and those offsets are absorbed by each well's own
+        plateaus, so they are not floor. Against the pooled calibration the
+        read-noise figure is the right order -- 0.81x for label 1, 2.28x for
+        label 2 -- where ``bg_noise`` is 4.5x too large for label 1.
+        """
+        titan = self._titration()
+        assert titan.sigma_floor == pytest.approx(titan.bg_read_noise)
+        assert titan.sigma_floor != pytest.approx(titan.bg_noise)
+
+    def test_supplied_floor_is_used_verbatim_without_a_reference_gain(self) -> None:
+        """A floor with no reference Gain is an absolute value, not a hint."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        assert titan.sigma_floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+    def test_reference_gain_scales_the_floor_by_the_amplification_law(self) -> None:
+        """A floor quoted at a reference Gain is scaled to the plate's own Gain.
+
+        Read noise is amplified with the signal, so a floor measured at one PMT
+        setting has to be moved to another before it means anything.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        gain_value = titan.labelblocksgroups[labels[0]].metadata["Gain"].value
+        assert isinstance(gain_value, (int, float))
+        gain = float(gain_value)
+        decade = titration_module._FLOOR_GAIN_DECADE  # ruff: ignore[private-member-access]
+        titan.params.noise_floor = (3.59, 0.42)
+        titan.params.noise_floor_ref_gain = (gain - decade, 0.0)
+        # One decade of gain units above the reference is exactly 10x.
+        assert titan.sigma_floor[labels[0]] == pytest.approx(35.9)
+
+    def test_zero_reference_gain_disables_scaling_for_that_label(self) -> None:
+        """Label 2's floor showed no Gain dependence, so it must be able to opt out."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        titan.params.noise_floor_ref_gain = (0.0, 0.0)
+        assert titan.sigma_floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+    def test_an_explicit_override_reaches_y_err(self) -> None:
+        """An explicit floor governs the classical weighting, not only the sampler."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        well = min(titan.data[labels[0]])
+        titan.params.noise_floor = (500.0, 500.0)
+        y_err = np.asarray(titan.create_ds(well, labels[0])[labels[0]].y_err)
+        # A floor far above every other term dominates the error model.
+        assert float(np.min(y_err)) >= 500.0
+
+    def test_y_err_defaults_to_bg_noise_not_the_read_noise(self) -> None:
+        """Unset, y_err keeps the pooled figure the classical path was tuned on.
+
+        With no gain or alpha this y_err is homoscedastic, and the best single
+        sigma for that is the typical noise over the signal range, not the
+        floor at zero signal: ``bg_noise`` sits 4x below it on label 1 where
+        ``bg_read_noise`` sits 14x below. Least squares does not care, since a
+        uniform scale cancels, but huber's transition point is absolute -- and
+        defaulting this to the read noise left 29 of 731 well-fits with an
+        unconstrained K that had been fine.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        well = min(titan.data[labels[0]])
+        y_err = np.asarray(titan.create_ds(well, labels[0])[labels[0]].y_err)
+        assert float(np.median(y_err)) == pytest.approx(
+            titan.bg_noise[labels[0]], rel=1e-6
+        )
+        assert titan.bg_noise[labels[0]] > titan.bg_read_noise[labels[0]]
+
+    def test_the_override_reaches_the_plate_fit_noise_model(self) -> None:
+        """The plate fitters must use the same floor as everything else.
+
+        ``_plate_noise_model`` read ``bg_noise`` directly, so a supplied
+        ``--noise-floor`` reached y_err, the FGLS calibration and the sampler
+        but silently not ``--plate-fit`` -- the one fitter that re-evaluates a
+        signal-dependent sigma at its own prediction, and so the one where the
+        floor matters most.
+        """
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        model = export._plate_noise_model(titan)  # ruff: ignore[private-member-access]
+        assert model is not None
+        assert model[labels[0]].sigma_floor == pytest.approx(3.59)
+        assert model[labels[1]].sigma_floor == pytest.approx(0.42)
+
+    def test_the_override_reaches_the_structured_mcmc_noise(self) -> None:
+        """And the sampler's floor hint, which is the other consumer."""
+        titan = self._titration()
+        labels = sorted(titan.data)
+        titan.params.noise_floor = (3.59, 0.42)
+        noise = export._structured_noise(  # ruff: ignore[private-member-access]
+            titan, noise_mode="fixed"
+        )
+        assert noise.floor == pytest.approx({labels[0]: 3.59, labels[1]: 0.42})
+
+
 class TestStructuredMcmcNoise:
     """CLI-selectable structured noise for ``--mcmc single-refit``."""
 
@@ -1752,6 +1964,10 @@ class TestStructuredMcmcNoise:
         assert noise.kind == "structured"
         assert noise.gain_mode == "free"
         assert noise.alpha_mode == "free"
+        # The floor hint is always measured, so it takes the configured mode
+        # even when gain and alpha have nothing to centre on. Left "free" it
+        # drifts well above bg_noise and flattens the structured model.
+        assert noise.floor_mode == "centered"
         assert isinstance(noise.floor, dict)
         assert set(noise.floor) == set(titan.data)
 
@@ -1781,6 +1997,8 @@ class TestStructuredMcmcNoise:
         assert noise.alpha_mode == "fixed"
         # Gain got no value, so it stays free regardless of noise_mode.
         assert noise.gain_mode == "free"
+        # The floor is measured, so "fixed" pins it to bg_noise.
+        assert noise.floor_mode == "fixed"
 
     def test_structured_noise_takes_mode_as_argument(self) -> None:
         """The mode is passed in, not read off titration.params.
@@ -1987,6 +2205,58 @@ def test_mcmc_spec_knobs_reach_the_multi_model(
     assert seen["sampler"].n_tune == 4000  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize(
+    ("x_error_model", "between", "expected"),
+    [
+        # The default must stay the shared axis and leave the offset SD to the
+        # library, so existing runs fit the model they always fitted.
+        ("deterministic", None, {"x_error_model": "deterministic"}),
+        ("per_well", None, {"x_error_model": "per_well"}),
+        (
+            "per_well",
+            0.028,
+            {"x_error_model": "per_well", "x_start_between_sigma": 0.028},
+        ),
+    ],
+)
+def test_mcmc_x_error_model_reaches_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    x_error_model: str,
+    between: float | None,
+    expected: dict[str, object],
+) -> None:
+    """The latent pH axis of ``McmcSpec`` must arrive at ``fit_binding_pymc_multi``.
+
+    ``fit_single_mcmc`` never passed ``x_error_model``, so every ``ppr`` run
+    used the shared axis -- one walk for all wells -- although the model could
+    give each well its own. pH is measured in a few wells and their spread grows
+    along a titration, and on eleven plates the per-well axis took free-K
+    single-well bulk z-SD from ~1.65 to ~0.95; unreachable, it did nothing.
+    """
+    from clophfit.prtecan import export  # ruff: ignore[import-outside-top-level]
+
+    seen: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return SimpleNamespace(results={})
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = prtecan.Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
+    spec = prtecan.McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(),
+        x_error_model=x_error_model,  # type: ignore[arg-type]
+        x_start_between_sigma=between,
+    )
+
+    export.fit_single_mcmc(tit, {}, tmp_path, spec)
+
+    got = {k: seen[k] for k in ("x_error_model", "x_start_between_sigma") if k in seen}
+    assert got == expected
+
+
 def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
     """``--plate-fit`` must produce a K per well, with control groups pooled.
 
@@ -2019,8 +2289,10 @@ def test_export_plate_fit_writes_k_per_well(tmp_path: Path) -> None:
 
     out = export_plate_fit(tit, datasets, tmp_path, "lm")  # type: ignore[arg-type]  # SimpleNamespace test double
 
+    # The fit result is returned, not the path: the caller needs its
+    # excluded_points to hand the screen's verdict to whatever fits next.
     assert out is not None
-    table = pd.read_csv(out).set_index("well")
+    table = pd.read_csv(tmp_path / "plate_lm_K.csv").set_index("well")
     assert set(table.index) == set(wells)
     assert table.loc["A01", "K"] == pytest.approx(table.loc["A12", "K"])
     assert bool(table.loc["A01", "k_shared"])
@@ -2306,7 +2578,7 @@ class TestSingleLabelWells:
         res = tit.fit_plate(datasets, method="lm")
         df = res.dataframe
         assert "n_labels" in df.columns
-        assert int(df.loc[well, "n_labels"]) == len(labels) - 1
+        assert df.loc[well, "n_labels"] == len(labels) - 1
         others = df.drop(index=well)["n_labels"]
         assert (others == len(labels)).all()
 
@@ -2330,3 +2602,544 @@ def test_ctr_loo_summary_uses_the_column_the_holdout_actually_writes(
     col = df["delta_k_mean"].astype(float)
     assert float(np.nanmedian(np.abs(col))) == pytest.approx(0.20)
     assert float(np.sqrt(np.nanmean(col**2))) == pytest.approx(0.2236, abs=1e-3)
+
+
+def test_hdi_columns_are_empty_when_the_fit_has_no_credible_interval() -> None:
+    """A least-squares bound must not be exported under an HDI column name.
+
+    ``ffit2.csv`` carried ``Khdi03=3, Khdi97=11`` - the pH box the solver was
+    bounded to, in columns a reader takes for a 94% interval. A bound is not an
+    interval, and one dressed as the other is worse than an absent value, so
+    these are written only when the fit actually produced them.
+    """
+    pars = Parameters()
+    pars.add("K", value=7.0, min=3.0, max=11.0)  # a bounded least-squares fit
+    pars["K"].stderr = 0.05
+    res = TitrationResults(
+        scheme=PlateScheme(),
+        fit_keys={"A01"},
+        results={"A01": FitResult(result=SimpleNamespace(params=pars), dataset=None)},
+    )
+    row = res.dataframe.loc["A01"]
+    assert row["K"] == pytest.approx(7.0)
+    assert row["sK"] == pytest.approx(0.05)
+    assert row[["Khdi03", "Khdi97"]].isna().all()
+
+
+def test_plate_fit_results_carry_a_figure_per_well() -> None:
+    """The winning fitter must produce the same per-well figures as the others.
+
+    A plate-wide solve returns parameter vectors, not the plotted fit objects
+    the export path draws from, so ``--plate-fit`` produced a CSV and nothing to
+    look at. Since this is the method the comparison selected, parity matters:
+    a well whose K looks wrong has to be inspectable.
+    """
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    datasets = {}
+    for i, well in enumerate(("A01", "A02", "A03")):
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            y = binding_1site(x, 6.8 + 0.1 * i, s0, s1, is_ph=True) + rng.normal(
+                0.0, 5.0, len(x)
+            )
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        datasets[well] = Dataset(arrays, is_ph=True)
+    result = fit_plate_lm(datasets, groups={})
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    res = export._plate_fit_results(  # ruff: ignore[private-member-access]
+        datasets, result, tit, with_figures=True
+    )
+    assert set(res.fit_keys) == set(datasets)
+    for well in datasets:
+        fr = res[well]
+        assert fr.figure is not None, f"{well} has no figure to inspect"
+        assert fr.result is not None
+        assert fr.result.params["K"].value == pytest.approx(result.k[well], abs=1e-9)
+
+
+def test_plate_fit_figures_report_k_and_residual_stats() -> None:
+    """A fit figure with no numbers on it cannot be judged, only admired.
+
+    The per-well plate-fit images carried the curve and nothing else: no pKa,
+    no interval, no indication of whether the residuals were plausibly normal.
+    Those are what tell a reader whether to believe the curve, and for an
+    edge-of-range well - where the midpoint sits outside the titrated span -
+    they are the only warning.
+    """
+    rng = np.random.default_rng(0)
+    x = np.linspace(5.0, 9.0, 7)
+    datasets = {}
+    for well in ("A01", "A02"):
+        arrays = {}
+        for lbl, (s0, s1) in (("1", (200.0, 1000.0)), ("2", (1000.0, 200.0))):
+            y = binding_1site(x, 6.9, s0, s1, is_ph=True) + rng.normal(0.0, 5.0, len(x))
+            arrays[lbl] = DataArray(x, y, y_errc=np.ones(len(x)))
+        datasets[well] = Dataset(arrays, is_ph=True)
+    result = fit_plate_lm(datasets, groups={})
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    res = export._plate_fit_results(  # ruff: ignore[private-member-access]
+        datasets, result, tit, with_figures=True
+    )
+    fig = res["A01"].figure
+    assert fig is not None
+    text = " ".join(t.get_text() for t in fig.axes[0].texts) + fig.axes[0].get_title()
+    assert "pK" in text, "the fitted pKa is not on the figure"
+    assert "±" in text or "+/-" in text, "no interval shown"
+    assert "RMS" in text or "z" in text, "no residual statistic shown"
+
+
+def test_bg_adj_lifts_only_traces_that_go_negative() -> None:
+    """The adjustment triggers on a negative minimum, and nothing else.
+
+    The condition read ``y.min() < alpha * 0 * y.max()``, which is ``y.min() <
+    0`` with a multiplication by zero sitting in the middle of it - so ``alpha``
+    appeared to set the threshold while having no effect on it, and only sized
+    the shift. Pin the behaviour so the simplification cannot drift into the
+    ``alpha * y.max()`` the expression looks like it wanted.
+    """
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    tit.params.bg = True
+    tit.params.nrm = True
+    tit.params.bg_adj = True
+    label = next(iter(tit.labelblocksgroups))
+    adjust = tit._adjust_negative_values  # ruff: ignore[private-member-access]
+
+    def one(trace: list[float]) -> np.ndarray:
+        """Run the adjustment over every fit key, and read back the first."""
+        keys = sorted(tit.fit_keys)
+        data = {label: dict.fromkeys(keys, np.array(trace))}
+        data[label] = {k: np.array(trace) for k in keys}
+        return np.asarray(adjust(data)[label][keys[0]], dtype=float)
+
+    # Wholly positive, however close to zero relative to its range: untouched.
+    assert np.allclose(one([1.0, 20.0, 100.0]), [1.0, 20.0, 100.0])
+
+    # Dipping below zero: lifted so the minimum sits a tenth of the range up.
+    out = one([-10.0, 40.0, 90.0])
+    assert out.min() == pytest.approx(0.1 * 100.0)
+    assert np.allclose(np.diff(out), np.diff([-10.0, 40.0, 90.0]))
+
+
+def test_structured_noise_reaches_the_multi_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--mcmc-noise structured` must actually configure the multi-well fit.
+
+    The multi branch called `fit_binding_pymc_multi` without passing `noise` at
+    all, so `--mcmc-noise structured`, `--noise-gain` and `--noise-alpha` were
+    accepted, echoed in the run's configuration, and silently ignored - a whole
+    noise family that could be selected but never took effect.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    spec = McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_samples=10, n_tune=10),
+        structured_noise=True,
+    )
+    datasets = {k: tit.create_global_ds(k) for k in list(tit.fit_keys)[:2]}
+    with pytest.raises(_StopBayesBuildError):
+        export.fit_single_mcmc(tit, datasets, tmp_path, spec)
+    noise = captured.get("noise")
+    assert noise is not None, "noise was never passed to the multi model"
+    assert getattr(noise, "kind", None) == "structured"
+
+
+@pytest.mark.parametrize("learn", [False, True])
+def test_noise_ye_mag_reaches_the_structured_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    learn: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - pytest passes parametrized values by name
+) -> None:
+    """``--noise-ye-mag`` must reach the structured model's ``learn_ye_mags``.
+
+    A structured model builds sigma from its own terms and has no overall
+    multiplier, so a supplied floor and gain set the level as well as the shape.
+    The flag separates the two; accepted and dropped, it would silently give the
+    model it was meant to replace.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    spec = McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_samples=10, n_tune=10),
+        structured_noise=True,
+        noise_ye_mag=learn,
+    )
+    datasets = {k: tit.create_global_ds(k) for k in list(tit.fit_keys)[:2]}
+    with pytest.raises(_StopBayesBuildError):
+        export.fit_single_mcmc(tit, datasets, tmp_path, spec)
+    assert getattr(captured["noise"], "learn_ye_mags", None) is learn
+
+
+def test_create_global_ds_honours_mask_outliers() -> None:
+    """One flag, one meaning, whichever entry point builds the dataset.
+
+    ``create_dataset_dict`` applied ``mask_outliers``; ``create_global_ds`` did
+    not. Since ``ppr tecan`` builds its global datasets with the latter, the
+    flag never reached the global, ODR, MCMC or plate fits at all - it was
+    accepted, echoed back, and silently confined to the per-label path. Two
+    builders of the same dataset must not disagree about what the flag means.
+    """
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    tit.params.bg = False
+    tit.params.nrm = True
+    well = min(tit.fit_keys)
+
+    tit.params.mask_outliers = False
+    tit.params.outlier_threshold = 0.2
+    unmasked = tit.create_global_ds(well)
+    n_off = sum(int(np.asarray(da.mask).sum()) for da in unmasked.values())
+
+    tit.params.mask_outliers = True
+    masked = tit.create_global_ds(well)
+    n_on = sum(int(np.asarray(da.mask).sum()) for da in masked.values())
+
+    # Same route as create_dataset_dict takes, so the two must agree.
+    via_dict = tit.create_dataset_dict()[well]
+    n_dict = sum(int(np.asarray(da.mask).sum()) for da in via_dict.values())
+    assert n_on == n_dict, "the two builders disagree about masking"
+    assert n_on <= n_off
+
+
+class TestDimLabelExemption:
+    """A dim second channel is only uninformative when its curve is noise-shaped.
+
+    Every well on these plates has a dim 400 nm channel by construction, so
+    dimness alone cannot condemn a well. The question is whether the channel
+    still traces a titration. The arrays below are the measured 485 nm curves of
+    two wells on plate L8, both dim, adjudicated opposite ways by the reviewer:
+    H11 is kept and E12 discarded.
+    """
+
+    X = np.array([8.97, 8.28, 7.53, 6.97, 6.19, 5.62])
+    BG_NOISE = 1.0099
+    # H11: monotone 5.0 -> -1.2, no point masked, K resolved to sK = 0.193.
+    H11_RAW = np.array([5.00, 4.06, 2.04, 0.44, -0.48, -1.23])
+    H11_MASKED = H11_RAW
+    # E12: spikes to 22.8 then decays; outlier masking keeps only three points.
+    E12_RAW = np.array([-0.78, -0.64, 22.84, 11.04, 6.61, 4.49])
+    E12_MASKED = np.array([-0.78, -0.64, 4.49])
+
+    def test_a_dim_but_monotone_channel_still_carries_k(self) -> None:
+        """H11 is dim yet fits K to 0.193 pH, so it must not be failed."""
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            self.H11_MASKED,
+            self.H11_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_dim_and_noise_shaped_channel_is_failed(self) -> None:
+        """E12 turns over mid-curve, which no single-pKa titration does."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            self.E12_MASKED,
+            self.E12_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_turnover_is_judged_before_masking(self) -> None:
+        """The mask protects the fit; the screen has to see what it removed.
+
+        Masking E12 deletes the very spike that proves the channel is noise. Run
+        the shape test on the masked curve instead and E12 reads as clean.
+        """
+        assert not prtecan.titration.label_is_uninformative(
+            self.X[:3],
+            self.E12_MASKED,
+            self.E12_MASKED,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_bright_channel_is_never_failed(self) -> None:
+        """Brightness settles it: no shape test is applied above the floor."""
+        bright = self.E12_RAW * 100.0
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            bright,
+            bright,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_no_exemption_without_a_turnover_limit(self) -> None:
+        """Label 1 gets no exemption: its acid turnover is real, not a defect."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            self.H11_MASKED,
+            self.H11_RAW,
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=None,
+        )
+
+    def test_too_few_points_is_uninformative(self) -> None:
+        """One surviving point cannot describe a titration."""
+        assert prtecan.titration.label_is_uninformative(
+            self.X[:1],
+            np.array([5.0]),
+            np.array([5.0]),
+            floor=self.BG_NOISE,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+    def test_a_monotone_drift_below_the_read_noise_is_not_a_titration(self) -> None:
+        """Monotone is not enough; the curve has to move further than the noise.
+
+        This is L4 G12 as bundled: a clean monotone drift of 3.2 counts against a
+        read noise of 4.0. H11 is kept on a swing of 6.2 against a noise of 1.0,
+        six widths against this one's less than one.
+        """
+        drift = np.array([-2.64, -2.53, -1.64, -0.78, -0.20, 0.26, 0.61])
+        assert prtecan.titration.label_is_uninformative(
+            np.linspace(9.0, 5.0, 7),
+            drift,
+            drift,
+            floor=4.0405,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )
+
+
+def _three_well_plate() -> tuple[dict[str, Any], SimpleNamespace]:
+    """Three synthetic pH wells with shot-like noise, and a scheme pooling two of them."""
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+
+    rng = np.random.default_rng(3)
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+    datasets = {}
+    for well, k in (("A01", 7.0), ("A12", 7.0), ("B01", 6.2)):
+        mu = 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+        y = mu + np.sqrt(4.0 + 0.5 * mu) * rng.standard_normal(7)
+        datasets[well] = Dataset(
+            {"1": DataArray(x, y, y_errc=np.full(7, 2.0))}, is_ph=True
+        )
+    tit = SimpleNamespace(
+        scheme=SimpleNamespace(names={"CTR": ["A01", "A12"]}),
+        x_err=None,
+        data={"1": object()},
+        params=SimpleNamespace(noise_gain=(), noise_alpha=(), outlier=None),
+        sigma_floor={"1": 2.0},
+        fit_keys=set(datasets),
+    )
+    return datasets, tit
+
+
+def test_export_plate_fit_gain_terms_calibrates_and_writes_history(
+    tmp_path: Path,
+) -> None:
+    """``--plate-noise gain`` must calibrate the gain and leave its passes on disk.
+
+    The calibration is the point of asking for it: a run that fits under a
+    calibrated gain and reports only K has thrown the answer away.
+    """
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    datasets, tit = _three_well_plate()
+    result = export_plate_fit(tit, datasets, tmp_path, "lm", gain_terms="gain")  # type: ignore[arg-type]  # SimpleNamespace test double
+    assert result is not None
+    assert set(result.k) == {"A01", "A12", "B01"}
+    noise = pd.read_csv(tmp_path / "plate_lm_noise.csv").set_index("label")
+    assert float(noise["gain"].to_numpy(dtype=float)[0]) > 0.0
+    assert float(noise["sigma_floor"].to_numpy(dtype=float)[0]) == pytest.approx(2.0)
+    history = pd.read_csv(tmp_path / "plate_lm_noise_history.csv")
+    assert {"iteration", "label", "gain", "sigma_floor", "converged"} <= set(
+        history.columns
+    )
+    assert history["gain"].iloc[0] == 0.0  # the first pass is floor-only
+
+
+def test_gain_calibrated_single_fit_attaches_the_noise_model(tmp_path: Path) -> None:
+    """``--fit-noise gain`` must return per-well fits carrying the calibrated noise."""
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        _gain_calibrated_single_fit,  # ruff: ignore[import-private-name] - the ppr path under test
+    )
+
+    datasets, tit = _three_well_plate()
+    res = _gain_calibrated_single_fit(tit, datasets, "lm", "gain", tmp_path)  # type: ignore[arg-type]  # SimpleNamespace test double
+    assert set(res.results) == {"A01", "A12", "B01"}
+    assert res.noise_model is not None
+    assert res.noise_model["1"].gain > 0.0
+    assert res.noise_model["1"].alpha == 0.0
+    assert (tmp_path / "noise_single_history.csv").exists()
+    with pytest.raises(ValueError, match="lm or huber"):
+        _gain_calibrated_single_fit(tit, datasets, "odr", "gain", tmp_path)  # type: ignore[arg-type]
+
+
+def test_export_plate_fit_writes_the_points_the_screen_removed(tmp_path: Path) -> None:
+    """A screened fit must say which points it dropped, not only that it did.
+
+    The per-well figures mark them as "excluded (not fitted)", but nothing
+    listed them in a form one could join to, sort, or count. On L4 the screen
+    removed three points from one well's 485 nm channel and left it unfittable;
+    that was found by diffing residual tables between arms, which is not a
+    review anyone should have to do.
+    """
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+
+    def curve(k: float) -> np.ndarray:
+        return 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+
+    datasets = {}
+    for well, k in (("A01", 7.0), ("A12", 7.0), ("B01", 6.2)):
+        y = curve(k)
+        if well == "B01":
+            y = y.copy()
+            y[3] += 4000.0  # unmistakable, so the screen must take it
+        datasets[well] = Dataset(
+            {"1": DataArray(x, y, y_errc=np.full(7, 5.0))}, is_ph=True
+        )
+    tit = SimpleNamespace(
+        scheme=SimpleNamespace(names={"CTR": ["A01", "A12"]}), x_err=None
+    )
+
+    export_plate_fit(tit, datasets, tmp_path, "lm", screen_z=3.0)  # type: ignore[arg-type]  # SimpleNamespace test double
+
+    path = tmp_path / "plate_lm_excluded.csv"
+    assert path.exists()
+    table = pd.read_csv(path)
+    assert set(table.columns) >= {"well", "label", "raw_i"}
+    assert (table["well"] == "B01").any()
+
+
+def test_export_plate_fit_excluded_file_is_written_even_when_empty(
+    tmp_path: Path,
+) -> None:
+    """An absent file cannot be told apart from a screen that dropped nothing."""
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+    y = 100.0 + 900.0 / (1.0 + 10.0 ** (x - 7.0))
+    datasets = {
+        "A01": Dataset({"1": DataArray(x, y, y_errc=np.full(7, 5.0))}, is_ph=True)
+    }
+    tit = SimpleNamespace(scheme=SimpleNamespace(names={}), x_err=None)
+
+    export_plate_fit(tit, datasets, tmp_path, "lm", screen_z=3.0)  # type: ignore[arg-type]  # SimpleNamespace test double
+
+    path = tmp_path / "plate_lm_excluded.csv"
+    assert path.exists()
+    assert pd.read_csv(path).empty
+
+
+class TestPlateRelativeDimness:
+    """Dimness is relative to the plate, not only to the read noise.
+
+    The signal test compares a label's mean against ``3 x bg_noise``. On L5b
+    that is 0.926 counts for the 485 nm channel, so E01 passes at 1.0 counts
+    while a healthy well on the same plate gives 97. The threshold is absolute;
+    what matters is how the well compares with the plate it sits on.
+
+    With a plate-relative clause E01 becomes dim, reaches the curve-shape test
+    it never reached before, and is condemned there on a turnover of 0.63 --
+    while L6a B02 and G05, equally faint but perfectly monotone, are still
+    spared. The known-good L2 B03 (0.8% of its plate's median amplitude, and
+    monotone) is spared too.
+    """
+
+    X = np.linspace(9.0, 5.0, 7)
+
+    @staticmethod
+    def _curve(top: float, bottom: float) -> np.ndarray:
+        return np.linspace(top, bottom, 7)
+
+    def test_a_well_far_below_its_plate_is_dim_however_it_compares_to_noise(
+        self,
+    ) -> None:
+        """L5b E01: 1.9% of the plate median, and noise-shaped, so it fails."""
+        noisy = np.array([1.9, 1.4, 2.1, 1.2, 1.8, 1.3, 1.7])  # turnover ~0.6
+        assert prtecan.titration.label_is_uninformative(
+            self.X,
+            noisy,
+            noisy,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=float(noisy.max() - noisy.min()),
+            plate_amplitude=93.0,
+        )
+
+    def test_a_faint_but_monotone_well_is_still_spared(self) -> None:
+        """L6a B02: 0.9% of the plate median, but a clean curve, so it stands."""
+        clean = self._curve(2.65, -0.34)
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            clean,
+            clean,
+            floor=0.407,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=float(clean.max() - clean.min()),
+            plate_amplitude=327.1,
+        )
+
+    def test_a_normal_well_is_never_made_dim_by_the_plate_comparison(self) -> None:
+        """A well at plate strength cannot be condemned by this clause."""
+        bright = self._curve(900.0, 20.0)
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            bright,
+            bright,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+            amplitude=880.0,
+            plate_amplitude=93.0,
+        )
+
+    def test_the_clause_is_off_when_no_plate_amplitude_is_given(self) -> None:
+        """Absent the plate context the rule must behave exactly as before."""
+        noisy = np.array([1.9, 1.4, 2.1, 1.2, 1.8, 1.3, 1.7])
+        assert not prtecan.titration.label_is_uninformative(
+            self.X,
+            noisy,
+            noisy,
+            floor=0.309,
+            bg_multiplier=3.0,
+            turnover_limit=0.2,
+        )

@@ -5,9 +5,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.data_structures import (
+    DataArray,
+    Dataset,
+    NoiseModelParams,
+)
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.plate_lm import fit_plate_lm
+from clophfit.fitting.plate_lm import (
+    PlateLMResult,
+    fit_plate_lm,
+    fit_plate_lm_screened,
+    profile_k_intervals,
+)
 
 
 def make_plate(
@@ -73,3 +82,268 @@ def test_k_stays_inside_the_ph_range() -> None:
     result = fit_plate_lm(make_plate(ks, {"1": 5.0}), groups={})
     for well in ks:
         assert 3.0 <= result.k[well] <= 11.0
+
+
+def test_result_carries_the_plateaus_not_only_k() -> None:
+    """K alone cannot be plotted or inspected; the curve needs its plateaus.
+
+    ``--plate-fit`` wrote a CSV of K and its error and nothing else: no K plot
+    and no per-well fit figures, while every other fitter in the same run
+    produced both. The plateaus are computed by the fit anyway, so exporting
+    them lets the plate fit reuse the plotting path instead of being a
+    second-class output.
+    """
+    ks = {"A01": 6.5, "A02": 7.0, "A03": 7.5}
+    result = fit_plate_lm(make_plate(ks, {"1": 5.0, "2": 3.0}), groups={})
+    for well in ks:
+        p = result.params[well]
+        assert p["K"] == pytest.approx(result.k[well])
+        for lbl in ("1", "2"):
+            # Plateaus bracket the data the fit saw.
+            assert np.isfinite(p[f"S0_{lbl}"])
+            assert np.isfinite(p[f"S1_{lbl}"])
+        assert np.isfinite(p["sK"])
+
+
+def test_screening_refit_drops_a_planted_outlier_and_recovers_k() -> None:
+    """Fit, mask on the fit's own residuals, refit - the classical two-step.
+
+    Geometric masking works on the shape of the raw trace and cannot see
+    whether a point disagrees with the *fit*; on this campaign it changed pKa
+    accuracy not at all. A z-score screen uses the fitted residuals, which is
+    the quantity that actually says a point is wrong.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 4.0, "2": 3.0})
+    # One point of one well, moved far off its curve.
+    da = datasets["A05"]["1"]
+    spoiled = np.asarray(da.yc, dtype=float).copy()
+    spoiled[3] += 400.0
+    datasets["A05"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                spoiled,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A05"]["2"],
+        },
+        is_ph=True,
+    )
+    plain = fit_plate_lm(datasets, groups={})
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=3.0)
+
+    assert screened.n_excluded >= 1, "the planted outlier was not screened"
+    # The spoiled well's K is recovered better after screening.
+    assert abs(screened.k["A05"] - ks["A05"]) < abs(plain.k["A05"] - ks["A05"])
+    # And the clean wells are left where they were.
+    for well in ("A01", "A12"):
+        assert screened.k[well] == pytest.approx(plain.k[well], abs=0.05)
+
+
+def test_screening_refit_leaves_a_clean_plate_alone() -> None:
+    """With nothing to screen, the two-step must return the one-pass answer."""
+    ks = {f"A{i:02d}": 6.5 + 0.12 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 4.0, "2": 3.0})
+    plain = fit_plate_lm(datasets, groups={})
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=4.0)
+    for well in ks:
+        assert screened.k[well] == pytest.approx(plain.k[well], abs=0.02)
+
+
+def test_robust_first_pass_finds_the_outlier_least_squares_hides() -> None:
+    """Screen on a robust fit, not on one the outlier has already bent.
+
+    Ordinary least squares drags the curve toward an outlier, which shrinks that
+    point's own residual and inflates its neighbours' - masking and swamping.
+    The profiled scale makes it worse: it is the RMS of the residuals, so the
+    outlier also inflates the ruler the z-scores are measured against. The
+    screen then decides with a bent curve and a stretched ruler, which is how a
+    threshold ends up behaving erratically.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    da = datasets["A05"]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[3] += 250.0  # one point, far off its curve
+    datasets["A05"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A05"]["2"],
+        },
+        is_ph=True,
+    )
+
+    def z_of_planted(result: PlateLMResult) -> float:
+        rows = [
+            r
+            for r in result.residuals
+            if r["well"] == "A05" and str(r["label"]) == "1" and r["raw_i"] == 3
+        ]
+        return abs(float(rows[0]["std_res"]))
+
+    plain = fit_plate_lm(datasets, groups={})
+    robust = fit_plate_lm(datasets, groups={}, loss="huber")
+    # The robust pass is not dragged, so the bad point stands out further.
+    assert z_of_planted(robust) > z_of_planted(plain)
+    # And the well's K is closer to truth without any screening at all.
+    assert abs(robust.k["A05"] - ks["A05"]) < abs(plain.k["A05"] - ks["A05"])
+
+
+def test_screening_still_finds_a_gross_outlier_without_a_noise_model() -> None:
+    """Falling back to the plain ruler must still catch the obvious case.
+
+    Without a noise model there is nothing to calibrate, so the screen judges
+    on the sigma it was handed. That is the weaker mode - it is why
+    `noise_model` is worth passing - but it must not be a broken one.
+    """
+    ks = {f"A{i:02d}": 6.5 + 0.12 * i for i in range(1, 13)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    da = datasets["A07"]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[2] += 250.0
+    datasets["A07"] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets["A07"]["2"],
+        },
+        is_ph=True,
+    )
+    screened = fit_plate_lm_screened(datasets, groups={}, threshold=3.0)
+    assert screened.n_excluded >= 1
+    assert screened.k["A07"] == pytest.approx(ks["A07"], abs=0.1)
+
+
+def test_profile_interval_matches_the_standard_error_on_a_clean_well() -> None:
+    """Where the likelihood really is a parabola, the two must agree.
+
+    This is the calibration check: a profile that disagreed with sK on a
+    well-behaved well would mean the criterion or the walk is wrong, not that
+    the standard error is.
+    """
+    ks = {f"A{i:02d}": 6.4 + 0.15 * i for i in range(1, 7)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    fit = fit_plate_lm(datasets, groups={})
+    wells = sorted(datasets)[:3]
+    intervals = profile_k_intervals(datasets, groups={}, wells=wells)
+
+    for well in wells:
+        lo, hi = intervals[well]
+        k, sk = fit.k[well], fit.k_stderr[well]
+        assert np.isfinite([lo, hi]).all()
+        assert lo < k < hi
+        # 94% on one parameter is +/- 1.881 sigma when the parabola holds.
+        z94 = 1.881
+        assert (k - lo) == pytest.approx(z94 * sk, rel=0.25)
+        assert (hi - k) == pytest.approx(z94 * sk, rel=0.25)
+
+
+def test_profile_reports_an_open_interval_when_k_is_unbounded() -> None:
+    """A flat well should say so, rather than quote a number.
+
+    A well whose curve never turns over carries no K. The curvature at the
+    optimum still yields some standard error - often an absurdly large one,
+    which downstream code has no way to read as "no information". An infinite
+    bound is the honest statement, and it is one a screen can act on.
+    """
+    ks = {f"A{i:02d}": 6.5 + 0.1 * i for i in range(1, 5)}
+    datasets = make_plate(ks, {"1": 3.0, "2": 3.0})
+    # Replace one well with a flat trace: no transition anywhere in range.
+    flat = datasets["A01"]
+    arrays = {}
+    for lbl, da in flat.items():
+        x = np.asarray(da.xc, dtype=float)
+        arrays[lbl] = DataArray(
+            x, np.full(x.size, 500.0), y_errc=np.asarray(da.y_errc, dtype=float)
+        )
+    datasets["A01"] = Dataset(arrays, is_ph=True)
+
+    intervals = profile_k_intervals(datasets, groups={}, wells=["A01"])
+    lo, hi = intervals["A01"]
+    assert not (np.isfinite(lo) and np.isfinite(hi)), (
+        f"a flat well reported a bounded K interval ({lo}, {hi})"
+    )
+
+
+def test_calibrated_ruler_screens_where_the_flat_one_misfires() -> None:
+    """The screen must judge a bright point and a dim one on the same scale.
+
+    With noise that grows as the signal does, one flat sigma per label is too
+    big at the bottom of the curve and too small at the top. A fixed threshold
+    on that ruler is then a soft test of a dim point and a harsh test of a
+    bright one, so the screen reaches for the plateaus - the points that pin S0
+    and S1 - while a genuine low-signal outlier sits under the threshold.
+
+    Here the planted point sits at the alkaline end, where label 1 has decayed
+    to its low plateau: true sigma is about 7 there, so a +60 spike is nearly
+    nine sigma, yet the flat ruler - inflated by the bright end of the same
+    curve - reports it as unremarkable.
+    """
+    rng = np.random.default_rng(11)
+    ks = {f"A{i:02d}": 6.4 + 0.12 * i for i in range(1, 13)}
+    x = np.linspace(5.0, 9.0, 12)
+    datasets = {}
+    for well, k in ks.items():
+        arrays = {}
+        for lbl, (s0, s1) in {"1": (60.0, 2400.0), "2": (2400.0, 60.0)}.items():
+            clean = binding_1site(x, k, s0, s1, is_ph=True)
+            # Noise proportional to signal: the case a flat sigma cannot describe.
+            sigma = 4.0 + 0.05 * clean
+            y = clean + rng.normal(0.0, sigma)
+            arrays[lbl] = DataArray(x, y, y_errc=np.full(x.size, 4.0))
+        datasets[well] = Dataset(arrays, is_ph=True)
+
+    # Label 1 runs S1 (low pH, bright) -> S0 (high pH, dim), so the dim end
+    # is the last steps, not the first.
+    victim, step = "A05", 10
+    da = datasets[victim]["1"]
+    y = np.asarray(da.yc, dtype=float).copy()
+    y[step] += 60.0  # ~9 true sigma there, but small next to the flat sigma
+    datasets[victim] = Dataset(
+        {
+            "1": DataArray(
+                np.asarray(da.xc, dtype=float),
+                y,
+                y_errc=np.asarray(da.y_errc, dtype=float),
+            ),
+            "2": datasets[victim]["2"],
+        },
+        is_ph=True,
+    )
+    floors = {
+        "1": NoiseModelParams(sigma_floor=4.0, gain=0.0, alpha=0.0),
+        "2": NoiseModelParams(sigma_floor=4.0, gain=0.0, alpha=0.0),
+    }
+
+    flat = fit_plate_lm(datasets, groups={})
+    cal = fit_plate_lm(datasets, groups={}, noise_model=floors, calibrate_noise=True)
+
+    def z_of_victim(result: PlateLMResult) -> float:
+        rows = [
+            r
+            for r in result.residuals
+            if r["well"] == victim and str(r["label"]) == "1" and r["raw_i"] == step
+        ]
+        return abs(float(rows[0]["std_res"]))
+
+    def spread(result: PlateLMResult) -> float:
+        """Ratio of mean |z| in the top signal decile to the bottom decile."""
+        rows = [r for r in result.residuals if str(r["label"]) == "1"]
+        yh = np.array([float(r["yhat"]) for r in rows])
+        z = np.array([abs(float(r["std_res"])) for r in rows])
+        lo, hi = np.quantile(yh, 0.25), np.quantile(yh, 0.75)
+        return float(z[yh >= hi].mean() / max(z[yh <= lo].mean(), 1e-12))
+
+    # The calibrated ruler is flat across the signal range; the raw one is not.
+    assert spread(flat) > 2.0, "fixture is not heteroscedastic enough to test"
+    assert spread(cal) < spread(flat)
+    # And the low-signal outlier stands out further once the scale is right.
+    assert z_of_victim(cal) > z_of_victim(flat)
