@@ -39,6 +39,7 @@ from clophfit.fitting.noise_calibration import (
     _noise_params_converged,
     _plate_noise_model_from_nnls,
     compute_plate_slopes,
+    dof_scale,
     fit_noise_model_nnls,
     fit_ph_slope_noise,
 )
@@ -257,6 +258,41 @@ def _fit_datasets(
             logger.warning("Skip %s for well %s.", fit_kind, well)
             results[well] = FitResult()
     return results
+
+
+def _with_well_dof_scale(
+    table: pd.DataFrame, results: typing.Mapping[str, FitResult]
+) -> pd.DataFrame:
+    """Attach each well's ``sqrt(n / (n - p))`` to its residual rows.
+
+    The noise estimators read the variance from these residuals, and each
+    well's own fit has already absorbed ``p / n`` of it. Wells with no residual
+    degrees of freedom are dropped: their residuals are zero by construction
+    and say nothing about the noise. A result that does not report how many
+    parameters it varied (lmfit's ``nvarys``) cannot be corrected and keeps a
+    factor of 1.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Residual table with a ``well`` column.
+    results : typing.Mapping[str, FitResult]
+        The per-well fits the residuals came from.
+
+    Returns
+    -------
+    pd.DataFrame
+        *table* with ``dof_scale``, restricted to wells where it is defined.
+    """
+    counts = table.groupby("well").size()
+    scale: dict[typing.Any, float] = {}
+    for well, n in counts.items():
+        fr = results.get(str(well))
+        n_varied = getattr(fr.result, "nvarys", None) if fr is not None else None
+        scale[well] = 1.0 if n_varied is None else dof_scale(int(n), int(n_varied))
+    out = table.assign(dof_scale=table["well"].map(scale))
+    # NaN both where a well has no fit and where dof_scale has no freedom.
+    return out[out["dof_scale"].notna()]
 
 
 @dataclass
@@ -1809,8 +1845,11 @@ class Titration(TecanfilesGroup):
                     )
                     results[well] = FitResult()
 
-            df_res = residuals_from_fit_results(
-                results, trace_id="", binding_function=binding_1site
+            df_res = _with_well_dof_scale(
+                residuals_from_fit_results(
+                    results, trace_id="", binding_function=binding_1site
+                ),
+                results,
             )
             try:
                 floors, gains, alphas = fit_noise_model_nnls(
@@ -1970,7 +2009,10 @@ class TecanConfig:
     and alpha per label from the fit's own residuals and refits under them.
     Calibration describes the residuals better and fits K worse, so it is not
     the default; see ``fit_plate_lm``. It sets the weights K is fitted with
-    whether or not ``plate_screen_z`` is given.
+    whether or not ``plate_screen_z`` is given. ``"gain"`` and ``"floor-gain"``
+    weight by ``floor^2 + gain * yhat`` with alpha 0, the gain (and the floor)
+    calibrated from dof-corrected residuals between refits; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_plate_lm`.
     """
 
     plate_screen_noise: str = "calibrated"
@@ -1992,6 +2034,15 @@ class TecanConfig:
     catches 32 of 875 library wells and none of 123 controls. Chloride ignores
     it: Kd is a ratio scale, undetermined when ``sKd > Kd``, and a well whose
     94% lower bound is above the highest concentration does not bind.
+    """
+
+    fit_noise: str = "fixed"
+    """How the per-well global lm/huber fit weights its points.
+
+    ``"fixed"`` uses ``y_err`` as built. ``"gain"`` and ``"floor-gain"`` fit
+    every well, pool all wells' dof-corrected residuals into one gain per label
+    (and with ``"floor-gain"`` one floor), and refit until it settles; see
+    :func:`~clophfit.fitting.gain_calibration.calibrate_single_well`.
     """
 
 
@@ -2055,6 +2106,15 @@ class McmcSpec:
         this SD passes straight into K's interval; set it to the measured
         well-to-well spread at the first step rather than a round number.
         ``None`` keeps the library default.
+    learn_x_start_between : bool
+        For ``x_error_model="per_well"``, estimate the between-well spread of
+        the first-step offset instead of pinning it at
+        *x_start_between_sigma*, which then becomes its prior scale.
+    ctr_sigma_w_prior : float | None
+        Prior scale, in pH, of the spread of a control group's replicates around
+        the group's own K (``K_sigma_w``). Given, each replicate keeps its own K
+        a learned distance from the group's: the middle ground between one
+        shared K and a free one. ``None`` (default) leaves the model as it was.
     """
 
     model: Literal["single", "single-refit", "multi"]
@@ -2068,6 +2128,15 @@ class McmcSpec:
     gain_mode: Literal["centered", "fixed"] | None = None
     alpha_mode: Literal["centered", "fixed"] | None = None
     per_well_ye_mags: bool | None = None
+    noise_ye_mag: bool = False
+    """Learn a ye_mag multiplier on top of a structured noise model.
+
+    A structured model builds sigma from floor, gain and alpha and, by default,
+    has no overall multiplier: the terms themselves carry the level. With this
+    set, sigma is also scaled by a learned ye_mag - per label, or per well when
+    ``per_well_ye_mags`` is set - which lets a calibrated shape keep its shape
+    while the data set the level. Meaningless without ``structured_noise``.
+    """
     ye_mag_parameterization: Literal[
         "centered", "hierarchical", "separable", "separable_step"
     ] = "centered"
@@ -2075,3 +2144,5 @@ class McmcSpec:
     ctr_free_k: bool = False
     x_error_model: Literal["deterministic", "per_well"] = "deterministic"
     x_start_between_sigma: float | None = None
+    ctr_sigma_w_prior: float | None = None
+    learn_x_start_between: bool = False

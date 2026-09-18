@@ -961,3 +961,34 @@ def test_plot_residual_distribution_shows_shape_and_tails() -> None:
         all_res[all_res["label"] == "1"], title="single"
     )
     assert len(fig2.axes) == 2
+
+
+def test_qq_reference_is_the_identity_not_a_fit_through_the_points() -> None:
+    """Residuals compressed to SD 0.5 must sit visibly off the reference line.
+
+    probplot draws a least-squares line through the ordered residuals, and a
+    set of standardised residuals half as wide as N(0, 1) lay perfectly on it:
+    the plot said "Normal" about residuals whose sigma was twice too large.
+    The reference is y = x; the fitted slope, which is the residuals' actual
+    SD, goes in the legend instead.
+    """
+    rng = np.random.default_rng(1)
+    n = 400
+    all_res = pd.DataFrame({
+        "label": ["1"] * n,
+        "well": [f"A{i:02d}" for i in range(n)],
+        "step": list(range(n)),
+        "yhat": rng.normal(500, 50, n),
+        "std_res": 0.5 * rng.normal(0, 1, n),
+    })
+    fig = residuals.plot_residual_distribution(all_res, title="t")
+    ax_q = fig.axes[1]
+    by_label = {str(line.get_label()): line for line in ax_q.get_lines()}
+    reference = by_label["N(0,1): y = x"]
+    x, y = reference.get_xdata(), reference.get_ydata()
+    assert np.allclose(x, y), "the reference line must be the identity"
+    fit = next(
+        line for label, line in by_label.items() if label.startswith("fit: slope")
+    )
+    slope = float(str(fit.get_label()).split()[-1])
+    assert slope == pytest.approx(0.5, abs=0.06)

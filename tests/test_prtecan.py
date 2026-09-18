@@ -2754,6 +2754,40 @@ def test_structured_noise_reaches_the_multi_model(
     assert getattr(noise, "kind", None) == "structured"
 
 
+@pytest.mark.parametrize("learn", [False, True])
+def test_noise_ye_mag_reaches_the_structured_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    learn: bool,  # ruff: ignore[boolean-type-hint-positional-argument] - pytest passes parametrized values by name
+) -> None:
+    """``--noise-ye-mag`` must reach the structured model's ``learn_ye_mags``.
+
+    A structured model builds sigma from its own terms and has no overall
+    multiplier, so a supplied floor and gain set the level as well as the shape.
+    The flag separates the two; accepted and dropped, it would silently give the
+    model it was meant to replace.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_multi(*_args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _StopBayesBuildError
+
+    monkeypatch.setattr(export, "fit_binding_pymc_multi", fake_multi)
+    tit = Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
+    tit.load_scheme(data_tests / "L1" / "scheme.txt")
+    spec = McmcSpec(
+        model="multi",
+        sampler=SamplerConfig(n_samples=10, n_tune=10),
+        structured_noise=True,
+        noise_ye_mag=learn,
+    )
+    datasets = {k: tit.create_global_ds(k) for k in list(tit.fit_keys)[:2]}
+    with pytest.raises(_StopBayesBuildError):
+        export.fit_single_mcmc(tit, datasets, tmp_path, spec)
+    assert getattr(captured["noise"], "learn_ye_mags", None) is learn
+
+
 def test_create_global_ds_honours_mask_outliers() -> None:
     """One flag, one meaning, whichever entry point builds the dataset.
 
@@ -2891,6 +2925,76 @@ class TestDimLabelExemption:
             bg_multiplier=3.0,
             turnover_limit=0.2,
         )
+
+
+def _three_well_plate() -> tuple[dict[str, Any], SimpleNamespace]:
+    """Three synthetic pH wells with shot-like noise, and a scheme pooling two of them."""
+    from clophfit.fitting.data_structures import (  # ruff: ignore[import-outside-top-level]
+        DataArray,
+        Dataset,
+    )
+
+    rng = np.random.default_rng(3)
+    x = np.array([5.0, 6.0, 6.5, 7.0, 7.5, 8.0, 9.0])
+    datasets = {}
+    for well, k in (("A01", 7.0), ("A12", 7.0), ("B01", 6.2)):
+        mu = 100.0 + 900.0 / (1.0 + 10.0 ** (x - k))
+        y = mu + np.sqrt(4.0 + 0.5 * mu) * rng.standard_normal(7)
+        datasets[well] = Dataset(
+            {"1": DataArray(x, y, y_errc=np.full(7, 2.0))}, is_ph=True
+        )
+    tit = SimpleNamespace(
+        scheme=SimpleNamespace(names={"CTR": ["A01", "A12"]}),
+        x_err=None,
+        data={"1": object()},
+        params=SimpleNamespace(noise_gain=(), noise_alpha=(), outlier=None),
+        sigma_floor={"1": 2.0},
+        fit_keys=set(datasets),
+    )
+    return datasets, tit
+
+
+def test_export_plate_fit_gain_terms_calibrates_and_writes_history(
+    tmp_path: Path,
+) -> None:
+    """``--plate-noise gain`` must calibrate the gain and leave its passes on disk.
+
+    The calibration is the point of asking for it: a run that fits under a
+    calibrated gain and reports only K has thrown the answer away.
+    """
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        export_plate_fit,
+    )
+
+    datasets, tit = _three_well_plate()
+    result = export_plate_fit(tit, datasets, tmp_path, "lm", gain_terms="gain")  # type: ignore[arg-type]  # SimpleNamespace test double
+    assert result is not None
+    assert set(result.k) == {"A01", "A12", "B01"}
+    noise = pd.read_csv(tmp_path / "plate_lm_noise.csv").set_index("label")
+    assert float(noise["gain"].to_numpy(dtype=float)[0]) > 0.0
+    assert float(noise["sigma_floor"].to_numpy(dtype=float)[0]) == pytest.approx(2.0)
+    history = pd.read_csv(tmp_path / "plate_lm_noise_history.csv")
+    assert {"iteration", "label", "gain", "sigma_floor", "converged"} <= set(
+        history.columns
+    )
+    assert history["gain"].iloc[0] == 0.0  # the first pass is floor-only
+
+
+def test_gain_calibrated_single_fit_attaches_the_noise_model(tmp_path: Path) -> None:
+    """``--fit-noise gain`` must return per-well fits carrying the calibrated noise."""
+    from clophfit.prtecan.export import (  # ruff: ignore[import-outside-top-level]
+        _gain_calibrated_single_fit,  # ruff: ignore[import-private-name] - the ppr path under test
+    )
+
+    datasets, tit = _three_well_plate()
+    res = _gain_calibrated_single_fit(tit, datasets, "lm", "gain", tmp_path)  # type: ignore[arg-type]  # SimpleNamespace test double
+    assert set(res.results) == {"A01", "A12", "B01"}
+    assert res.noise_model is not None
+    assert res.noise_model["1"].gain > 0.0
+    assert res.noise_model["1"].alpha == 0.0
+    assert (tmp_path / "noise_single_history.csv").exists()
+    with pytest.raises(ValueError, match="lm or huber"):
+        _gain_calibrated_single_fit(tit, datasets, "odr", "gain", tmp_path)  # type: ignore[arg-type]
 
 
 def test_export_plate_fit_writes_the_points_the_screen_removed(tmp_path: Path) -> None:

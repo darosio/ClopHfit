@@ -204,6 +204,43 @@ def residual_dataframe(fr: FitResult) -> pd.DataFrame:
     return pd.DataFrame([asdict(p) for p in extract_residual_points(fr)])
 
 
+def qq_fit(z: ArrayF) -> tuple[float, float]:
+    """Slope and intercept of the ordered residuals against Normal quantiles.
+
+    The slope is the scale the standardised residuals actually have: 1 when the
+    model's sigma is right, below 1 when the residuals are compressed (sigma too
+    large, or a fitted scale that has absorbed its own tails), above 1 when
+    sigma is too small. It is robust to a few outliers in a way the plain SD is
+    not, since a straight line through the bulk barely moves for one wild point.
+    Read from the same probability plot the figure draws, so the number and the
+    picture agree.
+
+    Parameters
+    ----------
+    z : ArrayF
+        Standardised residuals; non-finite values are dropped.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(slope, intercept)``, or ``(nan, nan)`` with fewer than three points.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> slope, _ = qq_fit(0.5 * rng.standard_normal(2000))
+    >>> round(slope, 1)
+    0.5
+    """
+    v = np.asarray(z, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size < 3:  # ruff: ignore[magic-value-comparison] - a line needs three points to mean anything
+        return float("nan"), float("nan")
+    _, (slope, intercept, _r) = sp_stats.probplot(v, dist="norm")
+    return float(slope), float(intercept)
+
+
 def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     """Compute residual statistics by label.
 
@@ -216,13 +253,15 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     -------
     pd.DataFrame
         Statistics by label: mean, std, median, mad, outlier_count,
-        robust_outlier_count, n_points, outlier_rate, robust_outlier_rate.
+        robust_outlier_count, n_points, outlier_rate, robust_outlier_rate,
+        qq_slope, qq_intercept.
 
         ``outlier_count`` thresholds the model-standardized ``std_res`` (``> 2``);
         a few points can hide by inflating the fitted scale.
         ``robust_outlier_count`` uses each label's own median/MAD scale
         (modified z-score ``> ROBUST_Z_THRESHOLD``), so masked points still
-        surface.
+        surface. ``qq_slope`` is the scale of the residuals read off the
+        probability plot (see :func:`qq_fit`): 1 means sigma is calibrated.
 
     Examples
     --------
@@ -278,6 +317,9 @@ def residual_statistics(df: pd.DataFrame) -> pd.DataFrame:
     summary_df["robust_outlier_rate"] = (
         summary_df["robust_outlier_count"] / summary_df["n_points"]
     )
+    fits = {lbl: qq_fit(g["std_res"].to_numpy()) for lbl, g in df.groupby("label")}
+    summary_df["qq_slope"] = [fits[lbl][0] for lbl in summary_df.index]
+    summary_df["qq_intercept"] = [fits[lbl][1] for lbl in summary_df.index]
 
     return summary_df
 
@@ -545,9 +587,29 @@ def plot_residual_distribution(all_res: pd.DataFrame, title: str = "") -> Figure
         ax_h.set_ylabel("Density")
         ax_q = axes[1][col]
         if v.size > 1:
-            sp_stats.probplot(v, dist="norm", plot=ax_q)
-            ax_q.get_lines()[0].set_markersize(3)
-            ax_q.set_title("")
+            # The reference is the identity, not probplot's own least-squares
+            # line: that line follows the points whatever their spread, so a
+            # residual set compressed to SD 0.5 still looked "on the line" and
+            # the miscalibration the figure exists to show was invisible. The
+            # fitted line stays, dashed, with its slope - the SD the residuals
+            # actually have - in the legend.
+            (osm, osr), _ = sp_stats.probplot(v, dist="norm")
+            slope, intercept = qq_fit(v)
+            lim = float(max(np.abs(osm).max(), np.abs(osr).max(), 3.0))
+            ax_q.plot(osm, osr, "o", color="C0", markersize=3)
+            ax_q.plot([-lim, lim], [-lim, lim], "r-", lw=1.2, label="N(0,1): y = x")
+            ax_q.plot(
+                osm,
+                slope * osm + intercept,
+                "--",
+                color="0.5",
+                lw=1,
+                label=f"fit: slope {slope:.2f}",
+            )
+            ax_q.set_xlim(-lim, lim)
+            ax_q.set_ylim(-lim, lim)
+            ax_q.set_aspect("equal", adjustable="box")
+            ax_q.legend(fontsize=8, loc="upper left")
         ax_q.set_xlabel("Theoretical quantiles")
         ax_q.set_ylabel("Ordered residuals")
     fig.suptitle(f"Residual distribution: departures from N(0,1) - {title}")

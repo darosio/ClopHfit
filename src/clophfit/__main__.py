@@ -149,6 +149,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--fit/--no-fit", default=True, show_default=True, help="Perform fitting.")  # fmt: skip
 @click.option("--png/--no-png", default=True, show_default=True, help="Export PNG files.")  # fmt: skip
 @click.option("--fit-method", default="huber", show_default=True, type=click.Choice(["lm", "huber", "irls", "odr"], case_sensitive=False), help="Global fit method: lm (standard LS), huber (robust Huber loss), irls (iterative reweighting), odr (orthogonal distance regression, x-aware).")  # fmt: skip
+@click.option("--fit-noise", type=click.Choice(["fixed", "gain", "floor-gain"], case_sensitive=False), default="fixed", show_default=True, help="Weights for the per-well global fit (--fit-method lm or huber). fixed uses y_err as built. gain weights by floor^2 + gain*yhat with alpha 0: every well is fitted, the dof-corrected residuals of all wells are pooled into one gain per label, and the wells are refitted until it settles; floor-gain calibrates the floor too. Writes noise_single_history.csv.")  # fmt: skip
 @click.option("--outlier", default=None, type=str, help="Outlier removal spec, e.g. 'mad:3.5:4' (method:threshold:min_keep).")  # fmt: skip
 @click.option("--mcmc", type=_FlexChoice(["None", "single", "single-refit", "multi"], case_sensitive=False), default="None", show_default=True, help="MCMC sampling: None, single, single-refit (robust screening pass then refit), multi (all wells jointly, control K shared per group).")  # fmt: skip
 @click.option("--nuts-sampler", type=click.Choice(["default", "blackjax", "numpyro", "nutpie"], case_sensitive=False), default="default", show_default=True, help="NUTS backend: default (pytensor/CPU), blackjax/numpyro (JAX/CPU), nutpie (Rust/CPU).")  # fmt: skip
@@ -162,16 +163,19 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--noise-floor-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for floor alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
 @click.option("--noise-gain-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for gain alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
 @click.option("--noise-alpha-mode", type=click.Choice(["centered", "fixed"], case_sensitive=False), default=None, help="Override --noise-mode for alpha alone. One mode for all three cannot separate the terms: pinning alpha at zero also pins the floor, so sigma cannot rescale and the run measures that instead of the term it meant to isolate.")  # fmt: skip
+@click.option("--noise-ye-mag/--no-noise-ye-mag", "noise_ye_mag", default=False, show_default=True, help="For --mcmc-noise structured: also learn a ye_mag multiplier on sigma, per label (or per well with --per-well-ye-mags). A structured model otherwise has no overall multiplier, so a supplied floor/gain sets the level as well as the shape; this separates the two.")  # fmt: skip
 @click.option("--per-well-ye-mags/--no-per-well-ye-mags", "per_well_ye_mags", default=None, help="For --mcmc multi: scale y_err per well rather than per label. Unset lets the library resolve it from the noise family, which couples the two.")  # fmt: skip
 @click.option("--ye-mag-parameterization", type=click.Choice(["centered", "hierarchical", "separable", "separable_step"], case_sensitive=False), default="centered", show_default=True, help="For --mcmc multi with per-well ye_mags: independent per label (centered), a shared well factor with per-label deviations (hierarchical), a per-label level plus one shared well factor (separable), or that plus a per-label pH axis on the noise (separable_step).")  # fmt: skip
 @click.option("--plate-fit", type=click.Choice(["lm", "odr"], case_sensitive=False), default=None, help="Also fit the whole plate in one classical least-squares problem, with the noise scale profiled per label across the plate and each control group pooled onto one K. Writes plate_{method}_K.csv. Minutes rather than hours, and as accurate against known pKs as the sampler.")  # fmt: skip
-@click.option("--plate-noise", type=click.Choice(["fixed", "calibrated"], case_sensitive=False), default="fixed", show_default=True, help="How --plate-fit weights the points K is fitted to, with or without --plate-screen-z. fixed uses y_err as built (bg_noise floor plus any --noise-gain/--noise-alpha). calibrated estimates gain and alpha per label from the fit's own residuals and refits under them; it describes the residuals better and fits K worse, so it is not the default.")  # fmt: skip
+@click.option("--plate-noise", type=click.Choice(["fixed", "calibrated", "gain", "floor-gain"], case_sensitive=False), default="fixed", show_default=True, help="How --plate-fit weights the points K is fitted to, with or without --plate-screen-z. fixed uses y_err as built (bg_noise floor plus any --noise-gain/--noise-alpha). calibrated estimates gain and alpha per label from the fit's own residuals and refits under them; it describes the residuals better and fits K worse, so it is not the default. gain weights by floor^2 + gain*yhat with alpha 0, the floor held and the gain calibrated from the dof-corrected residuals between refits until it settles; floor-gain calibrates the floor too. Both write plate_lm_noise_history.csv.")  # fmt: skip
 @click.option("--plate-screen-noise", type=click.Choice(["calibrated", "fixed"], case_sensitive=False), default="calibrated", show_default=True, help="The ruler --plate-screen-z judges points on. calibrated fits gain and alpha to the screening pass's own residuals so bright and dim points are judged alike; fixed judges on y_err as built. Separate from --plate-noise, which sets the weights K is then fitted with.")  # fmt: skip
 @click.option("--plate-screen-z", type=float, default=None, help="For --plate-fit: drop points whose |z| exceeds this and refit. The ruler is --plate-screen-noise (calibrated by default, so a dim point and a bright one are judged on the same scale); the refit uses --plate-noise's weights. 3.0 is the value measured to help; 2.5 is harmful.")  # fmt: skip
 @click.option("--plate-screen-frac", type=float, default=None, help="For --plate-fit: also drop 400 nm points whose |y-yhat|/yhat exceeds this, sparing any the 485 nm channel moves with. A z-score fails at both ends of a titration -- sigma tracks the signal while model error tracks the curve -- so a 5% miss at the dim end reads as 3.6 sigma while a 36% miss at the bright end reads as 2.7. 0.12 is where reviewer calls separate; unset leaves the z-screen alone.")  # fmt: skip
 @click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
 @click.option("--mcmc-robust-likelihood", type=click.Choice(["student_t", "mixture"], case_sensitive=False), default="student_t", show_default=True, help="Which robust likelihood --mcmc-robust selects: a heavy-tailed student_t, or a Normal/outlier contamination mixture that models the outliers rather than down-weighting them.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
+@click.option("--mcmc-x-start-between-learn", "learn_x_start_between", is_flag=True, default=False, help="For --mcmc-x-error per_well: estimate how far apart the wells' pH axes sit (x_start_between) instead of pinning it, with --mcmc-x-start-between as the prior scale. A well's pH offset shifts its K, so pinning that scale asserts how far two wells' K may sit apart.")  # fmt: skip
+@click.option("--ctr-sigma-w", "ctr_sigma_w", type=float, default=None, help="For --mcmc multi on a pH titration: let each control replicate keep its own K a learned distance from its group's, with this prior SD (pH) on that distance (K_sigma_w). Between --ctr-shared-k, which asserts the replicates agree exactly, and --ctr-free-k, which says nothing about the group; ~0.08 is what the plates show. Unset leaves the model as it was.")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi and --plate-fit: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
 @click.option("--mcmc-x-error", type=click.Choice(["deterministic", "per_well"], case_sensitive=False), default="deterministic", show_default=True, help="Latent pH axis for --mcmc multi. deterministic is one pipetting walk shared by every well; per_well gives each well its own walk, with step SDs from the measured pH errors (read noise plus accumulated pipetting). pH is measured in a few wells and their spread grows along the titration, so only per_well carries an unmeasured well's pH uncertainty into its K.")  # fmt: skip
 @click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
@@ -202,6 +206,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     fit: bool,
     png: bool,
     fit_method: str,
+    fit_noise: str,
     outlier: str | None,
     mcmc: str,
     nuts_sampler: str,
@@ -212,6 +217,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     noise_floor_ref_gain: tuple[float, ...],
     mcmc_noise: str,
     per_well_ye_mags: bool | None,
+    noise_ye_mag: bool,
     ye_mag_parameterization: str,
     noise_mode: str,
     noise_floor_mode: str | None,
@@ -226,6 +232,8 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     mcmc_robust_likelihood: str,
     student_t_nu: float,
     ctr_free_k: bool,
+    ctr_sigma_w: float | None,
+    learn_x_start_between: bool,
     mcmc_x_error: str,
     mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
@@ -281,6 +289,17 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     if max_k_se <= 0:
         msg = "must be positive; a limit of 0 calls every well undetermined."
         raise click.BadParameter(msg, param_hint="--max-k-se")
+    if fit_noise.lower() != "fixed" and fit_method.lower() not in {"lm", "huber"}:
+        msg = (
+            f"--fit-noise {fit_noise} calibrates the lm or huber fit, not {fit_method}."
+        )
+        raise click.UsageError(msg)
+    if (
+        plate_noise.lower() in {"gain", "floor-gain"}
+        and (plate_fit or "").lower() != "lm"
+    ):
+        msg = f"--plate-noise {plate_noise} needs --plate-fit lm."
+        raise click.UsageError(msg)
 
     # Dry run mode: validate inputs and exit
     if dry_run:
@@ -305,6 +324,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         plate_noise.lower(),
         plate_screen_noise.lower(),
         max_k_se=max_k_se,
+        fit_noise=fit_noise.lower(),
     )
 
     # Load titration with error handling
@@ -344,6 +364,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "nrm": nrm,
             "dil": dil,
             "fit_method": fit_method,
+            "fit_noise": fit_noise,
             "outlier": outlier,
             "mask_outliers": mask_outliers,
             "outlier_threshold": outlier_threshold,
@@ -361,10 +382,13 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "noise_floor": tuple(noise_floor),
             "noise_floor_ref_gain": tuple(noise_floor_ref_gain),
             "per_well_ye_mags": per_well_ye_mags,
+            "noise_ye_mag": noise_ye_mag,
             "ye_mag_parameterization": ye_mag_parameterization,
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
             "ctr_free_k": ctr_free_k,
+            "ctr_sigma_w": ctr_sigma_w,
+            "learn_x_start_between": learn_x_start_between,
             "x_error_model": mcmc_x_error.lower(),
             "x_start_between_sigma": mcmc_x_start_between,
             "mcmc_tune": mcmc_tune,
@@ -482,8 +506,11 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
                 nu=student_t_nu if student_t_nu > 0 else None,
             ),
             ctr_free_k=ctr_free_k,
+            ctr_sigma_w_prior=ctr_sigma_w,
+            learn_x_start_between=learn_x_start_between,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
+            noise_ye_mag=noise_ye_mag,
             ye_mag_parameterization=cast(
                 'Literal["centered", "hierarchical", "separable", "separable_step"]',
                 ye_mag_parameterization,

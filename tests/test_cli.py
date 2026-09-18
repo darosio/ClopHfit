@@ -404,6 +404,36 @@ def test_prtecan_x_start_between_needs_the_per_well_axis(
     assert "--mcmc-x-error per_well" in result.output
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (("--fit-method", "odr", "--fit-noise", "gain"), "lm or huber"),
+        (("--plate-noise", "gain"), "--plate-fit lm"),
+        (("--plate-fit", "odr", "--plate-noise", "floor-gain"), "--plate-fit lm"),
+    ],
+)
+def test_prtecan_gain_calibration_needs_a_fitter_it_can_weight(
+    runner: CliRunner, tmp_path: Path, args: tuple[str, ...], message: str
+) -> None:
+    """A gain calibration on a fit that would ignore it is refused, not dropped."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+    result = runner.invoke(ppr, ["-o", str(tmp_path / "out"), "tecan", list_f, *args])
+    assert result.exit_code != 0
+    assert message in result.output
+
+
+def test_prtecan_fit_noise_moves_the_signature(runner: CliRunner) -> None:
+    """Calibrated single-well weights are a different analysis and sign as one."""
+    list_f = str(tpath / "Tecan" / "140220" / "list.pH.csv")
+
+    def sig(*extra: str) -> str:
+        out = runner.invoke(ppr, ["tecan", list_f, "--print-spec", *extra]).output
+        return next(ln for ln in out.splitlines() if ln.startswith("signature:"))
+
+    assert sig("--fit-noise", "gain") != sig()
+    assert sig("--fit-noise", "floor-gain") != sig("--fit-noise", "gain")
+
+
 def test_print_spec_signs_the_resolved_analysis(runner: CliRunner) -> None:
     """The signature depends on resolved values, not on how flags were typed.
 
