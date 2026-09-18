@@ -813,6 +813,8 @@ def fit_single_mcmc(
         x_axis: dict[str, typing.Any] = {"x_error_model": spec.x_error_model}
         if spec.x_start_between_sigma is not None:
             x_axis["x_start_between_sigma"] = spec.x_start_between_sigma
+        if spec.learn_x_start_between:
+            x_axis["learn_x_start_between"] = True
         multi = fit_binding_pymc_multi(
             datasets,
             titration.scheme,
@@ -821,6 +823,7 @@ def fit_single_mcmc(
             ye_mag_parameterization=spec.ye_mag_parameterization,
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
+            ctr_sigma_w_prior=spec.ctr_sigma_w_prior,
             noise=(
                 _structured_noise(
                     titration,
