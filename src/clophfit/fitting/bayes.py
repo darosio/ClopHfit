@@ -1486,6 +1486,7 @@ def _build_multi_x_start(
     x_start_between_sigma: float,
     *,
     x_start_mu: float | None = None,
+    learn_between: bool = False,
 ) -> typing.Any:  # ruff: ignore[any-type]
     """Build the starting-x anchor for the multi-well x-error models.
 
@@ -1495,8 +1496,15 @@ def _build_multi_x_start(
     ``x_start_between_sigma > 0`` an opt-in per-well term
     ``x_start_well ~ Normal(x_start, x_start_between_sigma)`` is added, letting
     each well's x0 wobble around the shared plate value — a common-mode global
-    anchor plus independent per-well jitter. The between-well scale is fixed,
-    not sampled, to avoid a centered funnel.
+    anchor plus independent per-well jitter. The between-well scale is fixed by
+    default, not sampled, because sampling it centred makes a funnel.
+
+    ``learn_between`` estimates it instead, non-centred
+    (``x_start_well = x_start + x_start_between * z``, ``z ~ Normal(0, 1)``),
+    which has no funnel: the supplied *x_start_between_sigma* becomes the
+    HalfNormal prior scale rather than the value. A pinned scale asserts how far
+    apart the wells' pH axes sit, and that distance shifts K well for well, so
+    it is worth letting the plate say.
 
     Parameters
     ----------
@@ -1506,11 +1514,15 @@ def _build_multi_x_start(
         De-noised prior sigma for the shared ``x_start`` anchor (standard error
         of the step-0 mean).
     x_start_between_sigma : float
-        Fixed between-well scale. ``<= 0`` returns the shared scalar anchor;
-        ``> 0`` adds the per-well ``x_start_well`` term.
+        Between-well scale: the fixed value, or with *learn_between* the
+        HalfNormal prior scale for it. ``<= 0`` returns the shared scalar
+        anchor; ``> 0`` adds the per-well ``x_start_well`` term.
     x_start_mu : float | None
         Centre for the shared anchor. ``None`` uses ``xc[0]``; a two-stage fit
         passes the anchor a previous plate-level fit estimated.
+    learn_between : bool
+        Estimate the between-well scale (reported as ``x_start_between``)
+        instead of pinning it.
 
     Returns
     -------
@@ -1524,6 +1536,10 @@ def _build_multi_x_start(
     x_start = pm.Normal("x_start", mu=mu, sigma=max(x_start_sigma, 1e-6))
     if x_start_between_sigma <= 0:
         return x_start
+    if learn_between:
+        between = pm.HalfNormal("x_start_between", sigma=x_start_between_sigma)
+        z_well = pm.Normal("x_start_well_z", mu=0.0, sigma=1.0, dims="well")
+        return pm.Deterministic("x_start_well", x_start + between * z_well, dims="well")
     return pm.Normal(
         "x_start_well",
         mu=x_start,
@@ -3231,6 +3247,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     min_x_step: float = 0.2,
     x_error_model: Literal["deterministic", "per_well"] = "deterministic",
     x_start_between_sigma: float = _DEFAULT_X_START_BETWEEN_SIGMA,
+    learn_x_start_between: bool = False,
     x_prior: XPrior | None = None,
     ctr_free_k: bool = False,
     sample_ppc: bool = False,
@@ -3276,6 +3293,11 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         x_start, x_start_between_sigma)`` tightly anchored on the shared plate
         ``x_start`` prior (common-mode anchor plus independent per-well jitter).
         Set to ``0.0`` for a single shared ``x_start`` across all wells.
+    learn_x_start_between : bool
+        Estimate that between-well scale (``x_start_between``) instead of
+        pinning it, non-centred so it does not funnel; *x_start_between_sigma*
+        is then its HalfNormal prior scale. A well's pH offset shifts its K, so
+        a pinned scale asserts how far apart two wells' K may sit.
     x_prior : XPrior | None
         Plate-level pH axis from a previous fit, typically built by
         :func:`x_prior_from_trace`. ``None`` derives the axis from this plate's
@@ -3568,7 +3590,11 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 step_nominal = np.asarray(x_prior.step_mu, dtype=float)
                 step_sigmas = np.asarray(x_prior.step_sigma, dtype=float)
             x_start = _build_multi_x_start(
-                xc, x_start_sigma, x_start_between_sigma, x_start_mu=x_start_mu
+                xc,
+                x_start_sigma,
+                x_start_between_sigma,
+                x_start_mu=x_start_mu,
+                learn_between=learn_x_start_between,
             )
             x_step = pm.TruncatedNormal(
                 "x_step",

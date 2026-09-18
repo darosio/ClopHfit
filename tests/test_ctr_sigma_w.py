@@ -18,8 +18,9 @@ from clophfit.fitting.models import binding_1site
 from clophfit.prtecan import PlateScheme
 
 PH = np.linspace(5.0, 9.0, 7)
-CTR_WELLS = ("A01", "A02", "A03", "A04", "A05", "A06")
-SAMPLER = SamplerConfig(n_samples=400, n_tune=400, chains=2)
+CTR_WELLS = tuple(f"A{i:02d}" for i in range(1, 11))  # ten replicates: six leave
+# the hierarchy weakly identified, and sigma_w then collapses at random.
+SAMPLER = SamplerConfig(n_samples=600, n_tune=600, chains=2, random_seed=1234)
 
 
 def _plate(spread: float, *, seed: int = 0) -> tuple[dict[str, Dataset], PlateScheme]:

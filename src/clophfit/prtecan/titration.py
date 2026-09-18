@@ -2106,6 +2106,10 @@ class McmcSpec:
         this SD passes straight into K's interval; set it to the measured
         well-to-well spread at the first step rather than a round number.
         ``None`` keeps the library default.
+    learn_x_start_between : bool
+        For ``x_error_model="per_well"``, estimate the between-well spread of
+        the first-step offset instead of pinning it at
+        *x_start_between_sigma*, which then becomes its prior scale.
     ctr_sigma_w_prior : float | None
         Prior scale, in pH, of the spread of a control group's replicates around
         the group's own K (``K_sigma_w``). Given, each replicate keeps its own K
@@ -2141,3 +2145,4 @@ class McmcSpec:
     x_error_model: Literal["deterministic", "per_well"] = "deterministic"
     x_start_between_sigma: float | None = None
     ctr_sigma_w_prior: float | None = None
+    learn_x_start_between: bool = False
