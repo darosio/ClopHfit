@@ -14,7 +14,7 @@ import numpy as np
 
 from clophfit.fitting import bayes
 from clophfit.fitting.bayes_config import SamplerConfig
-from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.data_structures import DataArray, Dataset, MultiFitResult
 from clophfit.fitting.models import binding_1site
 from clophfit.prtecan import PlateScheme
 
@@ -39,7 +39,7 @@ def _plate(offset_sd: float, *, seed: int = 0) -> dict[str, Dataset]:
     return out
 
 
-def _fit(dsd: dict[str, Dataset], **kw: object) -> bayes.MultiFitResult:
+def _fit(dsd: dict[str, Dataset], **kw: object) -> MultiFitResult:
     """Multi-well fit on the per-well pH axis."""
     return bayes.fit_binding_pymc_multi(
         dsd,
