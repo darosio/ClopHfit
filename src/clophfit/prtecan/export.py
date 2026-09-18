@@ -821,6 +821,7 @@ def fit_single_mcmc(
             ye_mag_parameterization=spec.ye_mag_parameterization,
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
+            ctr_sigma_w_prior=spec.ctr_sigma_w_prior,
             noise=(
                 _structured_noise(
                     titration,

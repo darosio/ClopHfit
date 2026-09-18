@@ -3245,6 +3245,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     label_noise_scale_sigma: float = 0.3,
     well_noise_sd_sigma: float = 0.3,
     well_noise_scale_sigma: float | None = None,
+    ctr_sigma_w_prior: float | None = None,
     noise: NoiseConfig = _DEFAULT_NOISE,
     robust: RobustConfig = _DEFAULT_ROBUST,
     init: InitConfig = _DEFAULT_INIT,
@@ -3314,6 +3315,14 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         HalfNormal prior scale for the per-well noise spread.
     well_noise_scale_sigma : float | None
         Backwards-compatible alias for *well_noise_sd_sigma*.
+    ctr_sigma_w_prior : float | None
+        Prior scale, in pH, of ``K_sigma_w``: the spread of a control group's
+        replicates around the group's own K. Given, each replicate keeps its
+        own K (still reported as ``K_free``) drawn a HalfNormal-distributed
+        distance from the group's, instead of sharing one K (*ctr_free_k*
+        False) or ignoring the group (*ctr_free_k* True). Controls on these
+        plates miss their mates by more than their intervals allow, and this
+        is the term that says by how much. pH only.
     noise : NoiseConfig
         Observation-noise configuration (ye_mag multiplier or structured
         floor/gain/alpha). See :class:`NoiseConfig`.
@@ -3486,15 +3495,30 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     n_steps = len(xc)
 
     # Split wells into individually-fit (vectorized K_free) and shared-group K.
+    # A hierarchical control group is neither: its replicates get their own K
+    # around the group's, a distance sigma_w apart, so the group's spread is
+    # estimated rather than assumed zero (shared) or infinite (free).
+    hierarchical_ctr = ctr_sigma_w_prior is not None
+    if hierarchical_ctr and kd_range is not None:
+        msg = "ctr_sigma_w_prior is a pH-titration option; Kd fits have no group spread"
+        raise ValueError(msg)
     free_wells, k_free_mu, k_free_sigma, shared_of = _free_k_init(
         fit_results,
         wells_list,
         scheme,
         ctr_ks,
         n_sd,
-        ctr_free_k=ctr_free_k,
+        ctr_free_k=ctr_free_k and not hierarchical_ctr,
         kd_range=kd_range,
     )
+    # Controls keep their own K, so they join free_well; their prior is built
+    # from the group K below instead of from their own preliminary fit.
+    unknown_wells = list(free_wells)
+    ctr_wells = (
+        [key for key in wells_list if key in shared_of] if hierarchical_ctr else []
+    )
+    if hierarchical_ctr:
+        free_wells = unknown_wells + ctr_wells
 
     coords: dict[str, list[int] | list[str]] = {
         "well": wells_list,
@@ -3503,6 +3527,9 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     }
     if free_wells:
         coords["free_well"] = free_wells
+    if ctr_wells:
+        coords["unknown_well"] = unknown_wells
+        coords["ctr_well"] = ctr_wells
 
     with pm.Model(coords=coords):
         robust_nu = (
@@ -3594,7 +3621,7 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         # control groups keep one scalar K_ctr_* RV each, broadcast across
         # their replicate wells.
         k_params: dict[str, typing.Any] = {}
-        if not ctr_free_k:
+        if not ctr_free_k or hierarchical_ctr:
             k_params, _ = _build_ctr_k_params(
                 scheme,
                 ctr_ks,
@@ -3604,7 +3631,25 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 n_sd=n_sd,
             )
         k_free: typing.Any = None  # pt.TensorVariable
-        if free_wells and kd_range is not None:
+        if hierarchical_ctr:
+            # Non-centred: a replicate is its group's K plus sigma_w * z, so the
+            # sampler never has to move K_ctr and its replicates together.
+            # K_free stays the name every reader indexes by free_well.
+            k_unknown = (
+                pm.Normal(
+                    "K_unknown", mu=k_free_mu, sigma=k_free_sigma, dims="unknown_well"
+                )
+                if unknown_wells
+                else pt.zeros(0)
+            )
+            sigma_w = pm.HalfNormal("K_sigma_w", sigma=float(ctr_sigma_w_prior or 0.1))
+            z_ctr = pm.Normal("K_ctr_z", mu=0.0, sigma=1.0, dims="ctr_well")
+            group_mu = pt.stack([k_params[shared_of[key]] for key in ctr_wells])
+            k_stacked = pt.join(  # type: ignore[no-untyped-call]
+                0, k_unknown, group_mu + sigma_w * z_ctr
+            )
+            k_free = pm.Deterministic("K_free", k_stacked, dims="free_well")
+        elif free_wells and kd_range is not None:
             k_free = log_kd_prior(
                 "K_free", k_free_mu, k_free_sigma, kd_range, dims="free_well"
             )

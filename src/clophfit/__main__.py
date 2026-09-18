@@ -174,6 +174,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--mcmc-robust/--no-mcmc-robust", "mcmc_robust", default=False, show_default=True, help="Use a robust likelihood for --mcmc instead of a Normal. Student-t nu=3 was the best-calibrated arm on this campaign's plates.")  # fmt: skip
 @click.option("--mcmc-robust-likelihood", type=click.Choice(["student_t", "mixture"], case_sensitive=False), default="student_t", show_default=True, help="Which robust likelihood --mcmc-robust selects: a heavy-tailed student_t, or a Normal/outlier contamination mixture that models the outliers rather than down-weighting them.")  # fmt: skip
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
+@click.option("--ctr-sigma-w", "ctr_sigma_w", type=float, default=None, help="For --mcmc multi on a pH titration: let each control replicate keep its own K a learned distance from its group's, with this prior SD (pH) on that distance (K_sigma_w). Between --ctr-shared-k, which asserts the replicates agree exactly, and --ctr-free-k, which says nothing about the group; ~0.08 is what the plates show. Unset leaves the model as it was.")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi and --plate-fit: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
 @click.option("--mcmc-x-error", type=click.Choice(["deterministic", "per_well"], case_sensitive=False), default="deterministic", show_default=True, help="Latent pH axis for --mcmc multi. deterministic is one pipetting walk shared by every well; per_well gives each well its own walk, with step SDs from the measured pH errors (read noise plus accumulated pipetting). pH is measured in a few wells and their spread grows along the titration, so only per_well carries an unmeasured well's pH uncertainty into its K.")  # fmt: skip
 @click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
@@ -230,6 +231,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     mcmc_robust_likelihood: str,
     student_t_nu: float,
     ctr_free_k: bool,
+    ctr_sigma_w: float | None,
     mcmc_x_error: str,
     mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
@@ -383,6 +385,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
             "ctr_free_k": ctr_free_k,
+            "ctr_sigma_w": ctr_sigma_w,
             "x_error_model": mcmc_x_error.lower(),
             "x_start_between_sigma": mcmc_x_start_between,
             "mcmc_tune": mcmc_tune,
@@ -500,6 +503,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
                 nu=student_t_nu if student_t_nu > 0 else None,
             ),
             ctr_free_k=ctr_free_k,
+            ctr_sigma_w_prior=ctr_sigma_w,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
             noise_ye_mag=noise_ye_mag,
