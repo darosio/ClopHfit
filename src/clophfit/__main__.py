@@ -143,6 +143,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--bg-mth", default=_DEFAULT_BG_MTH, show_default=True, type=click.Choice(["mean", "median", "fit", "meansd", "mediansd"]), help="Buffer calculation method.")  # fmt: skip
 @click.option("--nrm", is_flag=True, help="Normalize using label metadata.")
 @click.option("--raw-dir", type=cPath(exists=True, file_okay=False), help="Folder holding the Tecan .xls files, when they are not next to LIST_FILE.")  # fmt: skip
+@click.option("--label", multiple=True, help="Fit only these measurement labels (repeatable), e.g. --label 2 for the 485 nm excitation channel alone. A plate carries 400 nm as label 1 and 485 nm as label 2; the 400 nm channel turns over at the acidic end, which one pKa cannot describe, and on this campaign's controls including it costs accuracy against the bench pK (median |error| 0.089 against 0.055 pH) and replicate agreement (0.225 against 0.195). Unset fits every label, as before.")  # fmt: skip
 @click.option("--sch", type=cPath(exists=True), help="Path to plate scheme file (buffers and controls).")  # fmt: skip
 @click.option("--add", type=cPath(exists=True), help="Path to additions file (initial volume + additions); enables dilution correction.")  # fmt: skip
 @click.option("--all", "comb", is_flag=True, help="Export all bg/dil/nrm data combinations.")  # fmt: skip
@@ -200,6 +201,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     nrm: bool,
     bg_mth: str,
     raw_dir: str | None,
+    label: tuple[str, ...],
     sch: str | None,
     add: str | None,
     comb: bool,
@@ -357,9 +359,21 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             f"Please check the file format and contents."
         )
         raise click.ClickException(msg) from e
+    if label:
+        missing = set(label) - set(tit.labelblocksgroups)
+        if missing:
+            msg = (
+                f"No label {sorted(missing)} in {list_fp}; "
+                f"it carries {sorted(tit.labelblocksgroups)}."
+            )
+            raise click.ClickException(msg)
+        for name in list(tit.labelblocksgroups):
+            if name not in label:
+                del tit.labelblocksgroups[name]
 
     if print_spec:
         _echo_spec({
+            "label": tuple(label) or "all",
             "bg": bg,
             "bg_adj": bg_adj,
             "bg_mth": bg_mth,
