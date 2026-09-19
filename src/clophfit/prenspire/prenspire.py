@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections
 import csv
+import re
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pyparsing
 
@@ -399,6 +401,54 @@ class EnspireFile:
         return a == b
 
 
+_COLUMN_ALIASES = {
+    "well": "Well",
+    "mutant": "Name",
+    "name": "Name",
+    "sample": "Name",
+    "ph": "pH",
+    "cl": "Cl",
+    "temp": "Temp",
+    "labels": "Labels",
+}
+_TEMP_IN_NAME = re.compile(r"[_-](\d{2})[_-]?note", re.IGNORECASE)
+
+
+def _normalize_columns(note: pd.DataFrame, fpath: Path) -> pd.DataFrame:
+    """Give a note the column names the rest of the code expects.
+
+    Two dialects are in use: ``Well,pH,Cl,Name,Temp,Labels`` and
+    ``well,pH,Cl,Mutant`` with the temperature in the file name. Aliases are
+    resolved case-insensitively, and ``Name``/``Temp`` are taken from the file
+    name when the note has no column for them.
+
+    Parameters
+    ----------
+    note : pd.DataFrame
+        The note as read.
+    fpath : Path
+        Where it came from; its name carries the temperature in one dialect.
+
+    Returns
+    -------
+    pd.DataFrame
+        The note with normalised columns.
+    """
+    note.columns = pd.Index([str(c).strip() for c in note.columns])
+    note = note.rename(
+        columns={c: _COLUMN_ALIASES.get(str(c).lower(), str(c)) for c in note.columns}
+    )
+    if "Temp" not in note.columns:
+        found = _TEMP_IN_NAME.search(fpath.name)
+        note["Temp"] = float(found.group(1)) if found else np.nan
+    if "Name" not in note.columns:
+        note["Name"] = fpath.name.removesuffix("_note.csv")
+    for col in ("pH", "Cl"):
+        if col not in note.columns:
+            note[col] = 0.0
+    return note
+
+
 @dataclass
 class Note:
     """Read and processes a Note csv file.
@@ -436,14 +486,32 @@ class Note:
         with Path(self.fpath).open("r", newline="", encoding="utf-8") as file:
             sample_data = file.read(1024)  # Read a sample of the CSV data
         dialect = cast("csv.Dialect", csv.Sniffer().sniff(sample_data))
-        self._note = pd.read_csv(self.fpath, dialect=dialect)
+        self._note = _normalize_columns(
+            pd.read_csv(self.fpath, dialect=dialect), Path(self.fpath)
+        )
         self.wells = self._note.iloc[:, 0].tolist()
         verboseprint(f"Wells {self.wells[:2]}...{self.wells[-2:]} generated.")
+
+    @property
+    def note(self) -> pd.DataFrame:
+        """The note as a frame, with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``."""
+        return self._note
 
     # MAYBE: Add buffer subtraction logic to prenspire Note.
 
     def build_titrations(self, ef: EnspireFile) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
+        if "Labels" not in self._note.columns:
+            # the second note dialect names no labels: take the ones the file
+            # measured at each row's temperature
+            at_temp: dict[str, str] = {}
+            for label, meas in ef.measurements.items():
+                temp = str(meas["metadata"].get("temp")).split(".")[0]
+                at_temp[temp] = f"{at_temp.get(temp, '')} {label}".strip()
+            self._note["Labels"] = [
+                at_temp.get(str(t).split(".")[0], " ".join(ef.measurements))
+                for t in self._note["Temp"]
+            ]
         df_no_buffer = self._note.query('Name != "buffer"')
         threshold = 3
         grouped0 = df_no_buffer.groupby("Name")

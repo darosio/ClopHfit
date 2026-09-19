@@ -47,11 +47,13 @@ from clophfit.fitting.errors import (
     DataValidationError,
     MissingDependencyError,
 )
-from clophfit.prenspire import EnspireFile, Note
+from clophfit.prenspire import EnspireFile, Note, bands as bands_module
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from clophfit.fitting.data_structures import FitResult
 
 
@@ -697,14 +699,186 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-def enspire(ctx: Context, csv_f: str, note_f: str | None, bands: tuple[Any]) -> None:
+@click.option("--method", type=click.Choice(["band", "svd", "both"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating.")  # fmt: skip
+@click.option("--normalise/--no-normalise", default=True, show_default=True, help="For --method band: divide each band by the tryptophan band (330-342 nm of the 278 nm-excited scan), which measures the protein in the well rather than any titration state.")  # fmt: skip
+@click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
+@click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
+@click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
+@click.option("--band-name", "band_names", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Bands allowed into the shared K; repeatable. Default is the three direct readouts: the 278 nm-excited emission reaches the chromophore through the protein and is reported but not fitted.")  # fmt: skip
+def enspire(  # ruff: ignore[too-many-arguments]
+    ctx: Context,
+    csv_f: str,
+    note_f: str | None,
+    bands: tuple[Any],
+    method: str,
+    normalise: bool,
+    buffer: bool,
+    screen: str,
+    min_rho: float,
+    band_names: tuple[str, ...],
+) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __enspire_out_dir__)
     ef = EnspireFile(Path(csv_f), verbose=verbose)
     ef.export_measurements(Path(out))
-    if note_f is not None:
+    if note_f is None:
+        return
+    if method in {"band", "both"}:
+        fit_enspire_bands(
+            ef,
+            Path(note_f),
+            Path(out),
+            normalise=normalise,
+            buffer=buffer,
+            screen=None if screen.lower() == "none" else screen,
+            min_rho=min_rho,
+            wanted=band_names or bands_module.DIRECT_BANDS,
+        )
+    if method in {"svd", "both"}:
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
+
+
+@ppr.command(name="enspire-batch")
+@click.pass_context
+@click.argument("root", type=cPath(exists=True, file_okay=False, path_type=str))
+@click.option("--normalise/--no-normalise", default=True, show_default=True, help="Divide each band by the tryptophan band of the same well.")  # fmt: skip
+@click.option("--buffer/--no-buffer", default=True, show_default=True, help="Subtract the buffer well of the same plate column.")  # fmt: skip
+@click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen as method:threshold:min_keep; 'none' fits every point.")  # fmt: skip
+@click.option("--min-rho", default=0.8, show_default=True, help="Smallest |Spearman rho| for a band to carry K.")  # fmt: skip
+def enspire_batch(  # ruff: ignore[too-many-arguments]
+    ctx: Context, root: str, normalise: bool, buffer: bool, screen: str, min_rho: float
+) -> None:
+    """Fit every folder under ROOT holding an EnSpire csv beside its *_note.csv.
+
+    One row per fit lands in ``enspire_batch_K.csv`` and one per folder that
+    could not be paired or fitted in ``enspire_batch_failures.csv``: a folder
+    that fails is part of the result, not a silent gap.
+    """
+    out = Path(ctx.obj.get("OUT", __enspire_out_dir__))
+    out.mkdir(parents=True, exist_ok=True)
+    root_dir = Path(root)
+    collected: list[pd.DataFrame] = []
+    failures: list[dict[str, str]] = []
+    for note_fp in sorted(root_dir.rglob("*_note.csv")):
+        data = _data_for(note_fp)
+        if data is None:
+            failures.append({"note": str(note_fp), "why": "no unambiguous data csv"})
+            continue
+        tag = note_fp.parent.relative_to(root_dir).as_posix().replace("/", "_")
+        try:
+            table = fit_enspire_bands(
+                EnspireFile(data),
+                note_fp,
+                out / tag,
+                normalise=normalise,
+                buffer=buffer,
+                screen=None if screen.lower() == "none" else screen,
+                min_rho=min_rho,
+                wanted=bands_module.DIRECT_BANDS,
+            )
+        except Exception as exc:  # ruff: ignore[blind-except] - a bad folder must not stop the walk
+            failures.append({
+                "note": str(note_fp),
+                "why": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        table.insert(0, "folder", note_fp.parent.relative_to(root_dir).as_posix())
+        table.insert(1, "file", data.name)
+        collected.append(table)
+    if collected:
+        every = pd.concat(collected, ignore_index=True)
+        every.to_csv(out / "enspire_batch_K.csv", index=False)
+        print(f"{len(collected)} files fitted -> {out / 'enspire_batch_K.csv'}")
+    if failures:
+        pd.DataFrame(failures).to_csv(out / "enspire_batch_failures.csv", index=False)
+        print(f"{len(failures)} not fitted -> {out / 'enspire_batch_failures.csv'}")
+
+
+def _data_for(note_fp: Path) -> Path | None:
+    """Return the EnSpire csv a note belongs to, or None when ambiguous."""
+    exact = note_fp.with_name(f"{note_fp.name.removesuffix('_note.csv')}.csv")
+    if exact.exists():
+        return exact
+    others = [
+        p for p in note_fp.parent.glob("*.csv") if not p.name.endswith("_note.csv")
+    ]
+    return others[0] if len(others) == 1 else None
+
+
+def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    normalise: bool,
+    buffer: bool,
+    screen: str | None,
+    min_rho: float,
+    wanted: Sequence[str],
+) -> pd.DataFrame:
+    """Fit a note's titrations from named bands and write the tables and figure.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the tables and the figure go.
+    normalise : bool
+        Divide each band by the tryptophan band of the same well.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+    screen : str | None
+        Point screen, e.g. ``studentized:0.05:5``; None keeps every point.
+    min_rho : float
+        Monotonicity gate below which a band carries no K.
+    wanted : Sequence[str]
+        Bands allowed into the shared K.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature, band, subset).
+    """
+    note = Note(note_fp)
+    fits = bands_module.fit_titrations(
+        ef,
+        note.note,
+        normalise=normalise,
+        buffer=buffer,
+        wanted=wanted,
+        min_rho=min_rho,
+        screen=screen,
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    fits.table.to_csv(out_dir / f"{stem}_K.csv", index=False)
+    if not fits.screened.empty:
+        fits.screened.to_csv(out_dir / f"{stem}_screened.csv", index=False)
+    if fits.samples:
+        fig, axes = plt.subplots(
+            1,
+            len(fits.samples),
+            figsize=(5.4 * len(fits.samples), 4.3),
+            constrained_layout=True,
+            squeeze=False,
+        )
+        for ax, (title, sample) in zip(axes[0], fits.samples.items(), strict=True):
+            bands_module.plot_sample(ax, sample, title)
+        fig.savefig(out_dir / f"{stem}_bands.pdf", bbox_inches="tight")
+        plt.close(fig)
+    head = fits.table[
+        (fits.table.band == "all (shared K)") & (fits.table.subset == "screened")
+    ]
+    for r in head.itertuples():
+        print(
+            f"{r.sample} at {r.temp}: K {r.K:.3f} [{r.lo:.3f}, {r.hi:.3f}] "
+            f"on {r.n} points, {r.dropped} screened out"
+        )
+    return fits.table
 
 
 # TODO: Simplify this function
