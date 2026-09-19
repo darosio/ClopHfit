@@ -65,12 +65,16 @@ EMISSION = (500.0, 520.0)
 ANIONIC = (480.0, 495.0)
 NEUTRAL = (395.0, 410.0)
 # The two readouts that agree best between sessions. Scored over 39
-# sample-temperatures and five constructs measured twice or more: this pair
+# sample-temperatures and the constructs measured twice or more: this pair
 # lands 0.14 pH apart between sessions against 0.25 for the pair plus the
-# neutral excitation band, 0.29 for the anionic band alone, 0.31 for the SVD of
-# the excitation label and 0.38 for the SVD of all labels concatenated. Within
-# one plate the arms are indistinguishable (0.21-0.27 pH between replicate
-# rows), so it is reproducibility across sessions that separates them.
+# neutral excitation band, 0.27 for the anionic band alone, 0.27 for the SVD of
+# the excitation label and 0.31 for the SVD of all labels concatenated, and it
+# has the smallest worst case of any arm (0.22). Within one plate the arms are
+# indistinguishable (0.23-0.27 pH between replicate rows), so it is
+# reproducibility across sessions that separates them. One session is left out
+# of that scoring as a first attempt whose own fits disagree internally - its
+# bands differ by 0.49 pH where the later sessions of the same construct differ
+# by 0.00 - and the ranking is the same with it in.
 DIRECT_BANDS = ("exc_anionic", "em_exc420")
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
