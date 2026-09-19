@@ -64,8 +64,14 @@ TRP = (330.0, 342.0)
 EMISSION = (500.0, 520.0)
 ANIONIC = (480.0, 495.0)
 NEUTRAL = (395.0, 410.0)
-# the bands that read the chromophore's protonation directly
-DIRECT_BANDS = ("exc_anionic", "exc_neutral", "em_exc420")
+# The two readouts that agree best between sessions. Scored over 39
+# sample-temperatures and five constructs measured twice or more: this pair
+# lands 0.14 pH apart between sessions against 0.25 for the pair plus the
+# neutral excitation band, 0.29 for the anionic band alone, 0.31 for the SVD of
+# the excitation label and 0.38 for the SVD of all labels concatenated. Within
+# one plate the arms are indistinguishable (0.21-0.27 pH between replicate
+# rows), so it is reproducibility across sessions that separates them.
+DIRECT_BANDS = ("exc_anionic", "em_exc420")
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
 _PROTEIN_EXCITATION = 350.0
