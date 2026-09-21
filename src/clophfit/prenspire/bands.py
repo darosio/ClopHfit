@@ -64,6 +64,16 @@ TRP = (330.0, 342.0)
 EMISSION = (500.0, 520.0)
 ANIONIC = (480.0, 495.0)
 NEUTRAL = (395.0, 410.0)
+# The anionic window above was chosen from pH reproducibility alone and is
+# nearly blind on a chloride titration: the excitation scan's actual
+# chloride-responsive region peaks at 426 nm (98% of the titration's
+# fractional change is there), which (480, 495) barely reaches. A window
+# centred on that peak is not the fix either - it is the best choice at one
+# temperature and the worst at the other (row spread 0.78 at 20 C, 1.40 at
+# 37 C), same failure mode as whole-spectrum SVD there (0.15 and 1.17). This
+# wide window is not the best at either temperature but is the only one that
+# is never bad (0.87 and 0.38): see arslanbaeva's rescreen_bands_full.py.
+ANIONIC_CL = (395.0, 495.0)
 # The two readouts that agree best between sessions. Scored over 39
 # sample-temperatures and the constructs measured twice or more: this pair
 # lands 0.14 pH apart between sessions against 0.25 for the pair plus the
@@ -75,6 +85,13 @@ NEUTRAL = (395.0, 410.0)
 # of that scoring as a first attempt whose own fits disagree internally - its
 # bands differ by 0.49 pH where the later sessions of the same construct differ
 # by 0.00 - and the ranking is the same with it in.
+#
+# Re-checked once the chloride window above needed fixing, in case the same
+# fix (or SVD) also helped pH: it does not. On the same session-spread metric,
+# recentring exc_neutral on its own 427 nm peak (rather than dropping it)
+# scores 0.27, adding em_exc278 scores 0.30, and whole-spectrum SVD scores
+# 0.34 - all worse than this pair's 0.084, not better. See
+# arslanbaeva's rescreen_bands_full.py for the full table.
 DIRECT_BANDS = ("exc_anionic", "em_exc420")
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
@@ -132,7 +149,7 @@ class TitrationFits(NamedTuple):
 
 
 def classify(
-    ef: EnspireFile, temp: str | float | None = None
+    ef: EnspireFile, temp: str | float | None = None, *, is_ph: bool = True
 ) -> tuple[list[Readout], Readout | None]:
     """Split a temperature's labels into titrating bands and the protein reference.
 
@@ -148,6 +165,12 @@ def classify(
         The parsed EnSpire export.
     temp : str | float | None
         Keep only labels measured at this temperature; None keeps every label.
+    is_ph : bool
+        Which anionic-band window to use: ``ANIONIC`` (480-495 nm, where a pH
+        titration's own reproducibility is best) for a pH titration, or
+        ``ANIONIC_CL`` (395-495 nm) for a chloride one - the two titrations
+        respond over different parts of the excitation scan and one window
+        does not serve both; see ``ANIONIC_CL``'s definition for the numbers.
 
     Returns
     -------
@@ -155,6 +178,7 @@ def classify(
         The bands available, and the tryptophan reference if one was measured.
     """
     wanted = None if temp is None or str(temp) in {"nan", "None", ""} else str(temp)
+    anionic = ANIONIC if is_ph else ANIONIC_CL
     readouts: list[Readout] = []
     reference: Readout | None = None
     for label, meas in ef.measurements.items():
@@ -166,7 +190,7 @@ def classify(
             continue
         if md["Monochromator"] == "Excitation":
             readouts += [
-                Readout("exc_anionic", label, *ANIONIC),
+                Readout("exc_anionic", label, *anionic),
                 Readout("exc_neutral", label, *NEUTRAL),
             ]
         elif float(md["Wavelength"]) < _PROTEIN_EXCITATION:
@@ -374,6 +398,7 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     x: np.ndarray,
     temp: str | float,
     *,
+    is_ph: bool,
     normalise: bool,
     buffer_wells: Sequence[str],
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]:
@@ -392,6 +417,9 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         Titrant value per well.
     temp : str | float
         Temperature selecting the labels.
+    is_ph : bool
+        pH titration (else chloride) - selects the anionic band's window;
+        see :func:`classify`.
     normalise : bool
         Divide each band by the tryptophan band of the same well.
     buffer_wells : Sequence[str]
@@ -402,7 +430,7 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]
         Band name to (x, y), the wells actually used, and their x values.
     """
-    readouts, reference = classify(ef, temp)
+    readouts, reference = classify(ef, temp, is_ph=is_ph)
     if not readouts:
         return {}, wells, x
     probe = band_values(ef, readouts[0], wells)
@@ -494,7 +522,7 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         x = one["pH" if is_ph else "Cl"].astype(float).to_numpy()
         buf = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
         data, wells, x = _sample_bands(
-            ef, wells, x, str(temp), normalise=normalise, buffer_wells=buf
+            ef, wells, x, str(temp), is_ph=is_ph, normalise=normalise, buffer_wells=buf
         )
         if not data:
             continue
