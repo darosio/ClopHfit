@@ -92,6 +92,15 @@ ANIONIC_CL = (395.0, 495.0)
 # scores 0.27, adding em_exc278 scores 0.30, and whole-spectrum SVD scores
 # 0.34 - all worse than this pair's 0.084, not better. See
 # arslanbaeva's rescreen_bands_full.py for the full table.
+#
+# Also checked: swapping the anionic band for that recentred neutral one
+# (dropping anionic, keeping em_exc420) rather than adding it - the same
+# comparison restricted to the two A11 sessions only, after excluding the one
+# G02 group whose row-to-row spread is 2-4x every other group's under every
+# arm tested (so it is that group's own data, not the band choice). Current
+# pair: 0.18 pH between sessions, worst case 0.22. Neutral+em1 without
+# anionic: 0.46, worst case 0.55 - worse by the same margin, not helped by
+# removing the noisy group.
 DIRECT_BANDS = ("exc_anionic", "em_exc420")
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
