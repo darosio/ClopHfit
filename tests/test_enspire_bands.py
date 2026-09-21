@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from clophfit.prenspire import EnspireFile, Note
+from clophfit.prenspire import EnspireFile, Note, bands
 from clophfit.prenspire.bands import (
     band_rho,
     blank_rows,
@@ -154,6 +154,24 @@ class TestTitrations:
         per_band = fits.table[fits.table.band.isin(["exc_anionic", "em_exc420"])]
         spread = per_band.groupby("temp").K.agg(lambda s: s.max() - s.min())
         assert (spread < 0.3).all()
+
+    def test_classify_picks_the_anionic_window_by_titration_type(
+        self, g10: EnspireFile
+    ) -> None:
+        """The anionic band uses a different window for pH and chloride.
+
+        A pH titration's own reproducibility is best served by ANIONIC
+        (480-495 nm); a chloride titration's actual signal - 98% of the
+        fractional change between its extremes - sits at 426 nm, which
+        ANIONIC barely reaches, so it uses the wider ANIONIC_CL instead.
+        """
+        ph_readouts, _ = classify(g10, "20", is_ph=True)
+        cl_readouts, _ = classify(g10, "20", is_ph=False)
+        anionic_ph = next(r for r in ph_readouts if r.name == "exc_anionic")
+        anionic_cl = next(r for r in cl_readouts if r.name == "exc_anionic")
+        assert (anionic_ph.lo, anionic_ph.hi) == bands.ANIONIC
+        assert (anionic_cl.lo, anionic_cl.hi) == bands.ANIONIC_CL
+        assert (anionic_ph.lo, anionic_ph.hi) != (anionic_cl.lo, anionic_cl.hi)
 
     def test_classify_reads_the_labels(self, g10: EnspireFile) -> None:
         """Every label is placed from its own metadata."""
