@@ -48,17 +48,32 @@ jobs:
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         env:
-          # PAT_WORKFLOWS is needed when Cruft changes workflow files; github.token is a fallback for ordinary updates.
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || github.token }}
+          # PAT_WORKFLOWS is needed when Cruft changes workflow files; github.token is a fallback for ordinary
+          # updates (it lacks permission to modify files under .github/workflows/).
+          PAT_WORKFLOWS: ${{ secrets.PAT_WORKFLOWS }}
+          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           BRANCH="chore/update-template"
           git checkout -B "$BRANCH"
           git add -A
           git commit -m "chore(template): apply cookiecutter updates via Cruft"
-          git push -f origin "$BRANCH"
+
+          push_with_token() {
+            git remote set-url origin "https://x-access-token:${1}@github.com/${{ github.repository }}.git"
+            git push -f origin "$BRANCH"
+          }
+
+          if [ -n "$PAT_WORKFLOWS" ] && push_with_token "$PAT_WORKFLOWS"; then
+            GH_TOKEN="$PAT_WORKFLOWS"
+          else
+            echo "::warning::PAT_WORKFLOWS is missing, expired, or invalid; falling back to github.token (this fails if Cruft touched .github/workflows/*)."
+            push_with_token "$DEFAULT_TOKEN"
+            GH_TOKEN="$DEFAULT_TOKEN"
+          fi
+          export GH_TOKEN
+
           if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q "OPEN"; then
             echo "PR already exists, updated branch."
           else
