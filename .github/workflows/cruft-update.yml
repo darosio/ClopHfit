@@ -45,12 +45,21 @@ jobs:
             fi
           fi
 
+      - name: Generate GitHub App token
+        id: app_token
+        if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
+        uses: actions/create-github-app-token@v2
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Create Pull Request
         if: ${{ steps.cruft_update.outputs.has_changes == 'true' }}
         env:
-          # PAT_WORKFLOWS is needed when Cruft changes workflow files; github.token is a fallback for ordinary
-          # updates (it lacks permission to modify files under .github/workflows/).
-          PAT_WORKFLOWS: ${{ secrets.PAT_WORKFLOWS }}
+          # The App token can push to .github/workflows/* (unlike github.token); it's the primary credential.
+          # github.token is a fallback for ordinary updates when the App isn't installed/configured yet.
+          APP_TOKEN: ${{ steps.app_token.outputs.token }}
           DEFAULT_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
@@ -65,10 +74,10 @@ jobs:
             git push -f origin "$BRANCH"
           }
 
-          if [ -n "$PAT_WORKFLOWS" ] && push_with_token "$PAT_WORKFLOWS"; then
-            GH_TOKEN="$PAT_WORKFLOWS"
+          if [ -n "$APP_TOKEN" ] && push_with_token "$APP_TOKEN"; then
+            GH_TOKEN="$APP_TOKEN"
           else
-            echo "::warning::PAT_WORKFLOWS is missing, expired, or invalid; falling back to github.token (this fails if Cruft touched .github/workflows/*)."
+            echo "::warning::GitHub App token missing or push failed; falling back to github.token (this fails if Cruft touched .github/workflows/*)."
             push_with_token "$DEFAULT_TOKEN"
             GH_TOKEN="$DEFAULT_TOKEN"
           fi
