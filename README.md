@@ -291,6 +291,33 @@ Notes:
 - The CI workflow skips if `.cruft.json` is absent.
 - If you maintain a stable template branch (e.g., `v1`), link with `--checkout v1`. You can also update within that line using `cruft update -y --checkout v1`.
 
+### Enabling the CI push (GitHub App, one-time per repo)
+
+The `cruft-update` workflow needs write access to push its update branch and
+open a PR, and `github.token` alone cannot push changes under
+`.github/workflows/*`. Rather than a personal access token (which expires and
+must be rotated), this template uses a GitHub App installation token via
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token).
+The workflow falls back to `github.token` automatically if the App isn't
+configured, but that fallback fails whenever Cruft touches workflow files.
+
+One-time setup (shared across all your repos once the App exists):
+
+1. Create the App (skip if you already have one for this purpose):
+   [github.com/settings/apps/new](https://github.com/settings/apps/new) —
+   Repository permissions: `Contents: Read & write`,
+   `Pull requests: Read & write`, `Workflows: Read & write`. Webhook: inactive.
+2. Generate a private key on the App's settings page and download the `.pem`.
+3. Install the App on this repository (or "All repositories" on your account
+   to cover future repos too).
+4. Set two **repo-level** secrets (GitHub Apps on personal accounts don't
+   support org-wide shared secrets, so this step is repeated per repo):
+
+   ```bash
+   gh secret set APP_ID --repo <owner>/<repo> --body "<app-id>"
+   gh secret set APP_PRIVATE_KEY --repo <owner>/<repo> < /path/to/key.pem
+   ```
+
 ## License
 
 We use a shared copyright model that enables all contributors to maintain the
