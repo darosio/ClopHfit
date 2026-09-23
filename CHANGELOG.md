@@ -3,6 +3,194 @@
 
 # Changelog
 
+## [0.14.0] - 2026-09-23
+
+### 🚀 Features
+
+- Add pH-dependent noise
+- Vectorize pymc and improve NoiseModel adoption
+- *(fitting)* Replace random_walk with per_well/hierarchical x models, fix multi-well ordering bug
+- *(fitting)* Add model_validation, ctr_validation, and diagnostic_plots
+- Model validation with robust residual
+- *(bayes)* Mixture-outlier robustness, residual-refit alignment, data-derived priors (#1383)
+- Detect bad wells with more robust plot
+- *(bayes)* Vectorize the multi-well PyMC K prior
+- *(prtecan)* Accept a Titration InitVar in TitrationResults
+- *(residuals)* Add robust MAD-z outlier flag to residual_statistics (#1395)
+- *(data)* Add mask_steps / mask_label_steps to drop step indices per label (#1396)
+- *(prtecan)* Titration.fit_plate returning TitrationResults with unified .residuals (#1398)
+- *(bayes)* Allow floors to be shared too
+- *(fitting)* Outlier display, robust screening, and ye_mag_parameterization
+- *(prtecan)* Add McmcSpec to carry the sampling decision
+- *(bayes)* Add a separable per-well ye_mag parameterization
+- *(grid)* Own the grid-expansion machinery in the library
+- *(grid)* Let a knob declare the kwarg it is passed as
+- *(cli)* Restore --mcmc multi, wired to the joint fit
+- *(cli)* Offer ODR and the per-well ye_mag knobs
+- *(cli)* Add --print-spec to name and sign a resolved analysis
+- *(outliers)* Screen residuals by a robust median/MAD z-score
+- *(models)* Optional Hill coefficient on the binding model
+- *(cli)* Let --mcmc multi reach the robust and free-K model
+- *(fitting)* Fit a whole plate classically, from the CLI
+- *(fitting)* Canonical residual columns on the plate fitters
+- *(bayes)* Two-stage pH-axis prior via XPrior
+- *(bayes)* Carry the two-stage x prior into the multi-well fit
+- *(fitting)* Buffer estimators over reps and pH, and a pH axis for ye_mag
+- *(prtecan)* Per-label bad-well detection, heterogeneous labels, diagnostics
+- *(prtecan)* Make --plate-fit report like every other fitter
+- *(plate_lm)* Profile-likelihood intervals for K
+- *(plate_lm)* Error-model diagnostics, prediction weighting, FGLS calibration
+- *(plate_lm)* Screen on a calibrated ruler, fit K on the plain one
+- *(prtecan)* Report the buffer's read noise apart from its pooled spread
+- *(prtecan)* Supply the noise floor, and scale it to the plate's Gain
+- *(diagnostics)* Screen wells on the data, before anything is fitted
+- *(prtecan)* Retire bad_wells.csv for a screening that says why
+- *(noise)* Fit one gain and alpha per label across every plate at once
+- *(prtecan)* Judge a dim channel by its curve, not only its level
+- *(diagnostics)* Cut post-fit on sK in pH, not on sK over K
+- *(plate_fit)* Let the Bayesian fit inherit the classical screen's verdict
+- *(plate_fit)* Write the points the screen removed, and fix plot_k without controls
+- *(plate_fit)* Screen the 400 nm channel on fractional deviation
+- *(prtecan)* Judge dimness against the plate, not only the read noise
+- *(cli)* Give each noise term its own mode
+- *(noise)* Fix any subset of the noise terms, and weight the regression
+- *(plate_lm)* Let the iterative calibration hold noise terms
+- *(cli)* Let ppr choose the multi-well fit's latent pH axis
+- *(prtecan)* Report wells whose fitted K is undetermined, after the fit
+- *(fitting)* Bound Kd to 1 mM - 100x the top [Cl], and report non-binders
+- *(fitting)* Residual assumption tests, and a y = x Q-Q reference
+- *(fitting)* Calibrate gain, and optionally the floor, from pooled residuals
+- *(prtecan)* Gain-calibrated fits, a ye_mag on structured noise, residual tests in the export
+- *(fitting)* Heteroskedasticity-robust standard errors for a fitted well
+- *(bayes)* A control group's replicates may differ by a learned sigma_w
+- *(bayes)* --mcmc-x-start-between-learn, and why it is not the default
+- *(enspire)* Fit spectral titrations from named bands, and screen them
+- *(tecan)* Fit a chosen measurement label, not always every one
+
+### 🐛 Bug Fixes
+
+- *(type)* Fix mapping type in assign_error_model for mypy
+- *(bayes)* Assign dims to sigma_obs in hierarchical model to avoid xarray dimension overflow
+- Pymc plotting
+- *(fitting)* Bypass az.summary for x_per_well extraction via xarray
+- *(bayes)* Avoid negative values for floor and gain
+- *(bayes)* Robust noise priors and safe sigma from lmfit stderr
+- *(bayes)* Direct sigma extraction from xarray
+- Model validation with none noise_model and sigma_obs is absent
+- *(bayes)* Random_seed
+- *(bayes)* De-noise x-error pipetting prior in create_x_true
+- Missing cookiecutter sync blind spot
+- *(bayes)* Keep NNLS-zeroed noise terms estimable (#1404)
+- *(docs)* After mini trace odr refit
+- *(prtecan)* Close final-review gaps on titration-config-decoupling
+- *(ctr-loo)* Exclude discarded wells from control holdout enumeration
+- *(prtecan)* Read chloride list files, which never parsed
+- *(models)* Keep the pH form inside double range
+- *(fitting)* Stop clipping the noise variance to 1.0
+- *(types)* Restore green make type on main
+- Three silent losses - the HDI, a label, and a curve
+- *(plate_fit)* Show what the screen discarded, honour --ctr-free-k, report the noise
+- *(prtecan)* Pin the measured noise floor instead of letting it drift
+- *(prtecan)* Pin the structured floor to read noise, not pooled buffer spread
+- *(export)* Let a supplied floor reach the plate noise model
+- *(bayes)* Build the multi noise model over every well's labels
+- *(plate_lm)* Stop the screen deleting the points that pin the plateaus
+- *(plate_lm)* Drop a label too damaged to clean, rather than keep it dirty
+- *(plate_lm)* Make the ratiometric exemption a veto over every screen
+- *(plate_lm)* Screen deficits only, at 0.09
+- *(plate_lm)* Robust solves converge, calibration stops cycling, screen ruler is its own switch
+- Chloride runs survive non-binding controls and plot gaps; ppr sets chains and seed
+- *(residuals)* Standardize robust fits' residuals through their own likelihood
+- *(fitting)* Correct every noise calibration for the degrees of freedom the fit spent
+- *(tests)* MultiFitResult comes from data_structures, not bayes
+- *(enspire)* The anionic band needs a different window for chloride
+
+### 🚜 Refactor
+
+- Split prtecan god module into parsers, models, and titration
+- Extract fitting export logic out of Titration
+- Resolve architecture debt and fix bugs
+- *(tecan)* Migrate all dataset labels to string identifiers
+- Remove redundant ErrorModels
+- Completely remove error_models.py abstraction
+- Simplify Titration._create_data_array via assign_error_model
+- Remove hardcoded Tecan heuristic gain_defaults
+- Add PlateNoiseModel
+- Clean up bayes
+- Consistent use of NoiseModel
+- *(residuals)* Make residuals extraction more robust
+- Add helper for az.compare and correct CTR-LOO
+- ResidualAnalysis
+- *(bayes)* Update to numba default and SamplerConfig
+- *(bayes)* Unify x latent across models; reconcile hierarchical to de-noised prior
+- *(bayes)* Rename multi-well x-error trace variables for consistency
+- *(residuals)* Rename p_outlier_per_point column to p_outlier (#1391)
+- *(bayes)* Drop hierarchical_per_well, default per-well x_start on (#1394)
+- *(residuals)* Drop collect_multi_residuals
+- *(fitting)* Split FitResult.mini into .mini/.trace/.odr, drop generic (#1399)
+- Consolidate plate-level fitting on TitrationResults (#1403)
+- *(tecan)* Accept raw_dir cli param
+- *(prtecan)* Drop the dead cache-reset tuple
+- *(cli)* Retire the no-op --mcmc multi modes
+- *(prtecan)* Pass noise_mode into _structured_noise
+- *(prtecan)* Pass an McmcSpec into the export chain
+- *(prtecan)* Remove sampler vocabulary from TitrationConfig
+- *(bayes)* Warn when per_well_ye_mags is resolved from learn_ye_mags
+- *(prtecan)* Say what the bg_adj condition actually tests
+
+### 📚 Documentation
+
+- Fix y1 to 1 in residual point docstring
+- *(readme)* Add model validation and diagnostics usage examples
+- Consolidate prtecan QC + residual showcases into tutorial (#1387)
+- Add plate-refit consolidation spec and fitresult-backend-fields plan
+- Add plate-refit consolidation implementation plan
+- Parameterize the two-pass noise strategy in the refit plan
+- Add TitrationConfig decoupling spec
+- Add TitrationConfig decoupling implementation plan
+- *(enspire)* Qualify the band ranking with the session that was left out
+- *(enspire)* Record that dropping exc_anionic for exc_neutral loses too
+
+### ⚡ Performance
+
+- Avoid collinearity in fit_noise_model_from_residuals
+- *(plate_lm)* Give the solver derivatives, and a budget it can finish
+- *(enspire)* Make the anionic and 420-emission bands the default pair
+
+### 🎨 Styling
+
+- Normalise suppressions to the current ruff syntax
+
+### 🧪 Testing
+
+- Speed up mcmc multi tests via sub_res trick and explicit tuning
+- Suppress arviz, seaborn, and pymc warnings
+- Fix warning
+- *(fitting)* Stabilize flaky test_fit_binding_pymc_ph on macOS/py3.12 (#1390)
+- *(prtecan)* Close two review gaps on titration-config-decoupling
+- Make `make type` pass again
+
+### 🦾 Build
+
+- *(deps)* Bump pymc from 6.0.0 to 6.3.2
+- *(deps)* Bump odrpack from 0.5.0 to 0.6.1
+- *(deps)* Bump tqdm from 4.67.3 to 4.70.1
+- Add deps to export traces
+- *(deps)* Bump arviz from 1.1.0 to 1.3.0
+- *(deps)* Bump matplotlib from 3.10.9 to 3.11.2
+- *(deps)* Bump scipy from 1.17.1 to 1.18.1
+- *(deps)* Bump pandas from 3.0.3 to 3.0.6
+- *(deps)* Bump corner from 2.2.3 to 2.3.0
+- *(deps)* Bump pyparsing from 3.3.2 to 3.3.3
+
+### 🐙 CI/CD
+
+- Update cruft-update manually
+
+### ◀️ Revert
+
+- *(prtecan)* The read-noise floor is right for label 2 only, not both
+
 ## [0.13.0] - 2026-05-19
 
 ### 🚀 Features
