@@ -48,6 +48,7 @@ from clophfit.fitting.errors import (
     MissingDependencyError,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire.spectral import fit_titrations_spectral
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
@@ -713,7 +714,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the direct bands' scans with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf.")  # fmt: skip
 @click.option("--normalise/--no-normalise", default=True, show_default=True, help="For --method band: divide each band by the tryptophan band (330-342 nm of the 278 nm-excited scan), which measures the protein in the well rather than any titration state.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
@@ -751,6 +752,10 @@ def enspire(  # ruff: ignore[too-many-arguments]
         )
     if method in {"svd", "both"}:
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
+    if method == "global":
+        fit_enspire_global(
+            ef, Path(note_f), Path(out), normalise=normalise, buffer=buffer
+        )
 
 
 @ppr.command(name="enspire-batch")
@@ -893,6 +898,61 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
             f"on {r.n} points, {r.dropped} screened out"
         )
     return fits.table
+
+
+def fit_enspire_global(
+    ef: EnspireFile, note_fp: Path, out_dir: Path, *, normalise: bool, buffer: bool
+) -> pd.DataFrame:
+    """Fit a note's titrations from whole spectra and write the table and species spectra.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the table and the figure go.
+    normalise : bool
+        Divide each well by its tryptophan band.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature, subset).
+    """
+    table, fits = fit_titrations_spectral(
+        ef, Note(note_fp).note, normalise=normalise, buffer=buffer
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
+    if fits:
+        fig, axes = plt.subplots(
+            1,
+            len(fits),
+            figsize=(5.4 * len(fits), 4.0),
+            constrained_layout=True,
+            squeeze=False,
+        )
+        for ax, (title, fit) in zip(axes[0], fits.items(), strict=True):
+            for label, species in fit.species.items():
+                lam = fit.wavelengths[label]
+                ax.plot(lam, species[0], label=f"{label} basic/free")
+                ax.plot(lam, species[1], "--", label=f"{label} acidic/bound")
+            ax.set_title(f"{title}: K {fit.K:.3f} ± {fit.se:.3f}")
+            ax.set_xlabel("wavelength (nm)")
+            ax.legend(fontsize=7)
+        fig.savefig(out_dir / f"{stem}_species.pdf", bbox_inches="tight")
+        plt.close(fig)
+    for r in table[table.subset == "all"].to_dict("records"):
+        print(
+            f"{r['sample']} at {r['temp']}: K {r['K']:.3f} ± {r['se']:.3f} (jackknife) "
+            f"on {r['n']} wells, residual sv ratio {r['sv_ratio']:.1f}"
+        )
+    return table
 
 
 # TODO: Simplify this function
