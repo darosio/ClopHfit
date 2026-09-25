@@ -79,9 +79,13 @@ bump:  ## Bumps version, updates changelog, commits and tags.
 	$(UV) lock; \
 	$(MAKE) ch; \
 	git add -u && git commit -m "chore: release $$NEXT_VERSION"; \
-	git tag -a "$$NEXT_VERSION" -m "Release $$NEXT_VERSION"
-	# git push; \
-	# git push --tags
+	git tag -a "$$NEXT_VERSION" -m "Release $$NEXT_VERSION"; \
+	echo; \
+	echo "Tagged $$NEXT_VERSION. Nothing has been pushed."; \
+	echo "The Release workflow triggers on the tag, and git does not push tags"; \
+	echo "by default, so push both or no release runs:"; \
+	echo; \
+	echo "    git push origin $$(git rev-parse --abbrev-ref HEAD) $$NEXT_VERSION"
 
 
 # Project cleanup
