@@ -4,6 +4,14 @@ The wells get the same corrections as the band readouts of :mod:`clophfit.prensp
 plate rows removed, the buffer spectrum of the same plate column subtracted, each well divided by its
 tryptophan band - so that the two methods differ only in the readout: named windows sharing K there,
 every wavelength of the chosen scans here.
+
+Scored with arslanbaeva's ``scripts/score_readout_arms.py`` metrics on the 25 pH plates it ranks
+(same exclusions; ``scripts/score_spectral_arms.py``): the whole excitation scan with a per-well
+amplitude has the smallest between-session spread of every readout (median 0.10 pH, worst 0.16,
+against 0.14 and 0.22 for the default band pair) at the same replicate-row spread (0.23). Adding the
+420 nm emission scan whole does not help (0.14, worst 0.37), and without the well amplitude it is
+worse (0.21, worst 0.80). Only five constructs are repeated across sessions, so the ranking of the
+excitation scan against the band pair is suggestive, not settled.
 """
 
 from __future__ import annotations
