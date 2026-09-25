@@ -306,6 +306,13 @@ class TitrationConfig:
     bg_mth: str = "mean"
     fit_method: str = "huber"
     outlier: str | None = None
+    acid_scale: bool = False
+    """Free factor on the most acidic step, shared by both labels, in the global fit.
+
+    Both channels lose emission at the last acid addition by a mutant-dependent amount; see
+    :data:`clophfit.fitting.core.ACID_SCALE`. Applies to the two-label global fits (lm/huber,
+    fixed or gain-calibrated noise), not to the single-label or ODR ones.
+    """
     noise_alpha: tuple[float, ...] = ()
     """Proportional noise coefficients per label.
 
@@ -2146,3 +2153,5 @@ class McmcSpec:
     x_start_between_sigma: float | None = None
     ctr_sigma_w_prior: float | None = None
     learn_x_start_between: bool = False
+    acid_scale: bool = False
+    """Per-well factor on the most acidic step, shared by labels (``model="multi"`` only)."""

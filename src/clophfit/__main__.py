@@ -180,6 +180,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
 @click.option("--mcmc-x-start-between-learn", "learn_x_start_between", is_flag=True, default=False, help="For --mcmc-x-error per_well: estimate how far apart the wells' pH axes sit (x_start_between) instead of pinning it, with --mcmc-x-start-between as the prior scale. A well's pH offset shifts its K, so pinning that scale asserts how far two wells' K may sit apart.")  # fmt: skip
 @click.option("--ctr-sigma-w", "ctr_sigma_w", type=float, default=None, help="For --mcmc multi on a pH titration: let each control replicate keep its own K a learned distance from its group's, with this prior SD (pH) on that distance (K_sigma_w). Between --ctr-shared-k, which asserts the replicates agree exactly, and --ctr-free-k, which says nothing about the group; ~0.08 is what the plates show. Unset leaves the model as it was.")  # fmt: skip
+@click.option("--acid-scale", is_flag=True, help="pH titrations: give each well a free factor on its most acidic step, shared by both labels, in the global lm/huber fit and in --mcmc multi. Both channels lose emission at the last acid addition by a mutant-dependent amount (the 400 nm 'turnover'); the factor frees that step's brightness but keeps its label ratio, which still informs K. On the 11 final library plates it improved bench accuracy over the plain fit and over dropping the step (scripts/score_acid_loss.py).")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi and --plate-fit: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
 @click.option("--mcmc-x-error", type=click.Choice(["deterministic", "per_well"], case_sensitive=False), default="deterministic", show_default=True, help="Latent pH axis for --mcmc multi. deterministic is one pipetting walk shared by every well; per_well gives each well its own walk, with step SDs from the measured pH errors (read noise plus accumulated pipetting). pH is measured in a few wells and their spread grows along the titration, so only per_well carries an unmeasured well's pH uncertainty into its K.")  # fmt: skip
 @click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
@@ -240,6 +241,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     ctr_sigma_w: float | None,
     learn_x_start_between: bool,
     mcmc_x_error: str,
+    acid_scale: bool,
     mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
     mcmc_target_accept: float | None,
@@ -404,6 +406,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
             "ctr_free_k": ctr_free_k,
+            "acid_scale": acid_scale,
             "ctr_sigma_w": ctr_sigma_w,
             "learn_x_start_between": learn_x_start_between,
             "x_error_model": mcmc_x_error.lower(),
@@ -428,6 +431,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     tit.params.noise_floor = noise_floor
     tit.params.noise_floor_ref_gain = noise_floor_ref_gain
     tit.params.mask_outliers = mask_outliers
+    tit.params.acid_scale = acid_scale
     tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
 
@@ -500,6 +504,9 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         raise click.ClickException(msg) from e
 
     # Output and export with error handling
+    if acid_scale and mcmc in {"single", "single-refit"}:
+        msg = "--acid-scale is implemented for the global lm/huber fit and --mcmc multi only."
+        raise click.UsageError(msg)
     mcmc_spec = (
         None
         if mcmc == "None"
@@ -524,6 +531,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             ),
             ctr_free_k=ctr_free_k,
             ctr_sigma_w_prior=ctr_sigma_w,
+            acid_scale=acid_scale,
             learn_x_start_between=learn_x_start_between,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
