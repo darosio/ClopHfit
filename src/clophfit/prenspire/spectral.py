@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 from clophfit.fitting.spectral import SpectralFit, fit_spectra_global
-from clophfit.prenspire.bands import DIRECT_BANDS, band_values, blank_rows, classify
+from clophfit.prenspire.bands import band_values, blank_rows, classify
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     from clophfit.prenspire.prenspire import EnspireFile
 
 _MIN_ROW_WELLS = 5
+# The excitation scan alone: on the readout-arm sweep (module docstring) adding the 420 nm emission
+# scan whole widened the between-session spread (median 0.10 -> 0.14 pH, worst 0.16 -> 0.37).
+EXCITATION_SCAN = ("exc_anionic",)
 
 
 def _spectra(
@@ -51,7 +54,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     is_ph: bool,
     normalise: bool,
     buffer_wells: Sequence[str],
-    bands: Sequence[str] = DIRECT_BANDS,
+    bands: Sequence[str] = EXCITATION_SCAN,
 ) -> tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]:
     """Corrected whole spectra of one sample, one entry per scan.
 
@@ -72,7 +75,8 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     buffer_wells : Sequence[str]
         Buffer wells declared by the note; blank rows serve when there are none.
     bands : Sequence[str]
-        Band names (as in :func:`~clophfit.prenspire.bands.classify`) whose scans are used whole.
+        Band names (as in :func:`~clophfit.prenspire.bands.classify`) whose scans are used whole;
+        the default takes the excitation scan only.
 
     Returns
     -------
@@ -129,7 +133,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     buffer: bool = True,
     well_scale: bool = True,
     fit_hill: bool = False,
-    bands: Sequence[str] = DIRECT_BANDS,
+    bands: Sequence[str] = EXCITATION_SCAN,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
 
@@ -148,7 +152,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     fit_hill : bool
         Also fit the Hill slope.
     bands : Sequence[str]
-        Band names whose scans are used whole (default: the scans of the direct bands).
+        Band names whose scans are used whole (default: the excitation scan only).
 
     Returns
     -------
