@@ -12,6 +12,11 @@ against 0.14 and 0.22 for the default band pair) at the same replicate-row sprea
 420 nm emission scan whole does not help (0.14, worst 0.37), and without the well amplitude it is
 worse (0.21, worst 0.80). Only five constructs are repeated across sessions, so the ranking of the
 excitation scan against the band pair is suggestive, not settled.
+
+The tryptophan reference (330-342 nm of the 278 nm-excited scan) does not depend on pH (Spearman
+rho 0.02 and -0.06 on G10) and neither causes nor removes the acid-side amplitude drop; it scatters
+by 15-30 % between wells, more than the fitted amplitudes do (about 5 %), so with ``well_scale`` it
+adds noise without changing K (7.972 against 7.970 unnormalised on G10).
 """
 
 from __future__ import annotations

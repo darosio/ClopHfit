@@ -115,3 +115,30 @@ def test_enspire_g10_agrees_with_bands() -> None:
         assert se > 0
     assert set(fits) == {"NTT-G10 20.0", "NTT-G10 37.0"}
     assert {"row D", "row E", "row F"} <= set(table.subset)
+
+
+def test_acid_state_recovers_second_pk_and_rejects_ligand() -> None:
+    """A dimmer acid state below the main transition is recovered with its own pK."""
+    rng = np.random.default_rng(8)
+    x = np.tile(np.linspace(4.0, 9.5, 12), 2)
+    e0 = np.exp(-0.5 * ((LAM - 488) / 12) ** 2)
+    e1 = 0.4 * np.exp(-0.5 * ((LAM - 420) / 15) ** 2)
+    ln10 = np.log(10.0)
+    logs = np.column_stack([
+        np.zeros_like(x),
+        (7.5 - x) * ln10,
+        (7.5 - x + 5.0 - x) * ln10,
+    ])
+    frac = np.exp(logs - np.log(np.exp(logs).sum(axis=1, keepdims=True)))
+    y = (
+        np.outer(e0, frac[:, 0])
+        + np.outer(e1, frac[:, 1])
+        + np.outer(0.3 * e1, frac[:, 2])
+    )
+    y += rng.normal(0, 0.003, y.shape)
+    fit = fit_spectra_global(x, {"exc": (LAM, y)}, acid_state=True, jackknife=False)
+    assert pytest.approx(7.5, abs=0.05) == fit.K
+    assert fit.k_acid == pytest.approx(5.0, abs=0.15)
+    assert fit.species["exc"].shape == (3, LAM.size)
+    with pytest.raises(ValueError, match="pH titrations only"):
+        fit_spectra_global(x, {"exc": (LAM, y)}, is_ph=False, acid_state=True)

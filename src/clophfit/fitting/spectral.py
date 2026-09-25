@@ -22,6 +22,17 @@ Neighbouring wavelengths of one spectrum share their errors (pipetting, lamp and
 the whole spectrum), so the covariance from the Jacobian treats far too many points as independent.
 The standard error reported is therefore the delete-one-well jackknife, with the naive value kept
 for comparison.
+
+The species spectra are not principal components: for each trial K the fractions C(K) are fixed and
+E is the ordinary least-squares solution of Y = C E (with the per-well amplitude, alternating with
+it). SVD enters only as a diagnostic, on the residual matrix.
+
+``acid_state`` adds a third state with its own pK below K. On the IBF plates it is not supported:
+the well amplitudes are low (median 0.90) in each plate's most acidic column whatever its pH (5.1-5.8),
+while on ten-column plates pH 5.4 and 4.7 are not dim; only below pH ~4.5 do they collapse
+(denaturation). That points to the last titration step rather than a protonation equilibrium, so the
+default stays two states with a per-well amplitude, which keeps K within 0.02 pH (median) of the fit
+without that column and limits the shift on a denatured plate to 0.13 pH (1.34 without it).
 """
 
 from __future__ import annotations
@@ -31,6 +42,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.special import logsumexp
 
 from clophfit.fitting.models import binding_1site
 
@@ -40,9 +52,10 @@ if TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF
 
 _GRID_POINTS = 61
+_DELTA_MIN, _DELTA_MAX = 0.3, 6.0
 _WEIGHT_PASSES = 3
-_ALSO_ITERATIONS = 50
-_ALSO_TOL = 1e-7
+_AMPLITUDE_ITERATIONS = 50
+_AMPLITUDE_TOL = 1e-7
 
 
 @dataclass(frozen=True)
@@ -59,10 +72,13 @@ class SpectralFit:
         Standard error from the Jacobian, treating every wavelength as independent (too small).
     hill : float
         Hill slope (1 unless fitted).
+    k_acid, se_acid : float
+        pK2 of the acid state and its jackknife error (nan without ``acid_state``).
     species : dict[str, ArrayF]
-        Per label, the two species spectra, shape (2, n_lambda), in the order of
+        Per label, the species spectra, shape (n_states, n_lambda), in the order of
         :func:`~clophfit.fitting.models.binding_1site`'s S0 and S1: for pH the deprotonated
-        (basic) then the protonated (acidic) state; for a ligand the free then the bound state.
+        (basic) then the protonated (acidic) state, then the acid state if fitted; for a ligand the
+        free then the bound state.
     wavelengths : dict[str, ArrayF]
         Per label, the wavelengths used.
     rms : dict[str, float]
@@ -80,6 +96,8 @@ class SpectralFit:
     se: float
     se_naive: float
     hill: float
+    k_acid: float
+    se_acid: float
     species: dict[str, ArrayF]
     wavelengths: dict[str, ArrayF]
     rms: dict[str, float]
@@ -88,33 +106,54 @@ class SpectralFit:
     well_scale: ArrayF
 
 
-def _fractions(x: ArrayF, k: float, hill: float, *, is_ph: bool) -> ArrayF:
-    f = np.asarray(
-        binding_1site(x, k, 0.0, 1.0, is_ph=is_ph, hill=hill), dtype=np.float64
+def _fractions(x: ArrayF, theta: ArrayF, model: _Model, *, is_ph: bool) -> ArrayF:
+    """Fraction of each state per well: columns S0, S1 (and the acid state).
+
+    ``theta`` is ``[K, (delta), (hill)]``. With an acid state the titration is sequential and
+    diprotic: deprotonated <-> protonated (pK1 = K, Hill slope) <-> acid state (pK2 = K - delta).
+    """
+    k = float(theta[0])
+    hill = float(theta[-1]) if model.fit_hill else 1.0
+    if not model.acid_state:
+        f = np.asarray(
+            binding_1site(x, k, 0.0, 1.0, is_ph=is_ph, hill=hill), dtype=np.float64
+        )
+        return np.column_stack([1.0 - f, f])
+    k2 = k - float(theta[1])
+    ln10 = np.log(10.0)
+    logs = np.column_stack([
+        np.zeros_like(x),
+        hill * (k - x) * ln10,
+        (hill * (k - x) + (k2 - x)) * ln10,
+    ])
+    return np.asarray(
+        np.exp(logs - logsumexp(logs, axis=1, keepdims=True)), dtype=np.float64
     )
-    return np.column_stack([1.0 - f, f])
 
 
-def _project(  # ruff: ignore[too-many-arguments]
-    x: ArrayF,
+@dataclass(frozen=True)
+class _Model:
+    acid_state: bool
+    fit_hill: bool
+    well_scale: bool
+
+
+def _project(
+    c: ArrayF,
     spectra: Sequence[ArrayF],
-    k: float,
-    hill: float,
     *,
-    is_ph: bool,
     well_scale: bool = False,
     sigma: Sequence[float] | None = None,
 ) -> tuple[list[ArrayF], list[ArrayF], ArrayF]:
-    """Species spectra and residuals per label, and the well scales, at fixed K and Hill slope.
+    """Species spectra and residuals per label, and the well scales, at fixed state fractions ``c``.
 
     Without ``well_scale`` the species spectra are one linear least-squares solve. With it, each
     well also gets an amplitude s_w (the protein amount actually in the well, mean 1) shared by all
     labels; the model ``s_w C_w E`` is then bilinear and is solved by alternating least squares.
     """
-    c = _fractions(x, k, hill, is_ph=is_ph)
     w = np.ones(len(spectra)) if sigma is None else 1 / np.asarray(sigma) ** 2
-    scale = np.ones(x.size)
-    for _ in range(_ALSO_ITERATIONS if well_scale else 1):
+    scale = np.ones(c.shape[0])
+    for _ in range(_AMPLITUDE_ITERATIONS if well_scale else 1):
         cs = c * scale[:, None]
         species = [np.linalg.lstsq(cs, y.T, rcond=None)[0] for y in spectra]
         if not well_scale:
@@ -127,7 +166,7 @@ def _project(  # ruff: ignore[too-many-arguments]
         den = sum(wj * np.sum(m * m, axis=1) for wj, m in zip(w, model, strict=True))
         new = np.asarray(num / den, dtype=np.float64)
         new /= new.mean()
-        converged = np.max(np.abs(new - scale)) < _ALSO_TOL
+        converged = np.max(np.abs(new - scale)) < _AMPLITUDE_TOL
         scale = new
         if converged:
             break
@@ -144,64 +183,63 @@ def _k_bounds(x: ArrayF, *, is_ph: bool) -> tuple[float, float]:
     return float(positive.min() / 10), float(x.max() * 10)
 
 
-def _solve(  # ruff: ignore[too-many-arguments]
+def _solve(
     x: ArrayF,
     spectra: Sequence[ArrayF],
+    model: _Model,
     *,
     is_ph: bool,
-    fit_hill: bool,
-    well_scale: bool,
-    k0: float | None = None,
-) -> tuple[float, float, float, list[float]]:
-    """Best K (and Hill slope), its naive standard error, and the per-label weights used."""
+    theta0: ArrayF | None = None,
+) -> tuple[ArrayF, float, list[float]]:
+    """Best ``theta``, the naive standard error of K, and the per-label weights used."""
     lo, hi = _k_bounds(x, is_ph=is_ph)
     grid = (
         np.linspace(lo, hi, _GRID_POINTS)
         if is_ph
         else np.geomspace(lo, hi, _GRID_POINTS)
     )
+    lower, upper, start = [lo], [hi], [float(np.median(grid))]
+    if model.acid_state:
+        lower, upper, start = [*lower, _DELTA_MIN], [*upper, _DELTA_MAX], [*start, 1.5]
+    if model.fit_hill:
+        lower, upper, start = [*lower, 0.2], [*upper, 5.0], [*start, 1.0]
+    theta = np.asarray(theta0 if theta0 is not None else start, dtype=np.float64)
     sigma = [1.0] * len(spectra)
-    k, hill, se = k0 if k0 is not None else float(np.median(grid)), 1.0, np.nan
+    se = np.nan
+    n_par = (
+        len(spectra) * (3 if model.acid_state else 2)
+        + theta.size
+        + (x.size - 1 if model.well_scale else 0)
+    )
     for _ in range(_WEIGHT_PASSES):
 
-        def resid(theta: ArrayF, s: list[float] = sigma) -> ArrayF:
-            h = float(theta[1]) if fit_hill else 1.0
-            _, res, _ = _project(
-                x,
-                spectra,
-                float(theta[0]),
-                h,
-                is_ph=is_ph,
-                well_scale=well_scale,
-                sigma=s,
-            )
+        def resid(th: ArrayF, s: list[float] = sigma) -> ArrayF:
+            c = _fractions(x, th, model, is_ph=is_ph)
+            _, res, _ = _project(c, spectra, well_scale=model.well_scale, sigma=s)
             return np.concatenate([
                 (r / sj).ravel() for r, sj in zip(res, s, strict=True)
             ])
 
-        if k0 is None:
-            ssr = [float(np.sum(resid(np.array([g, 1.0])) ** 2)) for g in grid]
-            k = float(grid[int(np.argmin(ssr))])
-        theta0 = np.array([k, hill]) if fit_hill else np.array([k])
-        bounds = ([lo, 0.2], [hi, 5.0]) if fit_hill else ([lo], [hi])
-        fit = least_squares(resid, theta0, bounds=bounds, x_scale="jac")
-        k = float(fit.x[0])
-        hill = float(fit.x[1]) if fit_hill else 1.0
-        _, res, _ = _project(
-            x, spectra, k, hill, is_ph=is_ph, well_scale=well_scale, sigma=sigma
-        )
-        n_par = (
-            2 * len(spectra)
-            + (2 if fit_hill else 1)
-            + (x.size - 1 if well_scale else 0)
-        )
+        if theta0 is None:
+            trial = theta.copy()
+            ssr = []
+            for g in grid:
+                trial[0] = g
+                ssr.append(float(np.sum(resid(trial) ** 2)))
+            theta[0] = grid[int(np.argmin(ssr))]
+        fit = least_squares(resid, theta, bounds=(lower, upper), x_scale="jac")
+        theta = np.asarray(fit.x, dtype=np.float64)
+        c = _fractions(x, theta, model, is_ph=is_ph)
+        _, res, _ = _project(c, spectra, well_scale=model.well_scale, sigma=sigma)
         sigma = [float(np.sqrt(np.sum(r**2) / max(r.size - n_par, 1))) for r in res]
         jac = np.asarray(fit.jac, dtype=np.float64)
-        jtj = jac.T @ jac
-        dof = max(fit.fun.size - n_par, 1)
-        cov = np.linalg.pinv(jtj) * float(np.sum(fit.fun**2)) / dof
+        cov = (
+            np.linalg.pinv(jac.T @ jac)
+            * float(np.sum(fit.fun**2))
+            / max(fit.fun.size - n_par, 1)
+        )
         se = float(np.sqrt(cov[0, 0]))
-    return k, hill, se, sigma
+    return theta, se, sigma
 
 
 def fit_spectra_global(  # ruff: ignore[too-many-arguments]
@@ -211,6 +249,7 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     is_ph: bool = True,
     fit_hill: bool = False,
     well_scale: bool = False,
+    acid_state: bool = False,
     jackknife: bool = True,
 ) -> SpectralFit:
     """Fit K to whole spectra of one or more labels, species spectra eliminated linearly.
@@ -231,6 +270,11 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         Give each well a free amplitude shared by its labels (protein amount, mean 1). Use it when
         the spectra are not normalised to a protein reference, or to absorb what is left of the
         well-to-well amount error after normalisation.
+    acid_state : bool
+        Add a third state below the main transition (pH titrations only): sequential
+        deprotonated <-> protonated <-> acid state with pK2 < K, its spectrum solved like the
+        others. It models a change of brightness or colour at the acid end that a two-state
+        model can only push into the well amplitudes (see the module notes on the IBF plates).
     jackknife : bool
         Compute the delete-one-well jackknife standard error (one refit per well).
 
@@ -242,8 +286,12 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     Raises
     ------
     ValueError
-        With fewer than four wells or no usable wavelength.
+        With fewer than four wells, no usable wavelength, or an acid state on a ligand titration.
     """
+    if acid_state and not is_ph:
+        msg = "the acid state is defined for pH titrations only"
+        raise ValueError(msg)
+    model = _Model(acid_state=acid_state, fit_hill=fit_hill, well_scale=well_scale)
     xa = np.asarray(x, dtype=np.float64)
     if xa.size < 4:  # ruff: ignore[magic-value-comparison]
         msg = "a global spectral fit needs at least four wells"
@@ -259,34 +307,34 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     if not ys:
         msg = "no wavelength is finite in every well"
         raise ValueError(msg)
-    k, hill, se_naive, sigma = _solve(
-        xa, ys, is_ph=is_ph, fit_hill=fit_hill, well_scale=well_scale
-    )
-    species, res, scale = _project(
-        xa, ys, k, hill, is_ph=is_ph, well_scale=well_scale, sigma=sigma
-    )
+    theta, se_naive, sigma = _solve(xa, ys, model, is_ph=is_ph)
+    c = _fractions(xa, theta, model, is_ph=is_ph)
+    species, res, scale = _project(c, ys, well_scale=well_scale, sigma=sigma)
     weighted = np.hstack([r / s for r, s in zip(res, sigma, strict=True)])
-    se = np.nan
+    se = se_acid = np.nan
     if jackknife:
-        ks = []
+        thetas = []
         for i in range(xa.size):
             keep = np.arange(xa.size) != i
-            ki, *_ = _solve(
-                xa[keep],
-                [y[:, keep] for y in ys],
-                is_ph=is_ph,
-                fit_hill=fit_hill,
-                well_scale=well_scale,
-                k0=k,
+            ti, *_ = _solve(
+                xa[keep], [y[:, keep] for y in ys], model, is_ph=is_ph, theta0=theta
             )
-            ks.append(ki)
-        kj = np.asarray(ks)
-        se = float(np.sqrt((kj.size - 1) / kj.size * np.sum((kj - kj.mean()) ** 2)))
+            thetas.append(ti)
+        tj = np.asarray(thetas)
+        k1 = tj[:, 0]
+        se = float(np.sqrt((k1.size - 1) / k1.size * np.sum((k1 - k1.mean()) ** 2)))
+        if acid_state:
+            k2 = tj[:, 0] - tj[:, 1]
+            se_acid = float(
+                np.sqrt((k2.size - 1) / k2.size * np.sum((k2 - k2.mean()) ** 2))
+            )
     return SpectralFit(
-        K=k,
+        K=float(theta[0]),
         se=se,
         se_naive=se_naive,
-        hill=hill,
+        hill=float(theta[-1]) if fit_hill else 1.0,
+        k_acid=float(theta[0] - theta[1]) if acid_state else np.nan,
+        se_acid=se_acid,
         species=dict(zip(labels, species, strict=True)),
         wavelengths=dict(zip(labels, lams, strict=True)),
         rms=dict(zip(labels, sigma, strict=True)),
