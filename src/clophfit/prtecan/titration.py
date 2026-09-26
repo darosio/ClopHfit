@@ -145,7 +145,7 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold
         range, 40% by more than 0.2), so monotonicity says nothing there. That
         turnover is real but not a 400 nm feature: both channels lose emission
         at the last acid addition, by an amount that depends on the mutant
-        (``scripts/tecan_acid_turnover.py``). It shows at 400 nm because that
+        (arslanbaeva's ``scripts/tecan_acid_turnover.py``). It shows at 400 nm because that
         channel is bright in acid; without the last step only 20% of wells turn
         over by more than 0.05. At 485 nm the same loss steepens a curve that
         already falls toward acid, so a real titration stays monotone there
@@ -1242,7 +1242,7 @@ class Titration(TecanfilesGroup):
                     # Under --acid-scale the fit models that step, so label 1 gets
                     # the exemption too, judged without it: on the 11 library plates
                     # this keeps 16 of 95 dropped label-1 channels
-                    # (scripts/count_label1_recovery.py).
+                    # (arslanbaeva's scripts/count_label1_recovery.py).
                     turnover_limit=(
                         None
                         if str(label) == str(label_ids[0]) and not acid_exempt
