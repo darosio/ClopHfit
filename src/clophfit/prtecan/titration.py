@@ -139,9 +139,16 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold
         Multiples of *floor* the masked mean must reach.
     turnover_limit : float | None
         Largest turnover a dim channel may show and still count as informative.
-        ``None`` disables the exemption, which is right for label 1: its acid
-        turnover is a real feature of the fluorophore in roughly 60% of wells,
-        so monotonicity says nothing there.
+        ``None`` disables the exemption, which is right for label 1: its curve
+        turns over at the acid end in most wells (65% by more than 0.05 of its
+        range, 40% by more than 0.2), so monotonicity says nothing there. That
+        turnover is real but not a 400 nm feature: both channels lose emission
+        at the last acid addition, by an amount that depends on the mutant
+        (``scripts/tecan_acid_turnover.py``). It shows at 400 nm because that
+        channel is bright in acid; without the last step only 20% of wells turn
+        over by more than 0.05. At 485 nm the same loss steepens a curve that
+        already falls toward acid, so a real titration stays monotone there
+        (0.9% of wells turn over by more than 0.2).
     amplitude : float | None
         This label's own swing, for the plate comparison below.
     plate_amplitude : float | None
@@ -1217,8 +1224,11 @@ class Titration(TecanfilesGroup):
                     bg_multiplier=bg_multiplier,
                     amplitude=own,
                     plate_amplitude=plate_amplitude.get(label),
-                    # Label 1 turns over in acid for real, so it gets no
-                    # exemption; a dim label 2 that is still monotone does.
+                    # Label 1 turns over at the acid end - the loss of emission at
+                    # the last acid addition, which the 400 nm channel shows because
+                    # it is bright there - so monotonicity cannot vouch for it and it
+                    # gets no exemption. The same loss keeps label 2 monotone (it falls
+                    # toward acid anyway), so a dim label 2 that still is gets one.
                     turnover_limit=(
                         None if str(label) == str(label_ids[0]) else monotone_turnover
                     ),
