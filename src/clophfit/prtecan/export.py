@@ -824,6 +824,7 @@ def fit_single_mcmc(
             robust=spec.robust,
             ctr_free_k=spec.ctr_free_k,
             ctr_sigma_w_prior=spec.ctr_sigma_w_prior,
+            acid_scale=spec.acid_scale,
             noise=(
                 _structured_noise(
                     titration,
@@ -1633,6 +1634,7 @@ def _gain_calibrated_single_fit(
         method="huber" if method == "huber" else "lm",
         fit_floor=fit_noise == "floor-gain",
         remove_outliers=titration.params.outlier,
+        acid_scale=getattr(titration.params, "acid_scale", False),
     )
     _write_gain_calibration(cal, outfit / "noise_single_history.csv")
     if not cal.converged:
@@ -1683,6 +1685,7 @@ def export_fit(
             method=method,
             reweight=reweight,
             remove_outliers=titration.params.outlier,
+            acid_scale=getattr(titration.params, "acid_scale", False),
         )
     else:
         global_res = _gain_calibrated_single_fit(

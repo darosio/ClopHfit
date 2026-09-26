@@ -48,6 +48,7 @@ from clophfit.fitting.errors import (
     MissingDependencyError,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire.spectral import fit_titrations_spectral
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
@@ -179,6 +180,7 @@ def ppr(ctx: Context, verbose: int, quiet: bool, out: str) -> None:  # pragma: n
 @click.option("--student-t-nu", default=3.0, show_default=True, type=float, help="Student-t degrees of freedom for --mcmc-robust. Lower is heavier-tailed; pass 0 to infer nu (support above 2).")  # fmt: skip
 @click.option("--mcmc-x-start-between-learn", "learn_x_start_between", is_flag=True, default=False, help="For --mcmc-x-error per_well: estimate how far apart the wells' pH axes sit (x_start_between) instead of pinning it, with --mcmc-x-start-between as the prior scale. A well's pH offset shifts its K, so pinning that scale asserts how far two wells' K may sit apart.")  # fmt: skip
 @click.option("--ctr-sigma-w", "ctr_sigma_w", type=float, default=None, help="For --mcmc multi on a pH titration: let each control replicate keep its own K a learned distance from its group's, with this prior SD (pH) on that distance (K_sigma_w). Between --ctr-shared-k, which asserts the replicates agree exactly, and --ctr-free-k, which says nothing about the group; ~0.08 is what the plates show. Unset leaves the model as it was.")  # fmt: skip
+@click.option("--acid-scale", is_flag=True, help="pH titrations: give each well a free factor on its most acidic step, shared by both labels, in the global lm/huber fit and in --mcmc multi. Both channels lose emission at the last acid addition by a mutant-dependent amount (the 400 nm 'turnover'); the factor frees that step's brightness but keeps its label ratio, which still informs K. On the 11 final library plates it improved bench accuracy over the plain fit and over dropping the step (arslanbaeva's scripts/score_acid_loss.py).")  # fmt: skip
 @click.option("--ctr-free-k/--ctr-shared-k", "ctr_free_k", default=False, show_default=True, help="For --mcmc multi and --plate-fit: fit every well its own K rather than pooling each control group onto a shared one. Pooling buys no accuracy at the construct level and narrows the stated interval, and library wells have no group to pool with.")  # fmt: skip
 @click.option("--mcmc-x-error", type=click.Choice(["deterministic", "per_well"], case_sensitive=False), default="deterministic", show_default=True, help="Latent pH axis for --mcmc multi. deterministic is one pipetting walk shared by every well; per_well gives each well its own walk, with step SDs from the measured pH errors (read noise plus accumulated pipetting). pH is measured in a few wells and their spread grows along the titration, so only per_well carries an unmeasured well's pH uncertainty into its K.")  # fmt: skip
 @click.option("--mcmc-x-start-between", type=float, default=None, help="For --mcmc-x-error per_well: prior SD of each well's pH offset at the first step. It passes straight into K's interval, so set it to the measured well-to-well spread at the first step. Unset keeps the library default.")  # fmt: skip
@@ -239,6 +241,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     ctr_sigma_w: float | None,
     learn_x_start_between: bool,
     mcmc_x_error: str,
+    acid_scale: bool,
     mcmc_x_start_between: float | None,
     mcmc_tune: int | None,
     mcmc_target_accept: float | None,
@@ -403,6 +406,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             "mcmc_robust": mcmc_robust,
             "student_t_nu": student_t_nu if mcmc_robust else None,
             "ctr_free_k": ctr_free_k,
+            "acid_scale": acid_scale,
             "ctr_sigma_w": ctr_sigma_w,
             "learn_x_start_between": learn_x_start_between,
             "x_error_model": mcmc_x_error.lower(),
@@ -427,6 +431,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
     tit.params.noise_floor = noise_floor
     tit.params.noise_floor_ref_gain = noise_floor_ref_gain
     tit.params.mask_outliers = mask_outliers
+    tit.params.acid_scale = acid_scale
     tit.params.outlier_threshold = outlier_threshold
     logger.info("%s", tit.params)
 
@@ -499,6 +504,9 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
         raise click.ClickException(msg) from e
 
     # Output and export with error handling
+    if acid_scale and mcmc in {"single", "single-refit"}:
+        msg = "--acid-scale is implemented for the global lm/huber fit and --mcmc multi only."
+        raise click.UsageError(msg)
     mcmc_spec = (
         None
         if mcmc == "None"
@@ -523,6 +531,7 @@ def tecan(  # ruff: ignore[complex-structure, too-many-branches, too-many-argume
             ),
             ctr_free_k=ctr_free_k,
             ctr_sigma_w_prior=ctr_sigma_w,
+            acid_scale=acid_scale,
             learn_x_start_between=learn_x_start_between,
             structured_noise=mcmc_noise == "structured",
             per_well_ye_mags=per_well_ye_mags,
@@ -713,7 +722,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf.")  # fmt: skip
 @click.option("--normalise/--no-normalise", default=True, show_default=True, help="For --method band: divide each band by the tryptophan band (330-342 nm of the 278 nm-excited scan), which measures the protein in the well rather than any titration state.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
@@ -751,6 +760,10 @@ def enspire(  # ruff: ignore[too-many-arguments]
         )
     if method in {"svd", "both"}:
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
+    if method == "global":
+        fit_enspire_global(
+            ef, Path(note_f), Path(out), normalise=normalise, buffer=buffer
+        )
 
 
 @ppr.command(name="enspire-batch")
@@ -893,6 +906,61 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
             f"on {r.n} points, {r.dropped} screened out"
         )
     return fits.table
+
+
+def fit_enspire_global(
+    ef: EnspireFile, note_fp: Path, out_dir: Path, *, normalise: bool, buffer: bool
+) -> pd.DataFrame:
+    """Fit a note's titrations from whole spectra and write the table and species spectra.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the table and the figure go.
+    normalise : bool
+        Divide each well by its tryptophan band.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature, subset).
+    """
+    table, fits = fit_titrations_spectral(
+        ef, Note(note_fp).note, normalise=normalise, buffer=buffer
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
+    if fits:
+        fig, axes = plt.subplots(
+            1,
+            len(fits),
+            figsize=(5.4 * len(fits), 4.0),
+            constrained_layout=True,
+            squeeze=False,
+        )
+        for ax, (title, fit) in zip(axes[0], fits.items(), strict=True):
+            for label, species in fit.species.items():
+                lam = fit.wavelengths[label]
+                ax.plot(lam, species[0], label=f"{label} basic/free")
+                ax.plot(lam, species[1], "--", label=f"{label} acidic/bound")
+            ax.set_title(f"{title}: K {fit.K:.3f} ± {fit.se:.3f}")
+            ax.set_xlabel("wavelength (nm)")
+            ax.legend(fontsize=7)
+        fig.savefig(out_dir / f"{stem}_species.pdf", bbox_inches="tight")
+        plt.close(fig)
+    for r in table[table.subset == "all"].to_dict("records"):
+        print(
+            f"{r['sample']} at {r['temp']}: K {r['K']:.3f} ± {r['se']:.3f} (jackknife) "
+            f"on {r['n']} wells, residual sv ratio {r['sv_ratio']:.1f}"
+        )
+    return table
 
 
 # TODO: Simplify this function
