@@ -16,6 +16,7 @@ from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.core import ACID_SCALE, fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.models import binding_1site
+from clophfit.fitting.residual_tests import well_leverage
 from clophfit.prtecan import PlateScheme
 
 TECAN = Path(__file__).parent / "Tecan"
@@ -165,3 +166,34 @@ def test_cli_flag_reaches_spec_and_is_refused_for_single_mcmc(tmp_path: Path) ->
     )
     assert res.exit_code != 0
     assert "--acid-scale" in res.output
+
+
+def test_residual_table_applies_acid_factor() -> None:
+    """Residuals of an acid-scaled fit use the scaled prediction on the acid step."""
+    ds = _dimmed(7.3, 0.8, 4)
+    plain = fit_binding_glob(ds).residual_table(well="A01")
+    scaled = fit_binding_glob(ds, acid_scale=True).residual_table(well="A01")
+    assert "acid_step" not in plain.columns
+    acid = scaled[scaled["acid_step"]]
+    assert set(acid["step"]) == {X.size - 1}
+    assert len(acid) == 2  # one row per label
+    # the fitted factor absorbs the loss: acid-step residuals shrink
+    plain_acid = plain[plain["step"] == X.size - 1]
+    assert acid["std_res"].abs().max() < plain_acid["std_res"].abs().max()
+
+
+def test_acid_factor_raises_acid_step_leverage() -> None:
+    """With the factor as a parameter, the acid rows' leverage goes up."""
+    ds = _dimmed(7.3, 0.8, 5)
+    fits = {
+        "plain": fit_binding_glob(ds),
+        "acid": fit_binding_glob(ds, acid_scale=True),
+    }
+    lev = {}
+    for name, fr in fits.items():
+        assert fr.result is not None
+        table = fr.residual_table(well="A01")
+        params = {"A01": {k: float(v.value) for k, v in fr.result.params.items()}}
+        h = well_leverage(table, params, is_ph=True)
+        lev[name] = float(h[table["step"] == X.size - 1].mean())
+    assert lev["acid"] > lev["plain"]

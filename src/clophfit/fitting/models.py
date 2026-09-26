@@ -79,6 +79,33 @@ def kd_bounds(x_max: float) -> tuple[float, float]:
 
 
 # fmt: off
+# Name of the optional factor on the most acidic step of a pH titration, shared by
+# every label of a well (see ``fit_binding_glob(acid_scale=True)``). At the last acid
+# addition of a Tecan plate both channels fall below the two-state curve by an amount
+# that depends on the mutant; the factor frees that step's brightness while its label
+# ratio still informs K.
+ACID_SCALE = "acid_scale"
+
+
+def acid_step(x_nominal: ArrayF) -> int:
+    """Index of the most acidic step: the smallest nominal pH of the full titration.
+
+    Taken on the unmasked x so that a masked acid point never moves the factor onto
+    the next step.
+
+    Parameters
+    ----------
+    x_nominal : ArrayF
+        The titration's x values, all steps.
+
+    Returns
+    -------
+    int
+        Position of the smallest x.
+    """
+    return int(np.argmin(np.asarray(x_nominal, dtype=float)))
+
+
 @typing.overload
 def binding_1site(
     x: float, K: float, S0: float, S1: float, *, is_ph: bool = False, hill: float = 1.0  # ruff: ignore[invalid-argument-name]

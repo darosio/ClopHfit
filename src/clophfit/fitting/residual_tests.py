@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import ACID_SCALE, binding_1site
 from clophfit.fitting.utils import bonferroni_threshold, studentized_scores
 
 if TYPE_CHECKING:
@@ -308,7 +308,9 @@ def _well_design(
     g : pd.DataFrame
         The well's residual rows (both labels): ``label``, ``x``, ``raw_res``, ``sigma``.
     params : Mapping[str, float]
-        ``K`` and ``S0_<label>``/``S1_<label>`` for the labels present.
+        ``K`` and ``S0_<label>``/``S1_<label>`` for the labels present, and
+        ``acid_scale`` when the fit had the acid-step factor (applied to the rows
+        whose ``acid_step`` column is true).
     is_ph : bool
         pH titration (else concentration).
 
@@ -323,6 +325,15 @@ def _well_design(
     x = g["x"].to_numpy(dtype=float)
     lab = g["label"].astype(str).to_numpy()
     w = 1.0 / g["sigma"].to_numpy(dtype=float)
+    # A fit with the acid-step factor spends one more parameter, shared by the
+    # labels' acid rows; leaving it out would understate their leverage.
+    acid = (
+        g["acid_step"].to_numpy(dtype=bool)
+        if ACID_SCALE in params and "acid_step" in g
+        else np.zeros(x.size, dtype=bool)
+    )
+    if acid.any():
+        names.append(ACID_SCALE)
 
     def predict(values: Mapping[str, float]) -> np.ndarray:
         out = np.empty_like(x)
@@ -331,6 +342,8 @@ def _well_design(
             out[m] = binding_1site(
                 x[m], values["K"], values[f"S0_{lbl}"], values[f"S1_{lbl}"], is_ph=is_ph
             )
+        if acid.any():
+            out[acid] *= values[ACID_SCALE]
         return out
 
     base = {n: float(params[n]) for n in names}

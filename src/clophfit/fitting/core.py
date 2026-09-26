@@ -61,7 +61,7 @@ from matplotlib import figure
 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.models import binding_1site, kd_bounds
+from clophfit.fitting.models import ACID_SCALE, binding_1site, kd_bounds
 from clophfit.fitting.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -101,14 +101,6 @@ logger = logging.getLogger(__name__)
 
 
 # ---- Helpers ----
-
-# Name of the optional factor on the most acidic step, shared by every label of a
-# well. At the last acid addition of a Tecan pH titration both channels fall below
-# the two-state curve (the 400 nm label by a median 11 %, the 485 nm label too where
-# it keeps signal), by an amount that depends on the mutant. A free factor on that
-# step keeps the step's label ratio, which still informs K, while releasing its
-# brightness; see scripts/score_acid_loss.py.
-ACID_SCALE = "acid_scale"
 
 
 def _acid_point(ds: Dataset) -> float:
