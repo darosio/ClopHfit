@@ -18,6 +18,7 @@ from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.residual_tests import well_leverage
 from clophfit.prtecan import PlateScheme
+from clophfit.prtecan.titration import label_is_uninformative
 
 TECAN = Path(__file__).parent / "Tecan"
 X = np.array([9.0, 8.4, 7.8, 7.1, 6.5, 5.9, 5.0])
@@ -197,3 +198,38 @@ def test_acid_factor_raises_acid_step_leverage() -> None:
         h = well_leverage(table, params, is_ph=True)
         lev[name] = float(h[table["step"] == X.size - 1].mean())
     assert lev["acid"] > lev["plain"]
+
+
+class TestLabel1AcidExemption:
+    """Under --acid-scale, a dim label 1 is judged monotone without its acid step."""
+
+    X = np.array([8.97, 8.28, 7.53, 6.97, 6.19, 5.62, 4.99])
+    FLOOR = 2.0
+    # rises toward acid as a 400 nm channel does, then loses emission at the last step
+    ACID_DROP = np.array([1.0, 2.0, 4.0, 6.0, 7.0, 7.5, 5.0])
+    # turns over well before the acid step: noise-shaped whatever the last point does
+    INTERIOR = np.array([1.0, 6.0, 7.5, 5.0, 3.0, 2.5, 2.0])
+
+    @staticmethod
+    def _uninformative(
+        x: np.ndarray, y: np.ndarray, *, limit: float | None, ignore: bool
+    ) -> bool:
+        return label_is_uninformative(
+            x,
+            y,
+            y,
+            floor=2.0,
+            bg_multiplier=3.0,
+            turnover_limit=limit,
+            ignore_acid_step=ignore,
+        )
+
+    def test_acid_drop_alone_no_longer_fails_the_channel(self) -> None:
+        """The loss at the last step is what the acid factor models, so the channel is kept."""
+        assert self._uninformative(self.X, self.ACID_DROP, limit=None, ignore=False)
+        assert self._uninformative(self.X, self.ACID_DROP, limit=0.2, ignore=False)
+        assert not self._uninformative(self.X, self.ACID_DROP, limit=0.2, ignore=True)
+
+    def test_interior_turnover_still_fails(self) -> None:
+        """Leaving out the acid step does not excuse a curve that turns over earlier."""
+        assert self._uninformative(self.X, self.INTERIOR, limit=0.2, ignore=True)

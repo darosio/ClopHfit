@@ -34,7 +34,7 @@ from clophfit.fitting.model_validation import (
     RESIDUAL_TABLE_COLUMNS,
     residuals_from_fit_results,
 )
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import acid_step, binding_1site
 from clophfit.fitting.noise_calibration import (
     _noise_params_converged,
     _plate_noise_model_from_nnls,
@@ -112,6 +112,7 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold
     amplitude: float | None = None,
     plate_amplitude: float | None = None,
     plate_amplitude_ratio: float = _MIN_PLATE_AMPLITUDE_RATIO,
+    ignore_acid_step: bool = False,
 ) -> bool:
     """Whether one label of one well carries no usable titration.
 
@@ -159,6 +160,11 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold
     plate_amplitude_ratio : float
         Fraction of the plate median below which a label is dim.
 
+    ignore_acid_step : bool
+        Leave the most acidic point out of the shape test (the brightness test
+        still sees every point). For label 1 under ``--acid-scale``, whose acid
+        turnover is the loss of emission the fit now models.
+
     Returns
     -------
     bool
@@ -180,6 +186,9 @@ def label_is_uninformative(  # ruff: ignore[too-many-arguments] - each threshold
     # Monotone is not enough: a drift smaller than the read noise is a random
     # walk, not a titration. L8 H11 swings 6.2 counts against a floor of 1.0 and
     # fits K; L4 G12 swings 3.2 against a floor of 4.0 and does not.
+    if ignore_acid_step and len(x) > _MIN_TITRATION_POINTS:
+        keep = np.arange(len(x)) != acid_step(x)
+        x, y_raw = np.asarray(x)[keep], np.asarray(y_raw)[keep]
     finite = y_raw[~np.isnan(y_raw)]
     if len(finite) < _MIN_TITRATION_POINTS:
         return True
@@ -1192,6 +1201,7 @@ class Titration(TecanfilesGroup):
             # 400 nm channel is dim by construction, so condemning the well for
             # it would throw away usable titrations.
             failed_labels: set[str] = set()
+            acid_exempt = self.is_ph and bool(getattr(self.params, "acid_scale", False))
             for label in label_ids:
                 ds = self.create_ds(well, label)
                 if outlier_threshold is not None:
@@ -1229,9 +1239,16 @@ class Titration(TecanfilesGroup):
                     # it is bright there - so monotonicity cannot vouch for it and it
                     # gets no exemption. The same loss keeps label 2 monotone (it falls
                     # toward acid anyway), so a dim label 2 that still is gets one.
+                    # Under --acid-scale the fit models that step, so label 1 gets
+                    # the exemption too, judged without it: on the 11 library plates
+                    # this keeps 16 of 95 dropped label-1 channels
+                    # (scripts/count_label1_recovery.py).
                     turnover_limit=(
-                        None if str(label) == str(label_ids[0]) else monotone_turnover
+                        None
+                        if str(label) == str(label_ids[0]) and not acid_exempt
+                        else monotone_turnover
                     ),
+                    ignore_acid_step=str(label) == str(label_ids[0]) and acid_exempt,
                 ):
                     failed_labels.add(str(label))
 
