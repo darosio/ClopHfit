@@ -6,8 +6,8 @@ Each assumption has a picture that shows it failing and a test that measures it:
 Assumption              What failure looks like          Test
 ======================  ===============================  ===============================
 Homoscedasticity        funnel / fan against prediction  Breusch-Pagan (Koenker), White
-Independence            waves along the titration        Durbin-Watson, lag-1 r
-Normality               curved QQ, skewed histogram      Shapiro-Wilk, Kolmogorov-Smirnov
+Independence            waves along the titration        Durbin-Watson, lag-1 r, runs
+Normality               curved QQ, skewed histogram      Shapiro-Wilk, KS, Anderson-Darling
 No outliers             isolated extreme points          externally studentized t, PRESS
 ======================  ===============================  ===============================
 
@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from clophfit.fitting.models import binding_1site
+from clophfit.fitting.models import ACID_SCALE, binding_1site
 from clophfit.fitting.utils import bonferroni_threshold, studentized_scores
 
 if TYPE_CHECKING:
@@ -53,6 +53,8 @@ __all__ = [
     "normality_tests",
     "press_statistics",
     "residual_tests",
+    "runs_test",
+    "runs_test_null",
     "studentized_outliers",
     "well_leverage",
     "white_test",
@@ -222,7 +224,7 @@ def durbin_watson(table: pd.DataFrame, *, z_col: str = "std_res") -> dict[str, f
 def normality_tests(
     z: np.ndarray, *, n_mc: int = 999, seed: int = 0
 ) -> dict[str, float]:
-    """Shapiro-Wilk, Kolmogorov-Smirnov against N(0, 1), and Lilliefors.
+    """Shapiro-Wilk, Kolmogorov-Smirnov against N(0, 1), Lilliefors and Anderson-Darling.
 
     * Shapiro-Wilk ``W`` measures shape only; it is the most powerful of the
       three, so on hundreds of points it rejects small departures - read W.
@@ -231,25 +233,39 @@ def normality_tests(
     * Lilliefors is KS with location and scale estimated, p by Monte Carlo
       (``scipy.stats.goodness_of_fit``): shape only, like Shapiro-Wilk, but
       weighted towards the centre rather than the tails.
+    * Anderson-Darling, also with location and scale estimated and p by Monte
+      Carlo: shape only, weighted towards the tails, where a Student-t or
+      mixture likelihood is meant to differ from the Normal.
 
     Parameters
     ----------
     z : np.ndarray
         Standardised residuals.
     n_mc : int
-        Monte Carlo samples for the Lilliefors p-value.
+        Monte Carlo samples for the Lilliefors and Anderson-Darling p-values.
     seed : int
         Seed for those samples, so a report is reproducible.
 
     Returns
     -------
     dict[str, float]
-        ``sw_w``, ``sw_p``, ``ks_n01_d``, ``ks_n01_p``, ``lillie_d``, ``lillie_p``.
+        ``sw_w``, ``sw_p``, ``ks_n01_d``, ``ks_n01_p``, ``lillie_d``, ``lillie_p``,
+        ``ad_a2``, ``ad_p``.
     """
     v = np.asarray(z, dtype=float)
     v = v[np.isfinite(v)]
     out = dict.fromkeys(
-        ["sw_w", "sw_p", "ks_n01_d", "ks_n01_p", "lillie_d", "lillie_p"], np.nan
+        [
+            "sw_w",
+            "sw_p",
+            "ks_n01_d",
+            "ks_n01_p",
+            "lillie_d",
+            "lillie_p",
+            "ad_a2",
+            "ad_p",
+        ],
+        np.nan,
     )
     if v.size < _MIN_POINTS:
         return out
@@ -262,6 +278,13 @@ def normality_tests(
         n_mc_samples=n_mc,
         rng=np.random.default_rng(seed),
     )
+    ad = stats.goodness_of_fit(
+        stats.norm,
+        v,
+        statistic="ad",
+        n_mc_samples=n_mc,
+        rng=np.random.default_rng(seed),
+    )
     out.update(
         sw_w=float(sw.statistic),
         sw_p=float(sw.pvalue),
@@ -269,6 +292,8 @@ def normality_tests(
         ks_n01_p=float(ks.pvalue),
         lillie_d=float(lil.statistic),
         lillie_p=float(lil.pvalue),
+        ad_a2=float(ad.statistic),
+        ad_p=float(ad.pvalue),
     )
     return out
 
@@ -283,7 +308,9 @@ def _well_design(
     g : pd.DataFrame
         The well's residual rows (both labels): ``label``, ``x``, ``raw_res``, ``sigma``.
     params : Mapping[str, float]
-        ``K`` and ``S0_<label>``/``S1_<label>`` for the labels present.
+        ``K`` and ``S0_<label>``/``S1_<label>`` for the labels present, and
+        ``acid_scale`` when the fit had the acid-step factor (applied to the rows
+        whose ``acid_step`` column is true).
     is_ph : bool
         pH titration (else concentration).
 
@@ -298,6 +325,15 @@ def _well_design(
     x = g["x"].to_numpy(dtype=float)
     lab = g["label"].astype(str).to_numpy()
     w = 1.0 / g["sigma"].to_numpy(dtype=float)
+    # A fit with the acid-step factor spends one more parameter, shared by the
+    # labels' acid rows; leaving it out would understate their leverage.
+    acid = (
+        g["acid_step"].to_numpy(dtype=bool)
+        if ACID_SCALE in params and "acid_step" in g
+        else np.zeros(x.size, dtype=bool)
+    )
+    if acid.any():
+        names.append(ACID_SCALE)
 
     def predict(values: Mapping[str, float]) -> np.ndarray:
         out = np.empty_like(x)
@@ -306,6 +342,8 @@ def _well_design(
             out[m] = binding_1site(
                 x[m], values["K"], values[f"S0_{lbl}"], values[f"S1_{lbl}"], is_ph=is_ph
             )
+        if acid.any():
+            out[acid] *= values[ACID_SCALE]
         return out
 
     base = {n: float(params[n]) for n in names}
@@ -451,6 +489,171 @@ def durbin_watson_null(
             "lag1_expected": float(v[2] / np.sqrt(v[3] * v[4]))
             if v[3] * v[4] > 0
             else np.nan,
+        }
+        for lbl, v in acc.items()
+    }
+    return pd.DataFrame.from_dict(rows, orient="index").rename_axis("label")
+
+
+def _runs_moments(e: np.ndarray) -> tuple[float, float, float]:
+    """Observed runs of signs and their Wald-Wolfowitz mean and variance.
+
+    Parameters
+    ----------
+    e : np.ndarray
+        One series of residuals in order; zeros carry no sign and are dropped.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        Runs, expected runs and variance, given the counts of each sign.
+    """
+    s = np.sign(e[np.isfinite(e) & (e != 0)])
+    n_pos, n_neg = float(np.sum(s > 0)), float(np.sum(s < 0))
+    n = n_pos + n_neg
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    runs = 1.0 + float(np.sum(s[1:] != s[:-1]))
+    if n_pos == 0 or n_neg == 0:
+        return runs, 1.0, 0.0
+    two = 2.0 * n_pos * n_neg
+    return runs, two / n + 1.0, two * (two - n) / (n**2 * (n - 1.0))
+
+
+def runs_test(table: pd.DataFrame, *, z_col: str = "std_res") -> dict[str, float]:
+    """Wald-Wolfowitz runs test on residual signs, pooled within series.
+
+    A run is a stretch of residuals with one sign along a (well, label) series.
+    Too few runs means neighbouring steps share their error, which is the wave
+    Durbin-Watson also detects. The runs test uses signs only, so a few large
+    residuals, which dominate DW's sums of squares, cannot drive it. It suits
+    Student-t and mixture fits, where such points are expected. Runs, their
+    expectations and variances (conditional on each series' sign counts) are
+    summed over series, so short titrations still pool into a usable test.
+    Like DW, the textbook null assumes independent *errors*. Fitted residuals
+    alternate more, so a correct fit shows *more* runs than
+    ``runs_expected``. Use :func:`runs_test_null` for the fitted-residual null.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Residual table with ``well``, ``label``, ``step`` (or ``x``) and *z_col*.
+    z_col : str
+        The residual column.
+
+    Returns
+    -------
+    dict[str, float]
+        ``runs`` (observed), ``runs_expected`` and ``runs_z`` under independent
+        errors, ``runs_p`` (two-sided, normal approximation) and ``n_series``.
+
+    Examples
+    --------
+    Twenty series that each change sign once have 40 runs, far fewer than
+    independent signs would give:
+
+    >>> import pandas as pd
+    >>> rows = [
+    ...     {"well": w, "label": "1", "step": i, "std_res": 1.0 if i < 4 else -1.0}
+    ...     for w in range(20)
+    ...     for i in range(8)
+    ... ]
+    >>> out = runs_test(pd.DataFrame(rows))
+    >>> out["runs"], out["runs_p"] < 1e-6
+    (40.0, True)
+    """
+    order = "step" if "step" in table else "x"
+    runs = mean = var = 0.0
+    n_series = 0
+    for _, g in table.groupby(["well", "label"], sort=False):
+        e = g.sort_values(order)[z_col].to_numpy(dtype=float)
+        r, m, v = _runs_moments(e)
+        if m == 0:
+            continue
+        runs, mean, var, n_series = runs + r, mean + m, var + v, n_series + 1
+    if var <= 0:
+        return {
+            "runs": runs,
+            "runs_expected": mean,
+            "runs_z": np.nan,
+            "runs_p": np.nan,
+            "n_series": float(n_series),
+        }
+    z = (runs - mean) / np.sqrt(var)
+    return {
+        "runs": runs,
+        "runs_expected": mean,
+        "runs_z": float(z),
+        "runs_p": float(2 * stats.norm.sf(abs(z))),
+        "n_series": float(n_series),
+    }
+
+
+def runs_test_null(
+    table: pd.DataFrame,
+    params: Mapping[str, Mapping[str, float]],
+    *,
+    is_ph: bool = True,
+    n_mc: int = 999,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Distribution of the pooled runs count for *fitted* residuals, per label.
+
+    With independent, calibrated errors, a least-squares fit leaves weighted
+    residuals ``e = (I - H) u`` with ``u ~ N(0, I)`` and ``H`` the hat matrix of
+    the well's weighted Jacobian (both labels, one shared K), as in
+    :func:`durbin_watson_null`. The runs count of that projection has no closed
+    form, so it is simulated. Each Monte Carlo draw projects fresh noise
+    through every well and sums the runs per label, which gives the null
+    distribution of the statistic :func:`runs_test` reports.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Residual table with ``well``, ``label``, ``step`` (or ``x``), ``x``,
+        ``raw_res`` and ``sigma``.
+    params : Mapping[str, Mapping[str, float]]
+        Well to fitted ``K``/``S0_<label>``/``S1_<label>``.
+    is_ph : bool
+        pH titration (else concentration).
+    n_mc : int
+        Monte Carlo draws.
+    seed : int
+        Seed for the draws.
+
+    Returns
+    -------
+    pd.DataFrame
+        Indexed by label: ``runs_expected_fit`` and ``runs_sd_fit`` (mean and SD
+        of the simulated pooled runs), and ``runs_null`` (the simulated counts,
+        as an array, for the p-value in :func:`residual_tests`).
+    """
+    order = "step" if "step" in table else "x"
+    t = table.assign(label=table["label"].astype(str))
+    finite = np.isfinite(t["raw_res"].to_numpy(float)) & np.isfinite(
+        t["sigma"].to_numpy(float)
+    )
+    t = t[finite].sort_values(["well", "label", order])
+    rng = np.random.default_rng(seed)
+    acc: dict[str, np.ndarray] = {}
+    for well, g in t.groupby("well", sort=False):
+        p = params.get(str(well))
+        lin = None if p is None else _well_linearised(g, p, is_ph=is_ph)
+        if lin is None:
+            continue
+        q, _ = np.linalg.qr(lin[3])
+        u = rng.standard_normal((len(g), n_mc))
+        e = u - q @ (q.T @ u)
+        lab = g["label"].to_numpy()
+        for lbl in dict.fromkeys(lab):
+            sign = np.sign(e[lab == lbl])
+            runs = 1.0 + np.sum(sign[1:] != sign[:-1], axis=0)
+            acc[lbl] = acc.get(lbl, np.zeros(n_mc)) + runs
+    rows = {
+        lbl: {
+            "runs_expected_fit": float(v.mean()),
+            "runs_sd_fit": float(v.std(ddof=1)),
+            "runs_null": v,
         }
         for lbl, v in acc.items()
     }
@@ -643,6 +846,32 @@ def _press_summary(parts: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def _runs_fit_columns(observed: float, null: Mapping[str, Any]) -> dict[str, float]:
+    """Compare an observed pooled runs count with its simulated fitted-residual null.
+
+    Parameters
+    ----------
+    observed : float
+        Pooled runs from :func:`runs_test`.
+    null : Mapping[str, Any]
+        One label's row of :func:`runs_test_null`.
+
+    Returns
+    -------
+    dict[str, float]
+        ``runs_expected_fit``, ``runs_sd_fit`` and ``runs_p_fit``, the two-sided
+        Monte Carlo p-value ``(1 + #{|R* - m| >= |R - m|}) / (1 + n_mc)``.
+    """
+    sim = np.asarray(null["runs_null"], dtype=float)
+    m = float(null["runs_expected_fit"])
+    extreme = int(np.sum(np.abs(sim - m) >= abs(observed - m)))
+    return {
+        "runs_expected_fit": m,
+        "runs_sd_fit": float(null["runs_sd_fit"]),
+        "runs_p_fit": (1.0 + extreme) / (1.0 + sim.size),
+    }
+
+
 def residual_tests(
     table: pd.DataFrame,
     params: Mapping[str, Mapping[str, float]] | None = None,
@@ -664,7 +893,8 @@ def residual_tests(
     is_ph : bool
         pH titration (else concentration).
     n_mc : int
-        Monte Carlo samples for the Lilliefors p-value.
+        Monte Carlo samples for the Lilliefors and Anderson-Darling p-values
+        and the fitted-residual runs null.
     seed : int
         Seed for those samples.
 
@@ -674,8 +904,11 @@ def residual_tests(
         Indexed by label. Columns: ``n``; ``bp_r2``/``bp_p`` and
         ``white_r2``/``white_p`` (homoscedasticity); ``dw``, ``dw_expected``,
         ``lag1_r``, ``dw_p``, and with *params* the fitted-residual nulls
-        ``dw_expected_fit`` and ``lag1_expected`` (independence); ``sw_w``, ``sw_p``, ``ks_n01_d``,
-        ``ks_n01_p``, ``lillie_d``, ``lillie_p`` (normality); ``t_max``,
+        ``dw_expected_fit`` and ``lag1_expected``; ``runs``, ``runs_expected``,
+        ``runs_z``, ``runs_p``, and with *params* ``runs_expected_fit``,
+        ``runs_sd_fit`` and the Monte Carlo ``runs_p_fit`` (independence);
+        ``sw_w``, ``sw_p``, ``ks_n01_d``, ``ks_n01_p``, ``lillie_d``,
+        ``lillie_p``, ``ad_a2``, ``ad_p`` (normality); ``t_max``,
         ``outlier_rate``, ``wells_with_outlier`` (studentized outliers);
         ``press``, ``press_rms``, ``press_ratio``, ``max_leverage`` (PRESS).
     """
@@ -685,6 +918,13 @@ def residual_tests(
     press = _press_parts(t, params, is_ph=is_ph) if params else None
     dw_null: dict[Any, dict[Any, Any]] = (
         durbin_watson_null(t, params, is_ph=is_ph).to_dict(orient="index")
+        if params
+        else {}
+    )
+    runs_null: dict[Any, dict[Any, Any]] = (
+        runs_test_null(t, params, is_ph=is_ph, n_mc=n_mc, seed=seed).to_dict(
+            orient="index"
+        )
         if params
         else {}
     )
@@ -708,6 +948,10 @@ def residual_tests(
             "dw_p": dw["p"],
         }
         row |= {str(k): float(v) for k, v in dw_null.get(str(lbl), {}).items()}
+        runs = runs_test(g)
+        row |= {k: v for k, v in runs.items() if k != "n_series"}
+        if str(lbl) in runs_null:
+            row |= _runs_fit_columns(runs["runs"], runs_null[str(lbl)])
         row |= normality_tests(z, n_mc=n_mc, seed=seed)
         if stud is not None and press is not None:
             s = stud.loc[g.index]

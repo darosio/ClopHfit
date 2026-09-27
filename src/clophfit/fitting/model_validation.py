@@ -19,6 +19,7 @@ import pandas as pd
 import xarray as xr
 from scipy import stats as sp_stats
 
+from clophfit.fitting.models import ACID_SCALE, acid_step
 from clophfit.fitting.residuals import (
     BIAS_P_VALUE_THRESHOLD,
     DW_LOWER_BOUND,
@@ -1826,6 +1827,55 @@ def _outlier_probability_for_label_well(
     )
 
 
+def _prediction(  # ruff: ignore[too-many-arguments]
+    binding_function: _t.Callable[..., ArrayLike],
+    da: _t.Any,
+    pars: _t.Any,
+    lbl: str,
+    step: np.ndarray,
+    *,
+    is_ph: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Model prediction for one label, with the acid-step factor when the fit has one.
+
+    Parameters
+    ----------
+    binding_function : _t.Callable[..., ArrayLike]
+        Two-state model.
+    da : _t.Any
+        The label's ``DataArray``; ``xc`` is its unmasked x.
+    pars : _t.Any
+        Fitted lmfit parameters.
+    lbl : str
+        Label name.
+    step : np.ndarray
+        Raw step index of each kept point.
+    is_ph : bool
+        pH titration (else concentration).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``yhat`` for the kept points and the mask of those on the acid step.
+    """
+    x = np.asarray(da.x, dtype=float)
+    yhat = np.asarray(
+        binding_function(
+            x,
+            pars["K"].value,
+            pars[f"S0_{lbl}"].value,
+            pars[f"S1_{lbl}"].value,
+            is_ph=is_ph,
+        ),
+        dtype=float,
+    )
+    acid_rows = np.zeros(x.size, dtype=bool)
+    if ACID_SCALE in pars:
+        acid_rows = step[: x.size] == acid_step(np.asarray(da.xc, dtype=float))
+        yhat = np.where(acid_rows, yhat * float(pars[ACID_SCALE].value), yhat)
+    return yhat, acid_rows
+
+
 def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
     multi: _t.Any,
     trace_id: str,
@@ -1876,12 +1926,8 @@ def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
             else:
                 y = np.asarray(da.y, dtype=float)
 
-            yhat = binding_function(
-                x,
-                pars["K"].value,
-                pars[f"S0_{lbl}"].value,
-                pars[f"S1_{lbl}"].value,
-                is_ph=ds.is_ph,
+            yhat, acid_rows = _prediction(
+                binding_function, da, pars, str(lbl), step, is_ph=ds.is_ph
             )
             sigma = _sigma_for_label_well(multi.trace, lbl, str(well), da, mask)
             p_outlier = _outlier_probability_for_label_well(
@@ -1924,6 +1970,8 @@ def residuals_from_multifit(  # ruff: ignore[too-many-arguments]
                     "is_residual_outlier": bool(outlier[j]),
                     "outlier_threshold": float(outlier_threshold),
                 }
+                if ACID_SCALE in pars:
+                    row["acid_step"] = bool(acid_rows[j])
                 if include_fit_params:
                     row["K"] = float(pars["K"].value)
                     row[f"S0_{lbl}"] = float(pars[f"S0_{lbl}"].value)
@@ -2000,12 +2048,8 @@ def residuals_from_fit_results(  # ruff: ignore[too-many-arguments]
             step = np.flatnonzero(mask)
             x = np.asarray(da.x, dtype=float)
             y = np.asarray(da.y, dtype=float)
-            yhat = binding_function(
-                x,
-                pars["K"].value,
-                pars[f"S0_{lbl}"].value,
-                pars[f"S1_{lbl}"].value,
-                is_ph=ds.is_ph,
+            yhat, acid_rows = _prediction(
+                binding_function, da, pars, str(lbl), step, is_ph=ds.is_ph
             )
             if hasattr(da, "y_err") and np.asarray(da.y_err).size == len(y):
                 sigma = np.asarray(da.y_err, dtype=float)
@@ -2057,6 +2101,8 @@ def residuals_from_fit_results(  # ruff: ignore[too-many-arguments]
                     "is_residual_outlier": bool(outlier[j]),
                     "outlier_threshold": float(outlier_threshold),
                 }
+                if ACID_SCALE in pars:
+                    row["acid_step"] = bool(acid_rows[j])
                 if include_fit_params:
                     row["K"] = float(pars["K"].value)
                     row[f"S0_{lbl}"] = float(pars[f"S0_{lbl}"].value)

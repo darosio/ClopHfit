@@ -61,7 +61,7 @@ from matplotlib import figure
 
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import InsufficientDataError
-from clophfit.fitting.models import binding_1site, kd_bounds
+from clophfit.fitting.models import ACID_SCALE, binding_1site, kd_bounds
 from clophfit.fitting.plotting import (
     COLOR_MAP,
     PlotParameters,
@@ -103,6 +103,11 @@ logger = logging.getLogger(__name__)
 # ---- Helpers ----
 
 
+def _acid_point(ds: Dataset) -> float:
+    """Most acidic nominal x of the dataset (the step the acid factor multiplies)."""
+    return float(min(np.min(da.xc) for da in ds.values()))
+
+
 def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     """Compute concatenated residuals for multiple datasets for lmfit.
 
@@ -114,6 +119,7 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
     # Pre-allocate lists for better performance
     residuals_list: list[ArrayF] = []
 
+    acid = _acid_point(ds) if ACID_SCALE in params else None
     for lbl, da in ds.items():
         # Get parameter values once per label
         S0 = params[f"S0_{lbl}"].value  # ruff: ignore[non-lowercase-variable-in-function]
@@ -121,6 +127,8 @@ def _binding_1site_residuals(params: Parameters, ds: Dataset) -> ArrayF:
 
         # Compute model and residuals in one go
         model = binding_1site(da.x, K, S0, S1, is_ph=is_ph)
+        if acid is not None:
+            model = np.where(da.x == acid, model * params[ACID_SCALE].value, model)
         weight = 1 / da.y_err if da.y_err.size > 0 else np.ones_like(da.y)
         residuals_list.append(weight * (da.y - model))
 
@@ -217,24 +225,46 @@ def _raw_residuals_by_label(ds: Dataset, params: Parameters) -> dict[str, ArrayF
     from the assumed ``y_err``.
     """
     k = params["K"].value
-    return {
-        lbl: da.y
-        - binding_1site(
+    acid = _acid_point(ds) if ACID_SCALE in params else None
+    out: dict[str, ArrayF] = {}
+    for lbl, da in ds.items():
+        model = binding_1site(
             da.x,
             k,
             params[f"S0_{lbl}"].value,
             params[f"S1_{lbl}"].value,
             is_ph=ds.is_ph,
         )
-        for lbl, da in ds.items()
-    }
+        if acid is not None:
+            model = np.where(da.x == acid, model * params[ACID_SCALE].value, model)
+        out[lbl] = da.y - model
+    return out
 
 
-def _build_params_1site(ds: Dataset) -> Parameters:
+def _build_params_1site(ds: Dataset, *, acid_scale: bool = False) -> lmfit.Parameters:
     """Initialize lmfit Parameters for a 1-site model from a Dataset.
 
-    Optimized version with reduced list operations and vectorized computations.
+    Parameters
+    ----------
+    ds : Dataset
+        Labels to fit with one shared K.
+    acid_scale : bool
+        Also add :data:`ACID_SCALE`, the factor on the most acidic step
+        (start 1, bounded to 0.2-2).
+
+    Returns
+    -------
+    lmfit.Parameters
+        K, a plateau pair per label, and the acid factor when requested.
+
+    Raises
+    ------
+    ValueError
+        If *acid_scale* is requested for a ligand titration.
     """
+    if acid_scale and not ds.is_ph:
+        msg = "acid_scale applies to pH titrations only"
+        raise ValueError(msg)
     params = Parameters()
     if ds.is_ph:
         params.add("K", min=3, max=11)
@@ -254,6 +284,8 @@ def _build_params_1site(ds: Dataset) -> Parameters:
         k_initial_guesses[i] = da.x[halfway_idx]
 
     params["K"].value = np.mean(k_initial_guesses)
+    if acid_scale:
+        params.add(ACID_SCALE, value=1.0, min=0.2, max=2.0)
     return params
 
 
@@ -473,6 +505,7 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
     max_iter: int = 15,
     tol: float = 0.01,
     scale_covar: bool = True,
+    acid_scale: bool = False,
 ) -> FitResult:
     r"""Analyze multi-label titration datasets and visualize the results.
 
@@ -515,6 +548,10 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
         the improvement drops below this value.  Default is 0.01.
     scale_covar : bool, optional
         Whether to scale the covariance matrix.  Default is ``True``.
+    acid_scale : bool, optional
+        pH titrations: multiply every label's model at the most acidic step by
+        one free factor (:data:`ACID_SCALE`), for the loss of emission at the
+        last acid addition. Default is ``False``.
 
     Returns
     -------
@@ -537,7 +574,7 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
     weight = 1/y_err.  This is appropriate for heteroscedastic data where
     different observations have different uncertainties.
     """
-    params = _build_params_1site(ds)
+    params = _build_params_1site(ds, acid_scale=acid_scale)
     total_len = sum(len(da.y) for da in ds.values())
     if len(params) > total_len:
         msg = "Not enough data points for the number of parameters."
@@ -563,7 +600,7 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
 
             mini = Minimizer(
                 _binding_1site_residuals,
-                _build_params_1site(ds_working),
+                _build_params_1site(ds_working, acid_scale=acid_scale),
                 fcn_args=(ds_working,),
                 scale_covar=scale_covar,
             )
@@ -583,7 +620,7 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
         ds_filtered = copy.deepcopy(ds_working)
         ds_filtered.apply_mask(combined_mask)
         ds_working = ds_filtered
-        params = _build_params_1site(ds_working)
+        params = _build_params_1site(ds_working, acid_scale=acid_scale)
         mini = Minimizer(
             _binding_1site_residuals,
             params,
@@ -607,6 +644,7 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
 # ---- Public API ----
 
 __all__ = [
+    "ACID_SCALE",
     # Helpers
     "_binding_1site_residuals",
     "_build_params_1site",

@@ -3257,6 +3257,8 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
     ] = "centered",
     learn_hill: bool = False,
     hill_prior_sigma: float = 0.2,
+    acid_scale: bool = False,
+    acid_scale_sigma: float = 0.3,
     well_noise_scale: bool = False,
     shared_well_noise_scale: bool = False,
     label_noise_scale_sigma: float = 0.3,
@@ -3327,6 +3329,14 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         Width of the ``LogNormal(0, sigma)`` prior on that coefficient. The
         default keeps 95% of its mass between about 0.68 and 1.48, so the data
         must pull it off 1.
+    acid_scale : bool
+        pH titrations: give every well a factor on its most acidic step, shared by
+        all labels (``acid_scale ~ LogNormal(0, acid_scale_sigma)``, dims ``well``),
+        for the loss of emission at the last acid addition. The size of that loss
+        depends on the mutant, so the factor is per well; the step's label ratio
+        still informs K. ``False`` reproduces the plain model exactly.
+    acid_scale_sigma : float
+        Log-scale prior SD of that factor.
     well_noise_scale : bool
         Enable a per-well multiplicative noise scale.
     shared_well_noise_scale : bool
@@ -3829,6 +3839,18 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             msg = "At least one dataset is required."
             raise ValueError(msg)
         is_ph = first_ds.is_ph
+        acid_factor: typing.Any = None
+        if acid_scale:
+            if not is_ph:
+                msg = "acid_scale applies to pH titrations only"
+                raise ValueError(msg)
+            acid_row = int(np.argmin(np.asarray(xc, dtype=float)))
+            acid = pm.LogNormal(
+                "acid_scale", mu=0.0, sigma=float(acid_scale_sigma), dims="well"
+            )
+            row = np.zeros((n_steps, 1))
+            row[acid_row] = 1.0
+            acid_factor = 1.0 + as_tensor_variable(row) * (acid[None, :] - 1.0)
         for lbl in labels:
             mask_lbl, y_obs_full, y_err_full = _masked_obs_err_matrices(
                 fit_results, wells_list, lbl, n_steps
@@ -3837,6 +3859,8 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
             y_model_all = binding_1site(
                 x_w_all, k_all, s0_vars[lbl], s1_vars[lbl], is_ph=is_ph, hill=hill_n
             )
+            if acid_factor is not None:
+                y_model_all *= acid_factor
             mu_vec = y_model_all[mask_lbl]
             y_obs_vec = y_obs_full[mask_lbl]
 

@@ -21,6 +21,8 @@ from clophfit.fitting.residual_tests import (
     normality_tests,
     press_statistics,
     residual_tests,
+    runs_test,
+    runs_test_null,
     studentized_outliers,
     well_leverage,
     white_test,
@@ -152,6 +154,8 @@ def test_normality_separates_heavy_tails_from_gaussian() -> None:
     assert gauss["lillie_p"] > 0.01
     assert heavy["sw_p"] < 1e-6
     assert heavy["lillie_p"] < 0.01
+    assert gauss["ad_p"] > 0.01
+    assert heavy["ad_p"] < 0.01
 
 
 def test_ks_against_n01_sees_scale_that_lilliefors_ignores() -> None:
@@ -202,6 +206,11 @@ def test_residual_tests_reports_every_family_per_label() -> None:
         "lag1_expected",
         "sw_w",
         "lillie_p",
+        "ad_p",
+        "runs",
+        "runs_p",
+        "runs_expected_fit",
+        "runs_p_fit",
         "t_max",
         "outlier_rate",
         "press_ratio",
@@ -212,3 +221,51 @@ def test_residual_tests_reports_every_family_per_label() -> None:
     assert bare["dw"].notna().all()
     assert "press_ratio" not in bare or bare["press_ratio"].isna().all()
     assert "dw_expected_fit" not in bare
+    assert bare["runs_p"].notna().all()
+    assert "runs_p_fit" not in bare
+
+
+def test_runs_test_sees_a_wave_and_passes_independent_errors() -> None:
+    """Independent errors match the textbook runs null; a wave has far too few runs."""
+    iid, _ = _plate(n_wells=200, seed=10)
+    wave, _ = _plate(n_wells=200, seed=10, ar=0.8)
+    ok = runs_test(iid)
+    bad = runs_test(wave)
+    assert ok["runs_p"] > 0.01
+    assert ok["n_series"] == 400
+    assert bad["runs"] < bad["runs_expected"]
+    assert bad["runs_p"] < 1e-10
+
+
+def test_runs_test_ignores_heavy_tails() -> None:
+    """Student-t(2) errors, which inflate DW's sums of squares, leave the sign runs calibrated."""
+    heavy, _ = _plate(n_wells=200, seed=11, noise="t2")
+    assert runs_test(heavy)["runs_p"] > 0.01
+
+
+def test_runs_test_skips_series_without_both_signs() -> None:
+    """A one-signed series has a single run and no variance; it adds nothing."""
+    rows = [
+        {"well": "W0", "label": "1", "step": i, "std_res": 1.0 + i} for i in range(7)
+    ]
+    out = runs_test(pd.DataFrame(rows))
+    assert out["runs"] == pytest.approx(1.0)
+    assert np.isnan(out["runs_p"])
+
+
+def test_runs_test_null_predicts_fitted_residuals() -> None:
+    """Fitted iid noise alternates: runs exceed the textbook null and match the simulated one."""
+    table, params = _plate(n_wells=300, seed=12)
+    fitted = _least_squares_residuals(table, params)
+    null = runs_test_null(fitted, params, n_mc=499).to_dict(orient="index")
+    tests = residual_tests(fitted, params, n_mc=499).to_dict(orient="index")
+    for lbl in ("1", "2"):
+        observed = runs_test(fitted[fitted.label == lbl])
+        expected = null[lbl]["runs_expected_fit"]
+        assert expected > observed["runs_expected"]
+        assert abs(observed["runs"] - expected) < 3 * null[lbl]["runs_sd_fit"]
+        assert tests[lbl]["runs_p_fit"] > 0.01
+    wave = _least_squares_residuals(*_plate(n_wells=300, seed=12, ar=0.8))
+    wave_row = residual_tests(wave, params, n_mc=499).to_dict(orient="index")["1"]
+    assert wave_row["runs"] < wave_row["runs_expected_fit"]
+    assert wave_row["runs_p_fit"] < 0.01
