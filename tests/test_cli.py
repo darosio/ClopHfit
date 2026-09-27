@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import IO, cast
 
+import pandas as pd
 import pytest
 from click.testing import CliRunner
 from PIL import Image
@@ -106,6 +107,27 @@ def test_prenspire(tmp_path: Path) -> None:
     # validate output file contents
     assert filecmp.cmp(out / "NTT_37C_pKa_A.csv", expected / "NTT_37C_pKa_A.csv")
     assert filecmp.cmp(out / "NTT_37C_pKa_B.csv", expected / "NTT_37C_pKa_B.csv")
+
+
+def test_prenspire_global(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method global`` writes the whole-spectrum K table and the species figure."""
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    # the 20 C wells only, to keep the jackknife short
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    args = ["--out", str(out), "enspire", str(data / "G10.csv"), str(note)]
+    result = runner.invoke(ppr, [*args, "--method", "global"])
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_global.csv")
+    whole = table[table.subset == "all"]
+    assert len(whole) == 1
+    assert whole.K.between(7.0, 9.0).all()
+    assert (whole.se > 0).all()
+    assert {"row D", "row E", "row F"} <= set(table.subset)
+    assert (out / "NTT-G10_species.pdf").stat().st_size > 1000
 
 
 @pytest.mark.slow
