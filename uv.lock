@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -421,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "blackjax"
-version = "1.6.2"
+version = "1.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax" },
@@ -431,9 +431,9 @@ dependencies = [
     { name = "scipy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/12/bc/423d304810d0defb54906d220468730895207c9c908cc0ea67d925b463b5/blackjax-1.6.2.tar.gz", hash = "sha256:ad3c97ff6c77cfa17310a68de665d1a48f9d47ff1ac39725082ab235517406ee", size = 5302867, upload-time = "2026-07-16T13:10:25.422Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/fc/dca22cc8b84c7c50bb2733181112c1a12988b3fa1f96b7062813f9cab9a3/blackjax-1.7.1.tar.gz", hash = "sha256:5e15e5d574afc40d59cfcf2b7fb4561f24bfa7169d846209ecf2a3b3725cc519", size = 5496902, upload-time = "2026-10-02T20:43:51.788Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/13/fc2be5e0c9a68c18eb0ea8ece9a0f3b078a513fd8a695f00d506de08db97/blackjax-1.6.2-py3-none-any.whl", hash = "sha256:2989786202cdfc9b0a84f8215c24f2c7985b40ae432136282c3776d979d1236e", size = 4915114, upload-time = "2026-07-16T13:10:23.466Z" },
+    { url = "https://files.pythonhosted.org/packages/99/a0/24f50e0cfd432b47103677c6fc6b220acc716c4b20dc9d6021a01d7924fa/blackjax-1.7.1-py3-none-any.whl", hash = "sha256:be2c7f982f4ab3afef2dd5f075dae271023fdec3d9c5d8b599ba7f2f281524fa", size = 4994604, upload-time = "2026-10-02T20:43:50.363Z" },
 ]
 
 [[package]]
@@ -792,7 +792,7 @@ tests = [
 [package.metadata]
 requires-dist = [
     { name = "arviz", specifier = ">=1.3.0" },
-    { name = "blackjax", marker = "extra == 'gpu'", specifier = ">=1.6.2" },
+    { name = "blackjax", marker = "extra == 'gpu'", specifier = ">=1.7.1" },
     { name = "click", specifier = ">=8.3.3" },
     { name = "corner", specifier = ">=2.3.0" },
     { name = "emcee", specifier = ">=3.1.6" },
