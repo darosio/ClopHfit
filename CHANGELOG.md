@@ -3,6 +3,31 @@
 
 # Changelog
 
+## [0.15.0] - 2026-10-06
+
+### 🚀 Features
+
+- *(fitting)* Add pooled runs test with fitted-residual null and Anderson-Darling p-values
+- *(prenspire)* Whole-spectrum global K fit by variable projection
+- *(prenspire)* Use the excitation scan alone for the global spectral fit
+- *(fitting)* Optional acid state in the global spectral fit
+- *(fitting)* Optional acid-step factor in the global and multi-well pH fits
+- *(prtecan)* Under --acid-scale a dim label 1 is judged monotone without its acid step
+
+### 🐛 Bug Fixes
+
+- *(fitting)* Residual diagnostics of acid-scaled fits use the scaled prediction
+
+### 📚 Documentation
+
+- *(prenspire)* Record the readout-arm score of the whole-spectrum fit
+- *(prtecan)* The label-1 acid turnover is the loss of emission at the last addition
+- Point to the analysis scripts now kept in the arslanbaeva repository
+
+### 🧪 Testing
+
+- *(cli)* Run ppr enspire --method global on the shipped G10 plate
+
 ## [0.14.0] - 2026-09-23
 
 ### 🚀 Features
