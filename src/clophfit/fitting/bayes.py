@@ -46,6 +46,7 @@ from clophfit.fitting.model_validation import (
 )
 from clophfit.fitting.models import KD_MIN, binding_1site, kd_bounds
 from clophfit.fitting.plotting import PlotParameters, plot_fit
+from clophfit.fitting.utils import resolve_y_err
 
 from .core import N_BOOT, fit_binding_glob  # local to avoid circular import
 from .data_structures import (
@@ -1326,7 +1327,7 @@ def _masked_obs_err_matrices(
                 )
                 raise ValueError(msg)
             err = np.asarray(da.y_errc, dtype=float)
-            err = np.where(np.isfinite(err) & (err > 0), err, 1.0)
+            err = resolve_y_err(err, label=lbl, well=key)
         else:
             err = np.ones(n_steps, dtype=float)
 
@@ -3881,7 +3882,9 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
                 sigma_vec = sigma_obs_all_det[mask_lbl]
             else:
                 # Homoscedastic (scaled) noise model
-                y_err_all = np.where(np.isfinite(y_err_full), y_err_full, 1.0)
+                y_err_all = resolve_y_err(
+                    np.asarray(y_err_full, dtype=float), label=lbl
+                )
                 sigma_all = ye_mags[lbl] * y_err_all
                 if well_noise_scale:
                     sigma_all *= well_noise_scales[lbl][None, :]

@@ -1,6 +1,7 @@
 """Utility functions for fitting modules."""
 
 import copy
+import logging
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,8 @@ from scipy import stats
 
 from clophfit.clophfit_types import ArrayMask
 from clophfit.fitting.data_structures import Dataset
+
+logger = logging.getLogger(__name__)
 
 # Per-method default thresholds. They are not interchangeable: for "mad" the
 # number is a robust z cutoff, for "studentized" it is the family-wise alpha
@@ -639,3 +642,71 @@ def add_robust_scores(
         )
     out.attrs["robust_score_degenerate_levels"] = degenerate
     return out
+
+
+def resolve_y_err(
+    y_err: "np.ndarray",
+    *,
+    label: str,
+    well: str = "",
+    fallback: "float | None" = None,
+) -> "np.ndarray":
+    """Replace missing per-point errors with the noise scale of the same label.
+
+    A missing or non-positive entry used to be filled with ``1.0``. On a
+    fluorescence label whose real scatter is tens or hundreds of counts that is
+    not a neutral default: the point enters the likelihood with a weight
+    ``(median / 1)**2`` larger than its neighbours - two orders of magnitude or
+    more - so a handful of dropped errors can dominate a titration while every
+    convergence diagnostic stays perfect. Filling with the label's own median
+    keeps the weight of such a point at the plate average instead.
+
+    Parameters
+    ----------
+    y_err : np.ndarray
+        Per-point error, any shape. Non-finite or non-positive entries are
+        replaced.
+    label : str
+        Label key, for the message.
+    well : str
+        Well key, when the caller knows it, for the message.
+    fallback : float | None
+        Scale to use when *y_err* carries no usable value at all.
+
+    Returns
+    -------
+    np.ndarray
+        Copy of *y_err* with every unusable entry replaced by the scale used.
+
+    Raises
+    ------
+    ValueError
+        When no usable entry exists and *fallback* is not a positive number.
+    """
+    arr = np.array(y_err, dtype=float, copy=True)
+    flat = arr.ravel()
+    usable = np.isfinite(flat) & (flat > 0)
+    if bool(usable.all()):
+        return arr
+    if usable.any():
+        scale = float(np.median(flat[usable]))
+    elif fallback is not None and fallback > 0:
+        scale = float(fallback)
+    else:
+        where = f"well {well!r}, " if well else ""
+        msg = (
+            f"no usable y_err for {where}label {label!r}: {int((~usable).sum())} of "
+            f"{flat.size} entries are missing and no fallback scale was given"
+        )
+        raise ValueError(msg)
+    flat[~usable] = scale
+    logger.warning(
+        "Filled %d of %d missing error(s) for label %s%s with the label's scale "
+        "%.4g (a unit default would have over-weighted those points).",
+        int((~usable).sum()),
+        flat.size,
+        label,
+        f" of well {well}" if well else "",
+        scale,
+    )
+    return arr
