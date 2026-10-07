@@ -78,6 +78,10 @@ bump:  ## Bumps version, updates changelog, commits and tags.
 	$(UV) version "$$NEXT_VERSION"; \
 	$(UV) lock; \
 	$(MAKE) ch; \
+	if [ -f CITATION.cff ]; then \
+		sed -E -i "s|^version: .*|version: \"$$NEXT_VERSION\"|; s|^date-released: .*|date-released: \"$$(date +%Y-%m-%d)\"|" CITATION.cff; \
+		echo "CITATION.cff set to $$NEXT_VERSION"; \
+	fi; \
 	git add -u && git commit -m "chore: release $$NEXT_VERSION"; \
 	git tag -a "$$NEXT_VERSION" -m "Release $$NEXT_VERSION"; \
 	echo; \

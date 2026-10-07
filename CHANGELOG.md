@@ -3,6 +3,12 @@
 
 # Changelog
 
+## [0.15.2] - 2026-10-07
+
+### 🐛 Bug Fixes
+
+- *(zenodo)* Add CITATION.cff and keep it in step with make bump
+
 ## [0.15.1] - 2026-10-07
 
 ### 🐛 Bug Fixes

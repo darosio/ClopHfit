@@ -1,0 +1,44 @@
+# CITATION.cff - Zenodo reads this file at the *tagged commit*; so it must be
+# committed before `make bump` cuts the tag. `make bump` rewrites `version` and
+# `date-released` automatically; keep everything else in a normal commit.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "ClopHfit: Bayesian errors-in-variables fitting of multi-channel fluorescence pH and chloride titrations"
+short-title: ClopHfit
+type: software
+abstract: >-
+  ClopHfit fits multi-channel fluorescence titrations (pH and chloride, or any
+  two readouts sharing one dissociation constant) with a Bayesian
+  errors-in-variables model: one constant per well, a latent per-well titrant
+  axis that carries the error of the additions themselves, a signal-dependent
+  noise model, and uncertainties propagated across channels and plates. It
+  ships as the `ppr` command line for plate-reader exports (Tecan EnSpire and
+  multi-mode readers) and as a Python library.
+authors:
+  - family-names: "Arosio"
+    given-names: "Daniele"
+    email: "daniele.arosio@cnr.it"
+    orcid: "https://orcid.org/0000-0003-2872-6906"
+contact:
+  - family-names: "Arosio"
+    given-names: "Daniele"
+    email: "daniele.arosio@cnr.it"
+repository-code: "https://github.com/darosio/ClopHfit"
+url: "https://github.com/darosio/ClopHfit"
+license: BSD-3-Clause
+license-file: "LICENSE.txt"
+version: "v0.15.1"
+date-released: "2026-10-07"
+# Zenodo mints a version DOI per release and a concept DOI for all of them; once
+# the first one exists, record it here so `make bump` keeps the two in step:
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+keywords:
+  - fluorescence titration
+  - Bayesian errors-in-variables
+  - latent x axis
+  - ratiometric biosensor
+  - chloride imaging
+  - pH sensor
+  - plate reader
