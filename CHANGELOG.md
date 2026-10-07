@@ -3,6 +3,12 @@
 
 # Changelog
 
+## [0.15.1] - 2026-10-07
+
+### 🐛 Bug Fixes
+
+- *(bayes)* Bug in sigma_obs
+
 ## [0.15.0] - 2026-10-06
 
 ### 🚀 Features
