@@ -27,8 +27,8 @@ repository-code: "https://github.com/darosio/ClopHfit"
 url: "https://github.com/darosio/ClopHfit"
 license: BSD-3-Clause
 license-file: "LICENSE.txt"
-version: "v0.15.1"
-date-released: "2026-10-07"
+version: "v0.15.2"
+date-released: "2026-10-08"
 # Zenodo mints a version DOI per release and a concept DOI for all of them; once
 # the first one exists, record it here so `make bump` keeps the two in step:
 # identifiers:
