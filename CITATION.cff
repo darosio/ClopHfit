@@ -2,7 +2,10 @@
 # committed before `make bump` cuts the tag. `make bump` rewrites `version` and
 # `date-released` automatically; keep everything else in a normal commit.
 cff-version: 1.2.0
-message: "If you use this software, please cite it using the metadata below."
+# message is optional in CFF 1.2.0 and Zenodo copies it into the record's "Notes".
+# Left out until the paper has a DOI; an empty value is not valid CFF, so delete the key
+# rather than writing `message:` with nothing after it.
+# message: "Cite the version DOI of the release used; the concept DOI 10.5281/zenodo.6354111 covers all versions."
 title: "ClopHfit: Bayesian errors-in-variables fitting of multi-channel fluorescence pH and chloride titrations"
 short-title: ClopHfit
 type: software
@@ -12,13 +15,19 @@ abstract: >-
   errors-in-variables model: one constant per well, a latent per-well titrant
   axis that carries the error of the additions themselves, a signal-dependent
   noise model, and uncertainties propagated across channels and plates. It
-  ships as the `ppr` command line for plate-reader exports (Tecan EnSpire and
+  ships as the ppr command line for plate-reader exports (Tecan EnSpire and
   multi-mode readers) and as a Python library.
 authors:
   - family-names: "Arosio"
     given-names: "Daniele"
     email: "daniele.arosio@cnr.it"
     orcid: "https://orcid.org/0000-0003-2872-6906"
+    affiliation: "Istituto di Biofisica, Consiglio Nazionale delle Ricerche, Trento"
+  # - family-names: "Arslanbaeva"
+  #   given-names: "Lyaysan R."
+  #   email: "liaisan.arslanbaeva@ieo.it"
+  #   orcid: "https://orcid.org/0000-0002-3914-2124"
+  #   affiliation: "Department of Experimental Oncology, IEO, European Institute of Oncology IRCCS, Milan, Italy"
 contact:
   - family-names: "Arosio"
     given-names: "Daniele"
@@ -42,3 +51,18 @@ keywords:
   - chloride imaging
   - pH sensor
   - plate reader
+
+# Fill in when the preprint exists and swap in the journal DOI on acceptance.
+# GitHub's "Citability" popup uses this block; Zenodo's DOI graph needs the same
+# identifier added as a related identifier (relation "isCitedBy") in the record's
+# Edit form, because a preferred-citation is not imported as a relation.
+# preferred-citation:
+#   type: article
+#   title: "Elevating the chromophore pKa of E2GFP reduces pH interference in genetically encoded chloride biosensors"
+#   authors:
+#     - family-names: "Arslanbaeva"
+#       given-names: "Lyaysan R."
+#   repository-code: "https://github.com/darosio/ClopHfit"
+#   year: 2026
+#   doi: 10.1101/2026.XXXXXX        # bioRxiv DOI; replace with the ACS DOI at acceptance
+#   journal: "bioRxiv"
