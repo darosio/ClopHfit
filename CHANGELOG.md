@@ -3,6 +3,12 @@
 
 # Changelog
 
+## [0.15.3] - 2026-10-08
+
+### 🐛 Bug Fixes
+
+- *(zenodo)* Tidy up
+
 ## [0.15.2] - 2026-10-08
 
 ### 🐛 Bug Fixes
