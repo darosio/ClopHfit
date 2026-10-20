@@ -130,6 +130,71 @@ def test_prenspire_global(tmp_path: Path, runner: CliRunner) -> None:
     assert (out / "NTT-G10_species.pdf").stat().st_size > 1000
 
 
+def test_prenspire_all(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method all`` runs band, svd and global in one invocation.
+
+    The guard a user asked for when comparing readouts: one call must leave
+    behind the band table, at least one svd figure, and the global K table -
+    the three artifacts that the separate ``band``, ``svd`` and ``global``
+    choices produce individually.
+    """
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    # the 20 C wells only, to keep the global jackknife short
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    args = ["--out", str(out), "enspire", str(data / "G10.csv"), str(note)]
+    result = runner.invoke(ppr, [*args, "--method", "all"])
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_K.csv").exists()  # band table
+    assert (out / "NTT-G10_bands.pdf").exists()  # band figure
+    assert (out / "NTT-G10_K_global.csv").exists()  # global table
+    assert (out / "NTT-G10_species.pdf").exists()  # global figure
+    svd_pdfs = sorted(p.name for p in out.glob("NTT-G10_20*_*.pdf"))
+    assert svd_pdfs  # at least one svd figure
+
+
+def test_prenspire_vanthoff(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method vanthoff`` joins the temperatures into one thermodynamic fit."""
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(ppr, [*args, "--method", "vanthoff"])
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_vanthoff.csv")
+    assert set(table.temp.astype(str)) == {"20", "37"}
+    assert table.K.between(7.0, 9.5).all()
+    assert (table.se > 0).all()
+    assert (table.se < 0.5).all()
+    assert table.dH_J_mol.notna().all()
+
+
+def test_prenspire_global_scans(tmp_path: Path, runner: CliRunner) -> None:
+    """``--scan`` lets the whole-spectrum global fit take more than the excitation scan."""
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    args = ["--out", str(out), "enspire", str(data / "G10.csv"), str(note)]
+    result = runner.invoke(
+        ppr,
+        [*args, "--method", "global", "--scan", "exc_anionic", "--scan", "em_exc420"],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_K_global.csv").exists()
+
+
 @pytest.mark.slow
 def test_prtecan(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Test prtecan command with actual data."""
@@ -476,3 +541,62 @@ def test_print_spec_signs_the_resolved_analysis(runner: CliRunner) -> None:
     assert (
         sig("--fit-method", "odr", "--mcmc", "multi", "--per-well-ye-mags") != reordered
     )
+
+
+def test_prenspire_mcr(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method mcr`` resolves species and returns a pKa per temperature."""
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(ppr, [*args, "--method", "mcr"])
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
+    assert set(table.temp.astype(str)) == {"20", "37"}
+    assert table.K.between(7.0, 9.5).all()
+    assert (
+        table.rel_err < 0.1
+    ).all()  # real plate noise; synthetic tests carry the accuracy bar
+    assert (table.se > 0).all()
+    assert (table.se < 0.5).all()
+    assert (out / "NTT-G10_mcr_spectra.csv").exists()
+    spec = pd.read_csv(out / "NTT-G10_mcr_spectra.csv")
+    assert {"lambda", "species_0", "species_1"} <= set(spec.columns)
+    assert (spec[["species_0", "species_1"]] >= 0).all().all()
+    assert (out / "NTT-G10_mcr.pdf").stat().st_size > 1000
+
+
+def test_prenspire_bayes(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method bayes`` returns a seeded posterior with a 94 % HDI per temp."""
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(
+        ppr, [*args, "--method", "bayes", "--draws", "400", "--seed", "11"]
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_bayes.csv")
+    assert set(table.temp.astype(str)) == {"20", "37"}
+    assert table.K.between(7.0, 9.5).all()
+    assert (table.hdi03 < table.K).all()
+    assert (table.hdi97 > table.K).all()
+    # ESS is a valid mixing signal even on the single-chain test harness;
+    # r_hat needs two or more chains, so it is asserted only when defined.
+    assert (table.ess_bulk > 100).all()
+    finite = table.r_hat.notna()
+    if finite.any():
+        assert (table.r_hat[finite] < 1.1).all()
+    assert (out / "NTT-G10_K_bayes.pdf").stat().st_size > 1000

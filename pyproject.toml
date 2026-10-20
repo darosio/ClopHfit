@@ -180,12 +180,12 @@ docstring-code-format = true
 
 [tool.ruff.lint]
 ignore = [
-  "E501",
+  "line-too-long",
   "T20",
-  "DOC201", # Missing return section in docstring - too strict for scientific code
-  "DOC501", # Missing exception documentation - too strict
-  "PLR0914", # Too many local variables - common in scientific functions
-  "PLR1702", # Too many nested blocks - common in data processing
+  "docstring-missing-returns", # Missing return section in docstring - too strict for scientific code
+  "docstring-missing-exception", # Missing exception documentation - too strict
+  "too-many-locals", # Too many local variables - common in scientific functions
+  "too-many-nested-blocks", # Too many nested blocks - common in data processing
 ]
 select = [
   "A", # builtins
@@ -257,70 +257,70 @@ max-complexity = 12
 
 [tool.ruff.lint.per-file-ignores]
 "src/clophfit/__init__.py" = [
-  "FBT001", # configure_logging has boolean arg for CLI compatibility
-  "FBT002", # configure_logging has boolean default for CLI compatibility
+  "boolean-type-hint-positional-argument", # configure_logging has boolean arg for CLI compatibility
+  "boolean-default-value-positional-argument", # configure_logging has boolean default for CLI compatibility
 ]
 "src/clophfit/__main__.py" = [
-  "E402", # Imports after PYTENSOR_FLAGS env-var setup (must precede pytensor init)
-  "FBT001", # Boolean args acceptable in CLI with Click
-  "FBT002", # Boolean defaults acceptable in CLI with Click
-  "PLR0917", # Many args acceptable in CLI commands
+  "module-import-not-at-top-of-file", # Imports after PYTENSOR_FLAGS env-var setup (must precede pytensor init)
+  "boolean-type-hint-positional-argument", # Boolean args acceptable in CLI with Click
+  "boolean-default-value-positional-argument", # Boolean defaults acceptable in CLI with Click
+  "too-many-positional-arguments", # Many args acceptable in CLI commands
 ]
 "*.ipynb" = [
-  "ANN001",
-  "ANN002",
-  "ANN003",
-  "ANN201",
-  "ANN202",
+  "missing-type-function-argument",
+  "missing-type-args",
+  "missing-type-kwargs",
+  "missing-return-type-undocumented-public-function",
+  "missing-return-type-private-function",
   "ARG",
-  "D103",
+  "undocumented-public-function",
   "ERA",
-  "F821", # Undefined names in notebooks (cells may define variables in execution order)
-  "ICN001",
-  "N802",
-  "N803",
-  "N806",
-  "N816",
-  "PD901",
-  "PLR0913",
-  "PLR0917", # Too many positional arguments - common in scientific functions
-  "PLR2004",
-  "PLC2701",
-  "RUF001", # Ambiguous unicode characters (e.g., Greek letters in scientific notebooks)
-  "S106", # False positives on parameter names like first_pass_method
-  "SLF001",
+  "undefined-name", # Undefined names in notebooks (cells may define variables in execution order)
+  "unconventional-import-alias",
+  "invalid-function-name",
+  "invalid-argument-name",
+  "non-lowercase-variable-in-function",
+  "mixed-case-variable-in-global-scope",
+  "pandas-df-variable-name",
+  "too-many-arguments",
+  "too-many-positional-arguments", # Too many positional arguments - common in scientific functions
+  "magic-value-comparison",
+  "import-private-name",
+  "ambiguous-unicode-character-string", # Ambiguous unicode characters (e.g., Greek letters in scientific notebooks)
+  "hardcoded-password-func-arg", # False positives on parameter names like first_pass_method
+  "private-member-access",
   "T20",
 ]
-"__init__.py" = ["I002"] # don't need annotations
+"__init__.py" = ["missing-required-import"] # don't need annotations
 "docs/*" = ["INP"]
 "tests/*" = [
-  "PLR2004",
-  "RUF069", # Direct float comparisons are acceptable in tests for exact sentinel values
-  "S101",
-  "PLR6301", # Method could be function/static - pytest relies on self
+  "magic-value-comparison",
+  "float-equality-comparison", # Direct float comparisons are acceptable in tests for exact sentinel values
+  "assert",
+  "no-self-use", # Method could be function/static - pytest relies on self
 ]
 "src/clophfit/fitting/model_validation.py" = [
-  "ANN401", # typing.Any for generic trace/dataset handling
-  "BLE001", # Robustness wrappers catch broad exceptions
-  "C901", # trace_diagnostics is intentionally comprehensive
-  "D103", # Docstrings on aggregation helpers (names are self-documenting)
-  "PD011", # xarray .values convention in scientific code
-  "PLR0912", # Branch complexity in trace_diagnostics
-  "PLR2004", # Domain-specific thresholds (2σ, 3σ, Pareto-k 0.7, etc.)
-  "PLW2901", # Loop var reassignment (sort_values in-place pattern)
+  "any-type", # typing.Any for generic trace/dataset handling
+  "blind-except", # Robustness wrappers catch broad exceptions
+  "complex-structure", # trace_diagnostics is intentionally comprehensive
+  "undocumented-public-function", # Docstrings on aggregation helpers (names are self-documenting)
+  "pandas-use-of-dot-values", # xarray .values convention in scientific code
+  "too-many-branches", # Branch complexity in trace_diagnostics
+  "magic-value-comparison", # Domain-specific thresholds (2σ, 3σ, Pareto-k 0.7, etc.)
+  "redefined-loop-name", # Loop var reassignment (sort_values in-place pattern)
 ]
 "src/clophfit/fitting/ctr_validation.py" = [
-  "ANN401", # typing.Any for generic scheme/trace handling
-  "D402", # Iterator docstring yields convention
-  "DOC402", # Yields section in docstring
-  "PD011", # xarray .values convention
-  "PLW2901", # Loop var reassignment (str coercion pattern)
+  "any-type", # typing.Any for generic scheme/trace handling
+  "signature-in-docstring", # Iterator docstring yields convention
+  "docstring-missing-yields", # Yields section in docstring
+  "pandas-use-of-dot-values", # xarray .values convention
+  "redefined-loop-name", # Loop var reassignment (str coercion pattern)
 ]
 "src/clophfit/fitting/diagnostic_plots.py" = [
-  "PLR0913", # plot_residual_overview has many keyword options
-  "PLR0915", # plot_residual_overview has many statements (4-panel plot)
-  "PLR2004", # Domain-specific thresholds (min 3 points for correlation)
-  "PLW2901", # Loop var reassignment (sort_values in-place pattern)
+  "too-many-arguments", # plot_residual_overview has many keyword options
+  "too-many-statements", # plot_residual_overview has many statements (4-panel plot)
+  "magic-value-comparison", # Domain-specific thresholds (min 3 points for correlation)
+  "redefined-loop-name", # Loop var reassignment (sort_values in-place pattern)
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -336,6 +336,11 @@ extend-ignore-re = [
 
 
 [tool.typos.default.extend-words]
+# ALS: alternating least squares (the MCR-ALS method). Without this the
+# spell-checker "corrects" it to ALSO, corrupting the method's own name
+# (both cases: identifiers are matched case-insensitively).
+ALS = "ALS"
+als = "als"
 arange = "arange"
 arosio = "Arosio"
 setp = "setp"

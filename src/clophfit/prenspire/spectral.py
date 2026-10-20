@@ -1,9 +1,8 @@
 """Whole-spectrum global K for EnSpire titrations (see :mod:`clophfit.fitting.spectral`).
 
 The wells get the same corrections as the band readouts of :mod:`clophfit.prenspire.bands` - blank
-plate rows removed, the buffer spectrum of the same plate column subtracted, each well divided by its
-tryptophan band - so that the two methods differ only in the readout: named windows sharing K there,
-every wavelength of the chosen scans here.
+plate rows removed, the buffer spectrum of the same plate column subtracted - so that the two methods
+differ only in the readout: named windows sharing K there, every wavelength of the chosen scans here.
 
 Scored with arslanbaeva's ``scripts/score_readout_arms.py`` metrics on the 25 pH plates it ranks
 (same exclusions; arslanbaeva's ``scripts/score_spectral_arms.py``): the whole excitation scan with a per-well
@@ -13,10 +12,12 @@ against 0.14 and 0.22 for the default band pair) at the same replicate-row sprea
 worse (0.21, worst 0.80). Only five constructs are repeated across sessions, so the ranking of the
 excitation scan against the band pair is suggestive, not settled.
 
-The tryptophan reference (330-342 nm of the 278 nm-excited scan) does not depend on pH (Spearman
-rho 0.02 and -0.06 on G10) and neither causes nor removes the acid-side amplitude drop; it scatters
-by 15-30 % between wells, more than the fitted amplitudes do (about 5 %), so with ``well_scale`` it
-adds noise without changing K (7.972 against 7.970 unnormalised on G10).
+The tryptophan band (330-342 nm of the 278 nm-excited scan) does not depend on pH (Spearman rho
+0.02 and -0.06 on G10) and neither causes nor removes the acid-side amplitude drop; it scatters by
+15-30 % between wells, more than the fitted amplitudes do (about 5 %), and on these plates it is
+dominated by the medium's scatter and Raman background - a buffer well keeps ~85 % of it. Dividing
+wells by it therefore only adds noise without changing K (7.972 against 7.970 unnormalised on G10),
+so it has been retired: there is no normalisation step in this path.
 """
 
 from __future__ import annotations
@@ -57,7 +58,6 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     temp: str | float,
     *,
     is_ph: bool,
-    normalise: bool,
     buffer_wells: Sequence[str],
     bands: Sequence[str] = EXCITATION_SCAN,
 ) -> tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]:
@@ -75,8 +75,6 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         Temperature selecting the labels.
     is_ph : bool
         pH titration (else chloride).
-    normalise : bool
-        Divide each well by its tryptophan band.
     buffer_wells : Sequence[str]
         Buffer wells declared by the note; blank rows serve when there are none.
     bands : Sequence[str]
@@ -88,7 +86,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]
         Label to (wavelengths, Y[n_lambda, n_wells]), the wells used and their x values.
     """
-    readouts, reference = classify(ef, temp, is_ph=is_ph)
+    readouts = classify(ef, temp, is_ph=is_ph)
     labels = list(dict.fromkeys(r.label for r in readouts if r.name in bands))
     if not labels:
         return {}, wells, x
@@ -98,11 +96,6 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         keep = [i for i, w in enumerate(wells) if w[0] not in blanks]
         wells, x = [wells[i] for i in keep], x[keep]
         buffer_wells = list(buffer_wells) or found
-    ref = (
-        band_values(ef, reference, wells).to_numpy()
-        if (normalise and reference)
-        else None
-    )
     out: dict[str, tuple[ArrayF, ArrayF]] = {}
     for label in labels:
         lam, y = _spectra(ef, label, wells)
@@ -111,8 +104,6 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
             by_column = {str(w)[1:]: yb[:, i] for i, w in enumerate(buffer_wells)}
             zero = np.zeros(lam.size)
             y -= np.column_stack([by_column.get(str(w)[1:], zero) for w in wells])
-        if ref is not None:
-            y /= ref
         out[label] = (lam, y / float(np.nanmax(np.abs(y))))
     return out, wells, x
 
@@ -134,7 +125,6 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note: pd.DataFrame,
     *,
-    normalise: bool = True,
     buffer: bool = True,
     well_scale: bool = True,
     fit_hill: bool = False,
@@ -148,8 +138,6 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         The parsed EnSpire export.
     note : pd.DataFrame
         Normalised note, with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
-    normalise : bool
-        Divide each well by its tryptophan band.
     buffer : bool
         Subtract the buffer well of the same plate column.
     well_scale : bool
@@ -183,7 +171,6 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             x,
             str(temp),
             is_ph=is_ph,
-            normalise=normalise,
             buffer_wells=buf,
             bands=bands,
         )

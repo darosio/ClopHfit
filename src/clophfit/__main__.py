@@ -9,6 +9,7 @@ import pprint
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
+import arviz as az  # type: ignore[import-untyped]
 import click
 import lmfit  # type: ignore[import-untyped]
 import matplotlib.pyplot as plt
@@ -17,6 +18,7 @@ import pandas as pd
 from click import Context, Path as cPath
 
 from clophfit.fitting.grid import model_signature
+from clophfit.fitting.models import binding_1site
 
 # Set unique pytensor compile dir per process to avoid atexit filelock race
 # when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock.
@@ -48,7 +50,9 @@ from clophfit.fitting.errors import (
     MissingDependencyError,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
-from clophfit.prenspire.spectral import fit_titrations_spectral
+from clophfit.prenspire.mcr import mcr_titration
+from clophfit.prenspire.spectral import fit_titrations_spectral, sample_spectra
+from clophfit.prenspire.thermo import LN10, R_GAS, VanthoffModel, vanthoff_titration
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
@@ -722,23 +726,35 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf.")  # fmt: skip
-@click.option("--normalise/--no-normalise", default=True, show_default=True, help="For --method band: divide each band by the tryptophan band (330-342 nm of the 278 nm-excited scan), which measures the protein in the well rather than any titration state.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "vanthoff", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. both runs band and svd; all runs band, svd and global. vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and pKa vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. vanthoff is defined for pH plates only. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
-@click.option("--band-name", "band_names", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Bands allowed into the shared K; repeatable. Default is the three direct readouts: the 278 nm-excited emission reaches the chromophore through the protein and is reported but not fitted.")  # fmt: skip
+@click.option("--band-name", "band_names", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Bands allowed into the shared K; repeatable. Default is the two direct readouts (exc_anionic + em_exc420); exc_neutral and em_exc278 are reported but not fitted by default.")  # fmt: skip
+@click.option("--scan", "scans", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Scans --method global or mcr takes whole; repeatable. Default is the excitation scan only: on the 25-plate readout sweep, adding the 420 nm emission scan whole widened the between-session spread (see clophfit/prenspire/spectral.py), so all-scans is offered for comparison, not as the default.")  # fmt: skip
+@click.option("--seed", type=int, default=0, show_default=True, help="NUTS seed for --method bayes; fixes the posterior draws so the 94 % HDI is reproducible run to run.")  # fmt: skip
+@click.option("--draws", type=int, default=2000, show_default=True, help="Posterior draws per chain for --method bayes (tuning is half of that).")  # fmt: skip
+@click.option("--chains", type=click.IntRange(min=1), default=2, show_default=True, help="MCMC chains for --method bayes. A fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
+@click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
+@click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
+@click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr. Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments]
     ctx: Context,
     csv_f: str,
     note_f: str | None,
     bands: tuple[Any],
     method: str,
-    normalise: bool,
     buffer: bool,
     screen: str,
     min_rho: float,
     band_names: tuple[str, ...],
+    scans: tuple[str, ...],
+    components: int,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -747,34 +763,348 @@ def enspire(  # ruff: ignore[too-many-arguments]
     ef.export_measurements(Path(out))
     if note_f is None:
         return
-    if method in {"band", "both"}:
+    if method in {"band", "both", "all"}:
         fit_enspire_bands(
             ef,
             Path(note_f),
             Path(out),
-            normalise=normalise,
             buffer=buffer,
             screen=None if screen.lower() == "none" else screen,
             min_rho=min_rho,
             wanted=band_names or bands_module.DIRECT_BANDS,
         )
-    if method in {"svd", "both"}:
+    if method in {"svd", "both", "all"}:
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
-    if method == "global":
-        fit_enspire_global(
-            ef, Path(note_f), Path(out), normalise=normalise, buffer=buffer
+    if method in {"global", "all"}:
+        fit_enspire_global(ef, Path(note_f), Path(out), buffer=buffer, scans=scans)
+    if method == "vanthoff":
+        fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer)
+    if method == "mcr":
+        fit_enspire_mcr(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            components=components,
         )
+    if method == "bayes":
+        fit_enspire_bayes(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            band_names=band_names,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
+
+
+def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
+    """Per sample: the banded curves with the joint model, and pKa vs 1/T."""
+    n = len(models)
+    fig, axes = plt.subplots(
+        n, 2, figsize=(10.8, 4.2 * n), squeeze=False, constrained_layout=True
+    )
+    for row, (sample, info) in enumerate(sorted(models.items())):
+        left, right = axes[row]
+        temps = sorted(info.k_by_temp)
+        colmap = {t: plt.get_cmap("tab10")(i / 10) for i, t in enumerate(temps)}
+        for (band, t), (x, y) in sorted(info.curves.items()):
+            left.plot(x, y, "o", ms=3.5, color=colmap[t], alpha=0.85)
+            k = info.a + info.b * (info.inv[t] - info.m)
+            s0, s1 = info.plateaus[band, t]
+            grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+            left.plot(
+                grid,
+                s0 + (s1 - s0) / (1 + np.power(10.0, k - grid)),
+                "-",
+                lw=1.1,
+                color=colmap[t],
+            )
+        for t in temps:
+            left.plot([], [], "o", color=colmap[t], label=f"{t} C")
+        left.legend(fontsize=8)
+        left.set_title(f"{sample}: bands and joint model")
+        left.set_xlabel("pH")
+        left.set_ylabel("normalized signal")
+        xs = np.array([info.inv[t] * 1000 for t in temps])
+        ys = np.array([info.k_by_temp[t][0] for t in temps])
+        ses = np.array([info.k_by_temp[t][1] for t in temps])
+        right.errorbar(xs, ys, yerr=ses, fmt="o", color="k")
+        line = np.linspace(float(xs.min()), float(xs.max()), 50)
+        right.plot(
+            line, [info.a + info.b * (v / 1000 - info.m) for v in line], "-k", lw=1
+        )
+        for i, t in enumerate(temps):
+            right.annotate(
+                f"{t} C",
+                (xs[i], ys[i]),
+                textcoords="offset points",
+                xytext=(6, -12),
+                fontsize=8,
+            )
+        right.set_title(f"van't Hoff: dH = {info.b * LN10 * R_GAS / 1000:.1f} kJ/mol")
+        right.set_xlabel("1000 / T  (1/K)")
+        right.set_ylabel("pKa")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _plot_mcr(
+    profiles: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]],
+    spectra: dict[str, dict[str, pd.DataFrame]],
+    fits: dict[str, dict[str, tuple[float, float, float, float, bool, float]]],
+    pdf_path: Path,
+) -> None:
+    """Per sample: profile points as symbols, with the fitted curve drawn."""
+    n = len(profiles)
+    fig, axes = plt.subplots(
+        n, 2, figsize=(10.8, 4.0 * n), squeeze=False, constrained_layout=True
+    )
+    for row, (sample, by_temp) in enumerate(sorted(profiles.items())):
+        left, right = axes[row]
+        for i, (t, (x, c)) in enumerate(sorted(by_temp.items())):
+            style = "-" if i == 0 else "--"
+            for j in range(c.shape[1]):
+                left.plot(x, c[:, j], "o", ms=4, color=f"C{j}", alpha=0.85)
+                frame = spectra[sample][t]
+                right.plot(
+                    frame["lambda"],
+                    frame[f"species_{j}"],
+                    style,
+                    color=f"C{j}",
+                    label=f"species {j}" if i == 0 else None,
+                )
+            k, se, f0, f1, is_ph, rel_err = fits[sample][t]
+            grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+            frac = (
+                1.0 / (1.0 + np.power(10.0, k - grid)) if is_ph else grid / (grid + k)
+            )
+            unit = "" if is_ph else " mM"
+            left.plot(
+                grid,
+                f0 + (f1 - f0) * frac,
+                color="k",
+                lw=1.4,
+                ls=style,
+                label=f"{t} C: {k:.2f}{unit} +/- {se:.2f} (err {rel_err:.2f})",
+            )
+        left.legend(fontsize=7)
+        right.legend(fontsize=7)
+        left.set_title(f"{sample}: components and fitted curve")
+        left.set_xlabel("pH" if next(iter(fits[sample].values()))[4] else "ligand (mM)")
+        left.set_ylabel("fraction")
+        right.set_title(f"{sample}: resolved spectra")
+        right.set_xlabel("wavelength (nm)")
+        right.set_ylabel("spectral abundance")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _post_samples(trace: object, name: str) -> np.ndarray:
+    """Flattened posterior draws of one variable from an ArviZ trace."""
+    return np.asarray(
+        az.extract(trace, var_names=[name]).to_numpy(), dtype=float
+    ).ravel()
+
+
+def _plot_bayes(
+    figdata: list[
+        tuple[
+            str,
+            str,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            bands_module.BandBayes,
+            bool,
+        ]
+    ],
+    pdf_path: Path,
+) -> None:
+    """Per sample: bands with the posterior curve band, and the K posterior."""
+    n = len(figdata)
+    fig, axes = plt.subplots(
+        n, 2, figsize=(10.8, 4.0 * n), squeeze=False, constrained_layout=True
+    )
+    for row, (sample, t, data, bb, is_ph) in enumerate(figdata):
+        left, right = axes[row]
+        ks = _post_samples(bb.trace, "K")
+        pick = ks[:: max(1, len(ks) // 200)]
+        for i, (nm, (x, y)) in enumerate(sorted(data.items())):
+            left.plot(x, y, "o", ms=4, color=f"C{i}", alpha=0.85, label=nm)
+            s0 = float(np.median(_post_samples(bb.trace, f"S0_{nm}")))
+            s1 = float(np.median(_post_samples(bb.trace, f"S1_{nm}")))
+            grid = np.linspace(float(x.min()), float(x.max()), 200)
+            # same binding_1site the likelihood used, so the drawn band is the
+            # fitted one (an independently-written fraction used here used to
+            # invert the curve relative to the data)
+            curves = np.array([
+                binding_1site(grid, kk, s0, s1, is_ph=is_ph) for kk in pick
+            ])
+            left.fill_between(
+                grid,
+                np.quantile(curves, 0.03, axis=0),
+                np.quantile(curves, 0.97, axis=0),
+                color=f"C{i}",
+                alpha=0.15,
+            )
+            left.plot(
+                grid, np.quantile(curves, 0.5, axis=0), "-", color=f"C{i}", lw=1.2
+            )
+        left.legend(fontsize=7)
+        left.set_title(
+            f"{sample} {t} C: K {bb.k:.2f} [{bb.hdi03:.2f}, {bb.hdi97:.2f}] 94% HDI"
+        )
+        left.set_xlabel("pH" if is_ph else "ligand (mM)")
+        left.set_ylabel("normalized signal")
+        right.hist(ks, bins=40, color="0.75")
+        right.axvline(bb.k, color="k", lw=1)
+        right.axvspan(bb.hdi03, bb.hdi97, color="orange", alpha=0.25)
+        right.set_title(f"posterior K, 94% HDI, rhat {bb.rhat:.3f}")
+        right.set_xlabel("K")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    band_names: tuple[str, ...],
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Seeded posterior of the shared K per sample/temperature.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the K table and the posterior figure go.
+    buffer : bool
+        Subtract the buffer wells of the same plate column.
+    band_names : tuple[str, ...]
+        Bands entering the shared-K posterior; default the direct readouts.
+    seed : int
+        NUTS seed, so the HDI reproduces.
+    draws : int
+        Posterior draws per chain.
+    chains : int
+        MCMC chains; reproducible for a fixed seed in either core mode.
+    cores : int | None
+        CPU cores for chain parallelism; None lets PyMC parallelise.
+    target_accept : float | None
+        NUTS target acceptance; None keeps the sampler default.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature): K median, hdi03, hdi97, r_hat,
+        ess_bulk, n.
+    """
+    note_df = Note(note_fp).note
+    samples = note_df[note_df["Name"] != "buffer"]
+    buffers = note_df[note_df["Name"] == "buffer"]
+    wanted = tuple(band_names) if band_names else bands_module.DIRECT_BANDS
+    rows: list[dict[str, object]] = []
+    figdata: list[
+        tuple[
+            str,
+            str,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            bands_module.BandBayes,
+            bool,
+        ]
+    ] = []
+    for (name, temp), group in samples.groupby(
+        ["Name", "Temp"], sort=True, dropna=False
+    ):
+        t = str(temp).split(".")[0]
+        one = group.drop_duplicates("Well")
+        wells = one["Well"].tolist()
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        titrant = one["pH"] if is_ph else one["Cl"]
+        x = np.array(titrant.astype(float), dtype=np.float64)
+        bufw = (
+            buffers[np.isclose(buffers["Temp"].astype(float), float(t))][
+                "Well"
+            ].tolist()
+            if len(buffers)
+            else []
+        )
+        readouts = bands_module.classify(ef, t, is_ph=is_ph)
+        data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        for r in readouts:
+            if r.name not in wanted:
+                continue
+            y = bands_module.band_values(ef, r, wells)
+            if bufw and buffer:
+                y = bands_module.subtract_buffer(
+                    y, bands_module.band_values(ef, r, bufw)
+                )
+            arr = np.array(y, dtype=np.float64)
+            top = float(np.nanmax(np.abs(arr)))
+            if not np.isfinite(top) or top <= 0.0:
+                continue
+            data[r.name] = (x, arr / top)
+        if not data:
+            continue
+        ds = Dataset(
+            {nm: DataArray(xx, yy) for nm, (xx, yy) in data.items()}, is_ph=is_ph
+        )
+        bb = bands_module.fit_bands_bayes(
+            ds,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
+        label = cast("str", name)
+        rows.append({
+            "sample": label,
+            "temp": t,
+            "K": bb.k,
+            "hdi03": bb.hdi03,
+            "hdi97": bb.hdi97,
+            "r_hat": bb.rhat,
+            "ess_bulk": bb.ess,
+            "n": x.size,
+        })
+        figdata.append((label, t, data, bb, is_ph))
+    table = pd.DataFrame(rows)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    table.to_csv(out_dir / f"{stem}_K_bayes.csv", index=False)
+    if figdata:
+        _plot_bayes(figdata, out_dir / f"{stem}_K_bayes.pdf")
+    for row in table[table["K"].notna()].itertuples():
+        print(
+            f"{row.sample} at {row.temp}: K {row.K:.3f} HDI94 [{row.hdi03:.3f}, {row.hdi97:.3f}] "
+            f"rhat {row.r_hat:.3f} ess {row.ess_bulk:.0f} on {row.n} points"
+        )
+    return table
 
 
 @ppr.command(name="enspire-batch")
 @click.pass_context
 @click.argument("root", type=cPath(exists=True, file_okay=False, path_type=str))
-@click.option("--normalise/--no-normalise", default=True, show_default=True, help="Divide each band by the tryptophan band of the same well.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="Subtract the buffer well of the same plate column.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen as method:threshold:min_keep; 'none' fits every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="Smallest |Spearman rho| for a band to carry K.")  # fmt: skip
-def enspire_batch(  # ruff: ignore[too-many-arguments]
-    ctx: Context, root: str, normalise: bool, buffer: bool, screen: str, min_rho: float
+def enspire_batch(
+    ctx: Context, root: str, buffer: bool, screen: str, min_rho: float
 ) -> None:
     """Fit every folder under ROOT holding an EnSpire csv beside its *_note.csv.
 
@@ -798,7 +1128,6 @@ def enspire_batch(  # ruff: ignore[too-many-arguments]
                 EnspireFile(data),
                 note_fp,
                 out / tag,
-                normalise=normalise,
                 buffer=buffer,
                 screen=None if screen.lower() == "none" else screen,
                 min_rho=min_rho,
@@ -838,7 +1167,6 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     note_fp: Path,
     out_dir: Path,
     *,
-    normalise: bool,
     buffer: bool,
     screen: str | None,
     min_rho: float,
@@ -854,8 +1182,6 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
         The note describing wells, titrant and samples.
     out_dir : Path
         Where the tables and the figure go.
-    normalise : bool
-        Divide each band by the tryptophan band of the same well.
     buffer : bool
         Subtract the buffer well of the same plate column.
     screen : str | None
@@ -874,7 +1200,6 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     fits = bands_module.fit_titrations(
         ef,
         note.note,
-        normalise=normalise,
         buffer=buffer,
         wanted=wanted,
         min_rho=min_rho,
@@ -909,7 +1234,12 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
 
 
 def fit_enspire_global(
-    ef: EnspireFile, note_fp: Path, out_dir: Path, *, normalise: bool, buffer: bool
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Fit a note's titrations from whole spectra and write the table and species spectra.
 
@@ -921,10 +1251,11 @@ def fit_enspire_global(
         The note describing wells, titrant and samples.
     out_dir : Path
         Where the table and the figure go.
-    normalise : bool
-        Divide each well by its tryptophan band.
     buffer : bool
         Subtract the buffer well of the same plate column.
+    scans : tuple[str, ...]
+        Band names whose scans enter whole; empty means the excitation scan
+        only (the measured optimum; see :mod:`clophfit.prenspire.spectral`).
 
     Returns
     -------
@@ -932,7 +1263,10 @@ def fit_enspire_global(
         One row per (sample, temperature, subset).
     """
     table, fits = fit_titrations_spectral(
-        ef, Note(note_fp).note, normalise=normalise, buffer=buffer
+        ef,
+        Note(note_fp).note,
+        buffer=buffer,
+        bands=tuple(scans) if scans else ("exc_anionic",),
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
@@ -959,6 +1293,173 @@ def fit_enspire_global(
         print(
             f"{r['sample']} at {r['temp']}: K {r['K']:.3f} ± {r['se']:.3f} (jackknife) "
             f"on {r['n']} wells, residual sv ratio {r['sv_ratio']:.1f}"
+        )
+    return table
+
+
+def fit_enspire_vanthoff(
+    ef: EnspireFile, note_fp: Path, out_dir: Path, *, buffer: bool
+) -> pd.DataFrame:
+    """Fit a note jointly across temperatures by van't Hoff and write the table.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the table goes.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature), with the shared ``A``, ``B``,
+        ``dH_J_mol`` and ``dS_J_molK`` repeated on each row.
+    """
+    note_df = Note(note_fp).note
+    one = note_df[note_df["Name"] != "buffer"].drop_duplicates("Well")
+    is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+    table, models = vanthoff_titration(ef, note_df, buffer=buffer, is_ph=is_ph)
+    if not models:
+        seen = sorted({str(t).split(".")[0] for t in note_df["Temp"].dropna()})
+        click.echo(
+            f"vanthoff: the note carries temperature(s) {seen}; a joint fit "
+            "needs at least two - nothing written, use --method band, global or mcr"
+        )
+        return pd.DataFrame()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    table.to_csv(out_dir / f"{stem}_K_vanthoff.csv", index=False)
+    kind, unit = ("pKa", "") if is_ph else ("Kd", " mM")
+    for r in table[table["K"].notna()].itertuples():
+        print(
+            f"{r.sample} at {r.temp}: {kind} {r.K:.3f}{unit} +/- {r.se:.3f} "
+            f"(dH {cast('float', r.dH_J_mol) / 1000:.1f} kJ/mol) over {r.n} points"
+        )
+    _plot_vanthoff(models, out_dir / f"{stem}_K_vanthoff.pdf")
+    return table
+
+
+def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    components: int,
+) -> pd.DataFrame:
+    """Resolve every sample/temperature by MCR-ALS and write the tables.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the K table and the resolved species spectra go.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+    scans : tuple[str, ...]
+        Scans joined into the data matrix; empty means the excitation scan.
+    components : int
+        Species to resolve.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature): K, se, rho, rel_err.
+    """
+    note_df = Note(note_fp).note
+    samples = note_df[note_df["Name"] != "buffer"]
+    buffers = note_df[note_df["Name"] == "buffer"]
+    wanted = tuple(scans) if scans else ("exc_anionic",)
+    tables: list[pd.DataFrame] = []
+    prof_by_sample: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
+    spe_by_sample: dict[str, dict[str, pd.DataFrame]] = {}
+    fits_by_sample: dict[
+        str, dict[str, tuple[float, float, float, float, bool, float]]
+    ] = {}
+    for (name, temp), group in samples.groupby(
+        ["Name", "Temp"], sort=True, dropna=False
+    ):
+        t = str(temp).split(".")[0]
+        one = group.drop_duplicates("Well")
+        wells = one["Well"].tolist()
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        titrant = one["pH"] if is_ph else one["Cl"]
+        x = np.array(titrant.astype(float), dtype=np.float64)
+        bufw = (
+            buffers[np.isclose(buffers["Temp"].astype(float), float(t))][
+                "Well"
+            ].tolist()
+            if len(buffers)
+            else []
+        )
+        spectra, _used, used_x = sample_spectra(
+            ef,
+            wells,
+            x,
+            t,
+            is_ph=is_ph,
+            buffer_wells=bufw if buffer else [],
+            bands=wanted,
+        )
+        if not spectra:
+            continue
+        table, specs, profs = mcr_titration(
+            {t: list(spectra.values())},
+            {t: np.asarray(used_x, dtype=float)},
+            n_species=components,
+            is_ph=is_ph,
+        )
+        if not len(table):
+            continue
+        label = cast("str", name)
+        table.insert(0, "sample", label)
+        tables.append(table)
+        prof_by_sample.setdefault(label, {}).update(profs)
+        spe_by_sample.setdefault(label, {}).update(specs)
+        row = table.iloc[0]
+        fits_by_sample.setdefault(label, {})[t] = (
+            float(row["K"]),
+            float(row["se"]),
+            float(row["F0"]),
+            float(row["F1"]),
+            is_ph,
+            float(row["rel_err"]),
+        )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv")
+    table = (
+        pd.concat(tables, ignore_index=True)
+        if tables
+        else pd.DataFrame(columns=["sample", "temp", "K", "se"])
+    )
+    table.to_csv(out_dir / f"{stem}_K_mcr.csv", index=False)
+    if spe_by_sample:
+        frames = []
+        for sname, by_temp in sorted(spe_by_sample.items()):
+            for tt, frame in sorted(by_temp.items()):
+                d = frame.copy()
+                d.insert(0, "sample", sname)
+                d.insert(1, "temp", tt)
+                frames.append(d)
+        pd.concat(frames, ignore_index=True).to_csv(
+            out_dir / f"{stem}_mcr_spectra.csv", index=False
+        )
+    if prof_by_sample:
+        _plot_mcr(
+            prof_by_sample, spe_by_sample, fits_by_sample, out_dir / f"{stem}_mcr.pdf"
+        )
+    for r in table[table["K"].notna()].itertuples():
+        print(
+            f"{r.sample} at {r.temp}: K {r.K:.3f} +/- {r.se:.3f} "
+            f"(rho {r.rho:.2f}, rel err {r.rel_err:.3f}) over {r.n} wells"
         )
     return table
 

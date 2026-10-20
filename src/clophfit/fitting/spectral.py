@@ -260,16 +260,16 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         Titrant value (pH or concentration) per well.
     spectra : Mapping[str, tuple[ArrayF, ArrayF]]
         Label to ``(wavelengths, Y)`` with ``Y`` of shape (n_lambda, n_wells), already corrected
-        per well (buffer subtracted, normalised to the protein amount). Wavelengths holding a
+        per well (buffer subtracted). Wavelengths holding a
         non-finite value in any well are dropped.
     is_ph : bool
         pH titration (Henderson-Hasselbalch) or ligand binding.
     fit_hill : bool
         Also fit the Hill slope (bounded to 0.2-5).
     well_scale : bool
-        Give each well a free amplitude shared by its labels (protein amount, mean 1). Use it when
-        the spectra are not normalised to a protein reference, or to absorb what is left of the
-        well-to-well amount error after normalisation.
+        Give each well a free amplitude shared by its labels (protein amount, mean 1). Use it to
+        absorb what is left of the
+        well-to-well amount error.
     acid_state : bool
         Add a third state below the main transition (pH titrations only): sequential
         deprotonated <-> protonated <-> acid state with pK2 < K, its spectrum solved like the

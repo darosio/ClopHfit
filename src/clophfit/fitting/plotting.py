@@ -874,7 +874,11 @@ def plot_fit(
             ax.plot(xfit[lbl], yfit[lbl], "-", color="gray")
         # Display label in error bar plot.
         if da.y_err.size > 0:
-            xe = da.x_err if da.x_err.size > 0 else None
+            # False when the array does not exist: neither an absent array
+            # nor matplotlib's xerr=None may stand for "no x error" (the
+            # property used to answer +-1, and xerr=None keeps a default of
+            # +-1) - ask x_errc itself.
+            xe = da.x_err if da.x_errc.size > 0 else False
             ax.errorbar(
                 da.x,
                 da.y,
@@ -978,7 +982,7 @@ def plot_fit_gemini(
 
         # Plot error bars if available
         if da.y_err.size > 0:
-            x_err = da.x_err if da.x_err.size > 0 else None
+            x_err = da.x_err if da.x_errc.size > 0 else False
             ax.errorbar(
                 da.x,
                 da.y,

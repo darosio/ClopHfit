@@ -2741,7 +2741,12 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
     ds = copy.deepcopy(fr.dataset)
     labels = list(ds.keys())
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc
+    head_da = next(iter(ds.values()))
+    # Latent-x modeling needs an SD per step; a dataset with no x_errc
+    # historically walked the x_err property's +-1 default (plot_fit used to
+    # materialize it as a side effect). Keep that behavior here explicitly so
+    # figures can stop arming datasets.
+    x_errc = head_da.x_errc if head_da.x_errc.size else np.ones_like(head_da.xc)
     floor_mode, gain_mode, alpha_mode = _resolve_noise_modes(
         prefer_centered=prefer_centered,
         floor_mode=noise.floor_mode,
@@ -3431,7 +3436,12 @@ def fit_binding_pymc_multi(  # ruff: ignore[complex-structure, too-many-branches
         else None
     )
     xc = next(iter(ds.values())).xc
-    x_errc = next(iter(ds.values())).x_errc
+    head_da = next(iter(ds.values()))
+    # Latent-x modeling needs an SD per step; a dataset with no x_errc
+    # historically walked the x_err property's +-1 default (plot_fit used to
+    # materialize it as a side effect). Keep that behavior here explicitly so
+    # figures can stop arming datasets.
+    x_errc = head_da.x_errc if head_da.x_errc.size else np.ones_like(head_da.xc)
     # Union over wells, not this one well's labels: per-label detection can
     # leave the first well single-label, and taking the list from it would
     # silently drop every observation of the other label on the plate.

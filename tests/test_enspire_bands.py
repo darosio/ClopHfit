@@ -8,12 +8,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note, bands
 from clophfit.prenspire.bands import (
     band_rho,
     blank_rows,
     classify,
     fit_bands,
+    fit_bands_bayes,
     fit_titrations,
     screen_bands,
 )
@@ -137,6 +139,21 @@ class TestFitBands:
         assert without.n_dropped == 0
         assert abs(with_screen.k - 7.3) < abs(without.k - 7.3)
 
+    def test_too_few_points_returns_none(self) -> None:
+        """A band with fewer points than parameters is unfitted, not fatal.
+
+        fit_binding_glob raises InsufficientDataError when n < parameters;
+        one such band (a temperature with a nearly empty note) must not
+        abort the folder's remaining fits.
+        """
+        x = np.array([6.0, 7.0])
+        y = np.array([0.5, 0.6])
+        assert fit_bands({"a": (x, y)}, is_ph=True, screen=None) is None
+        xg = np.linspace(5.0, 9.0, 12)
+        yg = 1 / (1 + 10 ** (7.3 - xg))
+        good = fit_bands({"a": (xg, yg)}, is_ph=True, screen=None)
+        assert good is not None  # a full band still fits
+
 
 class TestTitrations:
     """The whole path, on the spectra shipped with the tests."""
@@ -165,8 +182,8 @@ class TestTitrations:
         fractional change between its extremes - sits at 426 nm, which
         ANIONIC barely reaches, so it uses the wider ANIONIC_CL instead.
         """
-        ph_readouts, _ = classify(g10, "20", is_ph=True)
-        cl_readouts, _ = classify(g10, "20", is_ph=False)
+        ph_readouts = classify(g10, "20", is_ph=True)
+        cl_readouts = classify(g10, "20", is_ph=False)
         anionic_ph = next(r for r in ph_readouts if r.name == "exc_anionic")
         anionic_cl = next(r for r in cl_readouts if r.name == "exc_anionic")
         assert (anionic_ph.lo, anionic_ph.hi) == bands.ANIONIC
@@ -175,11 +192,34 @@ class TestTitrations:
 
     def test_classify_reads_the_labels(self, g10: EnspireFile) -> None:
         """Every label is placed from its own metadata."""
-        readouts, reference = classify(g10, "20")
-        assert reference is not None
+        readouts = classify(g10, "20")
         assert {r.name for r in readouts} == {
             "exc_anionic",
             "exc_neutral",
             "em_exc420",
             "em_exc278",
         }
+
+
+def test_fit_bands_bayes_recovers_k_with_hdi() -> None:
+    """The seeded posterior covers the truth and mixes well (ESS, r_hat).
+
+    r_hat needs two or more chains; the ClopHfit test harness forces a
+    single chain for speed, so it is asserted only when it is defined.
+    """
+    rng = np.random.default_rng(4)
+    x = np.linspace(5.0, 9.5, 24)
+    frac = 1.0 / (1.0 + np.power(10.0, 7.4 - x))
+    ds = Dataset(
+        {
+            "exc_anionic": DataArray(x, 0.05 + 0.95 * frac + rng.normal(0, 0.02, 24)),
+            "em_exc420": DataArray(x, 0.9 - 0.7 * frac + rng.normal(0, 0.02, 24)),
+        },
+        is_ph=True,
+    )
+    bb = fit_bands_bayes(ds, seed=3, draws=600, chains=2)
+    assert abs(bb.k - 7.4) < 0.15
+    assert bb.hdi03 < 7.4 < bb.hdi97
+    assert bb.ess > 200
+    if np.isfinite(bb.rhat):
+        assert bb.rhat < 1.1

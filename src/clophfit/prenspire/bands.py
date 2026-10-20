@@ -16,21 +16,27 @@ band, a readout that reverses sign between runs) is named and dropped rather
 than folded into a component that still returns a number.
 
 Two corrections belong to the well, not to the readout, and are applied first:
-the buffer well of the same plate column is subtracted, and each band is
-divided by the tryptophan band (330-342 nm of the 278 nm-excited scan), which
-measures the protein actually in the well rather than any titration state.
+the buffer well of the same plate column is subtracted, and blank plate rows
+are removed by level. There is deliberately no tryptophan normalisation: on
+these plates that band is dominated by the medium's scatter and Raman
+background (a buffer well keeps ~85 % of it), so dividing by it only adds
+well-to-well noise while shifting K by a third of a standard error.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from clophfit.fitting.core import fit_binding_glob
+from clophfit.fitting.bayes import fit_binding_pymc
+from clophfit.fitting.bayes_config import RobustConfig, SamplerConfig
+from clophfit.fitting.core import fit_binding_glob, weight_multi_ds_titration
 from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
@@ -59,8 +65,6 @@ __all__ = [
     "subtract_buffer",
 ]
 
-# the tryptophan window reports protein, not titration state
-TRP = (330.0, 342.0)
 EMISSION = (500.0, 520.0)
 ANIONIC = (480.0, 495.0)
 NEUTRAL = (395.0, 410.0)
@@ -159,14 +163,15 @@ class TitrationFits(NamedTuple):
 
 def classify(
     ef: EnspireFile, temp: str | float | None = None, *, is_ph: bool = True
-) -> tuple[list[Readout], Readout | None]:
-    """Split a temperature's labels into titrating bands and the protein reference.
+) -> list[Readout]:
+    """Split a temperature's labels into the titrating bands their scans offer.
 
     Each label declares its monochromator and the wavelength it holds fixed, so
     which windows it can offer is read from the file rather than configured: an
     excitation scan carries the anionic and neutral bands, an emission scan
-    excited below 350 nm carries both the tryptophan reference and the emission
-    band, and any other emission scan carries the emission band alone.
+    excited below 350 nm carries the emission band as seen from that excitation
+    (``em_exc278``), and any other emission scan carries the emission band
+    alone (``em_exc420``).
 
     Parameters
     ----------
@@ -183,13 +188,13 @@ def classify(
 
     Returns
     -------
-    tuple[list[Readout], Readout | None]
-        The bands available, and the tryptophan reference if one was measured.
+    list[Readout]
+        The titrating bands the labels of this temperature offer, in scan
+        order.
     """
     wanted = None if temp is None or str(temp) in {"nan", "None", ""} else str(temp)
     anionic = ANIONIC if is_ph else ANIONIC_CL
     readouts: list[Readout] = []
-    reference: Readout | None = None
     for label, meas in ef.measurements.items():
         md = meas["metadata"]
         if (
@@ -203,11 +208,10 @@ def classify(
                 Readout("exc_neutral", label, *NEUTRAL),
             ]
         elif float(md["Wavelength"]) < _PROTEIN_EXCITATION:
-            reference = Readout("trp", label, *TRP)
             readouts.append(Readout("em_exc278", label, *EMISSION))
         else:
             readouts.append(Readout("em_exc420", label, *EMISSION))
-    return readouts, reference
+    return readouts
 
 
 def band_values(ef: EnspireFile, readout: Readout, wells: Sequence[str]) -> pd.Series:
@@ -373,12 +377,18 @@ def fit_bands(
     Returns
     -------
     BandFit | None
-        The fit, or None when it does not converge.
+        The fit, or None when it does not converge or has too few points to fit.
     """
     if not data:
         return None
     ds = Dataset({name: DataArray(x, y) for name, (x, y) in data.items()}, is_ph=is_ph)
-    result = fit_binding_glob(ds, remove_outliers=screen)
+    try:
+        result = fit_binding_glob(ds, remove_outliers=screen)
+    except InsufficientDataError:
+        # a band with fewer points than parameters cannot carry K; report
+        # it as unfitted (the caller drops the row) instead of aborting
+        # the whole folder's fits.
+        return None
     if not result.is_valid() or result.result is None:
         return None
     params = result.result.params
@@ -408,10 +418,9 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     temp: str | float,
     *,
     is_ph: bool,
-    normalise: bool,
     buffer_wells: Sequence[str],
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]:
-    """Band values of one sample, buffer-subtracted and reference-normalised.
+    """Band values of one sample, buffer-subtracted and scaled to its own max.
 
     Blank plate rows are detected and removed from the sample here, and serve
     as the buffer when the note declared none.
@@ -429,8 +438,6 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     is_ph : bool
         pH titration (else chloride) - selects the anionic band's window;
         see :func:`classify`.
-    normalise : bool
-        Divide each band by the tryptophan band of the same well.
     buffer_wells : Sequence[str]
         Buffer wells declared by the note, if any.
 
@@ -439,7 +446,7 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]
         Band name to (x, y), the wells actually used, and their x values.
     """
-    readouts, reference = classify(ef, temp, is_ph=is_ph)
+    readouts = classify(ef, temp, is_ph=is_ph)
     if not readouts:
         return {}, wells, x
     probe = band_values(ef, readouts[0], wells)
@@ -449,14 +456,11 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         keep = [i for i, w in enumerate(wells) if w[0] not in blanks]
         wells, x = [wells[i] for i in keep], x[keep]
         buffer_wells = list(buffer_wells) or found
-    ref = band_values(ef, reference, wells) if (normalise and reference) else None
     data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for readout in readouts:
         y = band_values(ef, readout, wells)
         if buffer_wells:
             y = subtract_buffer(y, band_values(ef, readout, buffer_wells))
-        if ref is not None:
-            y /= ref
         top = float(np.abs(y).max())
         data[readout.name] = (x, (y / top if top else y).to_numpy())
     return data, wells, x
@@ -486,7 +490,6 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note: pd.DataFrame,
     *,
-    normalise: bool = True,
     buffer: bool = True,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
@@ -500,8 +503,6 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         The parsed EnSpire export.
     note : pd.DataFrame
         Normalised note, with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
-    normalise : bool
-        Divide each band by the tryptophan band of the same well.
     buffer : bool
         Subtract the buffer well of the same plate column.
     wanted : Sequence[str]
@@ -531,7 +532,7 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         x = one["pH" if is_ph else "Cl"].astype(float).to_numpy()
         buf = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
         data, wells, x = _sample_bands(
-            ef, wells, x, str(temp), is_ph=is_ph, normalise=normalise, buffer_wells=buf
+            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=buf
         )
         if not data:
             continue
@@ -599,6 +600,109 @@ def _row(
     }
 
 
+class BandBayes(NamedTuple):
+    """Seeded posterior of the K shared by a set of band readouts."""
+
+    k: float
+    """Posterior median of K."""
+    hdi03: float
+    hdi97: float
+    """94 % highest-density interval of K."""
+    rhat: float
+    ess: float
+    trace: object
+    """ArviZ trace, for posterior plots and plateau medians."""
+
+
+def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
+    ds: Dataset,
+    *,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float | None = None,
+    robust: bool = True,
+) -> BandBayes:
+    """Posterior of the K shared across the bands of ``ds`` (PyMC NUTS).
+
+    The Bayesian counterpart of :func:`fit_bands`: identical corrected band
+    readouts and shared-K model, but the interval is a 94 % HDI read off the
+    posterior instead of an LM covariance - the estimate the legacy svd+emcee
+    path used to provide, now on a readout that is stable across plates and
+    with a seed that makes the draws reproducible.
+
+    Parameters
+    ----------
+    ds : Dataset
+        Corrected band readouts (same construction as :func:`fit_bands`).
+    seed : int
+        NUTS seed; the HDI is reproducible for fixed seed and draws.
+    draws : int
+        Posterior draws per chain (tuning is half of that).
+    chains : int
+        MCMC chains. PyMC derives each chain's seed from the master seed
+        and the chain index - not from the core count - so a fixed seed
+        stays reproducible whether the chains run sequentially or in
+        parallel.
+    cores : int | None
+        CPU cores for chain parallelism. ``None`` lets PyMC run the chains
+        in parallel (capped at the core count); pass 1 for sequential.
+    target_accept : float | None
+        NUTS target acceptance, in (0, 1). ``None`` keeps the sampler
+        default; higher values (e.g. 0.9) trade step size for better mixing.
+    robust : bool
+        Student-t (nu = 3) likelihood, the best-calibrated arm on the
+        campaign plates; False gives a plain Normal.
+
+    Returns
+    -------
+    BandBayes
+        Median, 94 % HDI, convergence diagnostics and the trace; all NaN if
+        the sampler produced nothing.
+    """
+    weight_multi_ds_titration(ds)
+    sampler = SamplerConfig(
+        n_samples=draws,
+        n_tune=draws // 2,
+        chains=chains,
+        cores=cores,
+        target_accept=target_accept,
+        random_seed=seed,
+        nuts_sampler="pymc",
+    )
+    fr = fit_binding_pymc(
+        ds,
+        n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
+        robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
+        sampler=sampler,
+    )
+    if fr.trace is None or fr.result is None:
+        nan = float("nan")
+        return BandBayes(nan, nan, nan, nan, nan, None)
+
+    # per-chain draws, so the diagnostics do not depend on how the
+    # ArviZ tree stores sample dimensions
+    sampled = az.extract(fr.trace, var_names=["K"], combined=False).to_numpy()
+    if sampled.ndim == 1:
+        sampled = np.atleast_2d(sampled)
+    # a genuine highest-density interval, not the equal-tailed one some
+    # arviz builds report by default
+    lo, hi = (
+        float(v)
+        for v in np.asarray(az.hdi(sampled, prob=0.94), dtype=float).ravel()[:2]
+    )
+    k = float(np.median(sampled.ravel()))
+    return BandBayes(
+        k,
+        lo,
+        hi,
+        float(az.rhat(sampled)),
+        float(az.ess(sampled, relative=False)),
+        fr.trace,
+    )
+
+
 def plot_sample(ax: Axes, sample: Sample, title: str) -> None:
     """Draw one sample's bands, their shared curve, and the screened points.
 
@@ -644,7 +748,7 @@ def plot_sample(ax: Axes, sample: Sample, title: str) -> None:
     if not is_ph:
         ax.set_xscale("log")
     ax.set_xlabel("pH" if is_ph else f"[Cl$^-$] (mM), 0 drawn at {_ZERO_AT}")
-    ax.set_ylabel("band / reference")
+    ax.set_ylabel("relative band value")
     label = "pK$_\\mathrm{a}$" if is_ph else "$K_\\mathrm{d}$"
     ax.set_title(
         f"{title} — {label} {fit.k:.2f} [{fit.lo:.2f}, {fit.hi:.2f}]",

@@ -150,7 +150,13 @@ class DataArray:
 
     @property
     def x_err(self) -> ArrayF:
-        """Masked x_err."""
+        """Masked x_err.
+
+        NB: absent x errors materialize as +-1 - the ODR and MCMC paths
+        weight and prior off that. Whether an array genuinely exists is
+        ``x_errc.size``; figures must gate on that, not on this property,
+        or x-error-free spectra draw caplines a full unit off every point.
+        """
         if self.x_errc.size == 0:
             self.x_errc = np.ones_like(self.xc, dtype=np.float64)
         return self.x_errc[self.mask]
@@ -446,7 +452,7 @@ class Dataset(UserDict[str, DataArray]):
                 da.x,
                 da.y,
                 yerr=da.y_err,
-                xerr=da.x_err,
+                xerr=da.x_err if da.x_errc.size > 0 else False,
                 fmt="o",
                 label=f"{label} data",
                 color=color,
