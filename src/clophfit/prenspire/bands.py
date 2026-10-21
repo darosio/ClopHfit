@@ -772,20 +772,16 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
             n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
             robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
             sampler=sampler,
+            x_sigma=x_sigma,
         )
     except InsufficientDataError:
         # a band with fewer points than parameters cannot carry K; report it
         # as unfitted (the caller drops the row) instead of aborting the
-        # whole note's fits, as fit_bands already does.
+        # whole note's fits, as fit_bands already does. The pre-fit that
+        # raises this runs inside the call, before any sampling, so the
+        # guard costs nothing: there is no second fit to discard.
         nan = float("nan")
         return BandBayes(nan, nan, nan, nan, nan, None)
-    fr = fit_binding_pymc(
-        ds,
-        n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
-        robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
-        sampler=sampler,
-        x_sigma=x_sigma,
-    )
     if fr.trace is None or fr.result is None:
         nan = float("nan")
         return BandBayes(nan, nan, nan, nan, nan, None)
