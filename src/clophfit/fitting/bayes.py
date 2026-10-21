@@ -526,7 +526,21 @@ def _pymc_sample_parallel_args(
     if cores is not None:
         kwargs["cores"] = cores
     if "PYTEST_CURRENT_TEST" in os.environ:
-        kwargs.update({"cores": 1, "chains": 1})
+        # Keep the chains in one process so a test run does not fork
+        # workers, but do NOT collapse the chain count: R-hat needs two
+        # or more chains, and with one chain it is undefined (NaN), not
+        # "converged". A single-chain harness therefore reports no
+        # convergence information at all, which hides every
+        # disagreement between chains - the failure the diagnostic
+        # exists to catch. The chain count and the core count are
+        # independent knobs; only the core count is folded down here.
+        kwargs["cores"] = 1
+        if "chains" not in kwargs:
+            # No chain count was requested. Pick one that leaves R-hat
+            # defined; an explicit request is honoured as asked, so a
+            # test that wants a single chain still gets one (and the
+            # undefined diagnostic that goes with it).
+            kwargs["chains"] = 2
     return kwargs
 
 

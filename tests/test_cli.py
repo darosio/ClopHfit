@@ -644,12 +644,13 @@ def test_prenspire_bayes(tmp_path: Path, runner: CliRunner) -> None:
     assert table.K.between(7.0, 9.5).all()
     assert (table.hdi03 < table.K).all()
     assert (table.hdi97 > table.K).all()
-    # ESS is a valid mixing signal even on the single-chain test harness;
-    # r_hat needs two or more chains, so it is asserted only when defined.
+    # ESS and r_hat are both asserted outright: the run has two chains,
+    # so the convergence diagnostic is defined. A guard that skipped the
+    # assertion on an undefined r_hat would pass even if the chains had
+    # collapsed to one.
     assert (table.ess_bulk > 100).all()
-    finite = table.r_hat.notna()
-    if finite.any():
-        assert (table.r_hat[finite] < 1.1).all()
+    assert table.r_hat.notna().all()
+    assert (table.r_hat < 1.1).all()
     assert (out / "NTT-G10_K_bayes.pdf").stat().st_size > 1000
 
 

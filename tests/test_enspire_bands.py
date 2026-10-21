@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import arviz as az
+import arviz as az  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
 import pytest
@@ -206,8 +206,10 @@ class TestTitrations:
 def test_fit_bands_bayes_recovers_k_with_hdi() -> None:
     """The seeded posterior covers the truth and mixes well (ESS, r_hat).
 
-    r_hat needs two or more chains; the ClopHfit test harness forces a
-    single chain for speed, so it is asserted only when it is defined.
+    r_hat needs two or more chains, which this fit has, so it is
+    asserted outright: a guard that skipped the assertion whenever the
+    diagnostic came back undefined would let a collapsed chain count
+    pass unnoticed.
     """
     rng = np.random.default_rng(4)
     x = np.linspace(5.0, 9.5, 24)
@@ -223,8 +225,8 @@ def test_fit_bands_bayes_recovers_k_with_hdi() -> None:
     assert abs(bb.k - 7.4) < 0.15
     assert bb.hdi03 < 7.4 < bb.hdi97
     assert bb.ess > 200
-    if np.isfinite(bb.rhat):
-        assert bb.rhat < 1.1
+    assert np.isfinite(bb.rhat)
+    assert bb.rhat < 1.1
 
 
 def test_pooled_hdi_covers_every_chain() -> None:
