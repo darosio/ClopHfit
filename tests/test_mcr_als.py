@@ -94,3 +94,21 @@ def test_langmuir_extraction_for_ligand_titrations() -> None:
     assert abs(k - kd) < 6.0
     assert 0 < se < 5.0
     assert rho > 0.9
+
+
+def test_too_few_wells_is_reported_as_a_non_fit() -> None:
+    """A component with fewer wells than parameters cannot carry a K.
+
+    The curve has three free parameters (K, F0, F1), so two points are not
+    enough to fit it. That must come back as a reported non-fit, not as an
+    exception that aborts the whole run.
+    """
+    x = np.array([6.0, 7.0])
+    c = np.column_stack([np.array([0.9, 0.5]), np.array([0.1, 0.5])])
+    k, se, f0, f1, comp, rho = component_pka(x, c)
+    assert np.isnan(k)
+    assert np.isnan(se)
+    assert np.isnan(f0)
+    assert np.isnan(f1)
+    assert comp in {0, 1}
+    assert np.isfinite(rho)

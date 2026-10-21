@@ -53,6 +53,31 @@ def _kelvin(temp: str | float) -> float:
     return float(temp) + ZERO_C
 
 
+def titrant_kind(note: pd.DataFrame) -> dict[str, bool]:
+    """Decide per sample whether its titrant axis is pH or chloride.
+
+    The titrant is the column that varies within a sample: a pH titration
+    steps the pH and leaves the chloride alone, a chloride titration the
+    other way round. Deciding once for the whole note would fit a chloride
+    sample against its constant pH column and report a meaningless K.
+
+    Parameters
+    ----------
+    note : pd.DataFrame
+        Normalised note with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
+
+    Returns
+    -------
+    dict[str, bool]
+        Sample name to True when the sample is a pH titration.
+    """
+    kinds: dict[str, bool] = {}
+    for name, group in note.groupby("Name", sort=True):
+        one = group.drop_duplicates("Well")
+        kinds[str(name)] = bool(one["pH"].nunique() > one["Cl"].nunique())
+    return kinds
+
+
 class VanthoffFit(NamedTuple):
     """The joint fit of one sample: pKa per temperature plus the pair behind it."""
 
@@ -87,6 +112,8 @@ class VanthoffModel(NamedTuple):
     k_by_temp: dict[str, tuple[float, float]]
     plateaus: dict[tuple[str, str], tuple[float, float]]
     curves: dict[tuple[str, str], tuple[ArrayF, ArrayF]]
+    is_ph: bool = True
+    """Whether the sample was fitted as a pH (else ligand) titration."""
 
 
 def fit_vanthoff_model(
@@ -290,7 +317,7 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     note: pd.DataFrame,
     *,
     buffer: bool = True,
-    is_ph: bool = True,
+    is_ph: bool | None = None,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
 ) -> tuple[pd.DataFrame, dict[str, VanthoffModel]]:
@@ -304,8 +331,10 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
         Normalised note with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
     buffer : bool
         Subtract the buffer wells of the same plate column.
-    is_ph : bool
-        pH titration (else chloride): which column is the titrant.
+    is_ph : bool | None
+        Force the titrant column for every sample. ``None`` decides per
+        sample with :func:`titrant_kind`, which is what a note mixing a pH
+        and a chloride titration needs.
     wanted : Sequence[str]
         Band names entering the joint fit; default the two direct readouts.
     min_rho : float
@@ -330,12 +359,15 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     buffers = note[note["Name"] == "buffer"]
     rows: list[dict[str, object]] = []
     models: dict[str, VanthoffModel] = {}
+    kinds = titrant_kind(samples)
     for name, group in samples.groupby("Name", sort=True):
+        # an explicit is_ph overrides the per-sample decision
+        sample_is_ph = kinds[str(name)] if is_ph is None else is_ph
         curves = _curves_by_temp(
             ef,
             group,
             buffers,
-            is_ph=is_ph,
+            is_ph=sample_is_ph,
             buffer=buffer,
             wanted=wanted,
             min_rho=min_rho,
@@ -343,7 +375,7 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
         flat = {
             (b, t): pair for t, store in curves.items() for b, pair in store.items()
         }
-        fit = fit_vanthoff_model(flat, is_ph=is_ph)
+        fit = fit_vanthoff_model(flat, is_ph=sample_is_ph)
         if not fit.ok:
             rows.append({
                 "sample": name,
@@ -365,6 +397,7 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
             k_by_temp=fit.k_by_temp,
             plateaus=fit.plateaus,
             curves=flat,
+            is_ph=sample_is_ph,
         )
         for t, (k, se) in sorted(fit.k_by_temp.items()):
             rows.append({

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note, bands
 from clophfit.prenspire.bands import (
+    _pooled_hdi,  # ruff: ignore[import-private-name]
     band_rho,
     blank_rows,
     classify,
@@ -223,3 +225,36 @@ def test_fit_bands_bayes_recovers_k_with_hdi() -> None:
     assert bb.ess > 200
     if np.isfinite(bb.rhat):
         assert bb.rhat < 1.1
+
+
+def test_pooled_hdi_covers_every_chain() -> None:
+    """The HDI of a multi-chain fit must span the pooled draws.
+
+    ``az.hdi`` reduces over the last axis only, so a (chain, draw) array
+    yields one interval per chain. Taking the first chain's interval
+    describes a fraction of the posterior, while the r_hat printed beside it
+    describes all of it. The test harness runs one chain under pytest, so
+    this seam is exercised directly.
+    """
+    rng = np.random.default_rng(0)
+    sampled = np.vstack([rng.normal(0.0, 1.0, 500), rng.normal(5.0, 1.0, 500)])
+    lo, hi = _pooled_hdi(sampled, prob=0.94)
+    pooled = np.asarray(az.hdi(sampled.ravel(), prob=0.94), dtype=float)
+    assert (lo, hi) == pytest.approx((pooled[0], pooled[1]))
+    first = np.asarray(az.hdi(sampled[0], prob=0.94), dtype=float)
+    assert hi > first[1] + 1.0
+
+
+def test_fit_bands_bayes_reports_an_underdetermined_band_as_unfitted() -> None:
+    """A band with fewer points than parameters cannot carry a K.
+
+    The lmfit pre-fit inside the sampler raises InsufficientDataError; it must
+    be reported as an unfitted band instead of aborting the whole run.
+    """
+    x = np.array([6.0, 7.0])
+    y = np.array([0.9, 0.5])
+    ds = Dataset({"exc_anionic": DataArray(x, y)}, is_ph=True)
+    bb = fit_bands_bayes(ds, seed=1, draws=50, chains=1)
+    assert np.isnan(bb.k)
+    assert np.isnan(bb.hdi03)
+    assert np.isnan(bb.hdi97)

@@ -8,12 +8,21 @@ import tempfile
 from pathlib import Path
 from typing import IO, cast
 
+import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
 from PIL import Image
 
-from clophfit.__main__ import clop, fit_titration, note2csv, ppr
+from clophfit.__main__ import (
+    _plot_bayes,  # ruff: ignore[import-private-name]
+    clop,
+    fit_titration,
+    note2csv,
+    ppr,
+)
+from clophfit.fitting.data_structures import DataArray, Dataset
+from clophfit.prenspire import bands as bands_module
 
 # tests path
 tpath = Path(__file__).parent
@@ -600,3 +609,83 @@ def test_prenspire_bayes(tmp_path: Path, runner: CliRunner) -> None:
     if finite.any():
         assert (table.r_hat[finite] < 1.1).all()
     assert (out / "NTT-G10_K_bayes.pdf").stat().st_size > 1000
+
+
+def test_plot_bayes_skips_a_sample_the_sampler_could_not_fit(
+    tmp_path: Path,
+) -> None:
+    """A band with no posterior must not abort the figure.
+
+    ``fit_bands_bayes`` returns a null trace when the sampler produced
+    nothing, so the figure writer has to skip such a sample instead of
+    asking ArviZ to extract from a missing trace.
+    """
+    nan = float("nan")
+    unfitted = bands_module.BandBayes(nan, nan, nan, nan, nan, None)
+    data = {"exc_anionic": (np.array([6.0, 7.0, 8.0]), np.array([0.9, 0.6, 0.2]))}
+    # nothing drawable: no crash, and no empty figure either
+    _plot_bayes([("sample", "20", data, unfitted, True)], tmp_path / "none.pdf")
+    assert not (tmp_path / "none.pdf").exists()
+
+    # a fitted sample next to the unfitted one: the figure is written and
+    # holds the fitted sample only
+    x = np.linspace(5.0, 9.5, 12)
+    frac = 1.0 / (1.0 + np.power(10.0, 7.4 - x))
+    ds = Dataset(
+        {"exc_anionic": DataArray(x, 0.05 + 0.95 * frac)},
+        is_ph=True,
+    )
+    fitted = bands_module.fit_bands_bayes(ds, seed=1, draws=200, chains=1)
+    out = tmp_path / "K_bayes.pdf"
+    _plot_bayes(
+        [
+            ("unfitted", "20", data, unfitted, True),
+            ("fitted", "20", {"exc_anionic": (x, 0.05 + 0.95 * frac)}, fitted, True),
+        ],
+        out,
+    )
+    assert out.exists()
+    assert out.stat().st_size > 1000
+
+
+def test_prenspire_bayes_writes_a_table_when_nothing_fits(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """A note whose bands do not titrate is reported, not a traceback.
+
+    With no row to report the table has no columns at all, so the writer
+    must not index a column that does not exist.
+    """
+    data = tpath / "EnSpire"
+    note = tmp_path / "NTT-G10_note.csv"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    # one well per sample and temperature: too few points to carry a K
+    kept = [lines[0]]
+    seen: dict[tuple[str, str], int] = {}
+    for line in lines[1:]:
+        parts = line.split(",")
+        key = (parts[3], parts[4])
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] <= 1:
+            kept.append(line)
+    note.write_text("\n".join(kept))
+    out = tmp_path / "E"
+    out.mkdir()
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(out),
+            "enspire",
+            str(data / "G10.csv"),
+            str(note),
+            "--method",
+            "bayes",
+            "--draws",
+            "50",
+            "--seed",
+            "3",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_K_bayes.csv").exists()

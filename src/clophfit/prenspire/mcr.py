@@ -220,7 +220,9 @@ def component_pka(
             p0=[float(np.median(x)), float(np.min(y)), float(np.max(y))],
             maxfev=20000,
         )
-    except RuntimeError:
+    except (RuntimeError, TypeError):
+        # RuntimeError: the fit did not converge. TypeError: fewer wells than
+        # the curve's three parameters, so there is nothing to fit.
         return float("nan"), float("nan"), float("nan"), float("nan"), comp, rho[comp]
     se0 = pcov[0, 0]
     se_k = float(np.sqrt(se0)) if np.isfinite(se0) else float("nan")

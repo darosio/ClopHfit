@@ -12,6 +12,7 @@ from clophfit.prenspire.thermo import (
     VanthoffFit,
     VanthoffModel,
     fit_vanthoff_model,
+    titrant_kind,
     vanthoff_titration,
 )
 
@@ -26,6 +27,7 @@ __all__ = [
     "fit_vanthoff_model",
     "mcr_als",
     "mcr_titration",
+    "titrant_kind",
     "vanthoff_titration",
     "verbose_print",
 ]

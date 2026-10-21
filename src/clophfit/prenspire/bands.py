@@ -614,6 +614,32 @@ class BandBayes(NamedTuple):
     """ArviZ trace, for posterior plots and plateau medians."""
 
 
+def _pooled_hdi(sampled: np.ndarray, *, prob: float = 0.94) -> tuple[float, float]:
+    """Highest-density interval of the pooled draws, across every chain.
+
+    ``az.hdi`` reduces over the last axis only, so a ``(chain, draw)`` array
+    yields one interval per chain; taking the first one describes a fraction
+    of the posterior while the r_hat reported beside it describes all of it.
+    Pooling the draws first gives the one interval the whole posterior
+    supports.
+
+    Parameters
+    ----------
+    sampled : np.ndarray
+        Posterior draws, shaped ``(chain, draw)`` or ``(draw,)``.
+    prob : float
+        Mass the interval covers, in (0, 1).
+
+    Returns
+    -------
+    tuple[float, float]
+        The lower and upper bound of the pooled interval.
+    """
+    flat = np.asarray(sampled, dtype=float).ravel()
+    lo, hi = np.asarray(az.hdi(flat, prob=prob), dtype=float).ravel()[:2]
+    return float(lo), float(hi)
+
+
 def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
     ds: Dataset,
     *,
@@ -671,12 +697,19 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
         random_seed=seed,
         nuts_sampler="pymc",
     )
-    fr = fit_binding_pymc(
-        ds,
-        n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
-        robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
-        sampler=sampler,
-    )
+    try:
+        fr = fit_binding_pymc(
+            ds,
+            n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
+            robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
+            sampler=sampler,
+        )
+    except InsufficientDataError:
+        # a band with fewer points than parameters cannot carry K; report it
+        # as unfitted (the caller drops the row) instead of aborting the
+        # whole note's fits, as fit_bands already does.
+        nan = float("nan")
+        return BandBayes(nan, nan, nan, nan, nan, None)
     if fr.trace is None or fr.result is None:
         nan = float("nan")
         return BandBayes(nan, nan, nan, nan, nan, None)
@@ -686,12 +719,9 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
     sampled = az.extract(fr.trace, var_names=["K"], combined=False).to_numpy()
     if sampled.ndim == 1:
         sampled = np.atleast_2d(sampled)
-    # a genuine highest-density interval, not the equal-tailed one some
-    # arviz builds report by default
-    lo, hi = (
-        float(v)
-        for v in np.asarray(az.hdi(sampled, prob=0.94), dtype=float).ravel()[:2]
-    )
+    # a genuine highest-density interval over every chain's draws, not the
+    # equal-tailed one some arviz builds report by default
+    lo, hi = _pooled_hdi(sampled, prob=0.94)
     k = float(np.median(sampled.ravel()))
     return BandBayes(
         k,

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
+from clophfit.prenspire import titrant_kind
 from clophfit.prenspire.thermo import LN10, R_GAS, fit_vanthoff_model
 
 T20, T37 = 293.15, 310.15
 DH_TRUE = 41_000.0  # J/mol
 DS_TRUE = 35.0  # J/(mol K)
+ph_levels = (9.15, 8.84, 8.49, 8.22, 7.57, 7.04, 6.52, 5.60)
+cl_levels = (0.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 320.0)
 
 
 def pka_at(temp_k: float) -> float:
@@ -87,3 +91,67 @@ def test_ligand_pair_fits_pkd_and_reports_kd() -> None:
     assert abs(fit.k_by_temp["20"][0] - kd20) / kd20 < 0.15
     # Kd on the mM scale and a positive slope b_true<0 in pKd means endo binding...
     assert fit.k_by_temp["37"][0] > fit.k_by_temp["20"][0]
+
+
+def test_titrant_kind_is_decided_per_sample() -> None:
+    """A note mixing a pH and a chloride titration fits each on its own axis.
+
+    The titrant column is decided per sample: the pH sample's pH column
+    varies while the chloride sample's does not, so one decision for the
+    whole note would fit the chloride sample against a constant column and
+    report a meaningless K.
+    """
+    note = pd.DataFrame({
+        "Well": [f"D0{i}" for i in range(1, 9)]
+        + [f"E0{i}" for i in range(1, 9)]
+        + [f"F0{i}" for i in range(1, 9)]
+        + [f"G0{i}" for i in range(1, 9)],
+        "pH": list(ph_levels) * 2 + [0.0] * 16,
+        "Cl": [0.0] * 16 + list(cl_levels) * 2,
+        "Name": ["PHS"] * 16 + ["CLS"] * 16,
+        "Temp": [20.0] * 8 + [37.0] * 8 + [20.0] * 8 + [37.0] * 8,
+    })
+    kinds = titrant_kind(note)
+    assert kinds["PHS"] is True
+    assert kinds["CLS"] is False
+
+
+def test_vanthoff_fits_each_sample_on_its_own_titrant_axis() -> None:
+    """The chloride sample's K comes out on the mM scale, not as a pKa.
+
+    ``fit_vanthoff_model`` returns a pKa for a pH titration and a Kd in mM
+    for a ligand one. A note holding both must not hand the chloride
+    sample the pH model's scale, nor fit it against a constant column.
+    """
+    rng = np.random.default_rng(13)
+    inv = {"20": 1.0 / T20, "37": 1.0 / T37}
+    m = float(np.mean(list(inv.values())))
+    a_true, b_true = 1.4, -30.0
+    kd = 10.0 ** (a_true + b_true * (inv["20"] - m))
+
+    data = {}
+    for t in ("20", "37"):
+        # pH sample: a Henderson-Hasselbalch curve
+        xp = np.linspace(4.0, 9.5, 15)
+        pka = 7.2 + 0.5 * (inv[t] - m) * 1000.0
+        yp = 0.1 + 0.9 / (1.0 + np.power(10.0, pka - xp))
+        data["exc_anionic", t] = (xp, yp + rng.normal(0.0, 0.005, xp.size))
+        # chloride sample: a Langmuir curve
+        xc = np.asarray(cl_levels, dtype=float)
+        kd_t = 10.0 ** (a_true + b_true * (inv[t] - m))
+        yc = 0.1 + 0.9 * xc / (xc + kd_t)
+        data["em_exc420", t] = (xc, yc + rng.normal(0.0, 0.005, xc.size))
+
+    ph_fit = fit_vanthoff_model(
+        {k: v for k, v in data.items() if k[0] == "exc_anionic"}, is_ph=True
+    )
+    cl_fit = fit_vanthoff_model(
+        {k: v for k, v in data.items() if k[0] == "em_exc420"}, is_ph=False
+    )
+    assert ph_fit.ok
+    assert cl_fit.ok
+    # the pH sample reports a pKa, the chloride sample a Kd in mM
+    assert 6.0 < ph_fit.k_by_temp["20"][0] < 9.0
+    assert abs(cl_fit.k_by_temp["20"][0] - kd) / kd < 0.15
+    # and the model carries the sign of its own titration
+    assert ph_fit.dh != cl_fit.dh or ph_fit.ds != cl_fit.ds

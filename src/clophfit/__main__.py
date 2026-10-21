@@ -924,12 +924,20 @@ def _plot_bayes(
     ],
     pdf_path: Path,
 ) -> None:
-    """Per sample: bands with the posterior curve band, and the K posterior."""
-    n = len(figdata)
+    """Per sample: bands with the posterior curve band, and the K posterior.
+
+    A sample whose sampler produced nothing carries a null trace; it is
+    skipped rather than drawn, so one unfitted sample does not cost the
+    others their figure.
+    """
+    drawable = [row for row in figdata if row[3].trace is not None]
+    if not drawable:
+        return
+    n = len(drawable)
     fig, axes = plt.subplots(
         n, 2, figsize=(10.8, 4.0 * n), squeeze=False, constrained_layout=True
     )
-    for row, (sample, t, data, bb, is_ph) in enumerate(figdata):
+    for row, (sample, t, data, bb, is_ph) in enumerate(drawable):
         left, right = axes[row]
         ks = _post_samples(bb.trace, "K")
         pick = ks[:: max(1, len(ks) // 200)]
@@ -1083,7 +1091,19 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             "n": x.size,
         })
         figdata.append((label, t, data, bb, is_ph))
-    table = pd.DataFrame(rows)
+    table = pd.DataFrame(
+        rows,
+        columns=[
+            "sample",
+            "temp",
+            "K",
+            "hdi03",
+            "hdi97",
+            "r_hat",
+            "ess_bulk",
+            "n",
+        ],
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_bayes.csv", index=False)
@@ -1320,9 +1340,7 @@ def fit_enspire_vanthoff(
         ``dH_J_mol`` and ``dS_J_molK`` repeated on each row.
     """
     note_df = Note(note_fp).note
-    one = note_df[note_df["Name"] != "buffer"].drop_duplicates("Well")
-    is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
-    table, models = vanthoff_titration(ef, note_df, buffer=buffer, is_ph=is_ph)
+    table, models = vanthoff_titration(ef, note_df, buffer=buffer)
     if not models:
         seen = sorted({str(t).split(".")[0] for t in note_df["Temp"].dropna()})
         click.echo(
@@ -1333,8 +1351,8 @@ def fit_enspire_vanthoff(
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_vanthoff.csv", index=False)
-    kind, unit = ("pKa", "") if is_ph else ("Kd", " mM")
     for r in table[table["K"].notna()].itertuples():
+        kind, unit = ("pKa", "") if models[str(r.sample)].is_ph else ("Kd", " mM")
         print(
             f"{r.sample} at {r.temp}: {kind} {r.K:.3f}{unit} +/- {r.se:.3f} "
             f"(dH {cast('float', r.dH_J_mol) / 1000:.1f} kJ/mol) over {r.n} points"
