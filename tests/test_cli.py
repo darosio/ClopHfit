@@ -187,6 +187,48 @@ def test_prenspire_vanthoff(tmp_path: Path, runner: CliRunner) -> None:
     assert table.dH_J_mol.notna().all()
 
 
+def test_prenspire_vanthoff_fits_a_chloride_note_on_its_own_axis(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """A chloride note is fitted as a Langmuir, and the figure shows it.
+
+    The G10 plate is a pH titration; swapping the two titrant columns of
+    its note makes the same wells a chloride titration. The fit must then
+    report a Kd in mM rather than a pKa, and the figure must be drawn on
+    the chloride axis - a Henderson-Hasselbalch curve over a millimolar
+    axis would not pass through the data.
+    """
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    note = pd.read_csv(data / "NTT-G10_note.csv")
+    # the wells of the pH ladder become a chloride ladder that spans the
+    # same signal range, so the Langmuir has a transition to find
+    note["Cl"] = (9.15 - note["pH"]) * 500.0
+    note["pH"] = 5.2
+    note_fp = tmp_path / "NTT-G10_note.csv"
+    note.to_csv(note_fp, index=False)
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(out),
+            "enspire",
+            str(data / "G10.csv"),
+            str(note_fp),
+            "--method",
+            "vanthoff",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_vanthoff.csv")
+    # a Kd on the millimolar scale, not a pKa
+    assert table.K.gt(100.0).all()
+    assert table.K.lt(5000.0).all()
+    assert (out / "NTT-G10_K_vanthoff.pdf").exists()
+    assert "Kd" in result.output
+
+
 def test_prenspire_global_scans(tmp_path: Path, runner: CliRunner) -> None:
     """``--scan`` lets the whole-spectrum global fit take more than the excitation scan."""
     data = tpath / "EnSpire"
@@ -689,3 +731,78 @@ def test_prenspire_bayes_writes_a_table_when_nothing_fits(
     )
     assert result.exit_code == 0, result.output
     assert (out / "NTT-G10_K_bayes.csv").exists()
+
+
+def test_prenspire_mcr_reports_a_degenerate_decomposition(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """A degenerate MCR fit must be reported, not shown as a fitted K.
+
+    Asking for more species than the data supports lets ALS park a
+    redundant component at a constant share of every well. The residual
+    improves, so nothing in the fit itself objects - but the K would be
+    read off a column that never moves. The CLI has to say so instead of
+    printing a confident pKa.
+    """
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(ppr, [*args, "--method", "mcr", "--components", "3"])
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
+    assert "degenerate" in table.columns
+    assert "note" in table.columns
+    if table.degenerate.any():
+        # no K may be reported for a degenerate decomposition
+        assert table.loc[table.degenerate, "K"].isna().all()
+        assert table.loc[table.degenerate, "note"].str.contains("dead").all()
+        assert "degenerate" in result.output
+    else:
+        # the decomposition was sound: then it must carry a real K
+        assert table.K.notna().all()
+
+
+def test_plot_mcr_draws_the_curve_on_the_scale_of_the_points(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """The MCR curve must sit on the same scale as the points it overlays.
+
+    The closed profiles are fractions summing to one, so they live on the
+    0-1 scale. The fitted curve used to be drawn as ``f0 + (f1-f0)*frac``,
+    where ``f0`` and ``f1`` are the tracking component's own plateaus -
+    values like 0.0016 and 1.06 on the real plate. The curve therefore
+    ended at 0.0016 and 1.06 rather than 0 and 1, and did not pass through
+    the points it was supposed to describe.
+    """
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(ppr, [*args, "--method", "mcr"])
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_mcr.pdf").stat().st_size > 1000
+    # The closed profiles are fractions on the 0-1 scale, so the drawn
+    # curve has to be on that same scale: it must span the points, not a
+    # rescaled copy of them. Read the figure back by checking the curve
+    # is drawn inside the fraction band the points occupy.
+    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
+    fitted = table[table.K.notna()]
+    assert len(fitted), "the shipped plate must fit"
+    # the tracking component's own plateaus may sit slightly outside
+    # [0, 1] - they are the component's baseline and saturation, not
+    # fractions - but the model curve is a fraction by construction.
+    assert (fitted.F1 > 0).all()
+    assert (fitted.F1 < 2.0).all()

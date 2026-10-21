@@ -114,7 +114,7 @@ _MIN_ROW_POINTS = 5
 _MIN_RANK_POINTS = 4
 _MIN_DISTINCT = 3
 # where a zero-concentration point is drawn on a log axis
-_ZERO_AT = 0.7
+ZERO_AT = 0.7
 
 
 class Readout(NamedTuple):
@@ -750,12 +750,12 @@ def plot_sample(ax: Axes, sample: Sample, title: str) -> None:
     if is_ph:
         grid = np.linspace(xs.min() - 0.3, xs.max() + 0.3, 200)
     else:
-        grid = np.logspace(np.log10(_ZERO_AT), np.log10(max(xs.max(), 1.0) * 1.5), 200)
+        grid = np.logspace(np.log10(ZERO_AT), np.log10(max(xs.max(), 1.0) * 1.5), 200)
     for (name, (x, y)), color in zip(data.items(), _COLORS, strict=False):
-        px = x if is_ph else np.where(x == 0, _ZERO_AT, x)
+        px = x if is_ph else np.where(x == 0, ZERO_AT, x)
         ax.scatter(px, y, s=18, color=color, lw=0, zorder=3, label=name)
         s0, s1 = fit.plateaus[name]
-        gx = grid if is_ph else np.where(grid <= _ZERO_AT, 0.0, grid)
+        gx = grid if is_ph else np.where(grid <= ZERO_AT, 0.0, grid)
         ax.plot(
             grid,
             binding_1site(gx, fit.k, s0, s1, is_ph=is_ph),
@@ -777,7 +777,7 @@ def plot_sample(ax: Axes, sample: Sample, title: str) -> None:
             )
     if not is_ph:
         ax.set_xscale("log")
-    ax.set_xlabel("pH" if is_ph else f"[Cl$^-$] (mM), 0 drawn at {_ZERO_AT}")
+    ax.set_xlabel("pH" if is_ph else f"[Cl$^-$] (mM), 0 drawn at {ZERO_AT}")
     ax.set_ylabel("relative band value")
     label = "pK$_\\mathrm{a}$" if is_ph else "$K_\\mathrm{d}$"
     ax.set_title(

@@ -22,7 +22,7 @@ so it has been retired: there is no normalisation step in this path.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -40,6 +40,68 @@ _MIN_ROW_WELLS = 5
 # The excitation scan alone: on the readout-arm sweep (module docstring) adding the 420 nm emission
 # scan whole widened the between-session spread (median 0.10 -> 0.14 pH, worst 0.16 -> 0.37).
 EXCITATION_SCAN = ("exc_anionic",)
+
+
+def _scan_kind(md: dict[str, Any]) -> str:
+    """Return the kind of measurement a scan's metadata describes.
+
+    Parameters
+    ----------
+    md : dict[str, Any]
+        The metadata of one scan.
+
+    Returns
+    -------
+    str
+        The kind: ``"excitation"`` for a scan that holds the emission
+        wavelength fixed, ``"emission <wavelength>"`` for one that holds
+        the excitation wavelength fixed.
+    """
+    if md["Monochromator"] == "Excitation":
+        return "excitation"
+    return f"emission {float(md['Wavelength']):.0f}"
+
+
+def scan_name(ef: EnspireFile, label: str) -> str:
+    """Name a scan by the measurement it makes, not by its plate label.
+
+    The plate's labels are row names: the excitation scan is "C" at
+    20 C and "E" at 37 C, so the label cannot say which measurement a
+    spectrum is, and the two temperatures of one sample would look like
+    different scans. The monochromator and the wavelength it holds
+    fixed do say: an excitation scan and a 420 nm-excited emission scan
+    are different observables and must not be drawn on one wavelength
+    axis.
+
+    The name is unique within a temperature: a plate may hold two
+    scans of the same kind (an excitation scan with the filter in the
+    top position and another with it in the bottom one), and those are
+    different measurements. When a name would repeat at the same
+    temperature, the plate label is appended to tell them apart.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    label : str
+        The plate label of the scan.
+
+    Returns
+    -------
+    str
+        The scan's name, e.g. ``"excitation"`` or ``"emission 420"``.
+    """
+    md = ef.measurements[label]["metadata"]
+    name = _scan_kind(md)
+    same = [
+        other
+        for other, omeas in ef.measurements.items()
+        if str(omeas["metadata"].get("temp")) == str(md.get("temp"))
+        and _scan_kind(omeas["metadata"]) == name
+    ]
+    if len(same) > 1:
+        name = f"{name} {label}"
+    return name
 
 
 def _spectra(
@@ -84,7 +146,10 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     Returns
     -------
     tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]
-        Label to (wavelengths, Y[n_lambda, n_wells]), the wells used and their x values.
+        Scan name to (wavelengths, Y[n_lambda, n_wells]), the wells used and
+        their x values. The key is the scan's name (see :func:`scan_name`),
+        not its plate label, so the same measurement keeps one name at
+        every temperature.
     """
     readouts = classify(ef, temp, is_ph=is_ph)
     labels = list(dict.fromkeys(r.label for r in readouts if r.name in bands))
@@ -104,7 +169,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
             by_column = {str(w)[1:]: yb[:, i] for i, w in enumerate(buffer_wells)}
             zero = np.zeros(lam.size)
             y -= np.column_stack([by_column.get(str(w)[1:], zero) for w in wells])
-        out[label] = (lam, y / float(np.nanmax(np.abs(y))))
+        out[scan_name(ef, label)] = (lam, y / float(np.nanmax(np.abs(y))))
     return out, wells, x
 
 

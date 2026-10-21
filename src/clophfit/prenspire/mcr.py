@@ -39,6 +39,25 @@ if TYPE_CHECKING:
 _MAX_ITER = 500
 _TWO_STATES = 2  # the acid/base pair an endpoint start can seed
 _TOL = 1e-9
+# A closed profile column that varies by less than this across the wells
+# carries no per-well information: the component is either wholly present
+# in every well or wholly absent, so the decomposition is really a
+# lower-order one written with more species. Closure puts a profile in
+# [0, 1], so this is a scale-free statement about the fraction range.
+_DEAD_PTP_ABS = 1e-6
+# A column that is this small RELATIVE to the most mobile one is dead too.
+#
+# Both terms are needed. On its own the absolute test is unreliable: where
+# the scale degeneracy parks the redundant column is a matter of the ALS
+# start, so its absolute variation moves over many orders of magnitude
+# between runs - on a synthetic three-component decomposition it lands
+# anywhere between 1e-14 and 1.6e-6, which an absolute threshold either
+# misses or catches only by luck. On its own the relative test fails too:
+# when EVERY column is dead - which is what the real plate gives at
+# three components - the most mobile column is itself tiny, so the
+# threshold collapses onto it and nothing is flagged.
+_DEAD_PTP_RATIO = 1e-3
+_N_DIMS = 2  # a profile matrix has a well axis and a component axis
 
 
 class McrFit(NamedTuple):
@@ -50,6 +69,63 @@ class McrFit(NamedTuple):
     """[n_species, n_lambda] non-negative species spectra (arbitrary scale)."""
     rel_err: float
     """||D - C S.T|| / ||D||."""
+    dead_components: tuple[int, ...] = ()
+    """Components whose profile never varies across the wells.
+
+    A dead component is the signature of the MCR scale degeneracy: the
+    species was parked at an arbitrary scale while its concentration
+    column sat at a constant, so it holds no titration information.
+    """
+
+    @property
+    def degenerate(self) -> bool:
+        """Whether any component is dead, i.e. the decomposition is unusable.
+
+        ``rel_err`` cannot detect this: a spurious component is a free
+        lamp that lowers the residual while contributing nothing, so a
+        degenerate fit can report a *better* error than a sound one.
+        """
+        return bool(self.dead_components)
+
+
+def dead_components(
+    c: np.ndarray,
+    *,
+    absolute: float = _DEAD_PTP_ABS,
+    ratio: float = _DEAD_PTP_RATIO,
+) -> tuple[int, ...]:
+    """Find the concentration columns that carry no well-to-well change.
+
+    A component whose profile is the same number in every well cannot be
+    fitted for a K: the curve would be fitted to round-off, and the result
+    is a confident, meaningless number.
+
+    A column counts as dead when it varies by less than the absolute
+    floor, or by less than a small fraction of the most mobile column.
+    The absolute floor catches the case where every column is dead; the
+    relative term catches a redundant column parked on a scale that is
+    not itself tiny.
+
+    Parameters
+    ----------
+    c : np.ndarray
+        Closed concentration profiles ``[n_wells, n_species]``.
+    absolute : float
+        Peak-to-peak below which a column counts as dead outright.
+    ratio : float
+        A column whose peak-to-peak is below this fraction of the most
+        mobile column's also counts as dead.
+
+    Returns
+    -------
+    tuple[int, ...]
+        The indices of the dead columns, in order.
+    """
+    if c.ndim != _N_DIMS or c.size == 0:
+        return ()
+    ptp = np.ptp(c, axis=0)
+    threshold = max(absolute, ratio * float(np.max(ptp)))
+    return tuple(int(i) for i in np.flatnonzero(ptp < threshold))
 
 
 def _nnls_rows(target: np.ndarray, design: np.ndarray) -> np.ndarray:
@@ -157,24 +233,46 @@ def mcr_als(  # ruff: ignore[too-many-arguments]
     loadings = vt[:n_species, :]
     signed = np.where(loadings.sum(axis=1, keepdims=True) < 0, -loadings, loadings)
     clipped = np.clip(signed.T, 0.0, None)
-    dead = clipped.sum(axis=0) <= 0.0
-    if dead.any():
-        clipped[:, dead] = np.abs(signed.T[:, dead])
+    empty = clipped.sum(axis=0) <= 0.0
+    if empty.any():
+        clipped[:, empty] = np.abs(signed.T[:, empty])
     starts.extend((clipped, np.abs(loadings.T)))
     best = _als_run(d, starts[0], closure=closure, max_iter=max_iter, tol=tol)
     for s0 in starts[1:]:
         fit = _als_run(d, s0, closure=closure, max_iter=max_iter, tol=tol)
         if fit.rel_err < best.rel_err:
             best = fit
+    dead = dead_components(best.c)
+    if dead:
+        return best._replace(dead_components=dead)
     return best
 
 
-def _sigmoid(x: np.ndarray, k: float, f0: float, f1: float) -> np.ndarray:
-    return f0 + (f1 - f0) / (1.0 + np.power(10.0, k - x))
+def model_fraction(x: np.ndarray, k: float, *, is_ph: bool = True) -> np.ndarray:
+    """Return the model's bound fraction on the 0-1 scale.
 
+    This is the quantity the figure draws over the closed profiles, and
+    the one the component is compared against. Keeping it a fraction on
+    one scale means the curve and the points it overlays share an axis,
+    so the distance between them is a real measure of fit quality.
 
-def _langmuir(x: np.ndarray, k: float, f0: float, f1: float) -> np.ndarray:
-    return f0 + (f1 - f0) * x / (k + x)
+    Parameters
+    ----------
+    x : np.ndarray
+        Titrant values.
+    k : float
+        pKa for a pH titration, Kd in the units of ``x`` for a ligand one.
+    is_ph : bool
+        Henderson-Hasselbalch fraction (pH) if true, Langmuir (ligand) else.
+
+    Returns
+    -------
+    np.ndarray
+        The fraction in [0, 1] for every value of ``x``.
+    """
+    if is_ph:
+        return 1.0 / (1.0 + np.power(10.0, k - x))
+    return x / (x + k)
 
 
 def component_pka(
@@ -186,8 +284,11 @@ def component_pka(
     pKa for a pH titration (Henderson-Hasselbalch fraction), Kd in the
     units of x for a ligand titration (Langmuir fraction - linear, so no
     log-space propagation happens here). The fitted curve parameters
-    (F0, F1, on the component's own scale) are returned so callers can
-    draw the fit over the scatter.
+    (F0, F1) are the tracking component's own plateau pair, i.e. the
+    affine mixing that maps the model fraction onto that component's
+    scale; they are properties of the component, not of the model, and
+    they are free because the component's baseline need not sit at 0 and
+    its saturation need not sit at 1.
 
     Parameters
     ----------
@@ -211,7 +312,13 @@ def component_pka(
     pos = any(r > 0 for r in rho)
     comp = int(np.argmax(rho)) if pos else int(np.argmin(rho))
     y = c[:, comp]
-    model = _sigmoid if is_ph else _langmuir
+
+    def model(xx: np.ndarray, k: float, f0: float, f1: float) -> np.ndarray:
+        # the model's fraction, mapped onto this component's own scale by
+        # its plateau pair. The figure draws the fraction itself, so the
+        # affine part is a property of the component, not of the model.
+        return f0 + (f1 - f0) * model_fraction(xx, k, is_ph=is_ph)
+
     try:
         popt, pcov = curve_fit(
             model,
@@ -230,31 +337,113 @@ def component_pka(
     return k, se_k, f0, f1, comp, rho[comp]
 
 
-def _stack_scans(
-    scans: Sequence[tuple[ArrayF, ArrayF]],
-) -> tuple[np.ndarray, np.ndarray]:
-    """Join per-scan (lambda, Y[n_lambda, n_wells]) blocks rowwise.
+class StackedScans(NamedTuple):
+    """The scans of one plate, joined into one data matrix.
+
+    The columns keep one block per scan: the scans are different physical
+    measurements, so they do not share a wavelength axis.
+    """
+
+    tags: np.ndarray
+    """Scan name of every column."""
+    wavelengths: np.ndarray
+    """Wavelength of every column, in its own scan's units."""
+    data: np.ndarray
+    """D[n_wells, n_columns], each scan scaled by the common maximum."""
+
+
+def stack_scans(
+    scans: Sequence[tuple[str, tuple[ArrayF, ArrayF]]],
+) -> StackedScans:
+    """Join per-scan (wavelengths, Y[n_lambda, n_wells]) blocks into one matrix.
+
+    The scans of one plate are separate physical measurements - an
+    excitation scan and an emission scan are different observables - and
+    they do not share one wavelength axis: their ranges overlap but the
+    values at an overlapping wavelength are not the same measurement.
+    Stacking them therefore keeps one column block per scan, tagged with
+    the scan it came from, rather than gluing them into a single ramp
+    that runs backwards across the seam.
 
     Parameters
     ----------
-    scans : Sequence[tuple[ArrayF, ArrayF]]
-        One (wavelengths, Y[n_lambda, n_wells]) block per scan.
+    scans : Sequence[tuple[str, tuple[ArrayF, ArrayF]]]
+        One (scan name, (wavelengths, Y[n_lambda, n_wells])) block per scan.
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray]
-        The concatenated wavelength axis and D[n_wells, n_lambda_total],
-        each scan scaled by the common maximum so blocks stay commensurable.
+    StackedScans
+        The scan tag and the wavelength of every column, and the data
+        matrix itself, each scan scaled by the common maximum so blocks
+        stay commensurable.
     """
-    lams = np.concatenate([np.asarray(lam, dtype=np.float64) for lam, _ in scans])
-    mats = [np.asarray(y, dtype=np.float64) for _, y in scans]
+    tags = np.concatenate([
+        np.full(np.asarray(lam).size, name) for name, (lam, _y) in scans
+    ])
+    waves = np.concatenate([
+        np.asarray(lam, dtype=np.float64) for _name, (lam, _y) in scans
+    ])
+    mats = [np.asarray(y, dtype=np.float64) for _name, (_lam, y) in scans]
     top = max(float(np.nanmax(np.abs(m))) for m in mats)
-    d = np.vstack([m / top for m in mats]).T  # rows: wells; cols: all wavelengths
-    return lams, d
+    d = np.vstack([m / top for m in mats]).T  # rows: wells; cols: all scans
+    return StackedScans(tags=tags, wavelengths=waves, data=d)
+
+
+def scan_blocks(stacked: StackedScans) -> dict[str, slice]:
+    """Map each scan name to the column block it occupies.
+
+    Parameters
+    ----------
+    stacked : StackedScans
+        The stacked scans.
+
+    Returns
+    -------
+    dict[str, slice]
+        Scan name to the slice of columns it holds, in order of appearance.
+    """
+    blocks: dict[str, slice] = {}
+    for name in dict.fromkeys(stacked.tags.tolist()):
+        idx = np.flatnonzero(stacked.tags == name)
+        blocks[str(name)] = slice(int(idx[0]), int(idx[-1]) + 1)
+    return blocks
+
+
+def species_by_scan(
+    spec: pd.DataFrame, n_species: int
+) -> dict[str, tuple[np.ndarray, list[np.ndarray]]]:
+    """Split the resolved species spectra into one curve set per scan.
+
+    The species spectra of a scan are that scan's own measurement: an
+    excitation scan's species spectrum is an excitation spectrum, and the
+    emission scan's is an emission spectrum. Drawing them on one axis
+    would put two different observables on the same ramp.
+
+    Parameters
+    ----------
+    spec : pd.DataFrame
+        The resolved spectra, with ``scan``, ``lambda`` and one column
+        per species.
+    n_species : int
+        How many species columns to read.
+
+    Returns
+    -------
+    dict[str, tuple[np.ndarray, list[np.ndarray]]]
+        Scan name to (wavelengths, one array per species).
+    """
+    out: dict[str, tuple[np.ndarray, list[np.ndarray]]] = {}
+    for name, group in spec.groupby("scan", sort=False):
+        waves = group["lambda"].to_numpy(dtype=np.float64)
+        curves = [
+            group[f"species_{j}"].to_numpy(dtype=np.float64) for j in range(n_species)
+        ]
+        out[str(name)] = (waves, curves)
+    return out
 
 
 def mcr_titration(
-    spectra_by_temp: dict[str, Sequence[tuple[ArrayF, ArrayF]]],
+    spectra_by_temp: dict[str, Sequence[tuple[str, tuple[ArrayF, ArrayF]]]],
     x_by_temp: dict[str, ArrayF],
     *,
     n_species: int = 2,
@@ -265,8 +454,8 @@ def mcr_titration(
 
     Parameters
     ----------
-    spectra_by_temp : dict[str, Sequence[tuple[ArrayF, ArrayF]]]
-        Temperature label to its scans, each ``(lambda, Y[n_lambda, n_wells])``.
+    spectra_by_temp : dict[str, Sequence[tuple[str, tuple[ArrayF, ArrayF]]]]
+        Temperature label to its scans, each ``(name, (lambda, Y[n_lambda, n_wells]))``.
     x_by_temp : dict[str, ArrayF]
         Titrant value per well, same temperature keys.
     n_species : int
@@ -280,8 +469,9 @@ def mcr_titration(
     -------
     tuple[pd.DataFrame, dict[str, pd.DataFrame], dict[str, tuple[ArrayF, np.ndarray]]]
         One table row per (temp): K, se, component, rho, rel_err, n; per
-        temperature a table of the resolved species spectra; and per
-        temperature the titrant with the closed profiles, for plotting.
+        temperature a table of the resolved species spectra, tagged with the
+        scan each row came from; and per temperature the titrant with the
+        closed profiles, for plotting.
     """
     rows: list[dict[str, object]] = []
     spectra: dict[str, pd.DataFrame] = {}
@@ -291,14 +481,42 @@ def mcr_titration(
         x = np.asarray(x_by_temp[t], dtype=np.float64)
         if not scans:
             continue
-        lams, d = _stack_scans(scans)
-        d = np.where(np.isfinite(d), d, 0.0)
+        stacked = stack_scans(scans)
+        d = np.where(np.isfinite(stacked.data), stacked.data, 0.0)
         s_init: np.ndarray | None = None
         if n_species == _TWO_STATES and x.size > 1 and float(np.ptp(x)) > 0:
             # the extreme-titrant wells bound the two states of the equilibrium
             i0, i1 = int(np.argmin(x)), int(np.argmax(x))
             s_init = np.column_stack([d[i0], d[i1]])
         fit = mcr_als(d, n_species, closure=closure, s_init=s_init)
+        spec = pd.DataFrame({
+            "scan": stacked.tags,
+            "lambda": stacked.wavelengths,
+        })
+        for i in range(fit.s.shape[1]):
+            spec[f"species_{i}"] = fit.s[:, i]
+        spectra[t] = spec
+        profiles[t] = (x, fit.c)
+        if fit.degenerate:
+            # a component with a constant profile holds no titration
+            # information; fitting it would report a confident K describing
+            # nothing. Report the sample as unresolvable instead.
+            dead = ", ".join(str(i) for i in fit.dead_components)
+            rows.append({
+                "temp": t,
+                "K": float("nan"),
+                "se": float("nan"),
+                "F0": float("nan"),
+                "F1": float("nan"),
+                "component": -1,
+                "rho": float("nan"),
+                "rel_err": fit.rel_err,
+                "n_species": n_species,
+                "n": x.size,
+                "degenerate": True,
+                "note": f"degenerate: components {dead} have a dead profile",
+            })
+            continue
         k, se, f0, f1, comp, rho = component_pka(x, fit.c, is_ph=is_ph)
         rows.append({
             "temp": t,
@@ -311,10 +529,7 @@ def mcr_titration(
             "rel_err": fit.rel_err,
             "n_species": n_species,
             "n": x.size,
+            "degenerate": False,
+            "note": "",
         })
-        spec = pd.DataFrame(lams, columns=["lambda"])
-        for i in range(fit.s.shape[1]):
-            spec[f"species_{i}"] = fit.s[:, i]
-        spectra[t] = spec
-        profiles[t] = (x, fit.c)
     return pd.DataFrame(rows), spectra, profiles

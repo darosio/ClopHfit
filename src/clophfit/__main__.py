@@ -50,9 +50,17 @@ from clophfit.fitting.errors import (
     MissingDependencyError,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
-from clophfit.prenspire.mcr import mcr_titration
+from clophfit.prenspire.bands import ZERO_AT
+from clophfit.prenspire.mcr import mcr_titration, model_fraction, species_by_scan
 from clophfit.prenspire.spectral import fit_titrations_spectral, sample_spectra
-from clophfit.prenspire.thermo import LN10, R_GAS, VanthoffModel, vanthoff_titration
+from clophfit.prenspire.thermo import VanthoffModel, vanthoff_titration
+from clophfit.prenspire.thermo_plot import (
+    vanthoff_axes,
+    vanthoff_curve,
+    vanthoff_enthalpy,
+    vanthoff_right_line,
+    vanthoff_right_point,
+)
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
@@ -726,7 +734,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "vanthoff", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. both runs band and svd; all runs band, svd and global. vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and pKa vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. vanthoff is defined for pH plates only. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "vanthoff", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. both runs band and svd; all runs band, svd and global. vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
@@ -804,7 +812,7 @@ def enspire(  # ruff: ignore[too-many-arguments]
 
 
 def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
-    """Per sample: the banded curves with the joint model, and pKa vs 1/T."""
+    """Per sample: the banded curves with the joint model, and the constant vs 1/T."""
     n = len(models)
     fig, axes = plt.subplots(
         n, 2, figsize=(10.8, 4.2 * n), squeeze=False, constrained_layout=True
@@ -812,15 +820,23 @@ def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
     for row, (sample, info) in enumerate(sorted(models.items())):
         left, right = axes[row]
         temps = sorted(info.k_by_temp)
+        ax_labels = vanthoff_axes(info)
         colmap = {t: plt.get_cmap("tab10")(i / 10) for i, t in enumerate(temps)}
         for (band, t), (x, y) in sorted(info.curves.items()):
-            left.plot(x, y, "o", ms=3.5, color=colmap[t], alpha=0.85)
-            k = info.a + info.b * (info.inv[t] - info.m)
-            s0, s1 = info.plateaus[band, t]
-            grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+            if ax_labels.left_log:
+                # a zero concentration has no place on a log axis: it is
+                # drawn at the axis floor, as the band figure does
+                px = np.where(x == 0, ZERO_AT, x)
+                grid = np.logspace(
+                    np.log10(ZERO_AT), np.log10(max(float(np.max(x)), 1.0) * 1.5), 200
+                )
+            else:
+                px = x
+                grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+            left.plot(px, y, "o", ms=3.5, color=colmap[t], alpha=0.85)
             left.plot(
                 grid,
-                s0 + (s1 - s0) / (1 + np.power(10.0, k - grid)),
+                vanthoff_curve(info, t, grid, info.plateaus[band, t]),
                 "-",
                 lw=1.1,
                 color=colmap[t],
@@ -829,15 +845,21 @@ def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
             left.plot([], [], "o", color=colmap[t], label=f"{t} C")
         left.legend(fontsize=8)
         left.set_title(f"{sample}: bands and joint model")
-        left.set_xlabel("pH")
-        left.set_ylabel("normalized signal")
+        left.set_xlabel(ax_labels.left_x)
+        left.set_ylabel(ax_labels.left_y)
+        if ax_labels.left_log:
+            left.set_xscale("log")
         xs = np.array([info.inv[t] * 1000 for t in temps])
-        ys = np.array([info.k_by_temp[t][0] for t in temps])
-        ses = np.array([info.k_by_temp[t][1] for t in temps])
+        points = [vanthoff_right_point(info, t) for t in temps]
+        ys = np.array([p[0] for p in points])
+        ses = np.array([p[1] for p in points])
         right.errorbar(xs, ys, yerr=ses, fmt="o", color="k")
         line = np.linspace(float(xs.min()), float(xs.max()), 50)
         right.plot(
-            line, [info.a + info.b * (v / 1000 - info.m) for v in line], "-k", lw=1
+            line,
+            vanthoff_right_line(info, line / 1000),
+            "-k",
+            lw=1,
         )
         for i, t in enumerate(temps):
             right.annotate(
@@ -847,11 +869,28 @@ def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
                 xytext=(6, -12),
                 fontsize=8,
             )
-        right.set_title(f"van't Hoff: dH = {info.b * LN10 * R_GAS / 1000:.1f} kJ/mol")
+        right.set_title(f"van't Hoff: dH = {vanthoff_enthalpy(info) / 1000:.1f} kJ/mol")
         right.set_xlabel("1000 / T  (1/K)")
-        right.set_ylabel("pKa")
+        right.set_ylabel(ax_labels.right_y)
+        if ax_labels.right_log:
+            right.set_yscale("log")
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
+
+
+def _mcr_scan_names(
+    spectra: dict[str, dict[str, pd.DataFrame]],
+) -> dict[str, list[str]]:
+    """List the scan names of each sample, in the order the columns carry them."""
+    out: dict[str, list[str]] = {}
+    for sample, by_temp in spectra.items():
+        names: list[str] = []
+        for frame in by_temp.values():
+            for name in frame["scan"].tolist():
+                if name not in names:
+                    names.append(str(name))
+        out[sample] = names
+    return out
 
 
 def _plot_mcr(
@@ -860,47 +899,81 @@ def _plot_mcr(
     fits: dict[str, dict[str, tuple[float, float, float, float, bool, float]]],
     pdf_path: Path,
 ) -> None:
-    """Per sample: profile points as symbols, with the fitted curve drawn."""
+    """Per sample: profile points as symbols, with the fitted curve drawn.
+
+    The resolved spectra are drawn one panel per scan: an excitation scan
+    and an emission scan measure different things, and their wavelength
+    ranges overlap without the values at an overlapping wavelength being
+    the same measurement. One ramp would misplace every wavelength.
+    """
     n = len(profiles)
+    scans = _mcr_scan_names(spectra)
+    n_scans = max(len(s) for s in scans.values()) if scans else 1
     fig, axes = plt.subplots(
-        n, 2, figsize=(10.8, 4.0 * n), squeeze=False, constrained_layout=True
+        n,
+        1 + n_scans,
+        figsize=(5.4 * (1 + n_scans), 4.0 * n),
+        squeeze=False,
+        constrained_layout=True,
     )
     for row, (sample, by_temp) in enumerate(sorted(profiles.items())):
-        left, right = axes[row]
+        left = axes[row][0]
         for i, (t, (x, c)) in enumerate(sorted(by_temp.items())):
             style = "-" if i == 0 else "--"
+            k, se, _f0, _f1, is_ph, rel_err = fits[sample][t]
+            degenerate = not np.isfinite(k)
             for j in range(c.shape[1]):
                 left.plot(x, c[:, j], "o", ms=4, color=f"C{j}", alpha=0.85)
-                frame = spectra[sample][t]
-                right.plot(
-                    frame["lambda"],
-                    frame[f"species_{j}"],
-                    style,
-                    color=f"C{j}",
-                    label=f"species {j}" if i == 0 else None,
-                )
-            k, se, f0, f1, is_ph, rel_err = fits[sample][t]
+            if degenerate:
+                # a degenerate decomposition: the curve would be drawn over
+                # a profile that never moves, so say so instead
+                left.plot([], [], " ", label=f"{t} C: not fitted (degenerate)")
+                continue
             grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
-            frac = (
-                1.0 / (1.0 + np.power(10.0, k - grid)) if is_ph else grid / (grid + k)
-            )
+            # The points are closed fractions on the 0-1 scale. The curve
+            # is the model's bound fraction in the same units, so the two
+            # share one axis and the distance between them is a real
+            # measure of how well the model describes the component.
+            frac = model_fraction(grid, k, is_ph=is_ph)
             unit = "" if is_ph else " mM"
             left.plot(
                 grid,
-                f0 + (f1 - f0) * frac,
+                frac,
                 color="k",
                 lw=1.4,
                 ls=style,
                 label=f"{t} C: {k:.2f}{unit} +/- {se:.2f} (err {rel_err:.2f})",
             )
         left.legend(fontsize=7)
-        right.legend(fontsize=7)
         left.set_title(f"{sample}: components and fitted curve")
         left.set_xlabel("pH" if next(iter(fits[sample].values()))[4] else "ligand (mM)")
-        left.set_ylabel("fraction")
-        right.set_title(f"{sample}: resolved spectra")
-        right.set_xlabel("wavelength (nm)")
-        right.set_ylabel("spectral abundance")
+        left.set_ylabel("closed fraction")
+
+        names = scans.get(sample, [])
+        for s_index, name in enumerate(names):
+            panel = axes[row][1 + s_index]
+            for i, (t, (_x, c)) in enumerate(sorted(by_temp.items())):
+                style = "-" if i == 0 else "--"
+                # a scan may be missing at one temperature - the plate
+                # need not be read the same way at both
+                by_scan = species_by_scan(spectra[sample][t], c.shape[1])
+                if name not in by_scan:
+                    continue
+                waves, curves = by_scan[name]
+                for j, curve in enumerate(curves):
+                    panel.plot(
+                        waves,
+                        curve,
+                        style,
+                        color=f"C{j}",
+                        label=f"species {j}" if i == 0 else None,
+                    )
+            panel.legend(fontsize=7)
+            panel.set_title(f"{sample}: resolved spectra, scan {name}")
+            panel.set_xlabel("wavelength (nm)")
+            panel.set_ylabel("spectral abundance")
+        for s_index in range(len(names), n_scans):
+            axes[row][1 + s_index].set_axis_off()
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -1430,7 +1503,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
         if not spectra:
             continue
         table, specs, profs = mcr_titration(
-            {t: list(spectra.values())},
+            {t: [(label, pair) for label, pair in spectra.items()]},
             {t: np.asarray(used_x, dtype=float)},
             n_species=components,
             is_ph=is_ph,
@@ -1479,6 +1552,9 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
             f"{r.sample} at {r.temp}: K {r.K:.3f} +/- {r.se:.3f} "
             f"(rho {r.rho:.2f}, rel err {r.rel_err:.3f}) over {r.n} wells"
         )
+    for r in table[table["K"].isna()].itertuples():
+        note = getattr(r, "note", "")
+        print(f"{r.sample} at {r.temp}: not fitted ({note})")
     return table
 
 
