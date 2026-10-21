@@ -745,6 +745,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--chains", type=click.IntRange(min=1), default=2, show_default=True, help="MCMC chains for --method bayes. A fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
 @click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
+@click.option("--x-sigma", type=str, default=None, help="For --method bayes: prior SD (pH) on each well's true axis value - x_true ~ N(note pH, sigma), per well. The note's pH is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr. Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments]
     ctx: Context,
@@ -763,6 +764,7 @@ def enspire(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    x_sigma: str | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -771,6 +773,10 @@ def enspire(  # ruff: ignore[too-many-arguments]
     ef.export_measurements(Path(out))
     if note_f is None:
         return
+    if x_sigma is not None and method != "bayes":
+        ctx.fail(
+            "--x-sigma applies to --method bayes only (it is a posterior prior, not an LM option)"
+        )
     if method in {"band", "both", "all"}:
         fit_enspire_bands(
             ef,
@@ -808,6 +814,7 @@ def enspire(  # ruff: ignore[too-many-arguments]
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            x_sigma=x_sigma,
         )
 
 
@@ -1050,6 +1057,55 @@ def _plot_bayes(
     plt.close(fig)
 
 
+# Prior SD (pH) floor for --x-sigma: strictly positive, and small enough to
+# keep the posterior honest instead of smearing every point onto its plateau.
+X_SIGMA_MIN_PH = 0.01
+
+
+def _resolve_enspire_x_sigma(
+    x_sigma: str | None,
+    is_ph: bool,
+    one: object,
+    name: str,
+    t: str,
+) -> float | None:
+    """Resolve ``--x-sigma`` for one (sample, temperature) bayes fit.
+
+    ``None`` leaves the axis fixed at the note values. ``auto`` pools the
+    note's replicate-row spread per index column (rows A-C and D-F are the
+    same nominal targets at their temperature) into the prior sigma; a
+    number passes through after bounds checking. The prior only makes sense
+    on a pH axis, so with a Cl titrant it warns and keeps the fixed axis.
+    """
+    if x_sigma is None:
+        return None
+    one = cast("pd.DataFrame", one)
+    if not is_ph:
+        print(
+            f"warning: {name} at {t}: titrant is Cl, not pH - "
+            "--x-sigma is a pH-axis prior; the axis stays fixed"
+        )
+        return None
+    if x_sigma.strip().lower() == "auto":
+        sigma = bands_module.estimate_x_error_sigma(one["Well"], one["pH"])
+        if sigma is None:
+            print(
+                f"warning: {name} at {t}: fewer than two index columns with two "
+                "or more replicates; using a fixed axis (note pH)"
+            )
+            return None
+        return sigma
+    try:
+        sigma = float(x_sigma)
+    except ValueError:
+        msg = "--x-sigma must be 'auto' or a number, e.g. 0.15"
+        raise click.UsageError(msg) from None
+    if sigma < X_SIGMA_MIN_PH:
+        msg = f"--x-sigma must be >= {X_SIGMA_MIN_PH} pH (or 'auto')"
+        raise click.UsageError(msg)
+    return sigma
+
+
 def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note_fp: Path,
@@ -1062,6 +1118,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    x_sigma: str | None,
 ) -> pd.DataFrame:
     """Seeded posterior of the shared K per sample/temperature.
 
@@ -1087,6 +1144,10 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
         CPU cores for chain parallelism; None lets PyMC parallelise.
     target_accept : float | None
         NUTS target acceptance; None keeps the sampler default.
+    x_sigma : str | None
+        "auto" or a prior SD in pH on each well's true axis value
+        (x_true ~ N(note pH, sigma), independently); None fixes the axis at
+        the note values.
 
     Returns
     -------
@@ -1144,6 +1205,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
         ds = Dataset(
             {nm: DataArray(xx, yy) for nm, (xx, yy) in data.items()}, is_ph=is_ph
         )
+        x_res = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), t)
         bb = bands_module.fit_bands_bayes(
             ds,
             seed=seed,
@@ -1151,6 +1213,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            x_sigma=x_res,
         )
         label = cast("str", name)
         rows.append({
@@ -1162,6 +1225,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             "r_hat": bb.rhat,
             "ess_bulk": bb.ess,
             "n": x.size,
+            "x_sigma": x_res,
         })
         figdata.append((label, t, data, bb, is_ph))
     table = pd.DataFrame(
@@ -1175,6 +1239,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             "r_hat",
             "ess_bulk",
             "n",
+            "x_sigma",
         ],
     )
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1183,9 +1248,11 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
     if figdata:
         _plot_bayes(figdata, out_dir / f"{stem}_K_bayes.pdf")
     for row in table[table["K"].notna()].itertuples():
+        cell = str(row.x_sigma)
+        xsig = f" x_sigma {float(cell):.3f}" if cell not in {"nan", "None"} else ""
         print(
             f"{row.sample} at {row.temp}: K {row.K:.3f} HDI94 [{row.hdi03:.3f}, {row.hdi97:.3f}] "
-            f"rhat {row.r_hat:.3f} ess {row.ess_bulk:.0f} on {row.n} points"
+            f"rhat {row.r_hat:.3f} ess {row.ess_bulk:.0f} on {row.n} points{xsig}"
         )
     return table
 

@@ -25,6 +25,7 @@ well-to-well noise while shifting K by a third of a standard error.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, NamedTuple
 
 import arviz as az  # type: ignore[import-untyped]
@@ -40,7 +41,7 @@ from clophfit.fitting.errors import InsufficientDataError
 from clophfit.fitting.models import binding_1site
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from matplotlib.axes import Axes
 
@@ -640,6 +641,65 @@ def _pooled_hdi(sampled: np.ndarray, *, prob: float = 0.94) -> tuple[float, floa
     return float(lo), float(hi)
 
 
+# Fewest replicate wells in an index column for its spread to count.
+_MIN_WELLS_PER_COLUMN = 2
+# Fewest pooled degrees of freedom before a sigma can be estimated.
+_MIN_DOF_TO_ESTIMATE = 2
+
+
+def estimate_x_error_sigma(wells: Iterable[str], ph: Iterable[float]) -> float | None:
+    """Pooled within-column spread of the measured pH axis of one plate group.
+
+    EnSpire notes lay each temperature out as replicate rows of one nominal
+    target series, so the same well index (``A04``/``B04``/``C04``) holds the
+    same nominal target and the note's pH values spread around it by the
+    per-well axis error only: dispensing, electrode, reading. The pooled
+    within-column SD is a calibration-free estimate of that error, usable as
+    the prior scale in :func:`fit_bands_bayes` (``x_sigma``).
+
+    Parameters
+    ----------
+    wells : Iterable[str]
+        Well labels of one (sample, temperature) group.
+    ph : Iterable[float]
+        The note's pH per well, in the same order. Non-finite values are
+        skipped.
+
+    Returns
+    -------
+    float | None
+        The pooled SD in pH, over the index columns holding at least two
+        wells each. ``None`` when fewer than two index columns hold two or
+        more replicates (a single-row plate cannot separate axis error from
+        target spread - fall back to a fixed sigma or the fixed axis).
+
+    Notes
+    -----
+    Relies on the EnSpire replicate-row convention: rows of one temperature
+    are parallel replicates of the same nominal series (rows A-C at 20 C,
+    D-F at 37 C). The index is taken as the trailing digits of the well label.
+    A floor of 0.02 keeps the prior strictly positive.
+    """
+    idx: dict[str, list[float]] = {}
+    for w, p in zip(wells, ph, strict=False):
+        m = re.search(r"(\d+)$", str(w))
+        key = m.group(1) if m else str(w)
+        pv = float(p)
+        if np.isfinite(pv):
+            idx.setdefault(key, []).append(pv)
+    ss = 0.0
+    dof = 0
+    for vals in idx.values():
+        n = len(vals)
+        if n >= _MIN_WELLS_PER_COLUMN:
+            mean = sum(vals) / n
+            ss += sum((v - mean) ** 2 for v in vals)
+            dof += n - 1
+    if dof < _MIN_DOF_TO_ESTIMATE:
+        return None
+    return max(float(np.sqrt(ss / dof)), 0.02)
+
+
 def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
     ds: Dataset,
     *,
@@ -649,6 +709,7 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
     cores: int | None = None,
     target_accept: float | None = None,
     robust: bool = True,
+    x_sigma: float | None = None,
 ) -> BandBayes:
     """Posterior of the K shared across the bands of ``ds`` (PyMC NUTS).
 
@@ -680,6 +741,14 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
     robust : bool
         Student-t (nu = 3) likelihood, the best-calibrated arm on the
         campaign plates; False gives a plain Normal.
+    x_sigma : float | None
+        Prior SD (pH) on each well's true axis value:
+        ``x_true[i] ~ N(x[i], x_sigma)`` per point, independently. The
+        EnSpire note pH is an instrument reading, not an exact level, and
+        the replicate-row spread at one nominal target is exactly this
+        error - pool it with :func:`estimate_x_error_sigma` or pass a fixed
+        0.1-0.2. ``None`` fixes the axis at the note values (previous
+        behavior).
 
     Returns
     -------
@@ -710,6 +779,13 @@ def fit_bands_bayes(  # ruff: ignore[too-many-arguments]
         # whole note's fits, as fit_bands already does.
         nan = float("nan")
         return BandBayes(nan, nan, nan, nan, nan, None)
+    fr = fit_binding_pymc(
+        ds,
+        n_xerr=0.0,  # nominal titrant axis: enspire notes carry no additions scheme
+        robust=RobustConfig(enabled=robust, likelihood="student_t", nu=3.0),
+        sampler=sampler,
+        x_sigma=x_sigma,
+    )
     if fr.trace is None or fr.result is None:
         nan = float("nan")
         return BandBayes(nan, nan, nan, nan, nan, None)

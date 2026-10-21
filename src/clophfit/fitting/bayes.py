@@ -2663,7 +2663,7 @@ _DEFAULT_INIT = InitConfig()
 _DEFAULT_SAMPLER = SamplerConfig()
 
 
-def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
+def fit_binding_pymc(  # ruff: ignore[too-many-branches, too-many-arguments, too-many-statements]
     ds_or_fr: Dataset | FitResult,
     *,
     n_sd: float = 10.0,
@@ -2674,6 +2674,7 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
     init: InitConfig = _DEFAULT_INIT,
     sampler: SamplerConfig = _DEFAULT_SAMPLER,
     x_prior: XPrior | None = None,
+    x_sigma: float | None = None,
 ) -> FitResult:
     """Analyze multi-label titration datasets using PyMC (single model).
 
@@ -2705,6 +2706,14 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
         Plate-level pH-axis prior from a previous multi-well fit, as produced by
         :func:`x_prior_from_trace`. ``None`` derives the axis from this
         dataset's own x and x_err, as before. See :class:`SamplerConfig`.
+    x_sigma : float | None
+        Independent per-point prior on the true x: ``x_true[i] ~ N(x[i], x_sigma)``
+        for every point separately. For axes that are sets of independent
+        measurements rather than a cumulative addition series - e.g. EnSpire
+        wells, each set to its own nominal pH - the random-walk model below is
+        not the right structure, and this is.
+        ``None`` (default) leaves the axis fixed unless ``n_xerr > 0`` enables
+        the walk. Takes precedence over ``n_xerr`` and ``x_prior`` when set.
 
     Returns
     -------
@@ -2768,9 +2777,22 @@ def fit_binding_pymc(  # ruff: ignore[too-many-arguments, too-many-statements]
                 kd_range=None if ds.is_ph else kd_bounds(float(np.nanmax(xc))),
             )
         )
-        x_true = create_x_true(
-            xc, x_errc, n_xerr, min_x_step=min_x_step, x_prior=x_prior
-        )
+        if x_sigma is not None and x_sigma > 0:
+            # Independent per-point prior: each measured x anchors its own
+            # true value; there is no shared walk between points. The EnSpire
+            # layout (replicate rows of independent nominal targets) is a set,
+            # not a cumulative series, so this, not create_x_true, is its
+            # latent-x model.
+            x_true = pm.Normal(
+                "x_true",
+                mu=as_tensor_variable(np.asarray(xc, dtype=float)),
+                sigma=float(x_sigma),
+                shape=len(xc),
+            )
+        else:
+            x_true = create_x_true(
+                xc, x_errc, n_xerr, min_x_step=min_x_step, x_prior=x_prior
+            )
         robust_nu = (
             _student_t_nu_value(student_t_nu)
             if robust_on and robust_likelihood == "student_t"
