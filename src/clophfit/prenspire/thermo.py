@@ -409,6 +409,13 @@ def fit_vanthoff_model_bayes(  # ruff: ignore[too-many-arguments]
         )
 
 
+class _TempCurves(NamedTuple):
+    """One temperature's curves and the wells they were read off."""
+
+    wells: list[str]
+    store: dict[str, tuple[ArrayF, ArrayF]]
+
+
 def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     samples: pd.DataFrame,
@@ -418,9 +425,9 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     buffer: bool,
     wanted: Sequence[str],
     min_rho: float,
-) -> dict[str, dict[str, tuple[ArrayF, ArrayF]]]:
+) -> dict[str, _TempCurves]:
     """Corrected, scaled curves per (temperature, band), as the band path does."""
-    out: dict[str, dict[str, tuple[ArrayF, ArrayF]]] = {}
+    out: dict[str, _TempCurves] = {}
     for temp, group in samples.groupby("Temp", sort=True, dropna=False):
         t = str(temp).split(".")[0]
         one = group.drop_duplicates("Well")
@@ -460,7 +467,10 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
                 continue  # a flat band cannot inform K
             store[r.name] = (x, arr)
         if store:
-            out[t] = store
+            # the wells are the ones that survived the blank and finite-signal
+            # gates, so a caller mapping a per-well vector back to well names
+            # must use this list and not the note's
+            out[t] = _TempCurves(wells=wells, store=store)
     return out
 
 
@@ -471,6 +481,8 @@ class VanthoffCurves(NamedTuple):
     """Whether the sample was read as a pH (else ligand) titration."""
     curves: dict[tuple[str, str], tuple[ArrayF, ArrayF]]
     """``(band, temperature)`` to its ``(x, y)`` curve, y normalised per band."""
+    wells: dict[str, list[str]]
+    """Temperature label to the wells its curves were read off, in order."""
 
 
 def vanthoff_curves(  # ruff: ignore[too-many-arguments]
@@ -531,9 +543,10 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
             is_ph=sample_is_ph,
             curves={
                 (band, t): pair
-                for t, store in curves.items()
-                for band, pair in store.items()
+                for t, one in curves.items()
+                for band, pair in one.store.items()
             },
+            wells={t: one.wells for t, one in curves.items()},
         )
     return out
 

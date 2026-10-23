@@ -2078,10 +2078,9 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
                 continue
             xdraws = np.asarray(trace.posterior[f"x_true_{t}"].values)
             draws_x = xdraws.reshape(-1, xdraws.shape[-1])
-            # the wells of this temperature, in the order _curves_by_temp kept
-            labels = one["Temp"].map(lambda v: str(v).split(".")[0])
-            wells_t = one[labels == t].drop_duplicates("Well")["Well"].tolist()
-            for i, well in enumerate(wells_t):
+            # the wells that survived the blank and monotonicity gates, in the
+            # order the sampler carries them
+            for i, well in enumerate(info.wells[t]):
                 qlo, xmed, qhi = np.quantile(draws_x[:, i], [0.03, 0.5, 0.97])
                 x_rows.append({
                     "sample": name,
