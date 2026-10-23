@@ -2080,6 +2080,7 @@ def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
             np.ndarray,
             np.ndarray,
             np.ndarray,
+            bool,
         ]
     ] = []
     out_dir.mkdir(parents=True, exist_ok=True)
