@@ -41,6 +41,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pymc as pm  # type: ignore[import-untyped]
+import pytensor.tensor as pt
+import xarray as xr
 from scipy.optimize import least_squares
 from scipy.special import logsumexp
 
@@ -49,6 +52,8 @@ from clophfit.fitting.models import binding_1site
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    import arviz as az  # type: ignore[import-untyped]
+
     from clophfit.clophfit_types import ArrayF
 
 _GRID_POINTS = 61
@@ -56,6 +61,7 @@ _DELTA_MIN, _DELTA_MAX = 0.3, 6.0
 _WEIGHT_PASSES = 3
 _AMPLITUDE_ITERATIONS = 50
 _AMPLITUDE_TOL = 1e-7
+_MIN_GLOBAL_WELLS = 4
 
 
 @dataclass(frozen=True)
@@ -293,7 +299,7 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         raise ValueError(msg)
     model = _Model(acid_state=acid_state, fit_hill=fit_hill, well_scale=well_scale)
     xa = np.asarray(x, dtype=np.float64)
-    if xa.size < 4:  # ruff: ignore[magic-value-comparison]
+    if xa.size < _MIN_GLOBAL_WELLS:
         msg = "a global spectral fit needs at least four wells"
         raise ValueError(msg)
     labels, lams, ys = [], [], []
@@ -342,3 +348,582 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         n_wells=int(xa.size),
         well_scale=scale,
     )
+
+
+def _clean_spectra(
+    x: ArrayF,
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    x_sigma: float,
+) -> tuple[np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]]]:
+    """Validate the inputs and drop wavelengths non-finite in any well.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant value (pH or concentration) per well.
+    spectra : Mapping[str, tuple[ArrayF, ArrayF]]
+        Label to ``(wavelengths, Y)`` with ``Y`` of shape (n_lambda, n_wells),
+        already corrected per well.
+    x_sigma : float
+        Prior SD of each well's latent axis value.
+
+    Returns
+    -------
+    tuple[np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]]]
+        The validated titrant axis and, per label, the cleaned
+        ``(wavelengths, Y)`` pair with non-finite wavelengths dropped.
+
+    Raises
+    ------
+    ValueError
+        With fewer than four wells, a non-finite or non-positive ``x_sigma``,
+        non-finite ``x``, or no scan with finite wavelengths.
+    """
+    xa = np.asarray(x, dtype=np.float64)
+    if xa.size < _MIN_GLOBAL_WELLS or not np.isfinite(x_sigma) or x_sigma <= 0:
+        msg = "global Bayes needs >=4 wells and a positive finite x_sigma"
+        raise ValueError(msg)
+    if not np.isfinite(xa).all():
+        msg = "global Bayes needs a finite titrant axis"
+        raise ValueError(msg)
+    clean: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for name, (lam, values) in spectra.items():
+        y = np.asarray(values, dtype=np.float64)
+        keep = np.all(np.isfinite(y), axis=1)
+        if keep.any():
+            clean[name] = (np.asarray(lam, dtype=np.float64)[keep], y[keep])
+    if not clean:
+        msg = "global Bayes needs at least one scan with finite wavelengths"
+        raise ValueError(msg)
+    return xa, clean
+
+
+def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
+    x: ArrayF,
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    x_sigma: float,
+    is_ph: bool = True,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float = 0.9,
+    tune: int | None = None,
+) -> az.InferenceData:
+    """Bayesian whole-spectrum global fit with per-well latent titrant values.
+
+    This experimental counterpart to :func:`fit_spectra_global` retains its
+    two-species mixture and per-well amplitude. Species spectra are nuisance
+    parameters; scan-specific Gaussian residual scales are inferred jointly.
+    Wavelength residuals are conditionally independent within each scan, an
+    approximation that must be considered when interpreting posterior widths.
+
+    The priors are seeded from a :func:`fit_spectra_global` run: ``E0``/``E1``
+    are centered on the projected species spectra with a width of five residual
+    RMS, a mild empirical-Bayes reuse of the same data (constant across ``K``,
+    so the shape of the ``K`` posterior is not affected; the species draws are
+    systematically a little narrow). Species state ordering follows
+    :func:`~clophfit.fitting.models.binding_1site`'s convention: for
+    ``is_ph=True`` state 1 carries the *low-pH* weight ``1 / (1 + 10**(pH -
+    K))``, hence ``fraction = sigmoid(ln10 * (K - x_true))`` and ``E0`` tracks
+    the high-pH spectrum.
+
+    Input validation is the helper's (:func:`_clean_spectra`): fewer than
+    four wells, a non-finite or non-positive ``x_sigma``, a non-finite
+    ``x``, or no scan with finite wavelengths raise ``ValueError``.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant value (pH or concentration) per well.
+    spectra : Mapping[str, tuple[ArrayF, ArrayF]]
+        Label to ``(wavelengths, Y)`` with ``Y`` of shape (n_lambda, n_wells),
+        already corrected per well; wavelengths holding a non-finite value in
+        any well are dropped.
+    x_sigma : float
+        Prior SD of each well's latent axis value: ``x_true ~ N(x, x_sigma)``.
+    is_ph : bool
+        Henderson-Hasselbalch (pH) or Langmuir (ligand) titration axis.
+    seed : int
+        Random seed; a fixed seed reproduces the posterior.
+    draws : int
+        Posterior draws per chain.
+    chains : int
+        Number of NUTS chains.
+    cores : int | None
+        Chain parallelism; None chains in parallel.
+    target_accept : float
+        NUTS target acceptance, for better mixing at the price of step size.
+    tune : int | None
+        Tuning draws; None keeps ``draws // 2``.
+
+    Returns
+    -------
+    az.InferenceData
+        Posterior draws for ``K``, the latent axis per well, the per-well
+        amplitude and the reconstructed species spectra and noise scales
+        for each scan, with the log-likelihood attached so the comparison
+        scripts can compute elpd across methods.
+    """
+    xa, clean = _clean_spectra(x, spectra, x_sigma=x_sigma)
+    init = fit_spectra_global(xa, clean, is_ph=is_ph, well_scale=True, jackknife=False)
+    lo, hi = _k_bounds(xa, is_ph=is_ph)
+    with pm.Model():
+        k = pm.Uniform("K", lower=lo, upper=hi)
+        x_true = pm.Normal("x_true", mu=xa, sigma=x_sigma, shape=xa.size)
+        if is_ph:
+            fraction = pm.math.sigmoid(np.log(10.0) * (k - x_true))
+        else:
+            fraction = x_true / (k + x_true)
+        amp_raw = pm.LogNormal("amplitude_raw", mu=0.0, sigma=0.25, shape=xa.size)
+        amplitude = pm.Deterministic(
+            "amplitude",
+            amp_raw / pt.mean(amp_raw),  # type: ignore[no-untyped-call]
+        )
+        for name, (_lam, y) in clean.items():
+            species = init.species[name]
+            resid_scale = max(init.rms[name], 1e-6)
+            e0 = pm.Normal(
+                f"E0_{name}", mu=species[0], sigma=5 * resid_scale, shape=y.shape[0]
+            )
+            e1 = pm.Normal(
+                f"E1_{name}", mu=species[1], sigma=5 * resid_scale, shape=y.shape[0]
+            )
+            sigma = pm.HalfNormal(f"sigma_{name}", sigma=2 * resid_scale)
+            mu = amplitude[:, None] * (
+                (1 - fraction[:, None]) * e0 + fraction[:, None] * e1
+            )
+            pm.Normal(f"obs_{name}", mu=mu, sigma=sigma, observed=y.T)
+        # The least-squares K starts the chains (clipped into the Uniform's
+        # interior, a bound-hugging least-squares K would start NUTS on an edge).
+        # It passes as pm.sample(initvals=...), sampler-level, not as a model
+        # initval: posterior machinery (log-likelihood computation) rejects a
+        # graph with non-default rvs_to_initial_values under the nutpie backend.
+        idata = pm.sample(
+            draws,
+            tune=draws // 2 if tune is None else tune,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            random_seed=seed,
+            initvals={"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))},
+            return_inferencedata=True,
+            progressbar=False,
+        )
+        pm.compute_log_likelihood(idata)  # for elpd comparisons across methods
+        return idata
+
+
+_RIDGE = 4.0  # precision of the level/linear drift: drift SD ~0.5 in normalized units
+
+
+def _as_tensor(value: object) -> pm.math.TensorVariable:
+    """Wrap ``value`` as a typed pytensor variable (type checker pacifier)."""
+    return pt.as_tensor_variable(
+        value  # type: ignore[arg-type, unused-ignore]
+    )
+
+
+_SMOOTH_RHO = 10.0  # for the per-well smooth-noise correlation (see below)
+
+
+def _smooth_corr(n: int) -> np.ndarray:
+    """Unit-normalized smooth error correlation along wavelength.
+
+    ``Sigma = inv(SMOOTH_RHO D'D + I)``: level and linear drifts have unit
+    SD, higher-order shapes are shrunk, so ``smooth`` amplitude draws scale
+    the whole block and cover slowly varying per-well residuals (an AR(1) or
+    offset-sized error) without touching the shared species spectra.
+    """
+    d2 = _second_difference(n)
+    return np.linalg.inv(_SMOOTH_RHO * (d2.T @ d2) + np.eye(n))
+
+
+def _second_difference(n: int) -> np.ndarray:
+    """Build the (n-2, n) second-difference matrix; a smooth spectrum has tiny rows."""
+    d2 = np.zeros((n - 2, n))
+    for i in range(n - 2):
+        d2[i, i : i + 3] = (1.0, -2.0, 1.0)
+    return d2
+
+
+def _fractions_rows(  # ruff: ignore[too-many-arguments]
+    k: pm.math.TensorVariable,
+    delta: pm.math.TensorVariable | float | None,
+    hill: pm.math.TensorVariable | float | None,
+    axis: pm.math.TensorVariable,
+    *,
+    is_ph: bool,
+    acid_state: bool,
+) -> pm.math.TensorVariable:
+    """Symbolic state-fraction rows (columns S0..): the pytensor twin of ``_fractions``.
+
+    As there, ``hill`` stays 1 and ``delta`` unused outside the branches that
+    need them; the acid-state columns are the sequential diprotic softmax.
+    The parameters are pytensor variables inside the model, floats for the
+    plain-function path.
+    """
+    ln10 = np.log(10.0)
+    if not acid_state:
+        h = 1.0 if hill is None else hill
+        if is_ph:
+            f = pm.math.sigmoid(h * ln10 * (k - axis))
+        else:
+            ratio = (axis / k) ** h
+            f = ratio / (1 + ratio)
+        return pt.stack([1 - f, f], axis=1)
+    if delta is None:
+        msg = "the acid state needs a delta"
+        raise ValueError(msg)
+    h = 1.0 if hill is None else hill
+    k2 = k - delta
+    logs = pt.stack(
+        [
+            pt.zeros_like(axis),  # type: ignore[no-untyped-call]
+            h * (k - axis) * ln10,
+            (h * (k - axis) + (k2 - axis)) * ln10,
+        ],
+        axis=1,
+    )
+    mx = pt.max(logs, axis=1, keepdims=True)  # type: ignore[no-untyped-call]
+    ex = pt.exp(logs - mx)
+    return ex / pt.sum(ex, axis=1, keepdims=True)  # type: ignore[no-untyped-call]
+
+
+def _conditional_species_draws(  # ruff: ignore[too-many-arguments, too-many-statements]
+    idata: az.InferenceData,
+    clean: dict[str, tuple[np.ndarray, np.ndarray]],
+    means: dict[str, np.ndarray],
+    *,
+    is_ph: bool,
+    fit_hill: bool,
+    acid_state: bool,
+    seed: int,
+) -> None:
+    """Reconstruct conditional species-spectrum draws and attach them in place.
+
+    With the species spectra marginalized out of the likelihood the sampler
+    never draws them; for each posterior draw this draws once from the exact
+    Gaussian conditional of the stacked ``(E_0..E_{S-1}, b_w)`` vector given
+    all wells (the species prior is centered on ``means``), with the
+    per-well ``smooth`` residuals integrated out of ``(E, b)``'s likelihood
+    block. The species spectra stay available to the plots and downstream
+    checks exactly as in the free-parameter version.
+    """
+    post = idata.posterior
+    chains, ndraws = post.dims["chain"], post.dims["draw"]
+
+    def flat(v: str) -> np.ndarray:
+        arr = np.asarray(post[v].values)
+        return arr.reshape(chains * ndraws, *arr.shape[2:])
+
+    k_draws = flat("K")
+    delta_draws = flat("delta") if acid_state else np.zeros_like(k_draws)
+    hill_draws = flat("hill") if fit_hill else np.ones_like(k_draws)
+    x_draws = flat("x_true")
+    amp = flat("amplitude")
+    n_wells = x_draws.shape[1]
+    total = x_draws.shape[0]
+    model = _Model(acid_state=acid_state, fit_hill=fit_hill, well_scale=False)
+    rng = np.random.default_rng(seed + 1)
+    for name, (_lam, y) in clean.items():
+        n_lam = y.shape[0]
+        curv = _second_difference(n_lam).T @ _second_difference(n_lam)
+        bmat = _smooth_corr(n_lam)
+        ones_l = np.ones(n_lam)
+        s_e = flat(f"species_scale_{name}")
+        sig = flat(f"sigma_{name}")
+        s_b = flat(f"offset_{name}")
+        smooth = flat(f"smooth_{name}")
+        states = 3 if acid_state else 2
+        out = np.empty((total, states, n_lam))
+        for i in range(total):
+            theta = [float(k_draws[i])]
+            if acid_state:
+                theta.append(float(delta_draws[i]))
+            if fit_hill:
+                theta.append(float(hill_draws[i]))
+            c = _fractions(x_draws[i], np.asarray(theta), model, is_ph=is_ph)
+            # exact Gaussian conditional of (E stacked, per-well offsets b_w):
+            # y_w | E, b_w ~ N(..., sigma^2 I + smooth^2 B) per well, so the
+            # likelihood terms use that block's inverse instead of 1/sigma^2
+            prec_e = curv / s_e[i] ** 2 + _RIDGE * np.eye(n_lam)
+            uinv = np.linalg.inv(smooth[i] ** 2 * bmat + sig[i] ** 2 * np.eye(n_lam))
+            one_u = uinv @ ones_l
+            prec = np.zeros((states * n_lam + n_wells, states * n_lam + n_wells))
+            gmat = np.einsum("w,ws,wt->st", amp[i] ** 2, c, c)
+            prec[: states * n_lam, : states * n_lam] = np.kron(np.eye(states), prec_e)
+            prec[: states * n_lam, : states * n_lam] += np.kron(gmat, uinv)
+            for w in range(n_wells):
+                a_c = amp[i][w] * c[w]  # (S,)
+                for s in range(states):
+                    prec[s * n_lam : (s + 1) * n_lam, states * n_lam + w] = (
+                        a_c[s] * one_u
+                    )
+                    prec[states * n_lam + w, s * n_lam : (s + 1) * n_lam] = (
+                        a_c[s] * one_u
+                    )
+                prec[states * n_lam + w, states * n_lam + w] = 1.0 / s_b[
+                    i
+                ] ** 2 + float(one_u.sum())
+            prec[np.diag_indices(states * n_lam + n_wells)] += 1e-9
+            rhs = np.zeros(states * n_lam + n_wells)
+            auy = (uinv @ y) * amp[i]  # (n_lam, n_wells)
+            for s in range(states):
+                rhs[s * n_lam : (s + 1) * n_lam] = (
+                    prec_e @ means[name][s] + auy @ c[:, s]
+                )
+            rhs[states * n_lam :] = (uinv @ y).sum(axis=0) / sig[i] ** 2
+            chol = np.linalg.cholesky(prec)
+            step = np.linalg.solve(chol, rhs) + rng.standard_normal(chol.shape[0])
+            draw = np.linalg.solve(chol.T, step)
+            out[i] = draw[: states * n_lam].reshape(states, n_lam)
+        for s in range(states):
+            post[f"E{s}_{name}"] = xr.DataArray(
+                out.reshape(chains, ndraws, states, n_lam)[:, :, s, :],
+                dims=("chain", "draw", f"lambda_{name}"),
+            )
+
+
+def _joint_marginal_logp(  # ruff: ignore[too-many-arguments]
+    y_flat: pm.math.TensorVariable,
+    mu_flat: pm.math.TensorVariable,
+    q_wells: pm.math.TensorVariable,
+    inwell: pm.math.TensorVariable,
+    prec_e: pm.math.TensorVariable,
+    *,
+    states: int,
+    n_wells: int,
+    n_lam: int,
+) -> pm.math.TensorVariable:
+    """Exact log density of the stacked-wells marginal Gaussian.
+
+    The marginal covariance over all wells' wavelengths is
+    ``kron(U U', Sigma_E) + kron(I_wells, inwell)`` with ``U = q_wells`` of
+    rank <= ``states``, i.e. ``A + W M W'`` with ``A = kron(I, inwell)`` and
+    ``M = kron(I_states, Sigma_E)``; by the matrix determinant lemma the
+    quadratic form and log determinant reduce to per-well and
+    ``(states n_lam)``-sized algebra instead of one dense
+    ``(n_wells n_lam)^3`` factorization. ``prec_e`` is ``Sigma_E^{-1}``.
+    """
+    n_eff = n_wells * n_lam
+    jit = _as_tensor(np.eye(n_lam)) * 1e-9  # keeps the cholesky finite
+    chol_in = pt.linalg.cholesky(inwell + jit)
+    eye_l = _as_tensor(np.eye(n_lam))
+    inwell_inv = pt.linalg.solve_triangular(
+        pt.transpose(chol_in),  # type: ignore[no-untyped-call,unused-ignore]
+        pt.linalg.solve_triangular(chol_in, eye_l, lower=True),  # type: ignore[no-untyped-call,unused-ignore]
+        lower=False,
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    chol_pe = pt.linalg.cholesky(prec_e + jit)
+    logdet_pe = 2 * pt.sum(
+        pt.log(pt.diagonal(chol_pe, axis1=-2, axis2=-1))  # type: ignore[no-untyped-call,unused-ignore]
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    resid = (y_flat - mu_flat).reshape((n_wells, n_lam))
+    al = pt.linalg.solve_triangular(
+        chol_in,
+        pt.transpose(resid),  # type: ignore[no-untyped-call,unused-ignore]
+        lower=True,
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    quad = pt.sum(al**2)  # type: ignore[no-untyped-call,unused-ignore]
+    ra = pt.linalg.solve_triangular(
+        pt.transpose(chol_in),  # type: ignore[no-untyped-call,unused-ignore]
+        al,  # type: ignore[no-untyped-call,unused-ignore]
+        lower=False,
+    )  # type: ignore[no-untyped-call,unused-ignore]  # inwell^{-1} r
+    z = pt.dot(
+        pt.transpose(q_wells),  # type: ignore[no-untyped-call,unused-ignore]
+        pt.transpose(ra),  # type: ignore[no-untyped-call,unused-ignore]
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    gg = pt.dot(
+        pt.transpose(q_wells),  # type: ignore[no-untyped-call,unused-ignore]
+        q_wells,  # type: ignore[no-untyped-call,unused-ignore]
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    qmat = (
+        pt.eye(states)[:, None, :, None] * prec_e[None, :, None, :]  # type: ignore[no-untyped-call,unused-ignore]
+        + gg[:, None, :, None] * inwell_inv[None, :, None, :]
+    ).reshape((states * n_lam, states * n_lam))
+    chol_q = pt.linalg.cholesky(qmat + _as_tensor(np.eye(states * n_lam)) * 1e-9)
+    alpha_q = pt.linalg.solve_triangular(
+        chol_q,
+        z.reshape((states * n_lam, 1)),  # type: ignore[no-untyped-call,unused-ignore]
+        lower=True,
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    quad -= pt.sum(alpha_q**2)  # type: ignore[no-untyped-call,unused-ignore]
+    logdet_in = 2 * pt.sum(
+        pt.log(pt.diagonal(chol_in, axis1=-2, axis2=-1))  # type: ignore[no-untyped-call,unused-ignore]
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    logdet_q = 2 * pt.sum(
+        pt.log(pt.diagonal(chol_q, axis1=-2, axis2=-1))  # type: ignore[no-untyped-call,unused-ignore]
+    )  # type: ignore[no-untyped-call,unused-ignore]
+    # log|cov| = n_wells log|inwell| - S log|P_E| + log|Q|
+    logdet = n_wells * logdet_in - states * logdet_pe + logdet_q
+    return -0.5 * (quad + logdet + n_eff * np.log(2 * np.pi))  # type: ignore[no-untyped-call,unused-ignore]
+
+
+def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
+    x: ArrayF,
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    x_sigma: float,
+    is_ph: bool = True,
+    fit_hill: bool = False,
+    acid_state: bool = False,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float = 0.9,
+    tune: int | None = None,
+) -> az.InferenceData:
+    """Bayesian whole-spectrum global fit with the species spectra marginalized.
+
+    The same generative model as :func:`fit_spectra_global_bayes` - two-state
+    mixture, per-well amplitude, latent titrant axis - but the species spectra
+    are eliminated analytically instead of sampled: they carry a Gaussian
+    prior centered on the least-squares species spectra with a smooth
+    covariance (second-difference precision scaled by ``species_scale``, the
+    level/linear drift variance fixed), and, being linear in the likelihood,
+    integrate out exactly. Because the species spectra are shared by every
+    well, the exact marginal couples all wells: each scan contributes one
+    multivariate Gaussian over all wells' wavelengths with cross-well blocks
+    ``a_w a_w' (C_w . C_w') Sigma_E``, so the sampler holds a handful of
+    physical parameters (``K``, ``x_true``, ``amplitude``, per-scan ``sigma``
+    and ``offset`` scales) instead of two 30-60 dimensional species vectors
+    per scan, removing the strongly correlated posterior geometry of the
+    free-parameter version.
+
+    Two refinements against :func:`fit_spectra_global_bayes`:
+
+    - the species covariance is a smoothness prior with a data-free shape;
+      the centering on the least-squares species spectra is the same
+      documented empirical-Bayes reuse the free-parameter version makes, and
+      it is what keeps the mean structure - and with it ``K`` - identified
+      despite the per-well amplitude;
+    - per-well noise is a two-component covariance: white ``sigma`` plus a
+      wavelength-correlated ``smooth`` block (``inv(RHO D'D + I)``), plus an
+      ``offset`` scale per scan contributing an ``s_b^2 * J`` block. Those
+      give the sampler somewhere to put systematically shaped residuals - the
+      correlated-along-wavelength errors noted in the module docstring -
+      instead of letting the shared species spectra absorb them. Coverage
+      testing with AR(1) wavelength noise (benchmarks/mcr_bayes_constrained_eval.py)
+      shows the free-parameter version undercovers there (0.30-0.85 observed
+      95% coverage) and the noise model here directly targets that failure;
+      the marginalized fitter itself still undercovers in the same sweep
+      (0.25-0.70; benchmarks/marginal_bayes_coverage_eval.csv), with
+      ``mcr-constrained-bayes`` best-calibrated from noise 0.06 up (0.80-0.95)
+      - so verify coverage for a new data regime with the benchmark before
+      trusting the intervals.
+
+    ``fit_hill`` and ``acid_state`` are supported with the same conventions as
+    the least-squares twin (:func:`fit_spectra_global`; the acid state is
+    pH-only). The conditional species draws are reconstructed post hoc and
+    attached as ``E0_label``/``E1_label`` (``E2_label`` with an acid state) so
+    the output is drop-in compatible.
+
+    No ``log_likelihood`` group is attached (the likelihood is a potential);
+    for elpd comparisons use the free-parameter version.
+    """
+    xa, clean = _clean_spectra(x, spectra, x_sigma=x_sigma)
+    init = fit_spectra_global(
+        xa,
+        clean,
+        is_ph=is_ph,
+        fit_hill=fit_hill,
+        acid_state=acid_state,
+        well_scale=True,
+        jackknife=False,
+    )
+    lo, hi = _k_bounds(xa, is_ph=is_ph)
+    top = max(float(np.max(np.abs(values))) for _lam, values in clean.values())
+    species_mean = {
+        name: np.asarray(init.species[name], dtype=np.float64) / top for name in clean
+    }
+    theta_start: dict[str, float] = {"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))}
+    if acid_state:
+        if not is_ph:
+            msg = "the acid state is defined for pH titrations only"
+            raise ValueError(msg)
+        theta_start["delta"] = float(
+            np.clip(init.K - init.k_acid, _DELTA_MIN + 1e-9, _DELTA_MAX - 1e-9)
+        )
+    if fit_hill:
+        theta_start["hill"] = float(np.clip(init.hill, 0.2, 5.0))
+    with pm.Model():
+        k = pm.Uniform("K", lower=lo, upper=hi)
+        delta = (
+            pm.Uniform("delta", lower=_DELTA_MIN, upper=_DELTA_MAX)
+            if acid_state
+            else None
+        )
+        hill = pm.Uniform("hill", lower=0.2, upper=5.0) if fit_hill else None
+        x_true = pm.Normal("x_true", mu=xa, sigma=x_sigma, shape=xa.size)
+        amp_raw = pm.LogNormal("amplitude_raw", mu=0.0, sigma=0.25, shape=xa.size)
+        amplitude = pm.Deterministic(
+            "amplitude",
+            amp_raw / pt.mean(amp_raw),  # type: ignore[no-untyped-call]
+        )
+        fraction = _fractions_rows(
+            k, delta, hill, x_true, is_ph=is_ph, acid_state=acid_state
+        )
+        states = 3 if acid_state else 2
+        for name, (_lam, values) in clean.items():
+            n_lam = values.shape[0]
+            n_eff = xa.size * n_lam
+            rms = max(float(init.rms[name]) / top, 1e-6)
+            sb = pm.HalfNormal(f"offset_{name}", sigma=2 * rms)
+            sigma = pm.HalfNormal(f"sigma_{name}", sigma=2 * rms)
+            s_e = pm.HalfNormal(f"species_scale_{name}", sigma=5 * rms)
+            smooth = pm.HalfNormal(f"smooth_{name}", sigma=5 * rms)
+            curv = pt.as_tensor_variable(
+                _second_difference(n_lam).T @ _second_difference(n_lam)
+            )
+            bmat = _as_tensor(_smooth_corr(n_lam))
+            prec_e = curv / s_e**2 + _RIDGE * pt.eye(n_lam)  # type: ignore[no-untyped-call,unused-ignore]
+            m_stack = pt.stack([
+                _as_tensor(species_mean[name][s]) for s in range(states)
+            ])  # type: ignore[no-untyped-call,unused-ignore]
+            mu_flat = (
+                amplitude[:, None] * pt.dot(fraction, m_stack)  # type: ignore[no-untyped-call]
+            ).reshape((n_eff,))
+            y_flat = _as_tensor((values / top).T).reshape((n_eff,))
+            q_wells = amplitude[:, None] * fraction  # a_w C_w, rank <= S
+            inwell = (
+                sigma**2 * _as_tensor(np.eye(n_lam))
+                + sb**2 * _as_tensor(np.ones((n_lam, n_lam)))
+                + smooth**2 * bmat
+            )
+            logp = _joint_marginal_logp(
+                y_flat,
+                mu_flat,
+                q_wells,
+                inwell,
+                prec_e,
+                states=states,
+                n_wells=xa.size,
+                n_lam=n_lam,
+            )
+            pm.Potential(f"y_{name}", logp)
+        idata = pm.sample(
+            draws,
+            tune=draws // 2 if tune is None else tune,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            random_seed=seed,
+            initvals=theta_start,
+            return_inferencedata=True,
+            progressbar=False,
+        )
+    _conditional_species_draws(
+        idata,
+        clean,
+        species_mean,
+        is_ph=is_ph,
+        fit_hill=fit_hill,
+        acid_state=acid_state,
+        seed=seed,
+    )
+    return idata

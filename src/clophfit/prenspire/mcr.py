@@ -20,6 +20,23 @@ the two-state model *is* the factorisation (one K, species spectra solved
 linearly). MCR-ALS relaxes the profile shape - it can expose a third
 species or a non-Hill transition - at the price of a less tight K.
 ``fit_spectra_global``'s ``sv_ratio`` says when that trade is worth it.
+
+The state convention is the package's: state 0 = empty (deprotonated for a
+pH titration, unbound for a ligand one), state 1 = occupied (protonated /
+one bound ligand). ALS output columns are reoriented to it before being
+used as prior centers (:func:`_als_center`), so seeded posteriors and the
+constrained profile columns mean the same thing in every sampler variant.
+
+The two Bayesian fitters (:func:`fit_mcr_bayes`,
+:func:`fit_mcr_constrained_bayes`) put a NUTS posterior on the
+factorization with a latent titrant axis. Their species/profile priors are
+seeded from the ALS solution of the same data - without that anchor the
+two-state labeling is symmetric, so a chain that swaps the columns reports
+the mirrored K (observed as bimodal K, R-hat 2-3 on real plates). The
+constrained fitter's likelihood is one MvStudent-t per well with a
+wavelength-correlated smooth block, matching the whole-spectrum fitters'
+noise treatment; an iid per-wavelength Normal pins the noise at the photon
+floor and freezes the chains on the K-latent-axis ridge.
 """
 
 from __future__ import annotations
@@ -28,11 +45,17 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pandas as pd
+import pymc as pm  # type: ignore[import-untyped]
+import pytensor.tensor as pt
 from scipy.optimize import curve_fit, lsq_linear, nnls
 from scipy.stats import spearmanr
 
+from clophfit.fitting.models import kd_bounds
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    import arviz as az  # type: ignore[import-untyped]
 
     from clophfit.clophfit_types import ArrayF
 
@@ -58,6 +81,339 @@ _DEAD_PTP_ABS = 1e-6
 # threshold collapses onto it and nothing is flagged.
 _DEAD_PTP_RATIO = 1e-3
 _N_DIMS = 2  # a profile matrix has a well axis and a component axis
+_MIN_BAYES_COMPONENTS = 2
+_SMOOTH_RHO = 10.0  # per-well wavelength-correlated noise shape (see below)
+_STUDENT_NU = 3.0  # likelihood tails: the tecan sweep's best-calibrated arm
+
+
+def _smooth_corr(n: int) -> np.ndarray:
+    """Unit-level smooth error correlation along wavelength.
+
+    ``inv(SMOOTH_RHO D'D + I)`` with unit variance on level/linear drifts
+    and shrunk higher orders; ``smooth`` draws scale the block and cover
+    slowly varying per-well residuals (AR(1)-style errors, offsets) so the
+    shared species spectra need not absorb them.
+    """
+    d2 = np.diff(np.eye(n), n=2, axis=0)
+    return np.linalg.inv(_SMOOTH_RHO * (d2.T @ d2) + np.eye(n))
+
+
+def _als_center(
+    observed: np.ndarray, axis: np.ndarray, n_species: int, *, is_ph: bool
+) -> McrFit | None:
+    """ALS factorization of the same data as a prior center for the Bayes fits.
+
+    Runs the same multi-start ALS the CLI's ``--method mcr`` uses, seeded
+    with the extreme-titrant wells, and for two components reorders the
+    columns so column 0 tracks the *empty* state (state 0 = deprotonated
+    for a pH titration - its fraction rises with pH - and the free protein
+    for a ligand one, whose fraction falls with concentration), matching
+    the package's state-0 = empty convention; above two components the sign
+    test can only identify column 0, so the ALS ordering is kept as-is.
+    Returns ``None`` when ALS cannot produce a factorization, and the
+    callers fall back to the unseeded scale prior.
+    """
+    x = np.asarray(axis, dtype=np.float64)
+    s_init: np.ndarray | None = None
+    if n_species == _MIN_BAYES_COMPONENTS and x.size > 1 and float(np.ptp(x)) > 0:
+        # the extreme wells bound the two states, whichever the titrant axis
+        i0, i1 = int(np.argmin(x)), int(np.argmax(x))
+        s_init = np.column_stack([observed[i0], observed[i1]])
+    try:
+        fit = mcr_als(observed, n_species, closure=True, s_init=s_init)
+    except (RuntimeError, ValueError, np.linalg.LinAlgError):
+        return None
+    if fit.c.shape[1] < _MIN_BAYES_COMPONENTS or fit.s.shape[0] != observed.shape[1]:
+        return None
+    if fit.c.shape[1] != _MIN_BAYES_COMPONENTS:
+        # a full column reversal would mislabel the interior components
+        return fit
+    ptp0 = float(np.ptp(fit.c[:, 0]))
+    if ptp0 > 0:
+        rho0 = float(spearmanr(x, fit.c[:, 0]).statistic)
+        # state 0 = empty: its fraction rises with pH (deprotonation) and
+        # falls with ligand (unbound), so the correlation sign tells labels
+        if (is_ph and rho0 < 0) or (not is_ph and rho0 > 0):
+            return fit._replace(
+                c=np.ascontiguousarray(fit.c[:, ::-1]),
+                s=np.ascontiguousarray(fit.s[:, ::-1]),
+            )
+    return fit
+
+
+def _als_width(fit: McrFit, observed: np.ndarray) -> float:
+    """Five times the ALS reconstruction residual SD, in normalized units."""
+    resid = observed - fit.c @ fit.s.T
+    return max(5.0 * float(np.std(resid)), 1e-6)
+
+
+def _als_profile_seed(
+    observed: np.ndarray, axis: np.ndarray, n_species: int, *, is_ph: bool
+) -> tuple[np.ndarray | None, float]:
+    """Logit center and width for the ``profile_logits`` prior seed."""
+    fit = _als_center(observed, axis, n_species, is_ph=is_ph)
+    if fit is None:
+        return None, 0.0
+    clipped = np.clip(fit.c, 1e-3, 1.0 - 1e-3)
+    logits = np.log(clipped / (1.0 - clipped))
+    return logits, _als_width(fit, observed)
+
+
+def fit_mcr_bayes(  # ruff: ignore[too-many-arguments]
+    d: np.ndarray,
+    x: np.ndarray,
+    *,
+    x_sigma: float,
+    n_species: int = 2,
+    is_ph: bool = True,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float = 0.9,
+) -> az.InferenceData:
+    """Bayesian closed MCR factorization with a latent measured titrant axis.
+
+    The factorization is unsupervised: ``x_true`` is sampled from its
+    measurement-error prior, while K is intentionally not included in the
+    factorization. K must be derived afterward from posterior profile draws.
+    This preserves MCR's flexible profiles rather than imposing a titration
+    curve on them. (In :func:`clophfit.prenspire.mcr.fit_mcr_constrained_bayes`
+    the closed profiles are pinned to the titration law and K is a posterior
+    parameter.) The closed-profile prior is seeded from an ALS factorization
+    of the same data (:func:`_als_center`, columns ordered state 0 = empty)
+    with a wide log-scale prior: without that anchor the profiles' two-state
+    labeling is symmetric - a chain that swaps the columns reports the
+    mirrored derived K - and on real data the two modes sit close enough to
+    split the chains and inflate the interval. The seeded center keeps the
+    posterior in one mode while remaining wide enough for the ALS solution
+    to move freely; it is the same documented empirical-Bayes reuse the
+    whole-spectrum fitters make.
+
+    Posteriors over the derived K are built per profile draw, so its
+    ``q03``/``q97`` interval columns (as reported by the ``mcr-bayes`` CLI
+    tables) are the 3rd/97th percentiles of the draw-wise K distribution, not
+    a single-parameter posterior HDI; the ``x_true`` columns likewise carry
+    ``x_true`` quantiles. Unlike
+    :func:`fit_mcr_constrained_bayes`, the likelihood stays an iid Normal per
+    feature (no scan structure is available); treat its intervals with the
+    corresponding skepticism when wavelength-correlated noise dominates.
+    """
+    data = np.asarray(d, dtype=np.float64)
+    axis = np.asarray(x, dtype=np.float64)
+    if data.ndim != _N_DIMS or data.shape[0] != axis.size:
+        msg = "MCR Bayes expects D[well, feature] and one x value per well"
+        raise ValueError(msg)
+    if n_species < _MIN_BAYES_COMPONENTS or n_species > min(data.shape) or x_sigma <= 0:
+        msg = "MCR Bayes needs >=2 feasible species and positive x_sigma"
+        raise ValueError(msg)
+    if not np.isfinite(data).all() or not np.isfinite(axis).all():
+        msg = "MCR Bayes input must be finite"
+        raise ValueError(msg)
+    scale = max(float(np.max(np.abs(data))), 1e-9)
+    observed = data / scale
+    logit_center, logit_width = _als_profile_seed(
+        observed, axis, n_species, is_ph=is_ph
+    )
+    with pm.Model():
+        if logit_center is None:
+            logits = pm.Normal(
+                "profile_logits", 0.0, 1.5, shape=(data.shape[0], n_species)
+            )
+        else:
+            logits = pm.Truncated(
+                "profile_logits",
+                pm.Normal.dist(mu=logit_center, sigma=logit_width),
+                lower=-6.0,
+                upper=6.0,
+                shape=(data.shape[0], n_species),
+            )
+        profiles = pm.Deterministic("profiles", pm.math.softmax(logits, axis=1))
+        species = pm.HalfNormal("species", sigma=1.0, shape=(data.shape[1], n_species))
+        noise = pm.HalfNormal("noise", sigma=0.1)
+        pm.Normal("x_true", mu=axis, sigma=x_sigma, shape=axis.size)
+        expected = pt.dot(profiles, species.T)  # type: ignore[no-untyped-call]
+        pm.Normal("spectra", mu=expected, sigma=noise, observed=observed)
+        idata = pm.sample(
+            draws,
+            tune=draws // 2,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            random_seed=seed,
+            return_inferencedata=True,
+            progressbar=False,
+        )
+        pm.compute_log_likelihood(idata)  # for elpd comparisons across methods
+        return idata
+
+
+def fit_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, too-many-statements]
+    d: np.ndarray,
+    x: np.ndarray,
+    scan_index: np.ndarray,
+    *,
+    x_sigma: float,
+    is_ph: bool = True,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float = 0.9,
+) -> az.InferenceData:
+    """Bayesian two-state MCR with a titration-constrained profile.
+
+    The closed profiles are the empty/bound fractions implied by the shared
+    ``K`` and latent titrant axis - Henderson-Hasselbalch for a pH titration
+    (state 0 = deprotonated, state 1 = protonated), the Langmuir fraction for
+    a ligand one (state 0 = empty, state 1 = bound). Species spectra remain
+    nonnegative unknowns; well amplitudes and scan-specific residual scales
+    are inferred jointly. Unlike unconstrained MCR, this is a mechanistic
+    two-state model with a direct posterior for K.
+
+    The species prior is seeded from an ALS factorization of the same data
+    (:func:`_als_center`, oriented with state 0 as the empty state), centered
+    on it with a width of five reconstruction-rms. Without that anchor the
+    profiles' two-state labeling is symmetric - a chain that swaps the
+    species columns reports the mirrored K - and on real data, where model
+    error is real, the two modes sit close enough to keep chains split:
+    bimodal K, R-hat of 2 to 3 and an interval inflated to span both modes
+    (observed on actual plates with the unseeded HalfNormal prior). The seed
+    pins the orientation rather than tying the fit: the width leaves the
+    ALS solution free to move, and the ALS plateaus may disagree with the
+    constrained optimum without anything breaking.
+
+    The likelihood is one MvStudent-t per well (nu 3, the tecan sweep's
+    best-calibrated arm) with a within-well covariance ``noise^2 I +
+    smooth^2 inv(RHO D'D + I)`` per scan. Under this AR(1)-style wavelength
+    noise an iid per-wavelength Normal is overconfident (see the module
+    docstring); the smooth block gives correlated residuals a home so the
+    reported intervals do not shrink into frozen-chain artifacts. Scans must
+    occupy contiguous feature blocks of ``scan_index``.
+
+    Sampling uses nutpie's low-rank mass adaptation: the posterior is a long
+    ridge (the pooled K-to-axis shift trades against a likelihood that pins
+    K), a diagonal mass matrix leaves that single direction
+    un-preconditioned, and chains then settle on whichever ridge segment
+    their warmup adapted to - per-run R-hat looks fine while run-to-run K
+    medians wander by several posterior SD (observed on a real plate across
+    warmup lengths).
+    """
+    data = np.asarray(d, dtype=np.float64)
+    axis = np.asarray(x, dtype=np.float64)
+    scan_idx = np.asarray(scan_index, dtype=np.int64)
+    if data.ndim != _N_DIMS or data.shape[0] != axis.size:
+        msg = "constrained MCR expects D[well, feature] and one titrant value per well"
+        raise ValueError(msg)
+    if scan_idx.shape != (data.shape[1],) or scan_idx.size == 0:
+        msg = "scan_index must identify every spectral feature"
+        raise ValueError(msg)
+    if (
+        x_sigma <= 0
+        or not np.isfinite(x_sigma)
+        or not np.isfinite(data).all()
+        or not np.isfinite(axis).all()
+    ):
+        msg = "constrained MCR inputs and x_sigma must be finite; x_sigma must be positive"
+        raise ValueError(msg)
+    n_scans = int(scan_idx.max()) + 1
+    if scan_idx.min() < 0 or set(scan_idx.tolist()) != set(range(n_scans)):
+        msg = "scan_index values must be contiguous integers beginning at zero"
+        raise ValueError(msg)
+    scale = max(float(np.max(np.abs(data))), 1e-9)
+    observed = data / scale
+    als = _als_center(observed, axis, 2, is_ph=is_ph)
+    if is_ph:
+        k_lower, k_upper = float(axis.min() - 1), float(axis.max() + 1)
+    else:
+        k_lower, k_upper = kd_bounds(float(axis.max()))
+    with pm.Model():
+        k = pm.Uniform("K", lower=k_lower, upper=k_upper)
+        x_true = pm.Normal("x_true", mu=axis, sigma=x_sigma, shape=axis.size)
+        if is_ph:
+            # state 0 = empty = deprotonated: rises with pH (sigmoid(ln10(x-K)))
+            empty = 1.0 / (1.0 + pm.math.exp(np.log(10.0) * (k - x_true)))
+        else:
+            empty = 1.0 - x_true / (k + x_true)
+        profiles = pm.Deterministic("profiles", pt.stack([empty, 1.0 - empty], axis=1))
+        if als is None:
+            species = pm.HalfNormal("species", sigma=1.0, shape=(data.shape[1], 2))
+        else:
+            species_center = np.ascontiguousarray(als.s, dtype=np.float64)
+            species = pm.Truncated(
+                "species",
+                pm.Normal.dist(mu=species_center, sigma=_als_width(als, observed)),
+                lower=0.0,
+                shape=(data.shape[1], 2),
+            )
+        amplitude_raw = pm.LogNormal(
+            "amplitude_raw", mu=0.0, sigma=0.25, shape=axis.size
+        )
+        amplitude = pm.Deterministic(
+            "amplitude",
+            amplitude_raw / pt.mean(amplitude_raw),  # type: ignore[no-untyped-call]
+        )
+        noise = pm.HalfNormal("noise", sigma=0.1, shape=n_scans)
+        smooth = pm.HalfNormal("smooth", sigma=0.1, shape=n_scans)
+        expected = pt.dot(profiles, species.T)  # type: ignore[no-untyped-call]
+        # One likelihood per well with a within-well covariance
+        # sigma^2 I + smooth^2 inv(RHO D'D + I): the spectra's residuals are
+        # correlated along wavelength (measured repeatedly on the excitation
+        # scans), and an iid per-wavelength Normal pins the noise at the
+        # photon floor - K's conditional curvature runs ~10^6 against a
+        # K-latent-axis ridge of ~10^3 - so the chains freeze on hair-thin
+        # slices of the ridge (observed: R-hat 1.4-2.9 at ess<10 with 4000
+        # draws on a real plate). The smooth block carries the correlated
+        # part the way the whole-spectrum fitters do, restores an honest
+        # effective sample count per row, and with it the earlier reported
+        # intervals degenerate into a frozen-chain artifact instead of a
+        # claim about K.
+        mu_scan = amplitude[:, None] * expected
+        spans = [
+            (s, np.flatnonzero(scan_idx == s)) for s in sorted(set(scan_idx.tolist()))
+        ]
+        for s, cols in spans:
+            if int(cols[-1] - cols[0] + 1) != cols.size:
+                msg = "constrained MCR scans must occupy contiguous feature blocks"
+                raise ValueError(msg)
+            lo = slice(int(cols[0]), int(cols[-1]) + 1)
+            n_lam = int(lo.stop - lo.start)
+            chol = pt.linalg.cholesky(
+                noise[s] ** 2 * pt.as_tensor_variable(np.eye(n_lam))
+                + smooth[s] ** 2 * pt.as_tensor_variable(_smooth_corr(n_lam))
+                + pt.as_tensor_variable(np.eye(n_lam)) * 1e-9
+            )
+            for w in range(data.shape[0]):
+                pm.MvStudentT(
+                    f"spectra_{s}_{w}",
+                    nu=_STUDENT_NU,
+                    mu=mu_scan[w, lo],
+                    chol=chol,
+                    observed=observed[w, lo],
+                )
+        idata = pm.sample(
+            draws,
+            tune=draws // 2,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            random_seed=seed,
+            return_inferencedata=True,
+            # low-rank mass adaptation: the posterior is a long ridge - the
+            # pooled K-latent-axis shift trades against a likelihood that
+            # pins K hard, ~2.5 decades stiffer across the ridge than along
+            # it - and a diagonal mass matrix leaves that one direction
+            # un-preconditioned. Chains then sit on whichever segment of the
+            # ridge they adapted to: per-run R-hat looks converged while
+            # run-to-run K medians wander (observed 7.54 vs 7.90 for the
+            # same G10 plate and seed at different tune lengths). nutpie's
+            # low-rank mass picks the ridge up as one direction and lets
+            # the chains traverse it.
+            nuts={"adaptation": "low_rank"},
+            progressbar=False,
+        )
+        pm.compute_log_likelihood(idata)  # for elpd comparisons across methods
+        return idata
 
 
 class McrFit(NamedTuple):

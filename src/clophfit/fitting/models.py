@@ -139,14 +139,14 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
         - For pH titrations: pKa (acid dissociation constant)
         Higher K means weaker binding (higher concentration needed for half-maximal signal).
     S0 : float
-        Signal plateau value for the first state.
-        - For ligand binding: signal when fully unbound (no ligand)
-        - For pH titrations: signal in protonated state (low pH)
+        Signal plateau value for the empty state (state 0, no bound ligand).
+        - For ligand binding: signal when fully unbound (no Cl⁻)
+        - For pH titrations: signal in the deprotonated state (high pH)
         Units depend on the measurement (e.g., fluorescence intensity, absorbance).
     S1 : float
-        Signal plateau value for the second state.
-        - For ligand binding: signal when fully bound (saturating ligand)
-        - For pH titrations: signal in deprotonated state (high pH)
+        Signal plateau value for the occupied state (state 1, one bound ligand).
+        - For ligand binding: signal when fully bound (saturating Cl⁻)
+        - For pH titrations: signal in the protonated state (low pH)
         Same units as S0.
     is_ph : bool
         Selects the equation form:
@@ -197,9 +197,16 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
         S(pH) = S_0 + (S_1 - S_0) \\frac{10^{(K-pH)}}{1 + 10^{(K-pH)}}
 
     This is the Henderson-Hasselbalch equation with:
-    - S(pH << K) ≈ S₀ (protonated)
-    - S(pH >> K) ≈ S₁ (deprotonated)
+    - S(pH << K) ≈ S₁ (protonated, the occupied state)
+    - S(pH >> K) ≈ S₀ (deprotonated, the empty state)
     - S(pH = K) = (S₀ + S₁)/2 (half-titration)
+
+    The state labels mirror the ligand case: the protonated form carries the
+    titrated species (one more proton, "occupied"), just as the Cl-bound form
+    carries one chloride, so state 1 is the low-pH signal and state 0 the
+    high-pH one. Henderson-Hasselbalch is then a binding isotherm in disguise:
+    the occupied fraction ``10^(K-pH) / (1 + 10^(K-pH))`` falls with pH exactly
+    as a Langmuir fraction ``(x/K)/(1 + x/K)`` falls with K/x.
 
     **Typical Use Cases**
 

@@ -49,9 +49,23 @@ from clophfit.fitting.errors import (
     DataValidationError,
     MissingDependencyError,
 )
+from clophfit.fitting.spectral import (
+    _fractions,
+    _Model,
+    fit_spectra_global_bayes,
+    fit_spectra_global_bayes_marginal,
+)
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
 from clophfit.prenspire.bands import ZERO_AT
-from clophfit.prenspire.mcr import mcr_titration, model_fraction, species_by_scan
+from clophfit.prenspire.mcr import (
+    component_pka,
+    fit_mcr_bayes,
+    fit_mcr_constrained_bayes,
+    mcr_titration,
+    model_fraction,
+    species_by_scan,
+    stack_scans,
+)
 from clophfit.prenspire.spectral import fit_titrations_spectral, sample_spectra
 from clophfit.prenspire.thermo import VanthoffModel, vanthoff_titration
 from clophfit.prenspire.thermo_plot import (
@@ -65,7 +79,7 @@ from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from clophfit.fitting.data_structures import FitResult
 
@@ -734,20 +748,21 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "vanthoff", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. both runs band and svd; all runs band, svd and global. vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "mcr", "mcr-bayes", "mcr-constrained-bayes", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf. global-bayes-marginal eliminates the species spectra analytically (same model, smooth species prior, per-well noise split into white, wavelength-correlated smooth and offset components; --x-sigma required, same tables with global_bayes_marginal suffixes --acid-state adds a third acid state on pH plates, same conventions as the band-level acid_scale, its own pK below K and E2_ spectrum: the observed recurrent drop of the most acidic well). vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. mcr-bayes resamples the closed-profile factorization on a NUTS posterior with a latent titrant axis, deriving K from the posterior profiles; mcr-constrained-bayes additionally constrains the closed profiles to the titration fraction itself (Henderson-Hasselbalch on pH plates, Langmuir on ligand ones; K is a direct posterior parameter). both runs band and svd; all runs band, svd and global.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
 @click.option("--band-name", "band_names", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Bands allowed into the shared K; repeatable. Default is the two direct readouts (exc_anionic + em_exc420); exc_neutral and em_exc278 are reported but not fitted by default.")  # fmt: skip
 @click.option("--scan", "scans", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Scans --method global or mcr takes whole; repeatable. Default is the excitation scan only: on the 25-plate readout sweep, adding the 420 nm emission scan whole widened the between-session spread (see clophfit/prenspire/spectral.py), so all-scans is offered for comparison, not as the default.")  # fmt: skip
 @click.option("--seed", type=int, default=0, show_default=True, help="NUTS seed for --method bayes; fixes the posterior draws so the 94 % HDI is reproducible run to run.")  # fmt: skip
-@click.option("--draws", type=int, default=2000, show_default=True, help="Posterior draws per chain for --method bayes (tuning is half of that).")  # fmt: skip
-@click.option("--chains", type=click.IntRange(min=1), default=2, show_default=True, help="MCMC chains for --method bayes. A fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
+@click.option("--draws", type=int, default=4000, show_default=True, help="Posterior draws per chain for the Bayesian methods (tuning is half of that). The band-level and MCR ones sample in under a minute; each whole-spectrum one takes proportionally longer per draw, so budget minutes-per-scan there.")  # fmt: skip
+@click.option("--chains", type=click.IntRange(min=1), default=4, show_default=True, help="MCMC chains for the Bayesian methods. Four chains are the sanity floor for R-hat: a lost or label-flipped chain is cheap insurance when it can be seen, and a fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
 @click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
-@click.option("--x-sigma", type=str, default=None, help="For --method bayes: prior SD (pH) on each well's true axis value - x_true ~ N(note pH, sigma), per well. The note's pH is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values.")  # fmt: skip
-@click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr. Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
-def enspire(  # ruff: ignore[too-many-arguments]
+@click.option("--acid-state", is_flag=True, help="For --method global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
+@click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes and mcr-constrained-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
+@click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
+def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
     ctx: Context,
     csv_f: str,
     note_f: str | None,
@@ -765,6 +780,7 @@ def enspire(  # ruff: ignore[too-many-arguments]
     cores: int | None,
     target_accept: float | None,
     x_sigma: str | None,
+    acid_state: bool,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -773,10 +789,18 @@ def enspire(  # ruff: ignore[too-many-arguments]
     ef.export_measurements(Path(out))
     if note_f is None:
         return
-    if x_sigma is not None and method != "bayes":
+    if x_sigma is not None and method not in {
+        "bayes",
+        "global-bayes",
+        "global-bayes-marginal",
+        "mcr-bayes",
+        "mcr-constrained-bayes",
+    }:
         ctx.fail(
-            "--x-sigma applies to --method bayes only (it is a posterior prior, not an LM option)"
+            "--x-sigma applies to Bayesian methods only (it is a posterior prior, not an LM option)"
         )
+    if acid_state and method != "global-bayes-marginal":
+        ctx.fail("--acid-state applies to --method global-bayes-marginal only")
     if method in {"band", "both", "all"}:
         fit_enspire_bands(
             ef,
@@ -815,6 +839,76 @@ def enspire(  # ruff: ignore[too-many-arguments]
             cores=cores,
             target_accept=target_accept,
             x_sigma=x_sigma,
+        )
+    if method == "global-bayes":
+        if x_sigma is None:
+            ctx.fail("--method global-bayes requires --x-sigma (auto or a pH SD)")
+        fit_enspire_global_bayes(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            x_sigma=x_sigma,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
+    if method == "global-bayes-marginal":
+        if x_sigma is None:
+            ctx.fail(
+                "--method global-bayes-marginal requires --x-sigma (auto or a pH SD)"
+            )
+        fit_enspire_global_bayes_marginal(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            x_sigma=x_sigma,
+            acid_state=acid_state,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
+    if method == "mcr-bayes":
+        if x_sigma is None:
+            ctx.fail("--method mcr-bayes requires --x-sigma (auto or a pH SD)")
+        fit_enspire_mcr_bayes(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            components=components,
+            x_sigma=x_sigma,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
+    if method == "mcr-constrained-bayes":
+        if x_sigma is None:
+            ctx.fail(
+                "--method mcr-constrained-bayes requires --x-sigma (auto or a pH SD)"
+            )
+        fit_enspire_mcr_constrained_bayes(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            x_sigma=x_sigma,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
         )
 
 
@@ -1073,25 +1167,20 @@ def _resolve_enspire_x_sigma(
 
     ``None`` leaves the axis fixed at the note values. ``auto`` pools the
     note's replicate-row spread per index column (rows A-C and D-F are the
-    same nominal targets at their temperature) into the prior sigma; a
-    number passes through after bounds checking. The prior only makes sense
-    on a pH axis, so with a Cl titrant it warns and keeps the fixed axis.
+    same nominal targets at their temperature) into the prior sigma - on the
+    pH axis for a pH titration, on the Cl column (mM) for a ligand one; a
+    number passes through after bounds checking, in the axis's units.
     """
     if x_sigma is None:
         return None
     one = cast("pd.DataFrame", one)
-    if not is_ph:
-        print(
-            f"warning: {name} at {t}: titrant is Cl, not pH - "
-            "--x-sigma is a pH-axis prior; the axis stays fixed"
-        )
-        return None
+    xcol = "pH" if is_ph else "Cl"
     if x_sigma.strip().lower() == "auto":
-        sigma = bands_module.estimate_x_error_sigma(one["Well"], one["pH"])
+        sigma = bands_module.estimate_x_error_sigma(one["Well"], one[xcol])
         if sigma is None:
             print(
                 f"warning: {name} at {t}: fewer than two index columns with two "
-                "or more replicates; using a fixed axis (note pH)"
+                "or more replicates; using a fixed axis (note values)"
             )
             return None
         return sigma
@@ -1101,7 +1190,8 @@ def _resolve_enspire_x_sigma(
         msg = "--x-sigma must be 'auto' or a number, e.g. 0.15"
         raise click.UsageError(msg) from None
     if sigma < X_SIGMA_MIN_PH:
-        msg = f"--x-sigma must be >= {X_SIGMA_MIN_PH} pH (or 'auto')"
+        units = "pH" if is_ph else "mM"
+        msg = f"--x-sigma must be >= {X_SIGMA_MIN_PH} {units} (or 'auto')"
         raise click.UsageError(msg)
     return sigma
 
@@ -1457,6 +1547,338 @@ def fit_enspire_global(
     return table
 
 
+def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    x_sigma: str,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Fit whole spectra with a joint posterior over K, x and spectral noise."""
+    return _enspire_global_bayes_core(
+        ef,
+        note_fp,
+        out_dir,
+        buffer=buffer,
+        scans=scans,
+        x_sigma=x_sigma,
+        seed=seed,
+        draws=draws,
+        chains=chains,
+        cores=cores,
+        target_accept=target_accept,
+        fitter=fit_spectra_global_bayes,
+        suffix="global_bayes",
+        label="global Bayes",
+    )
+
+
+def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    x_sigma: str,
+    acid_state: bool = False,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Marginalized whole-spectrum fit: species spectra out of the sampler."""
+    return _enspire_global_bayes_core(
+        ef,
+        note_fp,
+        out_dir,
+        buffer=buffer,
+        scans=scans,
+        x_sigma=x_sigma,
+        seed=seed,
+        draws=draws,
+        chains=chains,
+        cores=cores,
+        target_accept=target_accept,
+        fitter=fit_spectra_global_bayes_marginal,
+        acid_state=acid_state,
+        suffix="global_bayes_marginal",
+        label="global Bayes marginal",
+    )
+
+
+def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    x_sigma: str,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+    fitter: Callable[..., Any],
+    acid_state: bool = False,
+    suffix: str,
+    label: str,
+) -> pd.DataFrame:
+    """Shared whole-spectrum Bayesian pipeline behind the two fitters.
+
+    Same generative model and reporting for free-species
+    (:func:`fit_spectra_global_bayes`) and marginalized-species
+    (:func:`fit_spectra_global_bayes_marginal`) inference; ``suffix`` names the
+    output files, ``label`` the console line.
+    """
+    note = Note(note_fp).note
+    samples = note[note["Name"] != "buffer"]
+    buffers = note[note["Name"] == "buffer"]
+    wanted = scans or ("exc_anionic",)
+    rows: list[dict[str, object]] = []
+    x_rows: list[dict[str, object]] = []
+    figdata: list[
+        tuple[
+            str,
+            str,
+            bool,
+            list[str],
+            np.ndarray,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            Any,
+        ]
+    ] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for (name, temp), group in samples.groupby(["Name", "Temp"], sort=True):
+        one = group.drop_duplicates("Well")
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        xcol = "pH" if is_ph else "Cl"
+        wells = one["Well"].tolist()
+        x = np.asarray(one[xcol], dtype=np.float64)
+        bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        spectra, wells, x = sample_spectra(
+            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=bwells, bands=wanted
+        )
+        if not spectra:
+            continue
+        sigma = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
+        if sigma is None:
+            msg = f"--method {suffix.removeprefix('global_').replace('_', '-')} requires a pH titration and resolvable x-sigma"
+            raise click.ClickException(msg)
+        trace = fitter(
+            x,
+            spectra,
+            x_sigma=sigma,
+            is_ph=is_ph,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept or 0.9,
+            **({"acid_state": acid_state} if acid_state else {}),
+        )
+        kdraw = np.asarray(trace.posterior["K"].values).reshape(-1)
+        hdi = np.asarray(az.hdi(kdraw, prob=0.94), dtype=float)
+        lo, hi = float(hdi[0]), float(hdi[1])
+        key = f"{name}_{str(temp).replace('.', 'p')}"
+        trace.to_netcdf(out_dir / f"{key}_{suffix}.nc")
+        rows.append({
+            "sample": name,
+            "temp": temp,
+            "K": float(np.median(kdraw)),
+            "hdi03": lo,
+            "hdi97": hi,
+            "r_hat": float(az.rhat(trace, var_names=["K"])["K"].item()),
+            "ess_bulk": float(az.ess(trace, var_names=["K"])["K"].item()),
+            "n": len(wells),
+            "x_sigma": sigma,
+        })
+        xdraw = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
+        figdata.append((str(name), str(temp), is_ph, wells, x, spectra, trace))
+        for i, well in enumerate(wells):
+            qlo, median, qhi = np.quantile(xdraw[:, i], [0.03, 0.5, 0.97])
+            x_rows.append({
+                "sample": name,
+                "temp": temp,
+                "well": well,
+                "x_note": x[i],
+                "x_median": median,
+                "hdi03": qlo,
+                "hdi97": qhi,
+            })
+        print(
+            f"{name} at {temp}: {label} K {np.median(kdraw):.3f} "
+            f"94% HDI [{lo:.3f}, {hi:.3f}] x_sigma {sigma:.3f}"
+        )
+    stem = note_fp.name.removesuffix("_note.csv")
+    table = pd.DataFrame(rows)
+    table.to_csv(out_dir / f"{stem}_K_{suffix}.csv", index=False)
+    pd.DataFrame(x_rows).to_csv(out_dir / f"{stem}_x_{suffix}.csv", index=False)
+    _plot_global_bayes(figdata, out_dir / f"{stem}_{suffix}.pdf")
+    return table
+
+
+def _plot_global_bayes(  # ruff: ignore[too-many-statements]
+    figdata: list[
+        tuple[
+            str,
+            str,
+            bool,
+            list[str],
+            np.ndarray,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            Any,
+        ]
+    ],
+    pdf_path: Path,
+) -> None:
+    """Plot posterior species spectra, fit lines, K, and per-well latent x."""
+    if not figdata:
+        return
+    fig, axes = plt.subplots(
+        len(figdata),
+        4,
+        figsize=(19.5, 4.2 * len(figdata)),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    for row, (sample, temp, is_ph, wells, x, spectra, trace) in enumerate(figdata):
+        xname = "pH" if is_ph else "Kd"
+        species_ax, fit_ax, k_ax, x_ax = axes[row]
+        posterior = trace.posterior
+        e_med: dict[str, tuple[np.ndarray, ...]] = {}
+        for i, (scan, (wavelengths, _values)) in enumerate(spectra.items()):
+            styles: tuple[tuple[int, str, str], ...] = (
+                (0, "state 0", "-"),
+                (
+                    1,
+                    "state 1",
+                    "--",
+                ),
+            )
+            if f"E2_{scan}" in posterior:
+                styles = (*styles, (2, "state 2 (acid)", ":"))
+            for state, label, style in styles:
+                draws = np.asarray(posterior[f"E{state}_{scan}"].values).reshape(
+                    -1, wavelengths.size
+                )
+                median = np.median(draws, axis=0)
+                lo, hi = np.quantile(draws, [0.03, 0.97], axis=0)
+                color = f"C{i}"
+                species_ax.plot(
+                    wavelengths, median, style, color=color, label=f"{scan}: {label}"
+                )
+                species_ax.fill_between(wavelengths, lo, hi, color=color, alpha=0.12)
+            e_med[scan] = tuple(
+                np.median(
+                    np.asarray(posterior[f"E{st}_{scan}"].values).reshape(
+                        -1, wavelengths.size
+                    ),
+                    axis=0,
+                )
+                for st in range(2 + (1 if f"E2_{scan}" in posterior else 0))
+            )
+        species_ax.set_title(f"{sample} {temp} C: posterior species spectra")
+        species_ax.set_xlabel("wavelength (nm)")
+        species_ax.set_ylabel("normalized signal")
+        species_ax.legend(fontsize=7)
+
+        # fit lines: observed spectra against the posterior-median model
+        kdraw = np.asarray(posterior["K"].values).reshape(-1)
+        kmed = float(np.median(kdraw))
+        xdraw = np.asarray(posterior["x_true"].values).reshape(-1, len(wells))
+        xmed_wells = np.median(xdraw, axis=0)
+        amp = np.asarray(posterior["amplitude"].values).reshape(-1, len(wells))
+        amp_med = np.median(amp, axis=0)
+        if "delta" in posterior:
+            dmed = float(np.median(np.asarray(posterior["delta"].values).ravel()))
+            fr = _fractions(  # diprotic sequential softmax, columns S0, S1, S2
+                xmed_wells,
+                np.array([kmed, dmed]),
+                _Model(acid_state=True, fit_hill=False, well_scale=True),
+                is_ph=is_ph,
+            )
+        else:
+            # f1 is the state-1 (occupied) fraction: protonated for a pH
+            # plate (10^(K-x) falling weight), bound for a ligand one; fr
+            # is [state 0, state 1] matching the model's columns.
+            f1 = (
+                1 / (1 + 10 ** (xmed_wells - kmed))
+                if is_ph
+                else xmed_wells / (kmed + xmed_wells)
+            )
+            fr = np.column_stack([1 - f1, f1])
+        order_x = np.argsort(x)
+        sel = order_x[
+            np.linspace(0, len(order_x) - 1, min(3, len(order_x))).astype(int)
+        ]
+        for i_scan, (scan, (wavelengths, values)) in enumerate(spectra.items()):
+            fit_ax.plot(
+                wavelengths,
+                values,
+                color="0.82",
+                lw=0.6,
+                alpha=0.7,
+                label="_all wells observed" if i_scan == 0 else None,
+            )
+            e_ms = e_med[scan]
+            for w in sel:
+                curve = amp_med[w] * sum(fr[w, j] * e_ms[j] for j in range(len(e_ms)))
+                fit_ax.plot(wavelengths, curve, lw=1.2, label=str(wells[w]))
+        fit_ax.set_title(f"{sample} {temp} C: observed vs posterior-median fit")
+        fit_ax.set_xlabel("wavelength (nm)")
+        fit_ax.set_ylabel("normalized signal")
+        fit_ax.legend(fontsize=6, loc="best")
+
+        klo, khi = np.quantile(kdraw, [0.03, 0.97])
+        k_ax.hist(kdraw, bins=35, color="0.72")
+        k_ax.axvline(np.median(kdraw), color="black", lw=1)
+        k_ax.axvspan(klo, khi, color="orange", alpha=0.25)
+        rhat = float(az.rhat(trace, var_names=["K"])["K"].item())
+        ess = float(az.ess(trace, var_names=["K"])["K"].item())
+        k_ax.set_title(
+            f"K {kmed:.3f} [{klo:.3f}, {khi:.3f}]; R-hat {rhat:.3f}, ESS {ess:.0f}"
+        )
+        k_ax.set_xlabel("pKa" if is_ph else "Kd")
+        k_ax.set_ylabel("draw count")
+
+        xdraw = np.asarray(posterior["x_true"].values).reshape(-1, len(wells))
+        med = np.median(xdraw, axis=0)
+        lo, hi = np.quantile(xdraw, [0.03, 0.97], axis=0)
+        order = np.argsort(x)
+        ypos = np.arange(len(wells))
+        x_ax.errorbar(
+            med[order],
+            ypos,
+            xerr=np.vstack([med[order] - lo[order], hi[order] - med[order]]),
+            fmt="o",
+            ms=3,
+            capsize=1.5,
+            color="#235789",
+            label=f"latent {xname}, 94% interval",
+        )
+        x_ax.scatter(
+            x[order], ypos, marker="|", s=55, color="#d1495b", label=f"note {xname}"
+        )
+        x_ax.set_yticks(ypos, np.asarray(wells)[order])
+        x_ax.set_xlabel(xname)
+        x_ax.set_ylabel("well")
+        x_ax.set_title(f"Latent {xname} by well")
+        x_ax.legend(fontsize=7)
+        x_ax.grid(axis="x", alpha=0.25)
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+
 def fit_enspire_vanthoff(
     ef: EnspireFile, note_fp: Path, out_dir: Path, *, buffer: bool
 ) -> pd.DataFrame:
@@ -1622,6 +2044,441 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
     for r in table[table["K"].isna()].itertuples():
         note = getattr(r, "note", "")
         print(f"{r.sample} at {r.temp}: not fitted ({note})")
+    return table
+
+
+def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    components: int,
+    x_sigma: str,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Bayesian MCR factorization and draw-wise post-hoc K estimation."""
+    note = Note(note_fp).note
+    samples, buffers = note[note["Name"] != "buffer"], note[note["Name"] == "buffer"]
+    wanted = scans or ("exc_anionic",)
+    rows: list[dict[str, object]] = []
+    x_rows: list[dict[str, object]] = []
+    plots: list[
+        tuple[
+            str,
+            str,
+            np.ndarray,
+            list[str],
+            object,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ]
+    ] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for (name, temp), group in samples.groupby(["Name", "Temp"], sort=True):
+        one = group.drop_duplicates("Well")
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        wells = one["Well"].tolist()
+        x = one["pH" if is_ph else "Cl"].to_numpy(dtype=np.float64)
+        bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        scans_data, wells, x = sample_spectra(
+            ef,
+            wells,
+            x,
+            str(temp).split(".")[0],
+            is_ph=is_ph,
+            buffer_wells=bwells,
+            bands=wanted,
+        )
+        if not scans_data:
+            continue
+        sigma_x = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
+        if sigma_x is None:
+            msg = "Could not estimate x_sigma for this plate"
+            raise click.ClickException(msg)
+        stacked = stack_scans(list(scans_data.items()))
+        trace = fit_mcr_bayes(
+            stacked.data,
+            x,
+            x_sigma=sigma_x,
+            n_species=components,
+            is_ph=is_ph,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept or 0.9,
+        )
+        cdraws = np.asarray(trace.posterior["profiles"].values).reshape(
+            -1, len(wells), components
+        )
+        xdraws = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
+        stride = max(1, len(cdraws) // 500)
+        k_samples: list[float] = []
+        for i in range(0, len(cdraws), stride):
+            k, *_rest = component_pka(xdraws[i % len(xdraws)], cdraws[i], is_ph=is_ph)
+            if np.isfinite(k):
+                k_samples.append(k)
+        if not k_samples:
+            click.echo(f"{name} at {temp}: no usable posterior profile draws for K")
+            continue
+        kd = np.asarray(k_samples)
+        qlo, med, qhi = np.quantile(kd, [0.03, 0.5, 0.97])
+        key = f"{name}_{str(temp).replace('.', 'p')}"
+        trace.to_netcdf(out_dir / f"{key}_mcr_bayes.nc")
+        rows.append({
+            "sample": name,
+            "temp": temp,
+            "K": med,
+            "q03": qlo,
+            "q97": qhi,
+            "n_draws_K": len(kd),
+            "n": len(wells),
+            "x_sigma": sigma_x,
+            "r_hat_x": float(
+                az.rhat(trace, var_names=["x_true"])["x_true"].max().item()
+            ),
+            "r_hat_profiles_max": float(
+                az.rhat(trace, var_names=["profiles"])["profiles"].max().item()
+            ),
+            "ess_profiles_min": float(
+                az.ess(trace, var_names=["profiles"])["profiles"].min().item()
+            ),
+        })
+        xm = np.median(xdraws, axis=0)
+        xlo, xhi = np.quantile(xdraws, [0.03, 0.97], axis=0)
+        for j, well in enumerate(wells):
+            x_rows.append({
+                "sample": name,
+                "temp": temp,
+                "well": well,
+                "x_note": x[j],
+                "x_median": xm[j],
+                "q03": xlo[j],
+                "q97": xhi[j],
+            })
+        plots.append((
+            str(name),
+            str(temp),
+            x,
+            wells,
+            trace,
+            kd,
+            stacked.wavelengths,
+            stacked.tags,
+            xdraws,
+            stacked.data,
+            is_ph,
+        ))
+        print(
+            f"{name} at {temp}: MCR-Bayes post-hoc K {med:.3f} "
+            f"profile-draw 94% interval [{qlo:.3f}, {qhi:.3f}] from {len(kd)} draws"
+        )
+    stem = note_fp.name.removesuffix("_note.csv")
+    table = pd.DataFrame(rows)
+    table.to_csv(out_dir / f"{stem}_K_mcr_bayes.csv", index=False)
+    pd.DataFrame(x_rows).to_csv(out_dir / f"{stem}_x_mcr_bayes.csv", index=False)
+    _plot_mcr_bayes(plots, out_dir / f"{stem}_mcr_bayes.pdf")
+    return table
+
+
+def _plot_mcr_bayes(  # ruff: ignore[too-many-statements]
+    plots: list[
+        tuple[
+            str,
+            str,
+            np.ndarray,
+            list[str],
+            Any,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            bool,
+        ]
+    ],
+    pdf_path: Path,
+    *,
+    k_label: str = "Post-hoc K from profile draws",
+) -> None:
+    """Plot MCR posterior profiles, fit lines, spectra, and draw-wise K."""
+    if not plots:
+        return
+    fig, axes = plt.subplots(
+        len(plots),
+        4,
+        figsize=(19.5, 4 * len(plots)),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    for row, (
+        name,
+        temp,
+        x,
+        wells,
+        trace,
+        kd,
+        wavelengths,
+        tags,
+        xdraws,
+        observed,
+        is_ph,
+    ) in enumerate(plots):
+        profile_ax, fit_ax, spectra_ax, k_ax = axes[row]
+        posterior = trace.posterior
+        n_components = int(posterior["profiles"].shape[-1])
+        c = np.asarray(posterior["profiles"].values).reshape(
+            -1, len(wells), n_components
+        )
+        order = np.argsort(x)
+        xmed = np.median(xdraws, axis=0)
+        xlo, xhi = np.quantile(xdraws, [0.03, 0.97], axis=0)
+        xorder = np.argsort(xmed)
+        for j in range(c.shape[2]):
+            med = np.median(c[:, :, j], axis=0)
+            lo, hi = np.quantile(c[:, :, j], [0.03, 0.97], axis=0)
+            profile_ax.errorbar(
+                xmed[xorder],
+                med[xorder],
+                xerr=np.vstack([
+                    xmed[xorder] - xlo[xorder],
+                    xhi[xorder] - xmed[xorder],
+                ]),
+                fmt="o",
+                ms=3,
+                capsize=1.2,
+                label=f"profile {j}",
+            )
+            profile_ax.fill_between(xmed[xorder], lo[xorder], hi[xorder], alpha=0.12)
+        profile_ax.scatter(
+            x[order],
+            np.full(len(order), -0.04),
+            marker="|",
+            color="black",
+            label="note pH",
+        )
+        profile_ax.set_title(f"{name} {temp} C: profiles vs latent pH")
+        profile_ax.set_xlabel("note pH" if is_ph else "note Cl (mM)")
+        profile_ax.set_ylabel("closed concentration")
+        profile_ax.legend(fontsize=7)
+
+        # fit lines: observed wells against the posterior-median model
+        spec_med = np.median(
+            np.asarray(posterior["species"].values).reshape(
+                -1, posterior["species"].shape[-2], posterior["species"].shape[-1]
+            ),
+            axis=0,
+        )
+        c_med = np.median(c, axis=0)
+        amp_med = (
+            np.median(
+                np.asarray(posterior["amplitude"].values).reshape(-1, len(wells)),
+                axis=0,
+            )[:, None]
+            if "amplitude" in posterior
+            else 1.0
+        )
+        pred = amp_med * (c_med @ spec_med.T)
+        sel = order[np.linspace(0, len(order) - 1, min(3, len(order))).astype(int)]
+        fit_ax.plot(
+            wavelengths,
+            observed.T,
+            color="0.82",
+            lw=0.6,
+            alpha=0.7,
+            label="_all wells observed",
+        )
+        for w in sel:
+            fit_ax.plot(wavelengths, pred[w], lw=1.2, label=str(wells[w]))
+        fit_ax.set_title(f"{name} {temp} C: observed vs posterior-median fit")
+        fit_ax.set_xlabel("wavelength (nm)")
+        fit_ax.set_ylabel("normalized signal")
+        fit_ax.legend(fontsize=6, loc="best")
+        s = np.asarray(posterior["species"].values).reshape(
+            -1, posterior["species"].shape[-2], posterior["species"].shape[-1]
+        )
+        for scan_i, scan in enumerate(dict.fromkeys(tags.tolist())):
+            mask = tags == scan
+            for j in range(s.shape[-1]):
+                median = np.median(s[:, mask, j], axis=0)
+                lo, hi = np.quantile(s[:, mask, j], [0.03, 0.97], axis=0)
+                spectra_ax.plot(
+                    wavelengths[mask],
+                    median,
+                    label=f"{scan}, species {j}",
+                    color=f"C{j}",
+                    linestyle="-" if scan_i == 0 else "--",
+                )
+                spectra_ax.fill_between(
+                    wavelengths[mask], lo, hi, color=f"C{j}", alpha=0.12
+                )
+        spectra_ax.set_title("Posterior species spectra by scan")
+        spectra_ax.set_xlabel("wavelength (nm)")
+        spectra_ax.legend(fontsize=7)
+        klo, khi = np.quantile(kd, [0.03, 0.97])
+        ktitle = f"{k_label}: K {np.median(kd):.3f} [{klo:.3f}, {khi:.3f}]"
+        if "K" in posterior:
+            rhat = float(az.rhat(trace, var_names=["K"])["K"].item())
+            ess = float(az.ess(trace, var_names=["K"])["K"].item())
+            ktitle += f"; R-hat {rhat:.3f}, ESS {ess:.0f}"
+        k_ax.hist(kd, bins=35, color="0.72")
+        k_ax.axvline(np.median(kd), color="black")
+        k_ax.axvspan(klo, khi, color="orange", alpha=0.25)
+        k_ax.set_title(ktitle)
+        k_ax.set_xlabel("pKa" if is_ph else "Kd")
+        k_ax.set_ylabel("draw count")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    scans: tuple[str, ...],
+    x_sigma: str,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Run joint Bayesian MCR with titration-constrained profiles and K."""
+    note = Note(note_fp).note
+    samples, buffers = note[note["Name"] != "buffer"], note[note["Name"] == "buffer"]
+    wanted = scans or ("exc_anionic",)
+    rows: list[dict[str, object]] = []
+    x_rows: list[dict[str, object]] = []
+    plots: list[
+        tuple[
+            str,
+            str,
+            np.ndarray,
+            list[str],
+            Any,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            bool,
+        ]
+    ] = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for (name, temp), group in samples.groupby(["Name", "Temp"], sort=True):
+        one = group.drop_duplicates("Well")
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        wells = one["Well"].tolist()
+        x = one["pH" if is_ph else "Cl"].to_numpy(dtype=np.float64)
+        bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        scan_data, wells, x = sample_spectra(
+            ef,
+            wells,
+            x,
+            str(temp).split(".")[0],
+            is_ph=is_ph,
+            buffer_wells=bwells,
+            bands=wanted,
+        )
+        if not scan_data:
+            continue
+        sigma_x = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
+        if sigma_x is None:
+            msg = "Could not estimate x_sigma for this plate"
+            raise click.ClickException(msg)
+        stacked = stack_scans(list(scan_data.items()))
+        scan_names = list(dict.fromkeys(stacked.tags.tolist()))
+        scan_index = np.asarray(
+            [scan_names.index(tag) for tag in stacked.tags], dtype=np.int64
+        )
+        trace = fit_mcr_constrained_bayes(
+            stacked.data,
+            x,
+            scan_index,
+            x_sigma=sigma_x,
+            is_ph=is_ph,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept or 0.9,
+        )
+        kdraws = np.asarray(trace.posterior["K"].values).reshape(-1)
+        hdi = np.asarray(az.hdi(kdraws, prob=0.94), dtype=float)
+        qlo, qhi = float(hdi[0]), float(hdi[1])
+        xdraws = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
+        key = f"{name}_{str(temp).replace('.', 'p')}"
+        trace.to_netcdf(out_dir / f"{key}_mcr_constrained_bayes.nc")
+        rows.append({
+            "sample": name,
+            "temp": temp,
+            "K": float(np.median(kdraws)),
+            "hdi03": qlo,
+            "hdi97": qhi,
+            "r_hat_K": float(az.rhat(trace, var_names=["K"])["K"].item()),
+            "ess_bulk_K": float(az.ess(trace, var_names=["K"])["K"].item()),
+            "r_hat_profiles_max": float(
+                az.rhat(trace, var_names=["profiles"])["profiles"].max().item()
+            ),
+            "ess_profiles_min": float(
+                az.ess(trace, var_names=["profiles"])["profiles"].min().item()
+            ),
+            "n": len(wells),
+            "x_sigma": sigma_x,
+        })
+        xmed = np.median(xdraws, axis=0)
+        xlo, xhi = np.quantile(xdraws, [0.03, 0.97], axis=0)
+        x_rows.extend(
+            {
+                "sample": name,
+                "temp": temp,
+                "well": well,
+                "x_note": x[i],
+                "x_median": xmed[i],
+                "q03": xlo[i],
+                "q97": xhi[i],
+            }
+            for i, well in enumerate(wells)
+        )
+        plots.append((
+            str(name),
+            str(temp),
+            x,
+            wells,
+            trace,
+            kdraws,
+            stacked.wavelengths,
+            stacked.tags,
+            xdraws,
+            stacked.data,
+            is_ph,
+        ))
+        print(
+            f"{name} at {temp}: constrained MCR-Bayes K {np.median(kdraws):.3f} "
+            f"94% HDI [{qlo:.3f}, {qhi:.3f}], R-hat {rows[-1]['r_hat_K']:.3f}"
+        )
+    stem = note_fp.name.removesuffix("_note.csv")
+    table = pd.DataFrame(rows)
+    table.to_csv(out_dir / f"{stem}_K_mcr_constrained_bayes.csv", index=False)
+    pd.DataFrame(x_rows).to_csv(
+        out_dir / f"{stem}_x_mcr_constrained_bayes.csv", index=False
+    )
+    _plot_mcr_bayes(
+        plots,
+        out_dir / f"{stem}_mcr_constrained_bayes.pdf",
+        k_label="Joint posterior K",
+    )
     return table
 
 
