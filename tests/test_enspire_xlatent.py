@@ -483,6 +483,88 @@ def test_cli_global_bayes_writes_posterior_outputs(
 
 
 @pytest.mark.slow
+def test_global_bayes_acid_state_samples_delta_and_third_species() -> None:
+    """The free-parameter Bayes supports the acid state as the LM twin does."""
+    x, lam, y, _k_true = _two_state_spectra()
+    trace = fit_spectra_global_bayes(
+        x,
+        {"exc": (lam, y)},
+        x_sigma=0.05,
+        acid_state=True,
+        seed=13,
+        draws=200,
+        chains=1,
+        cores=1,
+    )
+    assert {"delta", "E2_exc"} <= set(trace.posterior.data_vars)
+    assert np.asarray(trace.posterior["E2_exc"].values).shape[-1] == lam.size
+    kdraw = np.asarray(trace.posterior["K"].values).reshape(-1)
+    # the forced third state soaks part of the transition, as it does in the
+    # LM twin on the same two-state data: compare against that fit, not the
+    # injected ground truth
+    lm_acid = fit_spectra_global(x, {"exc": (lam, y)}, acid_state=True, jackknife=False)
+    assert np.quantile(kdraw, 0.03) <= lm_acid.K <= np.quantile(kdraw, 0.97)
+    delta = float(np.median(np.asarray(trace.posterior["delta"].values).ravel()))
+    assert 0.3 < delta < 6.0
+    # the acid pK sits below the main transition, as in the LM twin
+    assert np.median(kdraw) - delta < np.median(kdraw)
+
+
+def test_global_bayes_acid_state_is_ph_only() -> None:
+    """A ligand titration has no acid state; it fails before any sampling."""
+    lam = np.arange(10, dtype=np.float64)
+    y = np.tile(np.linspace(0.2, 0.8, 10)[:, None], (1, 6))
+    x = np.linspace(1.0, 20.0, 6)
+    with pytest.raises(ValueError, match="pH titrations only"):
+        fit_spectra_global_bayes(
+            x, {"exc": (lam, y)}, x_sigma=0.5, is_ph=False, acid_state=True
+        )
+
+
+@pytest.mark.slow
+def test_cli_global_bayes_acid_state_writes_third_state(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """--acid-state is accepted by the free-parameter whole-spectrum method."""
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "global_bayes_acid"
+    out.mkdir()
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(out),
+            "enspire",
+            str(data / "G10.csv"),
+            str(note),
+            "--method",
+            "global-bayes",
+            "--x-sigma",
+            "auto",
+            "--acid-state",
+            "--draws",
+            "100",
+            "--chains",
+            "2",
+            "--cores",
+            "1",
+            "--seed",
+            "17",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_K_global_bayes.csv").exists()
+    ncs = list(out.glob("*_global_bayes.nc"))
+    assert ncs
+    trace = az.from_netcdf(ncs[0])
+    assert "delta" in trace.posterior
+    assert any(v.startswith("E2_") for v in trace.posterior.data_vars)
+
+
+@pytest.mark.slow
 def test_cli_marginal_bayes_acid_state_writes_third_state(
     tmp_path: Path, runner: CliRunner
 ) -> None:

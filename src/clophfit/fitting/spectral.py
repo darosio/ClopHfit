@@ -405,6 +405,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     *,
     x_sigma: float,
     is_ph: bool = True,
+    acid_state: bool = False,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -415,20 +416,30 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     """Bayesian whole-spectrum global fit with per-well latent titrant values.
 
     This experimental counterpart to :func:`fit_spectra_global` retains its
-    two-species mixture and per-well amplitude. Species spectra are nuisance
-    parameters; scan-specific Gaussian residual scales are inferred jointly.
-    Wavelength residuals are conditionally independent within each scan, an
-    approximation that must be considered when interpreting posterior widths.
+    mixture model and per-well amplitude: two species spectra, or three with
+    ``acid_state``. Species spectra are nuisance parameters; scan-specific
+    Gaussian residual scales are inferred jointly. Wavelength residuals are
+    conditionally independent within each scan, an approximation that must be
+    considered when interpreting posterior widths.
 
     The priors are seeded from a :func:`fit_spectra_global` run: ``E0``/``E1``
-    are centered on the projected species spectra with a width of five residual
-    RMS, a mild empirical-Bayes reuse of the same data (constant across ``K``,
-    so the shape of the ``K`` posterior is not affected; the species draws are
-    systematically a little narrow). Species state ordering follows
-    :func:`~clophfit.fitting.models.binding_1site`'s convention: for
+    (and ``E2``) are centered on the projected species spectra with a width of
+    five residual RMS, a mild empirical-Bayes reuse of the same data (constant
+    across ``K``, so the shape of the ``K`` posterior is not affected; the
+    species draws are systematically a little narrow). Species state ordering
+    follows :func:`~clophfit.fitting.models.binding_1site`'s convention: for
     ``is_ph=True`` state 1 carries the *low-pH* weight ``1 / (1 + 10**(pH -
     K))``, hence ``fraction = sigmoid(ln10 * (K - x_true))`` and ``E0`` tracks
     the high-pH spectrum.
+
+    ``acid_state`` adds a third state below the main transition with the
+    conventions of the least-squares twin (:func:`fit_spectra_global`): the
+    sequential diprotic softmax of :func:`_fractions_rows`, a sampled
+    ``delta`` so that ``pK2 = K - delta``, and its own ``E2_label`` species
+    spectra, seeded from the acid-state least-squares solution. It is the
+    same model the marginalized version samples
+    (:func:`fit_spectra_global_bayes_marginal`), here with the species
+    spectra kept as free parameters; the traces stay drop-in comparable.
 
     Input validation is the helper's (:func:`_clean_spectra`): fewer than
     four wells, a non-finite or non-positive ``x_sigma``, a non-finite
@@ -446,6 +457,9 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         Prior SD of each well's latent axis value: ``x_true ~ N(x, x_sigma)``.
     is_ph : bool
         Henderson-Hasselbalch (pH) or Langmuir (ligand) titration axis.
+    acid_state : bool
+        Add the third (acid) state, as in the least-squares twin. pH
+        titrations only; a ligand titration raises ``ValueError``.
     seed : int
         Random seed; a fixed seed reproduces the posterior.
     draws : int
@@ -464,19 +478,43 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     az.InferenceData
         Posterior draws for ``K``, the latent axis per well, the per-well
         amplitude and the reconstructed species spectra and noise scales
-        for each scan, with the log-likelihood attached so the comparison
-        scripts can compute elpd across methods.
+        for each scan, plus ``delta`` with an acid state, with the
+        log-likelihood attached so the comparison scripts can compute elpd
+        across methods.
+
+    Raises
+    ------
+    ValueError
+        With fewer than four wells, no usable wavelength, a non-finite or
+        non-positive ``x_sigma``, or an acid state on a ligand titration.
     """
     xa, clean = _clean_spectra(x, spectra, x_sigma=x_sigma)
-    init = fit_spectra_global(xa, clean, is_ph=is_ph, well_scale=True, jackknife=False)
+    if acid_state and not is_ph:
+        msg = "the acid state is defined for pH titrations only"
+        raise ValueError(msg)
+    init = fit_spectra_global(
+        xa, clean, is_ph=is_ph, acid_state=acid_state, well_scale=True, jackknife=False
+    )
     lo, hi = _k_bounds(xa, is_ph=is_ph)
+    states = 3 if acid_state else 2
+    # Seed the chains from the least-squares solution, as the marginalized
+    # twin does: the pK of the acid state is only identified relative to K.
+    theta_start = {"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))}
+    if acid_state:
+        theta_start["delta"] = float(
+            np.clip(init.K - init.k_acid, _DELTA_MIN + 1e-9, _DELTA_MAX - 1e-9)
+        )
     with pm.Model():
         k = pm.Uniform("K", lower=lo, upper=hi)
+        delta = (
+            pm.Uniform("delta", lower=_DELTA_MIN, upper=_DELTA_MAX)
+            if acid_state
+            else None
+        )
         x_true = pm.Normal("x_true", mu=xa, sigma=x_sigma, shape=xa.size)
-        if is_ph:
-            fraction = pm.math.sigmoid(np.log(10.0) * (k - x_true))
-        else:
-            fraction = x_true / (k + x_true)
+        fraction = _fractions_rows(
+            k, delta, None, x_true, is_ph=is_ph, acid_state=acid_state
+        )
         amp_raw = pm.LogNormal("amplitude_raw", mu=0.0, sigma=0.25, shape=xa.size)
         amplitude = pm.Deterministic(
             "amplitude",
@@ -485,16 +523,19 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         for name, (_lam, y) in clean.items():
             species = init.species[name]
             resid_scale = max(init.rms[name], 1e-6)
-            e0 = pm.Normal(
-                f"E0_{name}", mu=species[0], sigma=5 * resid_scale, shape=y.shape[0]
-            )
-            e1 = pm.Normal(
-                f"E1_{name}", mu=species[1], sigma=5 * resid_scale, shape=y.shape[0]
-            )
+            e_states = [
+                pm.Normal(
+                    f"E{s}_{name}",
+                    mu=species[s],
+                    sigma=5 * resid_scale,
+                    shape=y.shape[0],
+                )
+                for s in range(states)
+            ]
+            # fraction's columns are the states, so the mixture is one dot
+            m_stack = pt.stack(e_states)
             sigma = pm.HalfNormal(f"sigma_{name}", sigma=2 * resid_scale)
-            mu = amplitude[:, None] * (
-                (1 - fraction[:, None]) * e0 + fraction[:, None] * e1
-            )
+            mu = amplitude[:, None] * pt.dot(fraction, m_stack)  # type: ignore[no-untyped-call]
             pm.Normal(f"obs_{name}", mu=mu, sigma=sigma, observed=y.T)
         # The least-squares K starts the chains (clipped into the Uniform's
         # interior, a bound-hugging least-squares K would start NUTS on an edge).
@@ -508,7 +549,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
             cores=cores,
             target_accept=target_accept,
             random_seed=seed,
-            initvals={"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))},
+            initvals=theta_start,
             return_inferencedata=True,
             progressbar=False,
         )

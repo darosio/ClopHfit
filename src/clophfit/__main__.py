@@ -759,7 +759,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--chains", type=click.IntRange(min=1), default=4, show_default=True, help="MCMC chains for the Bayesian methods. Four chains are the sanity floor for R-hat: a lost or label-flipped chain is cheap insurance when it can be seen, and a fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
 @click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
-@click.option("--acid-state", is_flag=True, help="For --method global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
+@click.option("--acid-state", is_flag=True, help="For --method global-bayes and global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
 @click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes and mcr-constrained-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
@@ -799,8 +799,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         ctx.fail(
             "--x-sigma applies to Bayesian methods only (it is a posterior prior, not an LM option)"
         )
-    if acid_state and method != "global-bayes-marginal":
-        ctx.fail("--acid-state applies to --method global-bayes-marginal only")
+    if acid_state and method not in {"global-bayes", "global-bayes-marginal"}:
+        ctx.fail(
+            "--acid-state applies to --method global-bayes and "
+            "global-bayes-marginal only"
+        )
     if method in {"band", "both", "all"}:
         fit_enspire_bands(
             ef,
@@ -850,6 +853,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             buffer=buffer,
             scans=scans,
             x_sigma=x_sigma,
+            acid_state=acid_state,
             seed=seed,
             draws=draws,
             chains=chains,
@@ -1555,6 +1559,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     buffer: bool,
     scans: tuple[str, ...],
     x_sigma: str,
+    acid_state: bool = False,
     seed: int,
     draws: int,
     chains: int,
@@ -1575,6 +1580,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         cores=cores,
         target_accept=target_accept,
         fitter=fit_spectra_global_bayes,
+        acid_state=acid_state,
         suffix="global_bayes",
         label="global Bayes",
     )
