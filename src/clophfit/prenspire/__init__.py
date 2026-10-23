@@ -9,10 +9,13 @@ from clophfit.prenspire.prenspire import (
     verbose_print,
 )
 from clophfit.prenspire.thermo import (
+    VanthoffCurves,
     VanthoffFit,
     VanthoffModel,
     fit_vanthoff_model,
+    fit_vanthoff_model_bayes,
     titrant_kind,
+    vanthoff_curves,
     vanthoff_titration,
 )
 
@@ -22,12 +25,15 @@ __all__ = [
     "ManyLinesFoundError",
     "McrFit",
     "Note",
+    "VanthoffCurves",
     "VanthoffFit",
     "VanthoffModel",
     "fit_vanthoff_model",
+    "fit_vanthoff_model_bayes",
     "mcr_als",
     "mcr_titration",
     "titrant_kind",
+    "vanthoff_curves",
     "vanthoff_titration",
     "verbose_print",
 ]

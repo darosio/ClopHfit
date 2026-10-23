@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import lmfit  # type: ignore[import-untyped]
 import numpy as np
 import pandas as pd
+import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
 
 from clophfit.prenspire.bands import (
@@ -39,6 +40,8 @@ from clophfit.prenspire.bands import (
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    import arviz as az  # type: ignore[import-untyped]
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prenspire.prenspire import EnspireFile
@@ -257,6 +260,155 @@ def fit_vanthoff_model(
     )
 
 
+def fit_vanthoff_model_bayes(  # ruff: ignore[too-many-arguments]
+    data: dict[tuple[str, str], tuple[ArrayF, ArrayF]],
+    *,
+    is_ph: bool = True,
+    x_sigma: float | None = None,
+    seed: int = 0,
+    draws: int = 2000,
+    chains: int = 2,
+    cores: int | None = None,
+    target_accept: float = 0.9,
+    tune: int | None = None,
+) -> az.InferenceData:
+    """Posterior of the joint van't Hoff fit over every temperature at once.
+
+    The Bayesian counterpart of :func:`fit_vanthoff_model`: the same model -
+    ``pKa(T) = A + B (1/T - m)`` shared by every band and temperature, the
+    plateaus free per ``(band, temperature)`` - but the interval is a highest
+    density interval read off a NUTS posterior instead of an LM covariance,
+    and ``dH``/``dS`` get intervals of their own rather than being propagated
+    from two correlated coefficients.
+
+    The priors are seeded from the least-squares joint fit: ``A`` and ``B``
+    are centered on it with a width of four least-squares standard errors
+    (floored so a degenerate least-squares error cannot collapse the prior),
+    the plateaus on their least-squares values with a width of a tenth of the
+    normalised signal axis, and the noise scale of each curve on a half-normal
+    at 0.05. This is the same documented empirical-Bayes reuse the band-level
+    and whole-spectrum Bayesian fitters make; the floor is what keeps it a
+    start rather than a pin.
+
+    Parameters
+    ----------
+    data : dict[tuple[str, str], tuple[ArrayF, ArrayF]]
+        Band name and temperature label to its ``(x, y)`` curve, y already
+        normalised and scaled by the caller - the shape
+        :func:`vanthoff_curves` produces. Every band of one temperature must
+        carry the same titrant axis, since they were read off the same wells.
+    is_ph : bool
+        pH titration (fit pKa(T) against a Henderson-Hasselbalch fraction) or
+        ligand titration (fit pKd(T) against a Langmuir fraction; the
+        reported ``K`` is Kd on the x scale).
+    x_sigma : float | None
+        Prior SD on each well's true titrant value,
+        ``x_true ~ N(note value, x_sigma)``, per well and temperature.
+        ``None`` keeps the axis fixed at the note values, as the
+        least-squares fit does.
+    seed : int
+        NUTS seed; a fixed seed reproduces the posterior.
+    draws : int
+        Posterior draws per chain.
+    chains : int
+        Number of NUTS chains; two is the minimum that leaves R-hat defined.
+    cores : int | None
+        Chain parallelism; None chains in parallel.
+    target_accept : float
+        NUTS target acceptance.
+    tune : int | None
+        Tuning draws; None keeps ``draws // 2``.
+
+    Returns
+    -------
+    az.InferenceData
+        Posterior draws for ``A``, ``B``, ``dH_J_mol``, ``dS_J_molK``, the
+        per-temperature constants ``pK_<t>`` (the fitted pKa or pKd) and
+        ``K_<t>`` (the same pKa, or Kd on the native x scale), the per-curve
+        plateaus ``s0_<band>_<t>``/``s1_<band>_<t>`` and noise scales, and
+        the latent ``x_true_<t>`` when a prior width was given.
+
+    Raises
+    ------
+    ValueError
+        With fewer than two temperatures, a non-positive ``x_sigma``, bands of
+        one temperature that disagree on their axis, or a least-squares joint
+        fit that did not converge (no posterior is started then).
+    """
+    temps = sorted({t for _band, t in data})
+    if not data or len(temps) < _MIN_TEMPS:
+        msg = f"a joint van't Hoff posterior needs at least {_MIN_TEMPS} temperatures"
+        raise ValueError(msg)
+    if x_sigma is not None and not (np.isfinite(x_sigma) and x_sigma > 0.0):
+        msg = "x_sigma must be positive and finite, or None"
+        raise ValueError(msg)
+    init = fit_vanthoff_model(data, is_ph=is_ph)
+    if not init.ok:
+        msg = "the least-squares van't Hoff fit did not converge; no posterior started"
+        raise ValueError(msg)
+    keys = sorted(data)
+    # every band of one temperature was read off the same wells, so the curves
+    # must agree on that temperature's titrant axis before one is sampled
+    axis: dict[str, np.ndarray] = {}
+    for t in temps:
+        per_band = [np.asarray(data[k][0], dtype=np.float64) for k in keys if k[1] == t]
+        first = per_band[0]
+        for other in per_band[1:]:
+            if other.shape != first.shape or not np.allclose(other, first):
+                msg = f"the bands of {t} C disagree on their titrant axis"
+                raise ValueError(msg)
+        axis[t] = first
+    # pH: Ka = 10^(-pKa) -> dH = +ln10 R B. Ligand: Kd itself is modelled,
+    # ln Kd = ln10 (a - b m) + ln10 b / T against d ln Kd/d(1/T) = -dH/R, so
+    # both thermodynamic signs flip relative to the pKa form, as in the LM fit.
+    sign = 1.0 if is_ph else -1.0
+    m = init.m
+    with pm.Model():
+        a = pm.Normal("A", mu=init.a, sigma=max(4.0 * init.se_a, 0.5))
+        b = pm.Normal("B", mu=init.b, sigma=max(4.0 * init.se_b, 200.0))
+        pm.Deterministic("dH_J_mol", sign * LN10 * R_GAS * b)
+        pm.Deterministic("dS_J_molK", -sign * LN10 * R_GAS * (a - b * m))
+        xd: dict[str, np.ndarray | pm.math.TensorVariable] = {}
+        for t in temps:
+            if x_sigma is None:
+                xd[t] = axis[t]
+            else:
+                xd[t] = pm.Normal(
+                    f"x_true_{t}", mu=axis[t], sigma=x_sigma, shape=axis[t].size
+                )
+            pk = a + b * (init.inv[t] - m)
+            pm.Deterministic(f"pK_{t}", pk)
+            kd = pm.math.exp(LN10 * pk)
+            pm.Deterministic(f"K_{t}", pk if is_ph else kd)
+            frac = (
+                1.0 / (1.0 + pm.math.exp(LN10 * (pk - xd[t])))
+                if is_ph
+                else xd[t] / (xd[t] + kd)
+            )
+            for band in sorted({band for band, t_ in keys if t_ == t}):
+                s0_ls, s1_ls = init.plateaus[band, t]
+                s0 = pm.Normal(f"s0_{band}_{t}", mu=s0_ls, sigma=0.1)
+                s1 = pm.Normal(f"s1_{band}_{t}", mu=s1_ls, sigma=0.1)
+                sigma = pm.HalfNormal(f"sigma_{band}_{t}", sigma=0.05)
+                pm.Normal(
+                    f"obs_{band}_{t}",
+                    mu=s0 + (s1 - s0) * frac,
+                    sigma=sigma,
+                    observed=np.asarray(data[band, t][1], dtype=np.float64),
+                )
+        return pm.sample(
+            draws,
+            tune=draws // 2 if tune is None else tune,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            random_seed=seed,
+            initvals={"A": init.a, "B": init.b},
+            return_inferencedata=True,
+            progressbar=False,
+        )
+
+
 def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     samples: pd.DataFrame,
@@ -312,6 +464,80 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     return out
 
 
+class VanthoffCurves(NamedTuple):
+    """One sample's corrected curves and the titrant kind they were read on."""
+
+    is_ph: bool
+    """Whether the sample was read as a pH (else ligand) titration."""
+    curves: dict[tuple[str, str], tuple[ArrayF, ArrayF]]
+    """``(band, temperature)`` to its ``(x, y)`` curve, y normalised per band."""
+
+
+def vanthoff_curves(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note: pd.DataFrame,
+    *,
+    buffer: bool = True,
+    is_ph: bool | None = None,
+    wanted: Sequence[str] = DIRECT_BANDS,
+    min_rho: float = 0.8,
+) -> dict[str, VanthoffCurves]:
+    """Corrected curves of every sample, as both van't Hoff fitters consume them.
+
+    The assembly is shared so that the least-squares joint fit
+    (:func:`fit_vanthoff_model`) and its posterior counterpart
+    (:func:`fit_vanthoff_model_bayes`) read the same wells, the same bands and
+    the same titrant axis: a comparison between the two is then a comparison
+    of the inference, not of the preprocessing.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note : pd.DataFrame
+        Normalised note with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
+    buffer : bool
+        Subtract the buffer wells of the same plate column.
+    is_ph : bool | None
+        Force the titrant column for every sample. ``None`` decides per sample
+        with :func:`titrant_kind`.
+    wanted : Sequence[str]
+        Band names entering the joint fit; default the two direct readouts.
+    min_rho : float
+        Monotonicity gate below which a band is dropped, as in the band path.
+
+    Returns
+    -------
+    dict[str, VanthoffCurves]
+        Sample name to its titrant kind and its ``(band, temperature)``
+        curves, the signal already normalised per band.
+    """
+    samples = note[note["Name"] != "buffer"]
+    buffers = note[note["Name"] == "buffer"]
+    kinds = titrant_kind(samples)
+    out: dict[str, VanthoffCurves] = {}
+    for name, group in samples.groupby("Name", sort=True):
+        sample_is_ph = kinds[str(name)] if is_ph is None else is_ph
+        curves = _curves_by_temp(
+            ef,
+            group,
+            buffers,
+            is_ph=sample_is_ph,
+            buffer=buffer,
+            wanted=wanted,
+            min_rho=min_rho,
+        )
+        out[str(name)] = VanthoffCurves(
+            is_ph=sample_is_ph,
+            curves={
+                (band, t): pair
+                for t, store in curves.items()
+                for band, pair in store.items()
+            },
+        )
+    return out
+
+
 def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note: pd.DataFrame,
@@ -355,31 +581,18 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     native mM scale (errors propagated log -> linear). The enthalpy is that
     of deprotonation / ligand dissociation respectively.
     """
-    samples = note[note["Name"] != "buffer"]
-    buffers = note[note["Name"] == "buffer"]
     rows: list[dict[str, object]] = []
     models: dict[str, VanthoffModel] = {}
-    kinds = titrant_kind(samples)
-    for name, group in samples.groupby("Name", sort=True):
-        # an explicit is_ph overrides the per-sample decision
-        sample_is_ph = kinds[str(name)] if is_ph is None else is_ph
-        curves = _curves_by_temp(
-            ef,
-            group,
-            buffers,
-            is_ph=sample_is_ph,
-            buffer=buffer,
-            wanted=wanted,
-            min_rho=min_rho,
-        )
-        flat = {
-            (b, t): pair for t, store in curves.items() for b, pair in store.items()
-        }
+    for name, info in vanthoff_curves(
+        ef, note, buffer=buffer, is_ph=is_ph, wanted=wanted, min_rho=min_rho
+    ).items():
+        sample_is_ph = info.is_ph
+        flat = info.curves
         fit = fit_vanthoff_model(flat, is_ph=sample_is_ph)
         if not fit.ok:
             rows.append({
                 "sample": name,
-                "temp": "+".join(sorted(curves)) or "none",
+                "temp": "+".join(sorted({t for _band, t in flat})) or "none",
                 "K": np.nan,
                 "se": np.nan,
                 "A": np.nan,

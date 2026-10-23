@@ -67,9 +67,16 @@ from clophfit.prenspire.mcr import (
     stack_scans,
 )
 from clophfit.prenspire.spectral import fit_titrations_spectral, sample_spectra
-from clophfit.prenspire.thermo import VanthoffModel, vanthoff_titration
+from clophfit.prenspire.thermo import (
+    ZERO_C,
+    VanthoffModel,
+    fit_vanthoff_model_bayes,
+    vanthoff_curves,
+    vanthoff_titration,
+)
 from clophfit.prenspire.thermo_plot import (
     vanthoff_axes,
+    vanthoff_axes_for,
     vanthoff_curve,
     vanthoff_enthalpy,
     vanthoff_right_line,
@@ -80,6 +87,8 @@ from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    import xarray as xr
 
     from clophfit.fitting.data_structures import FitResult
 
@@ -748,7 +757,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "mcr", "mcr-bayes", "mcr-constrained-bayes", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf. global-bayes-marginal eliminates the species spectra analytically (same model, smooth species prior, per-well noise split into white, wavelength-correlated smooth and offset components; --x-sigma required, same tables with global_bayes_marginal suffixes --acid-state adds a third acid state on pH plates, same conventions as the band-level acid_scale, its own pK below K and E2_ spectrum: the observed recurrent drop of the most acidic well). vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. mcr-bayes resamples the closed-profile factorization on a NUTS posterior with a latent titrant axis, deriving K from the posterior profiles; mcr-constrained-bayes additionally constrains the closed profiles to the titration fraction itself (Henderson-Hasselbalch on pH plates, Langmuir on ligand ones; K is a direct posterior parameter). both runs band and svd; all runs band, svd and global.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "mcr", "mcr-bayes", "mcr-constrained-bayes", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf. global-bayes-marginal eliminates the species spectra analytically (same model, smooth species prior, per-well noise split into white, wavelength-correlated smooth and offset components; --x-sigma required, same tables with global_bayes_marginal suffixes --acid-state adds a third acid state on pH plates, same conventions as the band-level acid_scale, its own pK below K and E2_ spectrum: the observed recurrent drop of the most acidic well). vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. mcr-bayes resamples the closed-profile factorization on a NUTS posterior with a latent titrant axis, deriving K from the posterior profiles; mcr-constrained-bayes additionally constrains the closed profiles to the titration fraction itself (Henderson-Hasselbalch on pH plates, Langmuir on ligand ones; K is a direct posterior parameter). both runs band and svd; all runs band, svd and global.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
@@ -760,7 +769,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
 @click.option("--acid-state", is_flag=True, help="For --method global-bayes and global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
-@click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes and mcr-constrained-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
+@click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes, mcr-constrained-bayes and vanthoff-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
     ctx: Context,
@@ -795,6 +804,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         "global-bayes-marginal",
         "mcr-bayes",
         "mcr-constrained-bayes",
+        "vanthoff-bayes",
     }:
         ctx.fail(
             "--x-sigma applies to Bayesian methods only (it is a posterior prior, not an LM option)"
@@ -820,6 +830,19 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         fit_enspire_global(ef, Path(note_f), Path(out), buffer=buffer, scans=scans)
     if method == "vanthoff":
         fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer)
+    if method == "vanthoff-bayes":
+        fit_enspire_vanthoff_bayes(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            x_sigma=x_sigma,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+        )
     if method == "mcr":
         fit_enspire_mcr(
             ef,
@@ -1158,6 +1181,7 @@ def _plot_bayes(
 # Prior SD (pH) floor for --x-sigma: strictly positive, and small enough to
 # keep the posterior honest instead of smearing every point onto its plateau.
 X_SIGMA_MIN_PH = 0.01
+_MIN_VANTHOFF_TEMPS = 2  # one enthalpy needs a pair of temperatures
 
 
 def _resolve_enspire_x_sigma(
@@ -1927,6 +1951,270 @@ def fit_enspire_vanthoff(
         )
     _plot_vanthoff(models, out_dir / f"{stem}_K_vanthoff.pdf")
     return table
+
+
+def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    x_sigma: str | None,
+    seed: int,
+    draws: int,
+    chains: int,
+    cores: int | None,
+    target_accept: float | None,
+) -> pd.DataFrame:
+    """Sample the joint van't Hoff fit and write its tables and figure.
+
+    One posterior per sample carries every temperature at once, as the
+    least-squares joint fit does: ``A`` and ``B`` of ``pK(T) = A + B (1/T - m)``
+    are shared by all bands and temperatures, the plateaus stay free per
+    ``(band, temperature)``. The K table keeps the columns of the Bayesian
+    tables elsewhere (``K``, ``hdi03``, ``hdi97``, ``r_hat``, ``ess_bulk``,
+    ``n``, ``x_sigma``) and adds ``dH_J_mol``/``dS_J_molK``, the posterior
+    medians of the thermodynamic pair that the least-squares table reports
+    with propagated, not sampled, errors.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where the tables, traces and figure go.
+    buffer : bool
+        Subtract the buffer well of the same plate column.
+    x_sigma : str | None
+        ``--x-sigma`` as given: None keeps the axis fixed at the note values,
+        ``auto`` pools the note's replicate spread, a number fixes the prior
+        width in the titrant's own units.
+    seed : int
+        NUTS seed, so the posterior reproduces.
+    draws : int
+        Posterior draws per chain.
+    chains : int
+        MCMC chains.
+    cores : int | None
+        CPU cores for chain parallelism; None lets PyMC parallelise.
+    target_accept : float | None
+        NUTS target acceptance; None keeps the sampler default.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature).
+
+    Raises
+    ------
+    click.ClickException
+        When ``--x-sigma`` was given but cannot be resolved for a sample.
+    """
+    note = Note(note_fp).note
+    stem = note_fp.name.removesuffix("_note.csv")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, object]] = []
+    x_rows: list[dict[str, object]] = []
+    figdata: list[
+        tuple[
+            str, bool, dict[tuple[str, str], tuple[np.ndarray, np.ndarray]], Any, float
+        ]
+    ] = []
+    for name, info in vanthoff_curves(ef, note, buffer=buffer).items():
+        curves = info.curves
+        temps = sorted({t for _band, t in curves})
+        if len(temps) < _MIN_VANTHOFF_TEMPS:
+            click.echo(
+                f"vanthoff-bayes: {name} carries temperature(s) {temps}; a joint "
+                "posterior needs at least two - skipped"
+            )
+            continue
+        # the axis prior is one number for the sample: 'auto' pools the
+        # replicate spread of every temperature's wells, which is the same
+        # error model the per-temperature fitters use
+        one = note[note["Name"] == name]
+        sigma = _resolve_enspire_x_sigma(x_sigma, info.is_ph, one, str(name), temps[0])
+        if x_sigma is not None and sigma is None:
+            msg = "--method vanthoff-bayes could not resolve --x-sigma for this note"
+            raise click.ClickException(msg)
+        trace = fit_vanthoff_model_bayes(
+            curves,
+            is_ph=info.is_ph,
+            x_sigma=sigma,
+            seed=seed,
+            draws=draws,
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept or 0.9,
+        )
+        trace.to_netcdf(out_dir / f"{stem}_{name}_vanthoff_bayes.nc")
+        n = int(sum(np.asarray(pair[0]).size for pair in curves.values()))
+        dh_draws = np.asarray(trace.posterior["dH_J_mol"].values).reshape(-1)
+        ds_draws = np.asarray(trace.posterior["dS_J_molK"].values).reshape(-1)
+        for t in temps:
+            kdraw = np.asarray(trace.posterior[f"K_{t}"].values).reshape(-1)
+            lo, hi = (float(v) for v in az.hdi(kdraw, prob=0.94))
+            median = float(np.median(kdraw))
+            rows.append({
+                "sample": name,
+                "temp": t,
+                "K": median,
+                "hdi03": lo,
+                "hdi97": hi,
+                "r_hat": float(az.rhat(trace, var_names=[f"K_{t}"])[f"K_{t}"].item()),
+                "ess_bulk": float(az.ess(trace, var_names=[f"K_{t}"])[f"K_{t}"].item()),
+                "dH_J_mol": float(np.median(dh_draws)),
+                "dS_J_molK": float(np.median(ds_draws)),
+                "n": n,
+                "x_sigma": np.nan if sigma is None else sigma,
+            })
+            kind, unit = ("pKa", "") if info.is_ph else ("Kd", " mM")
+            print(
+                f"{name} at {t}: {kind} {median:.3f}{unit} 94% HDI [{lo:.3f}, {hi:.3f}]"
+            )
+            if sigma is None:
+                continue
+            xdraws = np.asarray(trace.posterior[f"x_true_{t}"].values)
+            draws_x = xdraws.reshape(-1, xdraws.shape[-1])
+            # the wells of this temperature, in the order _curves_by_temp kept
+            labels = one["Temp"].map(lambda v: str(v).split(".")[0])
+            wells_t = one[labels == t].drop_duplicates("Well")["Well"].tolist()
+            for i, well in enumerate(wells_t):
+                qlo, xmed, qhi = np.quantile(draws_x[:, i], [0.03, 0.5, 0.97])
+                x_rows.append({
+                    "sample": name,
+                    "temp": t,
+                    "well": well,
+                    "x_median": float(xmed),
+                    "hdi03": float(qlo),
+                    "hdi97": float(qhi),
+                })
+        m = float(np.mean([1.0 / (float(t) + ZERO_C) for t in temps]))
+        figdata.append((str(name), info.is_ph, curves, trace, m))
+    table = pd.DataFrame(rows)
+    table.to_csv(out_dir / f"{stem}_K_vanthoff_bayes.csv", index=False)
+    if x_rows:
+        pd.DataFrame(x_rows).to_csv(
+            out_dir / f"{stem}_x_vanthoff_bayes.csv", index=False
+        )
+    _plot_vanthoff_bayes(figdata, out_dir / f"{stem}_K_vanthoff_bayes.pdf")
+    return table
+
+
+def _trace_draws(posterior: xr.Dataset, var: str) -> np.ndarray:
+    """Flatten one trace variable to (draws, ...), whatever the chain layout."""
+    arr = np.asarray(posterior[var].values)
+    return arr.reshape(-1, *arr.shape[2:])
+
+
+def _plot_vanthoff_bayes(  # ruff: ignore[too-many-statements]
+    figdata: list[
+        tuple[
+            str, bool, dict[tuple[str, str], tuple[np.ndarray, np.ndarray]], Any, float
+        ]
+    ],
+    pdf_path: Path,
+) -> None:
+    """Per sample: bands with the posterior-median model and its 94 % band, and K vs 1/T."""
+    if not figdata:
+        return
+    n = len(figdata)
+    fig, axes = plt.subplots(
+        n, 2, figsize=(10.8, 4.2 * n), squeeze=False, constrained_layout=True
+    )
+    for row, (sample, is_ph, curves, trace, m) in enumerate(figdata):
+        left, right = axes[row]
+        ax_labels = vanthoff_axes_for(is_ph=is_ph)
+        a_draws = _trace_draws(trace.posterior, "A")
+        b_draws = _trace_draws(trace.posterior, "B")
+        keep = np.linspace(0, a_draws.size - 1, min(200, a_draws.size)).astype(int)
+        temps = sorted({t for _band, t in curves})
+        colmap = {t: plt.get_cmap("tab10")(i / 10) for i, t in enumerate(temps)}
+        for (band, t), (x, y) in sorted(curves.items()):
+            if ax_labels.left_log:
+                # a zero concentration has no place on a log axis: it is drawn
+                # at the axis floor, as the least-squares figure does
+                px = np.where(x == 0, ZERO_AT, x)
+                grid = np.logspace(
+                    np.log10(ZERO_AT), np.log10(max(float(np.max(x)), 1.0) * 1.5), 200
+                )
+            else:
+                px = x
+                grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
+            left.plot(px, y, "o", ms=3.5, color=colmap[t], alpha=0.85)
+            pk = a_draws + b_draws * (1.0 / (float(t) + ZERO_C) - m)
+            kd = np.power(10.0, pk)[:, None]
+            frac = (
+                1.0 / (1.0 + np.power(10.0, pk[:, None] - grid[None, :]))
+                if is_ph
+                else grid[None, :] / (grid[None, :] + kd)
+            )
+            s0 = _trace_draws(trace.posterior, f"s0_{band}_{t}")
+            s1 = _trace_draws(trace.posterior, f"s1_{band}_{t}")
+            drawn = s0[:, None] + (s1 - s0)[:, None] * frac
+            lo, hi = np.quantile(drawn[keep], [0.03, 0.97], axis=0)
+            left.fill_between(grid, lo, hi, color=colmap[t], alpha=0.15, lw=0)
+            left.plot(grid, np.median(drawn, axis=0), "-", lw=1.1, color=colmap[t])
+        for t in temps:
+            left.plot([], [], "o", color=colmap[t], label=f"{t} C")
+        left.legend(fontsize=8)
+        left.set_title(f"{sample}: bands and posterior-median joint model")
+        left.set_xlabel(ax_labels.left_x)
+        left.set_ylabel(ax_labels.left_y)
+        if ax_labels.left_log:
+            left.set_xscale("log")
+
+        xs = np.array([1000.0 / (float(t) + ZERO_C) for t in temps])
+        med = np.array([
+            float(np.median(_trace_draws(trace.posterior, f"K_{t}"))) for t in temps
+        ])
+        q = np.array([
+            np.quantile(_trace_draws(trace.posterior, f"K_{t}"), [0.03, 0.97])
+            for t in temps
+        ])
+        right.errorbar(
+            xs,
+            med,
+            yerr=np.vstack([med - q[:, 0], q[:, 1] - med]),
+            fmt="o",
+            color="k",
+            capsize=2,
+        )
+        # the line of the joint model, with the credible band of the pair
+        grid_inv = np.linspace(
+            1.0 / (float(temps[-1]) + ZERO_C), 1.0 / (float(temps[0]) + ZERO_C), 100
+        )
+        fitted = a_draws[keep, None] + b_draws[keep, None] * (grid_inv[None, :] - m)
+        plotted = fitted if is_ph else np.power(10.0, fitted)
+        right.fill_between(
+            grid_inv * 1000,
+            *np.quantile(plotted, [0.03, 0.97], axis=0),
+            color="0.6",
+            alpha=0.3,
+            lw=0,
+        )
+        right.plot(grid_inv * 1000, np.median(plotted, axis=0), "-k", lw=1)
+        for i, t in enumerate(temps):
+            right.annotate(
+                f"{t} C",
+                (xs[i], med[i]),
+                textcoords="offset points",
+                xytext=(6, -12),
+                fontsize=8,
+            )
+        dh = _trace_draws(trace.posterior, "dH_J_mol") / 1000.0
+        dh_lo, dh_hi = np.quantile(dh, [0.03, 0.97])
+        right.set_title(
+            f"van't Hoff: dH = {np.median(dh):.1f} [{dh_lo:.1f}, {dh_hi:.1f}] kJ/mol"
+        )
+        right.set_xlabel("1000 / T  (1/K)")
+        right.set_ylabel(ax_labels.right_y)
+        if ax_labels.right_log:
+            right.set_yscale("log")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    plt.close(fig)
 
 
 def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]

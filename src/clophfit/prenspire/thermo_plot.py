@@ -131,20 +131,24 @@ def vanthoff_right_line(model: VanthoffModel, inv: np.ndarray) -> np.ndarray:
     return np.power(10.0, fitted)
 
 
-def vanthoff_axes(model: VanthoffModel) -> VanthoffAxes:
-    """How one sample's van't Hoff row must be drawn.
+def vanthoff_axes_for(*, is_ph: bool) -> VanthoffAxes:
+    """Give the two panels' axes for a titration kind.
+
+    Split out from :func:`vanthoff_axes` so the posterior figure, which reads
+    the kind off the curves instead of off a least-squares model, draws the
+    same axis as the fit figure.
 
     Parameters
     ----------
-    model : VanthoffModel
-        The joint fit of the sample.
+    is_ph : bool
+        Whether the sample was read as a pH (else ligand) titration.
 
     Returns
     -------
     VanthoffAxes
         The labels and the log-scale flags of the two panels.
     """
-    if model.is_ph:
+    if is_ph:
         return VanthoffAxes(
             left_x="pH",
             left_y="normalized signal",
@@ -159,3 +163,19 @@ def vanthoff_axes(model: VanthoffModel) -> VanthoffAxes:
         right_y="Kd (mM)",
         right_log=True,
     )
+
+
+def vanthoff_axes(model: VanthoffModel) -> VanthoffAxes:
+    """How one sample's van't Hoff row must be drawn.
+
+    Parameters
+    ----------
+    model : VanthoffModel
+        The joint fit of the sample.
+
+    Returns
+    -------
+    VanthoffAxes
+        The labels and the log-scale flags of the two panels.
+    """
+    return vanthoff_axes_for(is_ph=model.is_ph)

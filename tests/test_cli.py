@@ -187,6 +187,53 @@ def test_prenspire_vanthoff(tmp_path: Path, runner: CliRunner) -> None:
     assert table.dH_J_mol.notna().all()
 
 
+def test_prenspire_vanthoff_bayes(tmp_path: Path, runner: CliRunner) -> None:
+    """``--method vanthoff-bayes`` samples the joint model across temperatures."""
+    data = tpath / "EnSpire"
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(data / "NTT-G10_note.csv"),
+    ]
+    result = runner.invoke(
+        ppr,
+        [
+            *args,
+            "--method",
+            "vanthoff-bayes",
+            "--x-sigma",
+            "auto",
+            "--draws",
+            "200",
+            "--chains",
+            "2",
+            "--cores",
+            "1",
+            "--seed",
+            "5",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_vanthoff_bayes.csv")
+    assert set(table.temp.astype(str)) == {"20", "37"}
+    assert table.K.between(7.0, 9.5).all()
+    assert (table.hdi03 < table.K).all()
+    assert (table.hdi97 > table.K).all()
+    assert table.dH_J_mol.notna().all()
+    assert (table.x_sigma > 0).all()
+    # one trace per sample, and the latent-axis table of the --x-sigma run
+    assert list(out.glob("*_vanthoff_bayes.nc"))
+    x_table = pd.read_csv(out / "NTT-G10_x_vanthoff_bayes.csv")
+    assert set(x_table.temp.astype(str)) == {"20", "37"}
+    assert (x_table.hdi03 <= x_table.x_median).all()
+    assert (x_table.x_median <= x_table.hdi97).all()
+    assert (out / "NTT-G10_K_vanthoff_bayes.pdf").stat().st_size > 1000
+
+
 def test_prenspire_vanthoff_fits_a_chloride_note_on_its_own_axis(
     tmp_path: Path, runner: CliRunner
 ) -> None:
