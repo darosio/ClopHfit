@@ -482,6 +482,75 @@ def test_cli_global_bayes_writes_posterior_outputs(
     # (with the default 2000 the r_hat lands well below 1.1)
 
 
+def _wide_spectra(
+    n_lambda: int = 120, noise: float = 0.006, seed: int = 31
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Build a 16-well pH titration at many wavelengths, with sharp features."""
+    x = np.tile(np.linspace(5.5, 8.5, 8), 2)
+    k_true = 7.0
+    frac = 1 / (1 + 10 ** (k_true - x))
+    grid = np.linspace(0.0, 1.0, n_lambda)
+    # a smooth envelope plus two vibronic bands, as an excitation scan has
+    e0 = 0.25 + 0.55 * np.exp(-((grid - 0.85) ** 2) / 0.02) + 0.10 * np.cos(18 * grid)
+    e1 = 0.85 - 0.60 * np.exp(-((grid - 0.8) ** 2) / 0.05) - 0.08 * np.cos(14 * grid)
+    amp = np.repeat([0.95, 1.05], 8)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * amp
+    y += np.random.default_rng(seed).normal(0, noise, y.shape)
+    return x, np.arange(float(n_lambda)), y, k_true
+
+
+@pytest.mark.slow
+def test_global_bayes_species_basis_mixes_where_per_wavelength_does_not() -> None:
+    """A wide scan needs the spline basis: the free-per-wavelength block stalls.
+
+    One species value per wavelength gives the sampler a few hundred nearly
+    redundant parameters on a 226-wavelength scan, and a coordinated move of the
+    spectra can mimic a shift of K, so K's effective sample size collapses. The
+    basis keeps the same model and outputs (full-resolution species spectra) in
+    24 coefficients. This is the regression test for that: the same data, the
+    same budget, and the basis is the only path that earns a comparison.
+    """
+    # 226 wavelengths, the length of the excitation scan the plates carry
+    x, lam, y, k_true = _wide_spectra(n_lambda=226)
+    free = fit_spectra_global_bayes(
+        x,
+        {"exc": (lam, y)},
+        x_sigma=0.05,
+        seed=3,
+        draws=400,
+        chains=2,
+        cores=1,
+        species_basis=None,
+    )
+    basis = fit_spectra_global_bayes(
+        x,
+        {"exc": (lam, y)},
+        x_sigma=0.05,
+        seed=3,
+        draws=400,
+        chains=2,
+        cores=1,
+        species_basis=24,
+    )
+    ess_free = float(az.ess(free, var_names=["K"])["K"].item())
+    ess_basis = float(az.ess(basis, var_names=["K"])["K"].item())
+    rhat_basis = float(az.rhat(basis, var_names=["K"])["K"].item())
+    rhat_free = float(az.rhat(free, var_names=["K"])["K"].item())
+    # The free path's ESS is not asserted: nutpie's reductions are not bitwise
+    # reproducible, so it scatters between ~15 and ~45 here, while the basis
+    # path stays above 50 with R-hat near 1.02. Assert what is stable - the
+    # basis converges, and the free block does not.
+    assert ess_basis > 50
+    assert rhat_basis < 1.05
+    assert ess_basis > ess_free or rhat_free > 1.05
+    kdraw = np.asarray(basis.posterior["K"].values).reshape(-1)
+    assert abs(float(np.median(kdraw)) - k_true) < 0.15
+    # the basis samples coefficients but still reports full-resolution spectra
+    assert "c0_exc" in basis.posterior
+    assert np.asarray(basis.posterior["E0_exc"].values).shape[-1] == lam.size
+    assert np.asarray(free.posterior["E0_exc"].values).shape[-1] == lam.size
+
+
 @pytest.mark.slow
 def test_global_bayes_acid_state_samples_delta_and_third_species() -> None:
     """The free-parameter Bayes supports the acid state as the LM twin does."""

@@ -44,6 +44,7 @@ import numpy as np
 import pymc as pm  # type: ignore[import-untyped]
 import pytensor.tensor as pt
 import xarray as xr
+from scipy.interpolate import BSpline
 from scipy.optimize import least_squares
 from scipy.special import logsumexp
 
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from clophfit.clophfit_types import ArrayF
 
 _GRID_POINTS = 61
+_MIN_BASIS = 8  # a cubic spline basis needs a handful of coefficients to bend
 _DELTA_MIN, _DELTA_MAX = 0.3, 6.0
 _WEIGHT_PASSES = 3
 _AMPLITUDE_ITERATIONS = 50
@@ -406,6 +408,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     x_sigma: float,
     is_ph: bool = True,
     acid_state: bool = False,
+    species_basis: int | None = 24,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -460,6 +463,18 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     acid_state : bool
         Add the third (acid) state, as in the least-squares twin. pH
         titrations only; a ligand titration raises ``ValueError``.
+    species_basis : int | None
+        Coefficients of the clamped cubic B-spline basis the species spectra
+        are sampled in, or ``None`` for one free value per wavelength (the
+        historical parameterization). The basis is not a convenience: with one
+        parameter per wavelength the species block is ~450-dimensional on a
+        226-wavelength scan, the K posterior moves by fewer than 15 effective
+        draws at 2000 draws, and no budget tested recovers it, because a
+        coordinated move of the spectra can mimic a shift of K. At 24
+        coefficients the same model reaches bulk ESS of a few hundred and
+        reproduces the least-squares species to within the residual scale.
+        ``E0_``/``E1_``/``E2_`` are still written at full wavelength
+        resolution, so the outputs are unchanged.
     seed : int
         Random seed; a fixed seed reproduces the posterior.
     draws : int
@@ -523,15 +538,36 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         for name, (_lam, y) in clean.items():
             species = init.species[name]
             resid_scale = max(init.rms[name], 1e-6)
-            e_states = [
-                pm.Normal(
-                    f"E{s}_{name}",
-                    mu=species[s],
-                    sigma=5 * resid_scale,
-                    shape=y.shape[0],
-                )
-                for s in range(states)
-            ]
+            n_lam = y.shape[0]
+            n_coef = int(species_basis) if species_basis is not None else 0
+            use_basis = _MIN_BASIS <= n_coef < n_lam
+            if use_basis:
+                basis = _species_basis(n_lam, n_coef)
+                e_states = [
+                    pm.Deterministic(
+                        f"E{s}_{name}",
+                        pt.dot(  # type: ignore[no-untyped-call]
+                            pt.as_tensor(basis),
+                            pm.Normal(
+                                f"c{s}_{name}",
+                                mu=np.asarray(basis.T @ species[s], dtype=np.float64),
+                                sigma=5 * resid_scale,
+                                shape=basis.shape[1],
+                            ),
+                        ),
+                    )
+                    for s in range(states)
+                ]
+            else:
+                e_states = [
+                    pm.Normal(
+                        f"E{s}_{name}",
+                        mu=species[s],
+                        sigma=5 * resid_scale,
+                        shape=n_lam,
+                    )
+                    for s in range(states)
+                ]
             # fraction's columns are the states, so the mixture is one dot
             m_stack = pt.stack(e_states)
             sigma = pm.HalfNormal(f"sigma_{name}", sigma=2 * resid_scale)
@@ -558,6 +594,31 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
 
 
 _RIDGE = 4.0  # precision of the level/linear drift: drift SD ~0.5 in normalized units
+
+
+def _species_basis(n_lam: int, n_coef: int) -> np.ndarray:
+    """Return an orthonormal clamped cubic B-spline design matrix (n_lam, n_coef).
+
+    The species spectra of a fluorescence titration are smooth, so sampling one
+    value per wavelength gives the sampler hundreds of nearly redundant
+    parameters: on the 226-wavelength excitation scan the free-parameter
+    posterior does not move (bulk ESS of K below 15 at any usable budget), while
+    a 24-coefficient basis reaches an ESS in the hundreds. Clamped cubic knots
+    keep the first and last wavelength exact, which a Fourier basis does not: the
+    scan ends inside the anionic band and a truncated cosine fit rings there.
+
+    Columns are orthonormalized so a Normal prior of width ``w`` on the
+    coefficients induces the same ``w`` per wavelength that the per-wavelength
+    parameterization used.
+    """
+    degree = 3
+    grid = np.linspace(0.0, 1.0, n_lam)
+    n_inner = max(n_coef - degree - 1, 1)
+    inner = np.linspace(0.0, 1.0, n_inner + 2)[1:-1]
+    knots = np.concatenate([np.zeros(degree + 1), inner, np.ones(degree + 1)])
+    design = BSpline.design_matrix(grid, knots, degree).toarray()
+    basis, _ = np.linalg.qr(design)
+    return np.asarray(basis, dtype=np.float64)
 
 
 def _as_tensor(value: object) -> pm.math.TensorVariable:
