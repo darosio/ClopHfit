@@ -54,7 +54,7 @@ def configure_logging(
             The logger to check for handlers.
         handler_type : type
             The handler type to look for.
-        match_file : str | None, optional
+        match_file : str | None
             Optional filename to match against handler's baseFilename.
 
         Returns

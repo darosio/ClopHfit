@@ -489,7 +489,7 @@ def plot_residual_vs_predicted(all_res: pd.DataFrame, title: str = "") -> Figure
     all_res : pd.DataFrame
         Residual DataFrame from ``residuals_from_fit_results``.  Must contain
         columns ``label``, ``yhat``, and ``std_res``.
-    title : str, optional
+    title : str
         Figure suptitle suffix.
 
     Returns
@@ -629,7 +629,7 @@ def plot_residual_vs_yerr(all_res: pd.DataFrame, title: str = "") -> Figure:
     all_res : pd.DataFrame
         Residual DataFrame from ``residuals_from_fit_results``.  Must contain
         columns ``label``, ``sigma``, and ``raw_res``.
-    title : str, optional
+    title : str
         Figure suptitle suffix.
 
     Returns

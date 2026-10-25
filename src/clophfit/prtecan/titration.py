@@ -935,11 +935,11 @@ class TitrationResults(ResidualsMixin):
 
         Parameters
         ----------
-        xlim : tuple[float, float] | None, optional
+        xlim : tuple[float, float] | None
             Range.
-        title : str, optional
+        title : str
             To name the plot.
-        exclude : Mapping[str, Collection[str]] | None, optional
+        exclude : Mapping[str, Collection[str]] | None
             Wells to leave off the plot, keyed by the reason (e.g.
             ``"undetermined"``, ``"non-binding"``); the title says how many
             were left off for each.
@@ -1728,7 +1728,7 @@ class Titration(TecanfilesGroup):
 
         Parameters
         ----------
-        label : str | None, optional
+        label : str | None
             Specific label to extract. If None, creates global datasets containing
             all labels. Default is None.
 
@@ -1934,7 +1934,7 @@ class Titration(TecanfilesGroup):
 
         Parameters
         ----------
-        title : str, optional
+        title : str
             Additional title text to append to the plot.
 
         Returns

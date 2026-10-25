@@ -694,16 +694,16 @@ def plot_qc_mean_vs_std(  # ruff: ignore[too-many-arguments, too-many-positional
     trace : xr.DataTree | MultiFitResult
         The PyMC inference trace containing `sigma_obs` deterministic nodes, or
         the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
-    results : Mapping[str, FitResult] | None, optional
+    results : Mapping[str, FitResult] | None
         The dictionary of well results to derive fallback sigma values.
-    figsize_per_label : tuple[float, float], optional
+    figsize_per_label : tuple[float, float]
         Figure size allocated for each spectral band (label). Default is (5, 4).
-    annotate_wells : list[str] | None, optional
+    annotate_wells : list[str] | None
         A list of specific well IDs to annotate on the plot (e.g., ["B03", "C05"]).
         If None, no explicit labels are drawn.
     z_threshold : float
         Z-score threshold for identifying outliers.
-    bg_noise : Mapping[str, float] | None, optional
+    bg_noise : Mapping[str, float] | None
         Background noise dictionary.
     bg_multiplier : float
         Multiplier for background noise.
@@ -1261,14 +1261,14 @@ def plot_noise_vs_index(
     trace : xr.DataTree | MultiFitResult
         The PyMC inference trace containing `sigma_obs` deterministic nodes, or
         the multi-well result wrapper returned by ``fit_binding_pymc_multi``.
-    results : Mapping[str, FitResult] | None, optional
+    results : Mapping[str, FitResult] | None
         The dictionary of well results to derive fallback sigma values.
-    wells : Sequence[str] | str | None, optional
+    wells : Sequence[str] | str | None
         A specific well ID (e.g., 'A01'), a list of well IDs, or None to plot all
         wells found in the trace. Default is None.
-    figsize_per_well : tuple[float, float], optional
+    figsize_per_well : tuple[float, float]
         The width and height allocated per well subplot.
-    max_cols : int, optional
+    max_cols : int
         Maximum number of columns in the subplot grid.
 
     Returns
@@ -1350,7 +1350,7 @@ def plot_noise_vs_signal(
     results : Mapping[str, FitResult]
         The dictionary of well results containing datasets with `.y` arrays.
         Normally this is the ``results`` mapping of a ``TitrationResults``.
-    figsize_per_label : tuple[float, float], optional
+    figsize_per_label : tuple[float, float]
         The width and height to allocate per band/label in the final figure.
 
     Returns

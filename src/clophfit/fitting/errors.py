@@ -39,7 +39,7 @@ class FileFormatError(CLIError):
         Path to the problematic file.
     expected_format : str
         Description of expected file format.
-    details : str, optional
+    details : str
         Additional details about the error.
     """
 

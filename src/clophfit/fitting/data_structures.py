@@ -261,7 +261,7 @@ class Dataset(UserDict[str, DataArray]):
         ----------
         da : DataArray | list[DataArray]
             The DataArray objects to populate the dataset.
-        is_ph : bool, optional
+        is_ph : bool
             Indicate if x values represent pH (default is False).
 
         Returns
@@ -332,7 +332,7 @@ class Dataset(UserDict[str, DataArray]):
 
         Parameters
         ----------
-        keys : list[str] | set[str] | None, optional
+        keys : list[str] | set[str] | None
             List of keys to include in the copied dataset. If None (default),
             copies all data.
 

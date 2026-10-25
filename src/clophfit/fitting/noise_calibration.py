@@ -118,9 +118,9 @@ def calibrate_noise_robust(
     sigma_floor : dict[str, float]
         Known read-noise floor per label, e.g. ``tit.bg_noise``. Used as the
         fixed floor and copied into the returned model.
-    p_threshold : float, optional
+    p_threshold : float
         Posterior outlier probability above which a point is dropped.
-    min_keep : int, optional
+    min_keep : int
         Per label, if screening would retain fewer than this many points the
         full (unscreened) set is used instead.
 

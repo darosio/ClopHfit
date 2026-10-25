@@ -148,11 +148,11 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
         - For ligand binding: signal when fully bound (saturating ligand)
         - For pH titrations: signal in deprotonated state (high pH)
         Same units as S0.
-    is_ph : bool, optional
+    is_ph : bool
         Selects the equation form:
         - True: Henderson-Hasselbalch for pH titration (default)
         - False: Standard binding isotherm for ligand concentration
-    hill : float, optional
+    hill : float
         Hill coefficient scaling the exponent, 1.0 by default. Values below 1
         broaden the transition and values above sharpen it; K stays the
         midpoint either way. The default is exact in IEEE-754, so leaving it

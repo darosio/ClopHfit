@@ -516,17 +516,17 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
     ----------
     ds : Dataset
         Input dataset with *x*, *y*, and *y_err* for each label.
-    method : str, optional
+    method : str
         Fitting method: ``"lm"`` (default) for standard least-squares or
         ``"huber"`` for Huber-loss robust fitting (reduces outlier influence).
-    reweight : str | None, optional
+    reweight : str | None
         Reweighting strategy to apply **after** each residual evaluation:
 
         * ``"irls"`` - iteratively reweighted least-squares (uniform
           scale per label from MA-residual).
 
         Default is ``None`` (no reweighting).
-    remove_outliers : str | None, optional
+    remove_outliers : str | None
         Outlier-removal specification of the form ``"method:threshold:min_keep"``,
         where *min_keep* is the minimum number of points to retain per label.
         Two methods are available:
@@ -540,15 +540,15 @@ def fit_binding_glob(  # ruff: ignore[too-many-arguments]
 
         The two numbers are on different scales and are not interchangeable.
         Default is ``None``.
-    max_iter : int, optional
+    max_iter : int
         Maximum number of iterations for iterative procedures (reweighting).
         Default is 15.
-    tol : float, optional
+    tol : float
         Convergence tolerance on the reduced chi-squared.  The loop stops when
         the improvement drops below this value.  Default is 0.01.
-    scale_covar : bool, optional
+    scale_covar : bool
         Whether to scale the covariance matrix.  Default is ``True``.
-    acid_scale : bool, optional
+    acid_scale : bool
         pH titrations: multiply every label's model at the most acidic step by
         one free factor (:data:`ACID_SCALE`), for the loss of emission at the
         last acid addition. Default is ``False``.

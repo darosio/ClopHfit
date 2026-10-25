@@ -476,9 +476,9 @@ def apply_outlier_mask(
     ----------
     ds : Dataset
         Dataset to process (deep-copied; input is not modified).
-    threshold : float, optional
+    threshold : float
         Outlier score above which a point is masked. Default is 0.2.
-    min_keep : int, optional
+    min_keep : int
         Minimum number of unmasked points to retain. Default is 3.
 
     Returns

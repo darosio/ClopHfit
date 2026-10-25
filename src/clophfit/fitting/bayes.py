@@ -2193,15 +2193,15 @@ def extract_fit(  # ruff: ignore[too-many-arguments, complex-structure, too-many
         Either the raw multi-well PyMC trace or an ArviZ summary DataFrame.
     ds : Dataset
         Per-well dataset whose x values are updated in-place from the trace.
-    well_key : str, optional
+    well_key : str
         When provided, per-well x posteriors (``x_true[step, well_key]``)
         are used instead of the global ``x_true``.  Pass the well identifier
         for xrw fits so each well's .dat/.png uses its own inferred pH axis.
-    raw_trace : xr.DataTree | None, optional
+    raw_trace : xr.DataTree | None
         Raw multi-well PyMC trace for xarray-based x extraction, bypassing
         potential ``az.summary`` indexing bugs.  When ``None``, falls back
         to DataFrame-based extraction from *trace_df*.
-    global_p_names : typing.Iterable[str], optional
+    global_p_names : typing.Iterable[str]
         Names of model-wide (non-per-well) parameters, such as
         ``student_t_nu`` or per-label outlier terms, to copy verbatim from
         *trace_df* into the per-well result.

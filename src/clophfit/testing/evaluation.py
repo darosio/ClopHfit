@@ -218,7 +218,7 @@ def compare_methods_statistical(
         Name of method 1
     method2_name : str
         Name of method 2
-    verbose : bool, optional
+    verbose : bool
         Whether to print detailed comparison info, defaults to True.
 
     Returns
