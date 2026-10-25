@@ -367,7 +367,7 @@ def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     """
     # Support Python scalars and NumPy scalars
     if np.isscalar(ph):
-        ph_val = float(ph)  # type: ignore[arg-type]
+        ph_val = float(ph)
         return kd1 * (1 + 10 ** (pka - ph_val)) / 10 ** (pka - ph_val)
     ph_array = np.asarray(ph, dtype=np.float64)
     return kd1 * (1 + 10 ** (pka - ph_array)) / 10 ** (pka - ph_array)
