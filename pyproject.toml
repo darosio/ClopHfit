@@ -8,9 +8,9 @@ classifiers = [
   "Environment :: Console",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Programming Language :: Unix Shell",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
@@ -43,7 +43,7 @@ keywords = ["svd", "ClopHensor", "data fitting", "pH", "macromolecule binding"]
 license = "BSD-3-Clause"
 name = "clophfit"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 version = "0.15.3"
 
 [project.optional-dependencies]
@@ -61,7 +61,7 @@ docs = [
   "pygments>=2.21.0",
   "sphinx-autoapi>=3.8.1",
   "sphinx-click>=6.2.0",
-  "sphinx>=9.1.1",
+  "sphinx>=9.2.0",
   "sphinxcontrib-plantuml>=0.31",
 ]
 
@@ -71,7 +71,7 @@ dev = [
   "mdformat>=1.0.0",
   "mdformat-gfm>=1.0.0",
   "pylsp-mypy>=0.8.2",
-  "ruff>=0.17.1",
+  "ruff>=0.17.2",
   "python-lsp-ruff>=2.3.4",
   "cruft>=2.16.0",
 ]
@@ -79,7 +79,7 @@ lint = [
   "pre-commit==4.7.0",
 ]
 tests = [
-  "coverage[toml]>=7.16.2",
+  "coverage[toml]>=7.17.0",
   "mypy>=2.4.0",
   "pandas-stubs>=3.0.5.260914",
   "pygments>=2.21.0", # color xdoctest
@@ -170,7 +170,7 @@ extend-include = ["*.ipynb"]
 fix = true
 force-exclude = true
 line-length = 88
-target-version = "py312"
+target-version = "py313"
 unsafe-fixes = true
 # Enable preview mode
 preview = true
