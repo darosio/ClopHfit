@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.0
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -35,19 +35,44 @@ jobs:
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate GitHub App token
+        id: app_token
+        if: steps.check.outputs.has_changes == 'true'
+        uses: actions/create-github-app-token@v3
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Create Pull Request
         if: steps.check.outputs.has_changes == 'true'
         env:
-          GH_TOKEN: ${{ secrets.PAT_WORKFLOWS || secrets.GITHUB_TOKEN }}
+          # The App token is the primary credential. github.token is a fallback
+          # for repos where the App is not configured yet; uv.lock changes do
+          # not require workflow permissions.
+          APP_TOKEN: ${{ steps.app_token.outputs.token }}
+          DEFAULT_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           BRANCH="chore/update-lockfile"
           git checkout -B "$BRANCH"
           git add -A
           git commit -m "chore(deps): update uv.lock"
-          git push -f origin "$BRANCH"
+
+          push_with_token() {
+            git remote set-url origin "https://x-access-token:${1}@github.com/${{ github.repository }}.git"
+            git push -f origin "$BRANCH"
+          }
+
+          if [ -n "$APP_TOKEN" ] && push_with_token "$APP_TOKEN"; then
+            GH_TOKEN="$APP_TOKEN"
+          else
+            echo "::warning::GitHub App token missing or push failed; falling back to github.token."
+            push_with_token "$DEFAULT_TOKEN"
+            GH_TOKEN="$DEFAULT_TOKEN"
+          fi
+          export GH_TOKEN
           if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q "OPEN"; then
             echo "PR already exists, updated branch."
           else

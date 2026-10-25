@@ -21,6 +21,13 @@
   },
   "packageRules": [
     {
+      "description": "Disable Python version updates - .python-version, pyproject.toml and the CI matrix must be bumped together",
+      "matchManagers": [
+        "pyenv"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Disable GitHub Actions updates - managed by cookiecutter template",
       "matchManagers": [
         "github-actions"
@@ -89,6 +96,7 @@
       "commitMessagePrefix": "chore(dep):"
     },
     {
+      "description": "requires-python is part of the coordinated Python upgrade; see .python-version",
       "matchFileNames": [
         "**/pyproject.toml"
       ],

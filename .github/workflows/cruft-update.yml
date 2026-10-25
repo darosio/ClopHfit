@@ -22,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.0
+        uses: astral-sh/setup-uv@v10.3.2
 
       - name: Sync dev tools (installs cruft from dev group)
         run: uv sync --group dev
@@ -36,8 +36,15 @@ jobs:
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
           if ! uv run cruft check; then
             uv run cruft update -y --allow-untracked-files
-            # Remove any leftover .rej files from conflicts
-            find . -name "*.rej" -type f -delete
+            # Cruft leaves .rej files when a hunk cannot be applied. Never
+            # delete them: that silently drops template changes. Fail instead
+            # so a maintainer can resolve the conflicts locally.
+            rejects=$(find . -name "*.rej" -type f)
+            if [ -n "$rejects" ]; then
+              echo "::error::Cruft update produced conflicts; resolve them locally."
+              printf '%s\n' "$rejects"
+              exit 1
+            fi
             # Always regenerate lock file to ensure consistency after template update
             uv lock
             if ! git diff --quiet HEAD; then
