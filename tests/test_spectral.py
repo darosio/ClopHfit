@@ -142,3 +142,44 @@ def test_acid_state_recovers_second_pk_and_rejects_ligand() -> None:
     assert fit.species["exc"].shape == (3, LAM.size)
     with pytest.raises(ValueError, match="pH titrations only"):
         fit_spectra_global(x, {"exc": (LAM, y)}, is_ph=False, acid_state=True)
+
+
+def test_well_screen_drops_one_broken_spectrum() -> None:
+    """A single corrupted well is flagged and the refit recovers K.
+
+    The band path screens individual points; the whole-spectrum fit had no screen
+    at all, so a plate with one broken well pulled K with nothing to say so. The
+    well screen must find exactly that well, leave the others alone, and pull K
+    back towards the truth.
+    """
+    rng = np.random.default_rng(17)
+    x = np.linspace(5.5, 8.5, 7)
+    k_true = 7.1
+    frac = 1 / (1 + 10 ** (k_true - x))
+    lam = np.arange(24, dtype=np.float64)
+    e0 = np.linspace(0.2, 0.8, lam.size)
+    e1 = np.linspace(0.9, 0.1, lam.size)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * 0.95
+    y += rng.normal(0.0, 0.003, y.shape)
+    broken = 3
+    # a tilt is not expressible as a mixture of the two species: a gain error or
+    # a mean offset is, and the free per-well amplitude absorbs it, so the screen
+    # would have nothing to find
+    y[:, broken] *= 1.0 + 0.40 * np.linspace(-1.0, 1.0, lam.size)
+    spectrum = {"exc": (lam, y)}
+
+    raw = fit_spectra_global(x, spectrum, well_scale=True, jackknife=False)
+    screened = fit_spectra_global(
+        x, spectrum, well_scale=True, jackknife=False, screen=0.05
+    )
+    assert int((~screened.kept).sum()) == 1
+    assert not screened.kept[broken]
+    assert abs(screened.K - k_true) < abs(raw.K - k_true)
+    assert screened.n_wells == x.size - 1
+    # with nothing to screen, every well is kept
+    y_clean = y.copy()
+    y_clean[:, broken] /= 1.0 + 0.40 * np.linspace(-1.0, 1.0, lam.size)
+    clean = fit_spectra_global(
+        x, {"exc": (lam, y_clean)}, well_scale=True, jackknife=False, screen=0.05
+    )
+    assert clean.kept.all()

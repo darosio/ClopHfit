@@ -193,6 +193,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     buffer: bool = True,
     well_scale: bool = True,
     fit_hill: bool = False,
+    screen: float | None = None,
     bands: Sequence[str] = EXCITATION_SCAN,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
@@ -209,6 +210,10 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         Fit a per-well amplitude as well (see :func:`fit_spectra_global`).
     fit_hill : bool
         Also fit the Hill slope.
+    screen : float | None
+        Family-wise level of the well screen passed to
+        :func:`~clophfit.fitting.spectral.fit_spectra_global`; ``None`` keeps
+        every well.
     bands : Sequence[str]
         Band names whose scans are used whole (default: the excitation scan only).
 
@@ -242,8 +247,14 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         if not spectra:
             continue
         base: dict[str, object] = {"sample": name, "temp": temp}
-        opts = {"is_ph": is_ph, "fit_hill": fit_hill, "well_scale": well_scale}
-        fit = fit_spectra_global(x, spectra, **opts)
+        fit = fit_spectra_global(
+            x,
+            spectra,
+            is_ph=is_ph,
+            fit_hill=fit_hill,
+            well_scale=well_scale,
+            screen=screen,
+        )
         fits[f"{name} {temp}"] = fit
         rows.append(_row(base, "all", fit))
         for plate_row in sorted({w[0] for w in wells}):
@@ -251,6 +262,15 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             if sel.sum() < _MIN_ROW_WELLS:
                 continue
             sub = {lab: (lam, y[:, sel]) for lab, (lam, y) in spectra.items()}
-            row_fit = fit_spectra_global(x[sel], sub, jackknife=False, **opts)
+            # the row breakdown is a diagnostic: it keeps every well of the row
+            row_fit = fit_spectra_global(
+                x[sel],
+                sub,
+                is_ph=is_ph,
+                fit_hill=fit_hill,
+                well_scale=well_scale,
+                jackknife=False,
+            )
             rows.append(_row(base, f"row {plate_row}", row_fit))
+
     return pd.DataFrame(rows), fits

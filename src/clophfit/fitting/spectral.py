@@ -47,6 +47,7 @@ import xarray as xr
 from scipy.interpolate import BSpline
 from scipy.optimize import least_squares
 from scipy.special import logsumexp
+from scipy.stats import chi2
 
 from clophfit.fitting.models import binding_1site
 
@@ -112,6 +113,8 @@ class SpectralFit:
     residual_sv: ArrayF
     n_wells: int
     well_scale: ArrayF
+    kept: np.ndarray
+    """Wells kept by the well screen, all True when it was off."""
 
 
 def _fractions(x: ArrayF, theta: ArrayF, model: _Model, *, is_ph: bool) -> ArrayF:
@@ -258,6 +261,7 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     fit_hill: bool = False,
     well_scale: bool = False,
     acid_state: bool = False,
+    screen: float | None = None,
     jackknife: bool = True,
 ) -> SpectralFit:
     """Fit K to whole spectra of one or more labels, species spectra eliminated linearly.
@@ -283,6 +287,13 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         deprotonated <-> protonated <-> acid state with pK2 < K, its spectrum solved like the
         others. It models a change of brightness or colour at the acid end that a two-state
         model can only push into the well amplitudes (see the module notes on the IBF plates).
+    screen : float | None
+        Family-wise level of the well screen, e.g. ``0.05``: fit once, flag the wells whose
+        standardized whole-spectrum residual is beyond the chi-square cutoff (Bonferroni over
+        wells, see :func:`_well_screen`), refit on the rest, and report which wells were kept
+        in :attr:`SpectralFit.kept`. ``None`` keeps every well - the band path screens single
+        (well, band) points by default, this fit does not screen at all, and a comparison
+        across the two must say which is which.
     jackknife : bool
         Compute the delete-one-well jackknife standard error (one refit per well).
 
@@ -316,6 +327,16 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         msg = "no wavelength is finite in every well"
         raise ValueError(msg)
     theta, se_naive, sigma = _solve(xa, ys, model, is_ph=is_ph)
+    kept = np.ones(xa.size, dtype=bool)
+    if screen is not None:
+        c = _fractions(xa, theta, model, is_ph=is_ph)
+        _, res, _ = _project(c, ys, well_scale=well_scale, sigma=sigma)
+        kept = _well_screen(res, sigma, alpha=screen)
+        if not kept.all():
+            xa = xa[kept]
+            # ys are (wavelength, well): the kept wells are columns
+            ys = [y[:, kept] for y in ys]
+            theta, se_naive, sigma = _solve(xa, ys, model, is_ph=is_ph)
     c = _fractions(xa, theta, model, is_ph=is_ph)
     species, res, scale = _project(c, ys, well_scale=well_scale, sigma=sigma)
     weighted = np.hstack([r / s for r, s in zip(res, sigma, strict=True)])
@@ -349,6 +370,7 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         residual_sv=np.linalg.svd(weighted, compute_uv=False),
         n_wells=int(xa.size),
         well_scale=scale,
+        kept=kept,
     )
 
 
@@ -594,6 +616,64 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
 
 
 _RIDGE = 4.0  # precision of the level/linear drift: drift SD ~0.5 in normalized units
+
+
+def _well_screen(
+    residuals: Sequence[np.ndarray], sigma: Sequence[float], *, alpha: float = 0.05
+) -> np.ndarray:
+    """Flag wells whose whole-spectrum residual is larger than the scan's noise.
+
+    The band path screens individual (well, band) points with a studentized
+    residual. A whole-spectrum fit has no such points: every well contributes a
+    spectrum, so the analogue is a *well* whose standardized residual norm is
+    beyond what the scan's own residual scale predicts. The statistic is the
+    squared norm of a well's residuals divided by a robust scale, which is
+    chi-square with as many degrees of freedom as that well has wavelengths; a
+    well is dropped when it is in that tail at ``alpha`` **and** above three
+    times the plate's median statistic, so a clean plate does not lose a well to
+    the nominal level alone (the shared species spectra eat a few degrees of
+    freedom).
+
+    Parameters
+    ----------
+    residuals : Sequence[np.ndarray]
+        Per scan, the ``(n_wells, n_lambda)`` residual matrix of a first fit.
+    sigma : Sequence[float]
+        Per scan, the residual scale of that fit, used as a floor for the robust
+        scale (never as the scale itself: a broken well inflates it and
+        standardizes itself away).
+    alpha : float
+        Family-wise level of the chi-square tail, e.g. 0.05.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask of the wells to keep.
+    """
+    # The scale must be robust, not the fitted one: the residual scale is
+    # estimated from all the wells, so a broken well inflates it and standardizes
+    # itself away (masking). The median absolute residual does not move for one
+    # bad well in thirty, and 1.4826 x MAD is the Gaussian-consistent scale.
+    d2 = np.zeros(len(residuals[0]))
+    dof = 0
+    for res, sd in zip(residuals, sigma, strict=True):
+        robust = 1.4826 * float(np.median(np.abs(res)))
+        scale = max(min(robust, sd), 1e-12)
+        d2 += np.sum((res / scale) ** 2, axis=1)
+        dof += res.shape[1]
+    d2 /= len(residuals)
+    cutoff = float(chi2.ppf(1.0 - alpha, max(dof, 1)))
+    # Two conditions, both conservative: the well must be in the chi-square tail
+    # *and* stand out from the plate's own wells (three times the median d2), so a
+    # clean plate with the shared species eating a few degrees of freedom does not
+    # lose a well to the nominal alpha alone.
+    keep = (d2 <= cutoff) | (d2 <= 3.0 * float(np.median(d2)))
+    minimum = max(6, len(d2) // 2)
+    if int(keep.sum()) < minimum:  # a screen that eats the plate is not a screen
+        order = np.argsort(d2)
+        keep = np.zeros_like(keep)
+        keep[order[:minimum]] = True
+    return keep
 
 
 def _species_basis(n_lam: int, n_coef: int) -> np.ndarray:

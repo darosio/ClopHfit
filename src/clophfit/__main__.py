@@ -770,6 +770,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
 @click.option("--acid-state", is_flag=True, help="For --method global-bayes and global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
 @click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes, mcr-constrained-bayes and vanthoff-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
+@click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
     ctx: Context,
@@ -790,6 +791,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     target_accept: float | None,
     x_sigma: str | None,
     acid_state: bool,
+    global_screen: float | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -827,7 +829,14 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     if method in {"svd", "both", "all"}:
         fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
     if method in {"global", "all"}:
-        fit_enspire_global(ef, Path(note_f), Path(out), buffer=buffer, scans=scans)
+        fit_enspire_global(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            scans=scans,
+            screen=global_screen,
+        )
     if method == "vanthoff":
         fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer)
     if method == "vanthoff-bayes":
@@ -1511,13 +1520,14 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     return fits.table
 
 
-def fit_enspire_global(
+def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
     *,
     buffer: bool,
     scans: tuple[str, ...] = (),
+    screen: float | None = None,
 ) -> pd.DataFrame:
     """Fit a note's titrations from whole spectra and write the table and species spectra.
 
@@ -1534,6 +1544,11 @@ def fit_enspire_global(
     scans : tuple[str, ...]
         Band names whose scans enter whole; empty means the excitation scan
         only (the measured optimum; see :mod:`clophfit.prenspire.spectral`).
+    screen : float | None
+        Family-wise level of the well screen (e.g. ``0.05``): wells whose
+        standardized whole-spectrum residual is beyond the chi-square cutoff are
+        dropped and the fit repeated. ``None`` keeps every well, which is what
+        this method did before; the band path screens single points by default.
 
     Returns
     -------
@@ -1544,6 +1559,7 @@ def fit_enspire_global(
         ef,
         Note(note_fp).note,
         buffer=buffer,
+        screen=screen,
         bands=tuple(scans) if scans else ("exc_anionic",),
     )
     out_dir.mkdir(parents=True, exist_ok=True)
