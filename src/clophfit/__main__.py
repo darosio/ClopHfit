@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import os
 import pprint
@@ -55,7 +56,12 @@ from clophfit.fitting.spectral import (
     fit_spectra_global_bayes,
     fit_spectra_global_bayes_marginal,
 )
-from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire import (
+    EnspireFile,
+    Note,
+    bands as bands_module,
+    merge_enspire_files,
+)
 from clophfit.prenspire.bands import ZERO_AT
 from clophfit.prenspire.mcr import (
     component_pka,
@@ -758,6 +764,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
 @click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "mcr", "mcr-bayes", "mcr-constrained-bayes", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf. global-bayes-marginal eliminates the species spectra analytically (same model, smooth species prior, per-well noise split into white, wavelength-correlated smooth and offset components; --x-sigma required, same tables with global_bayes_marginal suffixes --acid-state adds a third acid state on pH plates, same conventions as the band-level acid_scale, its own pK below K and E2_ spectrum: the observed recurrent drop of the most acidic well). vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. mcr-bayes resamples the closed-profile factorization on a NUTS posterior with a latent titrant axis, deriving K from the posterior profiles; mcr-constrained-bayes additionally constrains the closed profiles to the titration fraction itself (Henderson-Hasselbalch on pH plates, Langmuir on ligand ones; K is a direct posterior parameter). both runs band and svd; all runs band, svd and global.")  # fmt: skip
+@click.option("--join", "joins", multiple=True, metavar="CSV:NOTE", help="Additional export:note pair to fit together with the first, for a titration split over several EnSpire files (e.g. 20 C in one export, 37 C in another, each with its own note). The exports must carry disjoint measurement labels; the notes are concatenated (each keeps its Temp) and written next to the outputs as <stem>_joined_note.csv, so nothing under data/ changes. --method vanthoff then fits one thermodynamic pair across every temperature.")  # fmt: skip
 @click.option("--export", "export", type=click.Choice(["auto", "always", "never"], case_sensitive=False), default="auto", show_default=True, help="What to do with the per-measurement tables and figures written before the fit. auto (default) writes the canonical <export>_<label>.csv/json/png and rewrites one only when the export is newer than it, so calling several methods on one plate reuses the same files instead of piling up timestamped copies; always rewrites everything; never writes nothing and only fits.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
@@ -775,7 +782,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
-def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
+def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
     csv_f: str,
     note_f: str | None,
@@ -798,15 +805,50 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     robust: bool,
     bayes_screen: str | None,
     export: str,
+    joins: tuple[str, ...],
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __enspire_out_dir__)
-    ef = EnspireFile(Path(csv_f), verbose=verbose)
-    written = ef.export_measurements(Path(out), mode=export)
+    exports = [EnspireFile(Path(csv_f), verbose=verbose)]
+    notes = [Path(note_f)] if note_f is not None else []
+    for pair in joins:
+        csv_part, _, note_part = pair.rpartition(":")
+        if not csv_part or not note_part:
+            ctx.fail(f"--join expects CSV:NOTE, got {pair!r}")
+        exports.append(EnspireFile(Path(csv_part), verbose=verbose))
+        notes.append(Path(note_part))
+    ef = merge_enspire_files(exports) if len(exports) > 1 else exports[0]
+    written: list[str] = []
+    for one in exports:
+        written += one.export_measurements(Path(out), mode=export)
+    note_f = str(notes[0]) if notes else ""
+    if len(notes) > 1:
+        # the joined note is a derived input: it lives with the outputs, not in data/
+        frames = [pd.read_csv(path) for path in notes]
+        joined = pd.concat(frames, ignore_index=True)
+        note_fp = (
+            Path(out) / f"{Path(note_f).name.removesuffix('_note.csv')}_joined_note.csv"
+        )
+        joined.to_csv(note_fp, index=False)
+        provenance = {
+            "inputs": [
+                str(path)
+                for path in [Path(csv_f), *(Path(j.rpartition(":")[0]) for j in joins)]
+            ],
+            "notes": [str(path) for path in notes],
+            "labels": sorted(ef.measurements),
+            "temperatures": sorted({
+                str(m["metadata"].get("temp")) for m in ef.measurements.values()
+            }),
+        }
+        note_fp.with_suffix(".json").write_text(json.dumps(provenance, indent=2) + "\n")
+        note_f = str(note_fp)
+        if verbose:
+            print(f"joined {len(notes)} notes into {note_fp}")
     if verbose and not written:
         print(f"measurement tables already up to date in {out}; nothing rewritten")
-    if note_f is None:
+    if not note_f:
         return
     if x_sigma is not None and method not in {
         "bayes",

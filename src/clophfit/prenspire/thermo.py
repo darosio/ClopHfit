@@ -37,6 +37,7 @@ from clophfit.prenspire.bands import (
     classify,
     subtract_buffer,
 )
+from clophfit.prenspire.prenspire import EnspireFile, merge_enspire_files
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -44,7 +45,6 @@ if TYPE_CHECKING:
     import arviz as az  # type: ignore[import-untyped]
 
     from clophfit.clophfit_types import ArrayF
-    from clophfit.prenspire.prenspire import EnspireFile
 
 R_GAS = 8.314462618  # J mol-1 K-1
 LN10 = 2.302585093
@@ -416,6 +416,15 @@ class _TempCurves(NamedTuple):
     store: dict[str, tuple[ArrayF, ArrayF]]
 
 
+def _as_single_export(
+    ef: EnspireFile | Sequence[EnspireFile],
+) -> EnspireFile:
+    """One export, merging the list when the titration spans several files."""
+    if isinstance(ef, EnspireFile):
+        return ef
+    return merge_enspire_files(list(ef))
+
+
 def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     samples: pd.DataFrame,
@@ -486,7 +495,7 @@ class VanthoffCurves(NamedTuple):
 
 
 def vanthoff_curves(  # ruff: ignore[too-many-arguments]
-    ef: EnspireFile,
+    ef: EnspireFile | Sequence[EnspireFile],
     note: pd.DataFrame,
     *,
     buffer: bool = True,
@@ -504,8 +513,10 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
 
     Parameters
     ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
+    ef : EnspireFile | Sequence[EnspireFile]
+        The parsed EnSpire export, or several when the titration is split over
+        files (one per temperature); they are merged, and they must carry
+        disjoint measurement labels.
     note : pd.DataFrame
         Normalised note with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
     buffer : bool
@@ -524,6 +535,7 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
         Sample name to its titrant kind and its ``(band, temperature)``
         curves, the signal already normalised per band.
     """
+    ef = _as_single_export(ef)
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     kinds = titrant_kind(samples)
@@ -552,7 +564,7 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
 
 
 def vanthoff_titration(  # ruff: ignore[too-many-arguments]
-    ef: EnspireFile,
+    ef: EnspireFile | Sequence[EnspireFile],
     note: pd.DataFrame,
     *,
     buffer: bool = True,
@@ -564,8 +576,10 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
 
     Parameters
     ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
+    ef : EnspireFile | Sequence[EnspireFile]
+        The parsed EnSpire export, or several when the titration is split over
+        files (one per temperature); they are merged, and they must carry
+        disjoint measurement labels.
     note : pd.DataFrame
         Normalised note with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
     buffer : bool

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from clophfit.prenspire import titrant_kind
+from clophfit.prenspire import EnspireFile, merge_enspire_files, titrant_kind
 from clophfit.prenspire.thermo import (
     LN10,
     R_GAS,
@@ -249,3 +251,37 @@ def test_bayes_fit_validates_before_sampling() -> None:
     }
     with pytest.raises(ValueError, match="disagree on their titrant axis"):
         fit_vanthoff_model_bayes(split)
+
+
+def test_merge_of_two_temperature_exports_and_vanthoff() -> None:
+    """A titration split over two exports fits one thermodynamic pair.
+
+    The instrument labels the same three scans E/B/F at 37 C and C/D/A at 20 C,
+    so two exports of one plate carry disjoint labels and can be merged; a
+    collision means the files are not two temperatures of one experiment and
+    must fail loudly rather than overwrite a measurement.
+    """
+    source = Path(__file__).parent / "EnSpire" / "G10.csv"
+    whole = EnspireFile(source)
+    hot = EnspireFile(source)
+    cold = EnspireFile(source)
+    hot.measurements = {
+        k: v
+        for k, v in whole.measurements.items()
+        if str(v["metadata"].get("temp")) == "37"
+    }
+    cold.measurements = {
+        k: v
+        for k, v in whole.measurements.items()
+        if str(v["metadata"].get("temp")) == "20"
+    }
+    assert set(hot.measurements).isdisjoint(cold.measurements)
+    merged = merge_enspire_files([cold, hot])
+    assert set(merged.measurements) == set(whole.measurements)
+    assert {str(m["metadata"].get("temp")) for m in merged.measurements.values()} == {
+        "20",
+        "37",
+    }
+    # a repeated label is two experiments, not two temperatures: refuse
+    with pytest.raises(ValueError, match="repeats measurement label"):
+        merge_enspire_files([whole, whole])

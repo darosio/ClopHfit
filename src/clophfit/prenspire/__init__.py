@@ -6,6 +6,7 @@ from clophfit.prenspire.prenspire import (
     EnspireFile,
     ManyLinesFoundError,
     Note,
+    merge_enspire_files,
     verbose_print,
 )
 from clophfit.prenspire.thermo import (
@@ -32,6 +33,7 @@ __all__ = [
     "fit_vanthoff_model_bayes",
     "mcr_als",
     "mcr_titration",
+    "merge_enspire_files",
     "titrant_kind",
     "vanthoff_curves",
     "vanthoff_titration",

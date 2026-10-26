@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import copy
 import csv
 import re
 import warnings
@@ -21,7 +22,7 @@ from clophfit.utils import lookup_listoflines
 # MAYBE: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from types import BuiltinFunctionType
 
 
@@ -587,3 +588,52 @@ class Note:
                                     meas_dict
                                 )
         self.titrations = titrations
+
+
+def merge_enspire_files(files: Sequence[EnspireFile]) -> EnspireFile:
+    """Combine the measurements of several exports of the same plate.
+
+    A construct can be titrated at two temperatures in two separate EnSpire
+    exports, with its own note each time; a van't Hoff fit needs both in one
+    place. The exports carry disjoint measurement labels (the instrument numbers
+    them E/B/F at 37 C and C/D/A at 20 C on the same plate), so the merge is a
+    union - and a *loud* failure if two files ever share a label, because then
+    they are not two temperatures of one experiment but two experiments.
+
+    Parameters
+    ----------
+    files : Sequence[EnspireFile]
+        The exports to combine, first one first.
+
+    Returns
+    -------
+    EnspireFile
+        An export carrying every file's measurements and the union of their wells.
+        Its ``file`` is the first input, which is what the export names use.
+
+    Raises
+    ------
+    ValueError
+        If the list is empty or two files share a measurement label.
+    """
+    if not files:
+        msg = "merge_enspire_files needs at least one export"
+        raise ValueError(msg)
+    # start from the first export *as given* (no re-read: a caller may have
+    # filtered its measurements), with its own containers
+    merged = copy.copy(files[0])
+    merged.measurements = dict(files[0].measurements)
+    merged.wells = list(files[0].wells)
+    for other in files[1:]:
+        clash = set(merged.measurements) & set(other.measurements)
+        if clash:
+            msg = (
+                f"{other.file.name} repeats measurement label(s) "
+                f"{sorted(clash)}; two exports of one experiment must carry "
+                "disjoint labels (different temperatures are labelled E/B/F and "
+                "C/D/A), so these are not two temperatures of one titration"
+            )
+            raise ValueError(msg)
+        merged.measurements.update(other.measurements)
+        merged.wells = sorted(set(merged.wells) | set(other.wells))
+    return merged
