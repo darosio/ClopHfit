@@ -770,6 +770,8 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
 @click.option("--acid-state", is_flag=True, help="For --method global-bayes and global-bayes-marginal (pH plates): add the third acid state the two-state model cannot represent - the recurrent signal drop of the most acidic well that stays a straight line in the label ratio. Same conventions as --method global (band-level acid_scale): the acid state gets its own pK below K and its own plateau, E2_; the circle of acidic wells the user notes across many EnSpire plates is the case in point.")  # fmt: skip
 @click.option("--x-sigma", type=str, default=None, help="For --method bayes, global-bayes, global-bayes-marginal, mcr-bayes, mcr-constrained-bayes and vanthoff-bayes: prior SD on each well's true axis value - x_true ~ N(note value, sigma), per well, in the axis's own units (pH, or mM on ligand plates). The note value is an instrument reading, not an exact level, so a latent axis is a defensible option: 'auto' pools the note's replicate-row spread per index column (A04/B04/C04 are the same nominal target) into the sigma, a number (e.g. 0.15) fixes it. Default: the axis is fixed at the note values; the whole-spectrum Bayesian methods require it.")  # fmt: skip
+@click.option("--robust/--no-robust", "robust", default=True, show_default=True, help="For --method bayes: Student-t (nu = 3) likelihood, which down-weights outliers; --no-robust gives a plain Normal, i.e. maximum likelihood with the latent axis still on.")  # fmt: skip
+@click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches]
@@ -792,6 +794,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     x_sigma: str | None,
     acid_state: bool,
     global_screen: float | None,
+    robust: bool,
+    bayes_screen: str | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -874,6 +878,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             cores=cores,
             target_accept=target_accept,
             x_sigma=x_sigma,
+            robust=robust,
+            screen=bayes_screen,
         )
     if method == "global-bayes":
         if x_sigma is None:
@@ -1190,6 +1196,7 @@ def _plot_bayes(
 # Prior SD (pH) floor for --x-sigma: strictly positive, and small enough to
 # keep the posterior honest instead of smearing every point onto its plateau.
 X_SIGMA_MIN_PH = 0.01
+_MIN_BAYES_WELLS_AFTER_SCREEN = 6  # below this the shared latent axis is not identified
 _MIN_VANTHOFF_TEMPS = 2  # one enthalpy needs a pair of temperatures
 
 
@@ -1233,7 +1240,7 @@ def _resolve_enspire_x_sigma(
     return sigma
 
 
-def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
+def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, too-many-statements, complex-structure]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
@@ -1246,6 +1253,8 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
     cores: int | None,
     target_accept: float | None,
     x_sigma: str | None,
+    robust: bool = True,
+    screen: str | None = None,
 ) -> pd.DataFrame:
     """Seeded posterior of the shared K per sample/temperature.
 
@@ -1275,6 +1284,13 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
         "auto" or a prior SD in pH on each well's true axis value
         (x_true ~ N(note pH, sigma), independently); None fixes the axis at
         the note values.
+    robust : bool
+        Student-t (nu = 3) likelihood when True, plain Normal when False.
+    screen : str | None
+        Point screen applied to the readouts before sampling, in the ``--screen``
+        form. A well flagged in any band is dropped from **every** band: the
+        posterior carries one latent axis per well shared by the bands, so the
+        bands must keep the same wells. ``None`` keeps every point.
 
     Returns
     -------
@@ -1329,6 +1345,27 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             data[r.name] = (x, arr / top)
         if not data:
             continue
+        n_kept = x.size
+        if screen is not None:
+            # One mask for every band: a well flagged in any band leaves all of
+            # them, because the posterior shares one latent axis across bands.
+            screened = bands_module.fit_bands(data, is_ph=is_ph, screen=screen)
+            if screened is not None:
+                keep = np.ones(x.size, dtype=bool)
+                for mask in screened.masks.values():
+                    flags = np.asarray(mask, dtype=bool)
+                    if flags.size == x.size:
+                        keep &= flags
+                if keep.sum() >= _MIN_BAYES_WELLS_AFTER_SCREEN:
+                    data = {nm: (xx[keep], yy[keep]) for nm, (xx, yy) in data.items()}
+                    x = x[keep]
+                    wells = [w for w, k in zip(wells, keep, strict=True) if k]
+                    n_kept = int(keep.sum())
+                else:  # a screen that eats the plate is not a screen
+                    print(
+                        f"warning: {name} at {t}: screen would leave "
+                        f"{int(keep.sum())} of {x.size} wells; keeping every well"
+                    )
         ds = Dataset(
             {nm: DataArray(xx, yy) for nm, (xx, yy) in data.items()}, is_ph=is_ph
         )
@@ -1340,6 +1377,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            robust=robust,
             x_sigma=x_res,
         )
         label = cast("str", name)
@@ -1351,7 +1389,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments]
             "hdi97": bb.hdi97,
             "r_hat": bb.rhat,
             "ess_bulk": bb.ess,
-            "n": x.size,
+            "n": n_kept,
             "x_sigma": x_res,
         })
         figdata.append((label, t, data, bb, is_ph))

@@ -854,3 +854,43 @@ def test_plot_mcr_draws_the_curve_on_the_scale_of_the_points(
     # fractions - but the model curve is a fraction by construction.
     assert (fitted.F1 > 0).all()
     assert (fitted.F1 < 2.0).all()
+
+
+def test_prenspire_bayes_screen_drops_a_well_from_every_band(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """``--bayes-screen`` removes the flagged well from all bands, keeping the axis shared.
+
+    The posterior carries one latent axis per well across the bands, so bands
+    must keep the same wells: a point removed from one band alone leaves the
+    others longer and the model cannot be built. The screen therefore takes the
+    union of the flagged wells, and the reported ``n`` counts what survived.
+    """
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    args = ["--out", str(tmp_path), "enspire", str(data / "G10.csv"), str(note)]
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    screened = tmp_path / "screened"
+    screened.mkdir()
+    common = [
+        "--method", "bayes", "--x-sigma", "auto",
+        "--draws", "120", "--chains", "2", "--cores", "1", "--seed", "3",
+    ]  # fmt: skip
+    first = runner.invoke(ppr, ["--out", str(plain), *args[2:], *common])
+    second = runner.invoke(
+        ppr,
+        ["--out", str(screened), *args[2:], *common,
+         "--bayes-screen", "mad:1.5:5"],
+    )  # fmt: skip
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+    n_plain = pd.read_csv(plain / "NTT-G10_K_bayes.csv")["n"].iloc[0]
+    n_screened = pd.read_csv(screened / "NTT-G10_K_bayes.csv")["n"].iloc[0]
+    # mad:1.5 drops the points beyond 1.5 robust sigma; the default studentized
+    # screen is conservative and flags nothing on this clean plate
+    assert n_screened < n_plain
+    table = pd.read_csv(screened / "NTT-G10_K_bayes.csv")
+    assert table.K.notna().all()
