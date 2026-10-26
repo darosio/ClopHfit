@@ -777,7 +777,7 @@ requires-dist = [
     { name = "emcee", specifier = ">=3.1.6" },
     { name = "graphviz", marker = "extra == 'docs'", specifier = ">=0.21" },
     { name = "h5netcdf", specifier = ">=1.8.1" },
-    { name = "h5py", specifier = ">=3.15.0" },
+    { name = "h5py", specifier = ">=3.16.0" },
     { name = "ipykernel", marker = "extra == 'docs'", specifier = ">=7.4.0" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'gpu'", specifier = ">=0.12.0.1" },
     { name = "jupyter", marker = "extra == 'docs'", specifier = ">=1.1.1" },
