@@ -1,5 +1,6 @@
 """Test prenspire module."""
 
+import os
 import warnings
 from pathlib import Path
 
@@ -196,3 +197,27 @@ class TestNote:
         assert tit0[5.2][272] == 3151
         tit5 = n1.titrations["H148G"][20]["pH_8.2"]["A"]
         assert tit5[667.0][500] == 8734
+
+
+def test_export_measurements_is_idempotent(tmp_path: Path) -> None:
+    """A second call lands on the same files instead of adding timestamped copies.
+
+    Running several fitting methods on one plate used to leave five copies of
+    every table and figure in the output directory, because an existing file made
+    the writer append a timestamp. The export is a pure function of the input
+    file, so the canonical names are reused: rewritten when the export is newer
+    than them, skipped when it is not.
+    """
+    source = Path(__file__).parent / "EnSpire" / "G10.csv"
+    ef = EnspireFile(source)
+    first = ef.export_measurements(tmp_path)
+    assert first
+    listing = sorted(p.name for p in tmp_path.iterdir())
+    assert ef.export_measurements(tmp_path) == []  # up to date: nothing rewritten
+    assert sorted(p.name for p in tmp_path.iterdir()) == listing
+    assert ef.export_measurements(tmp_path, mode="never") == []
+    # an export older than the source is rewritten in place, same names
+    for target in tmp_path.iterdir():
+        os.utime(target, (1.0, 1.0))
+    assert ef.export_measurements(tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == listing

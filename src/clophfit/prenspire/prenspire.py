@@ -7,7 +7,6 @@ import csv
 import re
 import warnings
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -92,32 +91,70 @@ class EnspireFile:
             csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
         )
 
-    def export_measurements(self, out_dir: Path = Path(__enspire_out_dir__)) -> None:
-        """Save measurements, metadata and plots into out_dir."""
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for measurement_name, measurement_data in self.measurements.items():
-            # Prepare data dictionary and construct DataFrame
-            data_dict = {"lambda": measurement_data["lambda"]}
-            data_dict.update({well: measurement_data[well] for well in self.wells})
+    def export_measurements(
+        self,
+        out_dir: Path = Path(__enspire_out_dir__),
+        *,
+        mode: str = "auto",
+    ) -> list[str]:
+        """Write each measurement's table, metadata and figure into ``out_dir``.
 
-            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
+        The file names are canonical - ``<export stem>_<label>.csv/json/png`` - so
+        a second run over the same export lands on the same files instead of
+        accumulating timestamped copies. Running several fitting methods on one
+        plate used to leave five copies of every table and figure in the output
+        directory, because an existing file made the writer append a timestamp.
+
+        Parameters
+        ----------
+        out_dir : Path
+            Destination directory; created when missing.
+        mode : str
+            ``"auto"`` (default) rewrites a measurement only when the export is
+            newer than what was written (or the files are missing), ``"always"``
+            rewrites every time, ``"never"`` writes nothing.
+
+        Returns
+        -------
+        list[str]
+            Base names written, in measurement order; empty when everything was
+            already up to date.
+
+        Raises
+        ------
+        ValueError
+            If ``mode`` is not one of the three accepted values.
+        """
+        if mode not in {"auto", "always", "never"}:
+            msg = f"export mode must be auto, always or never, not {mode!r}"
+            raise ValueError(msg)
+        if mode == "never":
+            return []
+        out_dir.mkdir(parents=True, exist_ok=True)
+        written: list[str] = []
+        source_mtime = self.file.stat().st_mtime
+        for measurement_name, measurement_data in self.measurements.items():
             basename = f"{self.file.stem}_{measurement_name}"
-            # Check for existing file and append timestamp if necessary
             csv_file = out_dir / f"{basename}.csv"
-            if csv_file.exists():
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # ruff: ignore[datetime-timezone-utc] [for py3.10]
-                basename = f"{self.file.stem}_{measurement_name}_{timestamp}"
-                csv_file = out_dir / f"{basename}.csv"
             md_file = out_dir / f"{basename}.json"
             png_file = out_dir / f"{basename}.png"
-            # Export data and metadata
+            targets = (csv_file, md_file, png_file)
+            if mode == "auto" and all(
+                path.exists() and path.stat().st_mtime >= source_mtime
+                for path in targets
+            ):
+                continue
+            data_dict: dict[str, Any] = {"lambda": measurement_data["lambda"]}
+            data_dict.update({well: measurement_data[well] for well in self.wells})
+            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
             dfdata.to_csv(csv_file)
             pd.DataFrame([measurement_data["metadata"]]).to_json(md_file, indent=4)
-            # Create and save plot
             fig, ax = plt.subplots()
             dfdata.plot(title=measurement_name, legend=False, ax=ax)
-            plt.savefig(png_file)
+            fig.savefig(png_file)
             plt.close(fig)
+            written.append(basename)
+        return written
 
     # Helpers
     @staticmethod
