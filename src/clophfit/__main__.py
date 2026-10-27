@@ -74,6 +74,7 @@ from clophfit.prenspire.mcr import (
 )
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
+    isosbestic_by_group,
     plate_isosbestic,
     sample_spectra,
 )
@@ -786,7 +787,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
-@click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape: a wavelength in nm, or 'auto' to locate the crossing per sample and temperature from the excitation scan (the longest-wavelength zero of the signal-versus-titrant slope, the chromophore's, not the protein's own crossing in the far UV). A chloride titration has no such point - bound and free differ in brightness without crossing - so 'auto' normalises nothing there and changes no number. Applies to every method, and writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
+@click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale|auto-shared]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. 'auto-shared' (or 'auto-wavelength') uses one crossing for every temperature of a sample: the temperatures are then comparable at one wavelength, but the K of whichever temperature sits further from that wavelength is biased (0.08 pH on NTT/A08 for a 457 nm shared point). A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
     csv_f: str,
@@ -1263,19 +1264,72 @@ _MIN_BAYES_WELLS_AFTER_SCREEN = 6  # below this the shared latent axis is not id
 _MIN_VANTHOFF_TEMPS = 2  # one enthalpy needs a pair of temperatures
 
 
+def _shared_isosbestic(
+    ef: EnspireFile,
+    note: pd.DataFrame,
+    isosbestic: float | str | None,
+    *,
+    buffer: bool,
+) -> dict[tuple[str, float], float | None] | None:
+    """Resolve ``auto-shared`` into one crossing per (sample, temperature).
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note : pd.DataFrame
+        The normalised note.
+    isosbestic : float | str | None
+        The option as parsed: a wavelength, ``"auto"``, ``"auto-shared"`` or
+        ``None``.
+    buffer : bool
+        Subtract the buffer wells before locating the crossings.
+
+    Returns
+    -------
+    dict[tuple[str, float], float | None] | None
+        The per-sample crossings, or ``None`` when the caller should let each
+        group locate its own.
+    """
+    if isinstance(isosbestic, str) and isosbestic in {
+        "auto-shared",
+        "auto-scale",
+        "auto-wavelength",
+    }:
+        shared = isosbestic in {"auto-shared", "auto-wavelength"}
+        return isosbestic_by_group(ef, note, buffer=buffer, shared=shared)
+    return None
+
+
+def _lam_for(
+    isosbestic: float | str | None,
+    lam_map: dict[tuple[str, float], float | None] | None,
+    name: object,
+    temp: object,
+) -> float | str | None:
+    """Pick the crossing to hand to one (sample, temperature) group."""
+    if lam_map is None:
+        return isosbestic
+    return lam_map.get((str(name), float(str(temp))))
+
+
 def _parse_isosbestic(value: str | None) -> float | str | None:
     """Turn ``--normalise-isosbestic`` into a wavelength, ``"auto"`` or None.
 
     Parameters
     ----------
     value : str | None
-        The option as typed: unset, ``"auto"``, or a wavelength in nm.
+        The option as typed: unset, ``"auto"`` (one crossing per sample and
+        temperature), ``"auto-scale"`` (the same crossings, with the amplitude
+        shared across a sample's temperatures), ``"auto-shared"`` or
+        ``"auto-wavelength"`` (one crossing per sample as well), or a wavelength
+        in nm.
 
     Returns
     -------
     float | str | None
-        ``None`` when the option is off, ``"auto"`` to locate the crossing, or
-        the wavelength.
+        ``None`` when the option is off, ``"auto"`` or ``"auto-shared"``, or the
+        wavelength.
 
     Raises
     ------
@@ -1285,10 +1339,24 @@ def _parse_isosbestic(value: str | None) -> float | str | None:
     if value is None:
         return None
     text = value.strip().lower()
-    if text in {"auto", "yes", "true"}:
-        return "auto"
-    if text in {"no", "none", "false", ""}:
-        return None
+    modes = {
+        "auto": "auto",
+        "yes": "auto",
+        "true": "auto",
+        "auto-scale": "auto-scale",
+        "scale": "auto-scale",
+        "auto-shared": "auto-shared",
+        "shared": "auto-shared",
+        "auto-sample": "auto-shared",
+        "auto-wavelength": "auto-wavelength",
+        "one-wavelength": "auto-wavelength",
+        "no": None,
+        "none": None,
+        "false": None,
+        "": None,
+    }
+    if text in modes:
+        return modes[text]
     try:
         lam = float(text)
     except ValueError as err:
@@ -1333,6 +1401,26 @@ def _write_isosbestic_table(
     note = Note(note_fp).note
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
+    if isinstance(isosbestic, str) and isosbestic == "auto-shared":
+        shared = isosbestic_by_group(ef, note, shared=True)
+        shared_rows = [
+            {
+                "sample": name,
+                "temp": temp,
+                "isosbestic_nm": shared.get((str(name), float(str(temp))), np.nan),
+                "n_wells": int((samples["Name"] == name).sum()),
+            }
+            for (name, temp) in samples[["Name", "Temp"]]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        ]
+        table = pd.DataFrame(
+            shared_rows, columns=["sample", "temp", "isosbestic_nm", "n_wells"]
+        )
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = note_fp.name.removesuffix("_note.csv").removesuffix("_joined_note")
+        table.to_csv(out_dir / f"{stem}_isosbestic.csv", index=False)
+        return table
     rows: list[dict[str, object]] = []
     for (name, temp), group in samples.groupby(
         ["Name", "Temp"], sort=True, dropna=False
@@ -1482,6 +1570,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
     samples = note_df[note_df["Name"] != "buffer"]
     buffers = note_df[note_df["Name"] == "buffer"]
     wanted = tuple(band_names) if band_names else bands_module.DIRECT_BANDS
+    lam_map = _shared_isosbestic(ef, note_df, isosbestic, buffer=buffer)
     rows: list[dict[str, object]] = []
     figdata: list[
         tuple[
@@ -1510,7 +1599,8 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
         )
         readouts = bands_module.classify(ef, t, is_ph=is_ph)
         scale = None
-        if isosbestic is not None:
+        lam = _lam_for(isosbestic, lam_map, name, temp)
+        if lam is not None:
             excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
             if excitation is not None:
                 _lam_iso, scale = bands_module.isosbestic_readout_scale(
@@ -1519,7 +1609,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
                     x,
                     excitation,
                     bufw if buffer else (),
-                    isosbestic=isosbestic,
+                    isosbestic=lam,
                 )
         data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for r in readouts:
@@ -1941,6 +2031,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     wanted = scans or ("exc_anionic",)
+    lam_map = _shared_isosbestic(ef, note, isosbestic, buffer=buffer)
     rows: list[dict[str, object]] = []
     x_rows: list[dict[str, object]] = []
     figdata: list[
@@ -1970,7 +2061,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
-            isosbestic=isosbestic,
+            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
         )
         if not spectra:
             continue
@@ -2551,6 +2642,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
     samples = note_df[note_df["Name"] != "buffer"]
     buffers = note_df[note_df["Name"] == "buffer"]
     wanted = tuple(scans) if scans else ("exc_anionic",)
+    lam_map = _shared_isosbestic(ef, note_df, isosbestic, buffer=buffer)
     tables: list[pd.DataFrame] = []
     prof_by_sample: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
     spe_by_sample: dict[str, dict[str, pd.DataFrame]] = {}
@@ -2581,7 +2673,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bufw if buffer else [],
             bands=wanted,
-            isosbestic=isosbestic,
+            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
         )
         if not spectra:
             continue
@@ -2661,6 +2753,7 @@ def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
     note = Note(note_fp).note
     samples, buffers = note[note["Name"] != "buffer"], note[note["Name"] == "buffer"]
     wanted = scans or ("exc_anionic",)
+    lam_map = _shared_isosbestic(ef, note, isosbestic, buffer=buffer)
     rows: list[dict[str, object]] = []
     x_rows: list[dict[str, object]] = []
     plots: list[
@@ -2693,7 +2786,7 @@ def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
-            isosbestic=isosbestic,
+            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
         )
         if not scans_data:
             continue
@@ -2956,6 +3049,7 @@ def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
     note = Note(note_fp).note
     samples, buffers = note[note["Name"] != "buffer"], note[note["Name"] == "buffer"]
     wanted = scans or ("exc_anionic",)
+    lam_map = _shared_isosbestic(ef, note, isosbestic, buffer=buffer)
     rows: list[dict[str, object]] = []
     x_rows: list[dict[str, object]] = []
     plots: list[
@@ -2988,7 +3082,7 @@ def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
-            isosbestic=isosbestic,
+            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
         )
         if not scan_data:
             continue

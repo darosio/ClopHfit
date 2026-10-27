@@ -21,6 +21,7 @@ Hill slope is fixed to 1 (Henderson-Hasselbalch); see
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 import lmfit  # type: ignore[import-untyped]
@@ -39,6 +40,7 @@ from clophfit.prenspire.bands import (
     subtract_buffer,
 )
 from clophfit.prenspire.prenspire import EnspireFile, merge_enspire_files
+from clophfit.prenspire.spectral import isosbestic_by_group
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -436,9 +438,9 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments, complex-structure]
     wanted: Sequence[str],
     min_rho: float,
     isosbestic: float | str | None = None,
-) -> dict[str, _TempCurves]:
+) -> dict[str, tuple[_TempCurves, dict[str, float]]]:
     """Corrected, scaled curves per (temperature, band), as the band path does."""
-    out: dict[str, _TempCurves] = {}
+    out: dict[str, tuple[_TempCurves, dict[str, float]]] = {}
     for temp, group in samples.groupby("Temp", sort=True, dropna=False):
         t = str(temp).split(".")[0]
         one = group.drop_duplicates("Well")
@@ -463,6 +465,7 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments, complex-structure]
             wells, x = [wells[i] for i in keep], x[keep]
             bufw = bufw or found
         store: dict[str, tuple[ArrayF, ArrayF]] = {}
+        tops: dict[str, float] = {}
         scale = None
         if isosbestic is not None:
             excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
@@ -491,11 +494,86 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments, complex-structure]
             if np.isfinite(min_rho) and abs(band_rho(x, arr, wells)) < min_rho:
                 continue  # a flat band cannot inform K
             store[r.name] = (x, arr)
+            tops[r.name] = top
         if store:
             # the wells are the ones that survived the blank and finite-signal
             # gates, so a caller mapping a per-well vector back to well names
             # must use this list and not the note's
-            out[t] = _TempCurves(wells=wells, store=store)
+            out[t] = (_TempCurves(wells=wells, store=store), tops)
+    return out
+
+
+def _resolve_isosbestic(
+    ef: EnspireFile,
+    note: pd.DataFrame,
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None,
+    *,
+    buffer: bool,
+) -> dict[tuple[str, float], float | None] | None:
+    """Resolve a per-sample crossing request into one wavelength per group.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note : pd.DataFrame
+        Normalised note.
+    isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
+        The caller's request.
+    buffer : bool
+        Subtract the buffer wells before locating the crossings.
+
+    Returns
+    -------
+    dict[tuple[str, float], float | None] | None
+        The crossings, or ``None`` when each group locates its own.
+    """
+    if isinstance(isosbestic, str) and isosbestic in {
+        "auto-shared",
+        "auto-scale",
+        "auto-wavelength",
+    }:
+        shared = isosbestic in {"auto-shared", "auto-wavelength"}
+        return isosbestic_by_group(ef, note, buffer=buffer, shared=shared)
+    if isinstance(isosbestic, dict):
+        return isosbestic
+    return None
+
+
+def _lam_for(
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None,
+    lam_map: dict[tuple[str, float], float | None] | None,
+    name: str,
+    temp: object,
+) -> float | str | None:
+    """Pick the crossing for one (sample, temperature) group."""
+    if lam_map is None:
+        return isosbestic if not isinstance(isosbestic, Mapping) else None
+    return lam_map.get((name, float(str(temp))))
+
+
+def _share_curve_scale(
+    per_temp: dict[str, tuple[_TempCurves, dict[str, float]]],
+) -> dict[str, tuple[_TempCurves, dict[str, float]]]:
+    """Put one sample's temperatures back on a common amplitude scale.
+
+    Each temperature was divided by its own band maximum, which hides whether the
+    construct is brighter at 20 C or at 37 C. A shared crossing is only worth
+    having if that ratio survives, so the group peaks are divided out against the
+    sample's largest, band by band.
+    """
+    common: dict[str, float] = {}
+    for _one, tops in per_temp.values():
+        for band, top in tops.items():
+            common[band] = max(common.get(band, 0.0), top)
+    out: dict[str, tuple[_TempCurves, dict[str, float]]] = {}
+    for t, (one, tops) in per_temp.items():
+        store = {
+            band: (pair[0], pair[1] * (tops.get(band, 0.0) / common[band]))
+            for band, pair in one.store.items()
+            if common.get(band, 0.0) > 0
+        }
+        out[t] = (_TempCurves(wells=one.wells, store=store), tops)
     return out
 
 
@@ -518,7 +596,7 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
     is_ph: bool | None = None,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
-    isosbestic: float | str | None = None,
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None = None,
 ) -> dict[str, VanthoffCurves]:
     """Corrected curves of every sample, as both van't Hoff fitters consume them.
 
@@ -545,11 +623,17 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
         Band names entering the joint fit; default the two direct readouts.
     min_rho : float
         Monotonicity gate below which a band is dropped, as in the band path.
-    isosbestic : float | str | None
-        Normalise every well by its signal at the isosbestic point [nm], or
-        ``"auto"`` to locate it per temperature; ``None`` keeps the raw
-        readouts. Both the least-squares and the posterior joint fit read
-        these curves, so the option reaches them alike.
+    isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
+        Normalise every well by its signal at the isosbestic point: a wavelength
+        [nm], ``"auto"`` per temperature, ``"auto-shared"`` for one crossing per
+        sample shared by its temperatures, a mapping of ``(sample, temperature)``
+        to that wavelength, or ``None``. Both the least-squares and the posterior
+        joint fit read these curves, so the option reaches them alike.
+
+        A shared crossing is the choice a *joint* fit wants: the same wavelength
+        normalises both temperatures, and the amplitudes stay on one scale, so
+        what the enthalpy sees is the measurement's temperature dependence rather
+        than the normalisation's.
 
     Returns
     -------
@@ -561,27 +645,35 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     kinds = titrant_kind(samples)
+    lam_map = _resolve_isosbestic(ef, note, isosbestic, buffer=buffer)
     out: dict[str, VanthoffCurves] = {}
     for name, group in samples.groupby("Name", sort=True):
         sample_is_ph = kinds[str(name)] if is_ph is None else is_ph
-        curves = _curves_by_temp(
-            ef,
-            group,
-            buffers,
-            is_ph=sample_is_ph,
-            buffer=buffer,
-            wanted=wanted,
-            min_rho=min_rho,
-            isosbestic=isosbestic,
-        )
+        per_temp = {}
+        for temp, one_group in group.groupby("Temp", sort=True, dropna=False):
+            lam = _lam_for(isosbestic, lam_map, str(name), temp)
+            per_temp.update(
+                _curves_by_temp(
+                    ef,
+                    one_group,
+                    buffers,
+                    is_ph=sample_is_ph,
+                    buffer=buffer,
+                    wanted=wanted,
+                    min_rho=min_rho,
+                    isosbestic=lam,
+                )
+            )
+        if lam_map is not None:
+            per_temp = _share_curve_scale(per_temp)
         out[str(name)] = VanthoffCurves(
             is_ph=sample_is_ph,
             curves={
                 (band, t): pair
-                for t, one in curves.items()
+                for t, (one, _tops) in per_temp.items()
                 for band, pair in one.store.items()
             },
-            wells={t: one.wells for t, one in curves.items()},
+            wells={t: one.wells for t, (one, _tops) in per_temp.items()},
         )
     return out
 
@@ -594,7 +686,7 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     is_ph: bool | None = None,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
-    isosbestic: float | str | None = None,
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, VanthoffModel]]:
     """Joint van't Hoff fit per sample of the note; one row per (sample, temp).
 
@@ -617,9 +709,11 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     min_rho : float
         Monotonicity gate below which a band is dropped, as in the band path.
 
-    isosbestic : float | str | None
+    isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
         Normalise every well by its signal at the isosbestic point before the
-        joint fit: a wavelength [nm], ``"auto"``, or ``None``.
+        joint fit: a wavelength [nm], ``"auto"`` per temperature,
+        ``"auto-shared"`` for one crossing per sample (the choice a joint fit
+        wants, see :func:`vanthoff_curves`), a mapping, or ``None``.
 
     Returns
     -------

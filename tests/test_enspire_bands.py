@@ -21,6 +21,8 @@ from clophfit.prenspire.bands import (
     fit_titrations,
     screen_bands,
 )
+from clophfit.prenspire.spectral import isosbestic_by_group
+from clophfit.prenspire.thermo import vanthoff_curves
 
 DATA = Path(__file__).parent / "EnSpire"
 
@@ -230,6 +232,53 @@ def test_isosbestic_normalisation_keeps_the_band_k_and_drops_the_scale(
     assert np.allclose(a.index, b.index)
     assert np.all(np.abs(a.to_numpy() - b.to_numpy()) < 0.15)
     assert not np.allclose(a.to_numpy(), b.to_numpy())
+
+
+def test_sharing_the_crossing_across_temperatures(g10: EnspireFile) -> None:
+    """One crossing per sample for both temperatures, and one amplitude scale.
+
+    Three requests, and what each does to the two temperatures of one plate:
+
+    * ``auto`` locates a crossing per temperature and scales each to its own peak,
+      so the 37 C / 20 C amplitude ratio is exactly 1 by construction;
+    * ``auto-scale`` keeps those crossings - the unbiased ones - and shares the
+      amplitude instead, which is the only one of the three that leaves the
+      measured temperature dependence in the curves;
+    * ``auto-shared`` puts both temperatures through one wavelength, which moves
+      the K of the temperature whose true crossing is further away.
+    """
+    note = Note(DATA / "NTT-G10_note.csv").note
+
+    def ratios(mode: str | None) -> dict[str, float]:
+        info = vanthoff_curves(g10, note, isosbestic=mode)["NTT-G10"]
+        out: dict[str, float] = {}
+        for band in ("exc_anionic", "em_exc420"):
+            amps = {
+                float(t): float(np.nanmax(y))
+                for (b, t), (_x, y) in info.curves.items()
+                if b == band
+            }
+            if len(amps) == 2:
+                out[band] = amps[37.0] / amps[20.0]
+        return out
+
+    per_group = ratios("auto")
+    shared_scale = ratios("auto-scale")
+    assert per_group
+    assert all(np.isclose(v, 1.0) for v in per_group.values())
+    assert any(not np.isclose(v, 1.0, atol=0.02) for v in shared_scale.values())
+
+
+def test_the_crossing_can_be_located_once_per_sample(g10: EnspireFile) -> None:
+    """Sharing collapses a sample's temperatures onto one wavelength."""
+    note = Note(DATA / "NTT-G10_note.csv").note
+    per_group = isosbestic_by_group(g10, note, shared=False)
+    per_sample = isosbestic_by_group(g10, note, shared=True)
+    found = [v for v in per_group.values() if v is not None]
+    assert len(found) == 2
+    assert max(found) - min(found) > 0.5  # the crossing moves with temperature
+    assert len(set(per_sample.values())) == 1
+    assert per_sample[next(iter(per_sample))] == pytest.approx(float(np.median(found)))
 
 
 def test_fit_bands_bayes_recovers_k_with_hdi() -> None:

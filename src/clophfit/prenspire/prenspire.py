@@ -537,7 +537,7 @@ class Note:
 
     # MAYBE: Add buffer subtraction logic to prenspire Note.
 
-    def build_titrations(
+    def build_titrations(  # ruff: ignore[complex-structure, too-many-branches]
         self, ef: EnspireFile, *, isosbestic: float | str | None = None
     ) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>).
@@ -550,10 +550,11 @@ class Note:
             Divide every well by its signal at the isosbestic point before the
             titration is assembled, so the legacy projection path is normalised
             the same way the band and whole-spectrum paths are: a wavelength
-            [nm], ``"auto"`` to locate it per group, or ``None``. The scaling is
-            applied to every label of the group from the excitation scan's
-            crossing, because the crossing belongs to the sample, not to the
-            detector window.
+            [nm], ``"auto"`` to locate it per group, ``"auto-shared"`` for one
+            crossing per sample shared by its temperatures, or ``None``. The
+            scaling is applied to every label of the group from the excitation
+            scan's crossing, because the crossing belongs to the sample, not to
+            the detector window.
         """
         if "Labels" not in self._note.columns:
             # the second note dialect names no labels: take the ones the file
@@ -566,6 +567,12 @@ class Note:
                 at_temp.get(str(t).split(".")[0], " ".join(ef.measurements))
                 for t in self._note["Temp"]
             ]
+        if isinstance(isosbestic, str) and isosbestic == "auto-shared":
+            from clophfit.prenspire.spectral import isosbestic_by_group  # ruff: ignore[import-outside-top-level]
+
+            lam_map = isosbestic_by_group(ef, self._note, shared=True)
+        else:
+            lam_map = {}
         df_no_buffer = self._note.query('Name != "buffer"')
         threshold = 3
         grouped0 = df_no_buffer.groupby("Name")
@@ -600,9 +607,14 @@ class Note:
                                             group3["Cl"].to_list()
                                         )
                                     meas_dict[label] = value_df
-                                if isosbestic is not None:
+                                lam = (
+                                    lam_map.get((str(name0), float(str(name1))))
+                                    if lam_map
+                                    else isosbestic
+                                )
+                                if lam is not None:
                                     meas_dict = _normalise_titration_isosbestic(
-                                        meas_dict, ef, isosbestic
+                                        meas_dict, ef, lam
                                     )
                                 titrations[name0][name1][f"{grouping}_{name2}"] = (
                                     meas_dict

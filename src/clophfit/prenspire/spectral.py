@@ -428,6 +428,81 @@ def plate_isosbestic(
     return float(np.median(list(found.values())))
 
 
+def isosbestic_by_group(
+    ef: EnspireFile,
+    note: pd.DataFrame,
+    *,
+    buffer: bool = True,
+    shared: bool = False,
+) -> dict[tuple[str, float], float | None]:
+    """Locate the crossing of every (sample, temperature) group on one plate.
+
+    A plate holds the same construct at two temperatures, and the crossing moves
+    with temperature (on the NTT plates 4.4 nm lower at 37 C than at 20 C). Two
+    normalisations are defensible and they answer different questions:
+
+    * per group (``shared=False``) - each temperature is divided by its own
+      crossing, which is the least biased choice for a fit that treats the
+      temperatures separately;
+    * per sample (``shared=True``) - one wavelength for every temperature, so the
+      two temperatures are normalised the same way and what is left of their
+      amplitude ratio is the measurement's, not the normalisation's.
+
+    The shared value is the median of the group crossings, which is also the
+    honest summary of a shift that is a property of the sample.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note : pd.DataFrame
+        Normalised note, with ``Well``, ``pH``, ``Cl``, ``Name`` and ``Temp``.
+    buffer : bool
+        Subtract the buffer wells of the same plate column before locating the
+        crossing.
+    shared : bool
+        Collapse each sample's temperatures onto one crossing.
+
+    Returns
+    -------
+    dict[tuple[str, float], float | None]
+        ``(sample, temperature)`` to the crossing [nm], ``None`` where the group
+        has no crossing (a chloride titration).
+    """
+    samples = note[note["Name"] != "buffer"]
+    buffers = note[note["Name"] == "buffer"]
+    out: dict[tuple[str, float], float | None] = {}
+    for (name, temp), group in samples.groupby(
+        ["Name", "Temp"], sort=True, dropna=False
+    ):
+        one = group.drop_duplicates("Well")
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        wells = one["Well"].tolist()
+        x = np.asarray(one["pH" if is_ph else "Cl"], dtype=np.float64)
+        bufw = (
+            buffers[np.isclose(buffers["Temp"].astype(float), float(str(temp)))][
+                "Well"
+            ].tolist()
+            if buffer
+            else []
+        )
+        spectra, _used, used_x = sample_spectra(
+            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=bufw
+        )
+        out[str(name), float(str(temp))] = (
+            plate_isosbestic(spectra, used_x) if spectra else None
+        )
+    if shared:
+        for name in {key[0] for key in out}:
+            found = [v for (n, _t), v in out.items() if n == name and v is not None]
+            if not found:
+                continue
+            one_lam = float(np.median(found))
+            for key in [k for k in out if k[0] == name]:
+                out[key] = one_lam
+    return out
+
+
 def isosbestic_scale(
     spectra: Mapping[str, tuple[Any, Any]],
     lam_iso: float,
@@ -587,7 +662,8 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         Band names whose scans are used whole (default: the excitation scan only).
     isosbestic : float | str | None
         Normalise every well by its signal at the isosbestic point before
-        fitting (see :func:`sample_spectra`).
+        fitting (see :func:`sample_spectra`); ``"auto-shared"`` uses one crossing
+        for every temperature of a sample.
 
     Returns
     -------
@@ -599,6 +675,17 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     fits: dict[str, SpectralFit] = {}
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
+    lam_map = (
+        isosbestic_by_group(
+            ef,
+            note,
+            buffer=buffer,
+            shared=isosbestic in {"auto-shared", "auto-wavelength"},
+        )
+        if isinstance(isosbestic, str)
+        and isosbestic in {"auto-shared", "auto-scale", "auto-wavelength"}
+        else None
+    )
     for (name, temp), group in samples.groupby(
         ["Name", "Temp"], sort=True, dropna=False
     ):
@@ -607,6 +694,11 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         wells = one["Well"].tolist()
         x = np.asarray(one["pH" if is_ph else "Cl"], dtype=np.float64)
         buf = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        lam = (
+            lam_map.get((str(name), float(str(temp))))
+            if lam_map is not None
+            else isosbestic
+        )
         spectra, wells, x = sample_spectra(
             ef,
             wells,
@@ -615,7 +707,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=buf,
             bands=bands,
-            isosbestic=isosbestic,
+            isosbestic=lam,
         )
         if not spectra:
             continue
