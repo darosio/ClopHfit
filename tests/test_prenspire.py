@@ -4,9 +4,15 @@ import os
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from clophfit.prenspire import EnspireFile, Note
+from clophfit.prenspire.spectral import (
+    consensus_isosbestic,
+    isosbestic_point,
+    normalise_to_isosbestic,
+)
 
 data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath
@@ -221,3 +227,86 @@ def test_export_measurements_is_idempotent(tmp_path: Path) -> None:
         os.utime(target, (1.0, 1.0))
     assert ef.export_measurements(tmp_path)
     assert sorted(p.name for p in tmp_path.iterdir()) == listing
+
+
+def _two_state_spectra(
+    n_lam: int = 120, crossing: int = 500
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Two species spectra that cross exactly at ``crossing`` nm."""
+    lam = np.linspace(380.0, 580.0, n_lam)
+    e0 = 0.15 + 0.85 * np.exp(-((lam - 520.0) ** 2) / (2 * 30.0**2))
+    e1 = e0.copy()
+    # make them differ only by a ramp that vanishes at the crossing
+    e1 = e0 * (1.0 + 0.9 * (crossing - lam) / (crossing - lam.min()))
+    return lam, e0, e1
+
+
+def test_isosbestic_point_finds_the_known_crossing() -> None:
+    """Two species crossing at 500 nm give a slope zero there, not elsewhere."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    found = isosbestic_point({"exc": (lam, y)}, x)
+    assert abs(found["exc"] - 500.0) < 1.5
+
+
+def test_normalising_to_isosbestic_puts_every_spectrum_on_one() -> None:
+    """After the normalization every well passes through 1.0 at the crossing."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    rng = np.random.default_rng(5)
+    # per-well brightness and pipetting, which the normalization must remove
+    gain = rng.uniform(0.7, 1.3, x.size)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * gain
+    y += rng.normal(0, 0.002, y.shape)
+    iso = isosbestic_point({"exc": (lam, y)}, x)["exc"]
+    scaled = normalise_to_isosbestic({"exc": (lam, y)}, iso)["exc"][1]
+    at = np.array([np.interp(iso, lam, scaled[:, i]) for i in range(x.size)])
+    assert np.allclose(at, 1.0, atol=0.01)
+    # the per-well gain is gone: at 520 nm the normalised signal matches the
+    # noise-free model normalised the same way, whatever the well's brightness
+    model = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    want = model[np.argmin(np.abs(lam - 520.0))] / model[np.argmin(np.abs(lam - iso))]
+    got = scaled[np.argmin(np.abs(lam - 520.0))]
+    # the crossing is located to about a nanometre, and the model's slope there
+    # turns a 1 nm offset into a few percent, so this is a 5 % check
+    assert np.allclose(got, want, atol=0.06)
+
+
+def test_acid_end_bends_the_crossing_so_it_is_excluded() -> None:
+    """The acid-end drop moves the apparent crossing; x_min keeps it in place.
+
+    This is the case the NTT 37 C plate shows: the most acidic wells fall below
+    the two-state model, and including them drags the slope zero away from the
+    chromophore's real crossing.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(5.5, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    # the three most acidic wells are blue-shifted by 3 nm, the artefact a
+    # degraded or partly denatured sample shows: the crossing moves with it
+    shifted = np.array([np.interp(lam - 3.0, lam, y[:, i]) for i in range(3)]).T
+    y[:, :3] = shifted
+    naive = isosbestic_point({"exc": (lam, y)}, x)["exc"]
+    guarded = isosbestic_point({"exc": (lam, y)}, x, x_min=6.5)["exc"]
+    assert abs(guarded - 500.0) < 2.0
+    assert abs(guarded - 500.0) < abs(naive - 500.0)
+
+
+def test_consensus_isosbestic_pools_measurements() -> None:
+    """Two noisy measurements give a consensus closer to the truth than either."""
+    lam, e0, e1 = _two_state_spectra()
+    datasets = []
+    for seed, k in ((1, 7.1), (2, 7.4)):
+        rng = np.random.default_rng(seed)
+        x = np.linspace(6.0, 8.5, 12)
+        frac = 1.0 / (1.0 + 10.0 ** (k - x))
+        y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+        y += rng.normal(0, 0.006, y.shape)
+        datasets.append(({"exc": (lam, y)}, x))
+    pooled = consensus_isosbestic(datasets)
+    each = [isosbestic_point(s, x)["exc"] for s, x in datasets]
+    assert abs(pooled - 500.0) <= max(abs(w - 500.0) for w in each) + 0.5

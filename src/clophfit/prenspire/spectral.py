@@ -31,7 +31,7 @@ from clophfit.fitting.spectral import SpectralFit, fit_spectra_global
 from clophfit.prenspire.bands import band_values, blank_rows, classify
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prenspire.prenspire import EnspireFile
@@ -184,6 +184,197 @@ def _row(base: dict[str, object], subset: str, fit: SpectralFit) -> dict[str, ob
         "n": fit.n_wells,
         "sv_ratio": float(fit.residual_sv[0] / fit.residual_sv[1]),
     }
+
+
+def slope_profile(
+    spectra: Mapping[str, tuple[Any, Any]], x: ArrayF, *, x_min: float | None = None
+) -> dict[str, tuple[ArrayF, ArrayF]]:
+    """Per label, how strongly each wavelength responds to the titration.
+
+    The isosbestic point of a two-state titration is the wavelength whose signal
+    does not change with the titrant: there the two species spectra cross, so the
+    slope of the measured signal against the titrant passes through zero. This
+    regresses every wavelength's signal on the titrant value and returns the
+    normalized slope profile, which is what the isosbestic search reads.
+
+    ``x_min`` drops the spectra below a titrant value. The most acidic wells are
+    the ones that carry the extra acid-end drop that a two-state model cannot
+    describe, and they are also the noisiest; including them bends the profile
+    and moves the apparent crossing.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Label to ``(wavelengths, Y[n_lambda, n_wells])``.
+    x : ArrayF
+        Titrant value per well.
+    x_min : float | None
+        Keep only wells with ``x >= x_min``; ``None`` keeps every well.
+
+    Returns
+    -------
+    dict[str, tuple[ArrayF, ArrayF]]
+        Label to ``(wavelengths, slope)``, the slope normalized to unit maximum
+        absolute value so labels with different brightness compare.
+    """
+    xa = np.asarray(x, dtype=np.float64)
+    keep = np.ones(xa.size, dtype=bool) if x_min is None else xa >= x_min
+    xk = xa[keep] - xa[keep].mean()
+    denom = float(np.sum(xk**2)) or 1.0
+    out: dict[str, tuple[ArrayF, ArrayF]] = {}
+    for label, (lam, y) in spectra.items():
+        ya = np.asarray(y, dtype=np.float64)[:, keep]
+        slope = (ya - ya.mean(axis=1, keepdims=True)) @ xk / denom
+        top = float(np.max(np.abs(slope))) or 1.0
+        out[label] = (np.asarray(lam, dtype=np.float64), slope / top)
+    return out
+
+
+def isosbestic_point(
+    spectra: Mapping[str, tuple[Any, Any]], x: ArrayF, *, x_min: float | None = None
+) -> dict[str, float]:
+    """Give the wavelength at which each label's signal stops tracking the titrant.
+
+    The crossing returned is the **longest-wavelength** zero of
+    :func:`slope_profile`. A scan has more than one: the far-UV end carries one
+    from the protein's own absorbance (342 nm on the NTT plate) and the
+    chromophore's bands carry the one that describes the two-state titration
+    (461 nm at 20 C). Taking the longest keeps the chromophore's; a window can be
+    imposed afterwards by :func:`consensus_isosbestic`.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Label to ``(wavelengths, Y[n_lambda, n_wells])``.
+    x : ArrayF
+        Titrant value per well.
+    x_min : float | None
+        Drop the wells below this titrant value before locating the crossing.
+
+    Returns
+    -------
+    dict[str, float]
+        Label to the interpolated crossing wavelength [nm]. Empty when a label's
+        slope profile has no zero crossing.
+    """
+    found: dict[str, float] = {}
+    for label, (lam, slope) in slope_profile(spectra, x, x_min=x_min).items():
+        crossings = [
+            float(lam[i] + (lam[i + 1] - lam[i]) * slope[i] / (slope[i] - slope[i + 1]))
+            for i in range(lam.size - 1)
+            if slope[i] * slope[i + 1] < 0
+        ]
+        if not crossings:
+            continue
+        found[label] = max(crossings)
+    return found
+
+
+def consensus_isosbestic(
+    datasets: Sequence[tuple[Mapping[str, tuple[Any, Any]], ArrayF]],
+    *,
+    x_min: float | None = None,
+    window: tuple[float, float] | None = None,
+) -> float:
+    """One isosbestic wavelength for several titrations at once.
+
+    A single plate's crossing is noisy (the signal barely changes there, which is
+    the point), so several measurements of the same construct are pooled: the
+    consensus is the wavelength at which the summed absolute slope profile is
+    smallest, restricted to a window around the individual crossings. That
+    window is what keeps a protein-absorbance crossing in the far UV from
+    competing with the chromophore's own.
+
+    Parameters
+    ----------
+    datasets : Sequence[tuple[Mapping[str, tuple[Any, Any]], ArrayF]]
+        One ``(spectra, x)`` pair per measurement.
+    x_min : float | None
+        Passed to :func:`slope_profile`; drop the acid end of every dataset.
+    window : tuple[float, float] | None
+        Wavelength range to search. ``None`` uses the span of the individual
+        crossings, widened by 20 nm on each side.
+
+    Returns
+    -------
+    float
+        The consensus isosbestic wavelength [nm].
+
+    Raises
+    ------
+    ValueError
+        If no dataset yields a crossing.
+    """
+    profiles = [slope_profile(spectra, x, x_min=x_min) for spectra, x in datasets]
+    individual = [
+        w
+        for spectra, x in datasets
+        for w in isosbestic_point(spectra, x, x_min=x_min).values()
+    ]
+    if not individual:
+        msg = "no dataset shows an isosbestic crossing; check the wavelength range"
+        raise ValueError(msg)
+    lo, hi = (
+        (min(individual) - 20.0, max(individual) + 20.0) if window is None else window
+    )
+    grid = np.union1d(
+        np.concatenate([lam for prof in profiles for lam, _s in prof.values()]),
+        np.arange(lo, hi + 0.001, 0.5),
+    )
+    grid = grid[(grid >= lo) & (grid <= hi)]
+    total = np.zeros(grid.size)
+    for prof in profiles:
+        for lam, slope in prof.values():
+            total += np.abs(np.interp(grid, lam, slope))
+    return float(grid[int(np.argmin(total))])
+
+
+def normalise_to_isosbestic(
+    spectra: Mapping[str, tuple[Any, Any]], lam_iso: float
+) -> dict[str, tuple[Any, Any]]:
+    """Divide every spectrum by its own value at the isosbestic wavelength.
+
+    At an isosbestic point the signal is the same for every titration state, so
+    the ratio to it removes per-well brightness, path length and pipetting while
+    leaving the titration's shape untouched - and it puts every spectrum through
+    1.0 there, which is what makes the crossing visible.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Label to ``(wavelengths, Y[n_lambda, n_wells])``.
+    lam_iso : float
+        The isosbestic wavelength [nm]; interpolated between grid points.
+
+    Returns
+    -------
+    dict[str, tuple[Any, Any]]
+        The same mapping, normalized. A well whose value at the crossing is
+        non-finite or below 2 % of that well's peak is left untouched, and its
+        index is reported by the caller's statistics rather than silently
+        dropped.
+
+    Raises
+    ------
+    ValueError
+        If ``lam_iso`` lies outside a label's wavelength range.
+    """
+    out: dict[str, tuple[Any, Any]] = {}
+    for label, (lam, y) in spectra.items():
+        lam_a = np.asarray(lam, dtype=np.float64)
+        ya = np.asarray(y, dtype=np.float64)
+        if not lam_a.min() <= lam_iso <= lam_a.max():
+            msg = f"{label}: isosbestic {lam_iso:.1f} nm is outside {lam_a.min():.0f}-{lam_a.max():.0f} nm"
+            raise ValueError(msg)
+        ref = np.array([
+            np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])
+        ])
+        floor = 0.02 * np.max(np.abs(ya), axis=0)
+        usable = np.isfinite(ref) & (np.abs(ref) > floor)
+        scaled = ya.copy()
+        scaled[:, usable] /= ref[usable]
+        out[label] = (lam_a, scaled)
+    return out
 
 
 def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
