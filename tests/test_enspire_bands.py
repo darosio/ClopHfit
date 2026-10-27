@@ -203,6 +203,35 @@ class TestTitrations:
         }
 
 
+def test_isosbestic_normalisation_keeps_the_band_k_and_drops_the_scale(
+    g10: EnspireFile,
+) -> None:
+    """Normalising every well to the crossing moves the band K a little, not a lot.
+
+    The band fit keeps one plateau pair for the whole plate, so per-well amount
+    and brightness sit in the residual; dividing each well by its signal at the
+    isosbestic point takes them out before the fit. What must not happen is a
+    different titration: the two runs have to describe the same K, with the
+    normalised one no less precise.
+    """
+    note = Note(DATA / "NTT-G10_note.csv").note
+    raw = fit_titrations(g10, note, screen="studentized:0.05:5")
+    scaled = fit_titrations(g10, note, screen="studentized:0.05:5", isosbestic="auto")
+
+    def head(fits: object) -> pd.Series:
+        table = fits.table  # type: ignore[attr-defined]
+        rows = table[
+            (table["band"] == "all (shared K)") & (table["subset"] == "screened")
+        ]
+        return rows.set_index("temp")["K"].astype(float)
+
+    a, b = head(raw), head(scaled)
+    assert not a.empty
+    assert np.allclose(a.index, b.index)
+    assert np.all(np.abs(a.to_numpy() - b.to_numpy()) < 0.15)
+    assert not np.allclose(a.to_numpy(), b.to_numpy())
+
+
 def test_fit_bands_bayes_recovers_k_with_hdi() -> None:
     """The seeded posterior covers the truth and mixes well (ESS, r_hat).
 

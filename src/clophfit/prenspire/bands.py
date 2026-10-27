@@ -412,6 +412,66 @@ def fit_bands(
     return BandFit(k, lo, hi, se, rms, kept, total - kept, plateaus, masks)
 
 
+def isosbestic_readout_scale(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    wells: Sequence[str],
+    x: np.ndarray,
+    readout: Readout,
+    buffer_wells: Sequence[str] = (),
+    *,
+    isosbestic: float | str,
+) -> tuple[float | None, np.ndarray | None]:
+    """Per-well brightness reference of one readout, taken at the crossing.
+
+    A band readout is one number per well, so normalising it to the isosbestic
+    point means reading the whole excitation scan the window came from and
+    dividing the well by its signal where the two species cross: the ratio
+    removes how much protein the well holds and how brightly it is measured,
+    and keeps the fraction. This is the band-level counterpart of
+    :func:`~clophfit.prenspire.spectral.sample_spectra`'s ``isosbestic``.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    wells : Sequence[str]
+        Wells of this sample, in the order of ``x``.
+    x : np.ndarray
+        Titrant value per well.
+    readout : Readout
+        The band whose scan supplies the spectrum; its label names the scan.
+    buffer_wells : Sequence[str]
+        Buffer wells of the same plate column, subtracted before the crossing
+        is located, exactly as the band values are.
+    isosbestic : float | str
+        A wavelength [nm] or ``"auto"``.
+
+    Returns
+    -------
+    tuple[float | None, np.ndarray | None]
+        The crossing used and the scale per well, or ``(None, None)`` when
+        ``"auto"`` finds none - which is what a chloride titration returns.
+    """
+    from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
+        EXCITATION_SCAN_NAMES,
+        isosbestic_scale,
+        plate_isosbestic,
+        scan_spectrum,
+    )
+
+    lam, y = scan_spectrum(ef, readout.label, wells, buffer_wells)
+    spectra = {EXCITATION_SCAN_NAMES[0]: (lam, y)}
+    lam_iso = (
+        plate_isosbestic(spectra, x)
+        if isinstance(isosbestic, str)
+        else float(isosbestic)
+    )
+    if lam_iso is None:
+        return None, None
+    scale, _usable = isosbestic_scale(spectra, lam_iso)
+    return lam_iso, scale
+
+
 def _sample_bands(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     wells: list[str],
@@ -420,6 +480,7 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     *,
     is_ph: bool,
     buffer_wells: Sequence[str],
+    isosbestic: float | str | None = None,
 ) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]:
     """Band values of one sample, buffer-subtracted and scaled to its own max.
 
@@ -441,6 +502,10 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         see :func:`classify`.
     buffer_wells : Sequence[str]
         Buffer wells declared by the note, if any.
+    isosbestic : float | str | None
+        Normalise each well by its signal at the isosbestic point, before the
+        band is scaled to its own maximum (see
+        :func:`isosbestic_readout_scale`); ``None`` keeps the raw readout.
 
     Returns
     -------
@@ -457,13 +522,28 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         keep = [i for i, w in enumerate(wells) if w[0] not in blanks]
         wells, x = [wells[i] for i in keep], x[keep]
         buffer_wells = list(buffer_wells) or found
+    scale = None
+    if isosbestic is not None:
+        excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
+        if excitation is not None:
+            _lam_iso, scale = isosbestic_readout_scale(
+                ef,
+                wells,
+                x,
+                excitation,
+                buffer_wells,
+                isosbestic=isosbestic,
+            )
     data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for readout in readouts:
         y = band_values(ef, readout, wells)
         if buffer_wells:
             y = subtract_buffer(y, band_values(ef, readout, buffer_wells))
-        top = float(np.abs(y).max())
-        data[readout.name] = (x, (y / top if top else y).to_numpy())
+        arr = np.array(y, dtype=float)
+        if scale is not None:
+            arr /= scale
+        top = float(np.abs(arr).max())
+        data[readout.name] = (x, arr / top if top else arr)
     return data, wells, x
 
 
@@ -495,6 +575,7 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
     screen: str | None = DEFAULT_SCREEN,
+    isosbestic: float | str | None = None,
 ) -> TitrationFits:
     """Fit every sample of a note from its bands.
 
@@ -512,6 +593,9 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         Monotonicity gate for a band.
     screen : str | None
         Point screen handed to :func:`fit_binding_glob`.
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point first
+        (see :func:`isosbestic_readout_scale`).
 
     Returns
     -------
@@ -533,7 +617,13 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         x = one["pH" if is_ph else "Cl"].astype(float).to_numpy()
         buf = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
         data, wells, x = _sample_bands(
-            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=buf
+            ef,
+            wells,
+            x,
+            str(temp),
+            is_ph=is_ph,
+            buffer_wells=buf,
+            isosbestic=isosbestic,
         )
         if not data:
             continue

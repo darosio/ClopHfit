@@ -29,6 +29,7 @@ import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
 
+from clophfit.prenspire import bands as bands_module
 from clophfit.prenspire.bands import (
     DIRECT_BANDS,
     band_rho,
@@ -425,7 +426,7 @@ def _as_single_export(
     return merge_enspire_files(list(ef))
 
 
-def _curves_by_temp(  # ruff: ignore[too-many-arguments]
+def _curves_by_temp(  # ruff: ignore[too-many-arguments, complex-structure]
     ef: EnspireFile,
     samples: pd.DataFrame,
     buffers: pd.DataFrame,
@@ -434,6 +435,7 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
     buffer: bool,
     wanted: Sequence[str],
     min_rho: float,
+    isosbestic: float | str | None = None,
 ) -> dict[str, _TempCurves]:
     """Corrected, scaled curves per (temperature, band), as the band path does."""
     out: dict[str, _TempCurves] = {}
@@ -461,6 +463,18 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
             wells, x = [wells[i] for i in keep], x[keep]
             bufw = bufw or found
         store: dict[str, tuple[ArrayF, ArrayF]] = {}
+        scale = None
+        if isosbestic is not None:
+            excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
+            if excitation is not None:
+                _lam_iso, scale = bands_module.isosbestic_readout_scale(
+                    ef,
+                    wells,
+                    x,
+                    excitation,
+                    bufw if buffer else (),
+                    isosbestic=isosbestic,
+                )
         for r in readouts:
             if r.name not in wanted:
                 continue
@@ -468,6 +482,8 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments]
             if bufw and buffer:
                 y = subtract_buffer(y, band_values(ef, r, bufw))
             arr = np.array(y, dtype=np.float64)
+            if scale is not None:
+                arr /= scale
             top = float(np.nanmax(np.abs(arr)))
             if not np.isfinite(top) or top <= 0.0:
                 continue
@@ -502,6 +518,7 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
     is_ph: bool | None = None,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
+    isosbestic: float | str | None = None,
 ) -> dict[str, VanthoffCurves]:
     """Corrected curves of every sample, as both van't Hoff fitters consume them.
 
@@ -528,6 +545,11 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
         Band names entering the joint fit; default the two direct readouts.
     min_rho : float
         Monotonicity gate below which a band is dropped, as in the band path.
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point [nm], or
+        ``"auto"`` to locate it per temperature; ``None`` keeps the raw
+        readouts. Both the least-squares and the posterior joint fit read
+        these curves, so the option reaches them alike.
 
     Returns
     -------
@@ -550,6 +572,7 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
             buffer=buffer,
             wanted=wanted,
             min_rho=min_rho,
+            isosbestic=isosbestic,
         )
         out[str(name)] = VanthoffCurves(
             is_ph=sample_is_ph,
@@ -571,6 +594,7 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     is_ph: bool | None = None,
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
+    isosbestic: float | str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, VanthoffModel]]:
     """Joint van't Hoff fit per sample of the note; one row per (sample, temp).
 
@@ -593,6 +617,10 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     min_rho : float
         Monotonicity gate below which a band is dropped, as in the band path.
 
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before the
+        joint fit: a wavelength [nm], ``"auto"``, or ``None``.
+
     Returns
     -------
     tuple[pd.DataFrame, dict[str, VanthoffModel]]
@@ -611,7 +639,13 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     rows: list[dict[str, object]] = []
     models: dict[str, VanthoffModel] = {}
     for name, info in vanthoff_curves(
-        ef, note, buffer=buffer, is_ph=is_ph, wanted=wanted, min_rho=min_rho
+        ef,
+        note,
+        buffer=buffer,
+        is_ph=is_ph,
+        wanted=wanted,
+        min_rho=min_rho,
+        isosbestic=isosbestic,
     ).items():
         sample_is_ph = info.is_ph
         flat = info.curves

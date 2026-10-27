@@ -40,6 +40,9 @@ _MIN_ROW_WELLS = 5
 # The excitation scan alone: on the readout-arm sweep (module docstring) adding the 420 nm emission
 # scan whole widened the between-session spread (median 0.10 -> 0.14 pH, worst 0.16 -> 0.37).
 EXCITATION_SCAN = ("exc_anionic",)
+#: The scan name (see :func:`scan_name`) of the excitation scan, which is where
+#: the chromophore's two-state crossover can be located.
+EXCITATION_SCAN_NAMES = ("excitation",)
 
 
 def _scan_kind(md: dict[str, Any]) -> str:
@@ -113,6 +116,37 @@ def _spectra(
     return lam, y
 
 
+def scan_spectrum(
+    ef: EnspireFile, label: str, wells: Sequence[str], buffer_wells: Sequence[str] = ()
+) -> tuple[ArrayF, ArrayF]:
+    """One label's whole spectrum, buffer-subtracted, one column per well.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    label : str
+        The plate label naming the scan.
+    wells : Sequence[str]
+        Wells to read, in order.
+    buffer_wells : Sequence[str]
+        Buffer wells of the same plate column, subtracted column by column;
+        empty keeps the raw spectrum.
+
+    Returns
+    -------
+    tuple[ArrayF, ArrayF]
+        Wavelengths and ``Y[n_lambda, n_wells]``.
+    """
+    lam, y = _spectra(ef, label, wells)
+    if buffer_wells:
+        _, yb = _spectra(ef, label, list(buffer_wells))
+        by_column = {str(w)[1:]: yb[:, i] for i, w in enumerate(buffer_wells)}
+        zero = np.zeros(lam.size)
+        y -= np.column_stack([by_column.get(str(w)[1:], zero) for w in wells])
+    return lam, y
+
+
 def sample_spectra(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     wells: list[str],
@@ -122,6 +156,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     is_ph: bool,
     buffer_wells: Sequence[str],
     bands: Sequence[str] = EXCITATION_SCAN,
+    isosbestic: float | str | None = None,
 ) -> tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]:
     """Corrected whole spectra of one sample, one entry per scan.
 
@@ -142,6 +177,12 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     bands : Sequence[str]
         Band names (as in :func:`~clophfit.prenspire.bands.classify`) whose scans are used whole;
         the default takes the excitation scan only.
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point, which
+        removes per-well amount, path length and brightness: a wavelength [nm],
+        ``"auto"`` to locate it with :func:`plate_isosbestic`, or ``None``.
+        ``"auto"`` on a titration with no crossing (a chloride one) normalises
+        nothing and changes no number.
 
     Returns
     -------
@@ -163,13 +204,20 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         buffer_wells = list(buffer_wells) or found
     out: dict[str, tuple[ArrayF, ArrayF]] = {}
     for label in labels:
-        lam, y = _spectra(ef, label, wells)
-        if buffer_wells:
-            _, yb = _spectra(ef, label, list(buffer_wells))
-            by_column = {str(w)[1:]: yb[:, i] for i, w in enumerate(buffer_wells)}
-            zero = np.zeros(lam.size)
-            y -= np.column_stack([by_column.get(str(w)[1:], zero) for w in wells])
+        lam, y = scan_spectrum(ef, label, wells, buffer_wells)
         out[scan_name(ef, label)] = (lam, y / float(np.nanmax(np.abs(y))))
+    if isosbestic is not None:
+        lam_iso = (
+            plate_isosbestic(out, x)
+            if isinstance(isosbestic, str)
+            else float(isosbestic)
+        )
+        if lam_iso is not None:
+            key = next(
+                (k for k in out if k == "excitation" or k.startswith("excitation ")),
+                next(iter(out)),
+            )
+            out = normalise_to_isosbestic(out, lam_iso, scan=key)
     return out, wells, x
 
 
@@ -329,10 +377,123 @@ def consensus_isosbestic(
     return float(grid[int(np.argmin(total))])
 
 
+def plate_isosbestic(
+    spectra: Mapping[str, tuple[Any, Any]],
+    x: ArrayF,
+    *,
+    scans: Sequence[str] = EXCITATION_SCAN_NAMES,
+    x_min: float | None = None,
+) -> float | None:
+    """Return the crossing the spectra of one titration agree on, or None.
+
+    :func:`isosbestic_point` answers per scan, and not every scan has an answer:
+    an emission scan taken at 420 nm excitation carries the anionic species
+    alone, so it crosses nowhere and reports several near-zeros in its noise,
+    while the excitation scan carries the two-state crossover the chromophore
+    actually shows. This picks the scans that describe the titration (by default
+    the excitation scan), takes each one's longest-wavelength zero, and returns
+    their median - the number a per-well normalisation needs.
+
+    A chloride titration is the case that returns ``None``: bound and free
+    species differ in brightness without crossing in the measured window, so no
+    wavelength is titrant-independent and no such normalisation exists.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Scan name to ``(wavelengths, Y[n_lambda, n_wells])``.
+    x : ArrayF
+        Titrant value per well.
+    scans : Sequence[str]
+        Scan names (as :func:`scan_name` builds them) that may carry the
+        crossing.
+    x_min : float | None
+        Drop the wells below this titrant value before locating the crossing.
+
+    Returns
+    -------
+    float | None
+        The crossing [nm], or ``None`` when no chosen scan has one.
+    """
+    chosen = {
+        label: value
+        for label, value in spectra.items()
+        if any(label == name or label.startswith(f"{name} ") for name in scans)
+    }
+    if not chosen:
+        return None
+    found = isosbestic_point(chosen, x, x_min=x_min)
+    if not found:
+        return None
+    return float(np.median(list(found.values())))
+
+
+def isosbestic_scale(
+    spectra: Mapping[str, tuple[Any, Any]],
+    lam_iso: float,
+    *,
+    scan: str | None = None,
+    floor: float = 0.02,
+) -> tuple[ArrayF, ArrayF]:
+    """Per-well brightness reference at the crossing, and the wells it can serve.
+
+    The value at the crossing is proportional to how much protein the well
+    holds times how bright it is measured, and to nothing else - that is what an
+    isosbestic point means. Dividing a well by it therefore removes amount,
+    path length and pipetting while keeping the titration's shape, and it can be
+    applied to *every* readout of that well, not only to the scan the crossing
+    was found in.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Scan name to ``(wavelengths, Y[n_lambda, n_wells])``.
+    lam_iso : float
+        The crossing [nm]; interpolated between grid points.
+    scan : str | None
+        Scan to read the reference from; ``None`` takes the first one.
+    floor : float
+        A reference below this fraction of the well's own peak is not used: at
+        the instrument's floor the ratio divides by noise.
+
+    Returns
+    -------
+    tuple[ArrayF, ArrayF]
+        The reference per well (1.0 where it cannot be used) and the boolean
+        mask of the wells it could be used for, so a caller can report how many
+        wells were left untouched.
+
+    Raises
+    ------
+    ValueError
+        If ``scan`` is missing, or ``lam_iso`` lies outside its range.
+    """
+    key = scan if scan is not None else next(iter(spectra))
+    if key not in spectra:
+        msg = f"no scan named {key!r}; have {sorted(spectra)}"
+        raise ValueError(msg)
+    lam_a = np.asarray(spectra[key][0], dtype=np.float64)
+    ya = np.asarray(spectra[key][1], dtype=np.float64)
+    if not lam_a.min() <= lam_iso <= lam_a.max():
+        msg = f"{key}: isosbestic {lam_iso:.1f} nm is outside {lam_a.min():.0f}-{lam_a.max():.0f} nm"
+        raise ValueError(msg)
+    ref = np.array([np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])])
+    usable = np.asarray(
+        np.isfinite(ref) & (np.abs(ref) > floor * np.max(np.abs(ya), axis=0)),
+        dtype=bool,
+    )
+    scale = np.ones(ref.size, dtype=np.float64)
+    scale[usable] = ref[usable]
+    return scale, usable
+
+
 def normalise_to_isosbestic(
-    spectra: Mapping[str, tuple[Any, Any]], lam_iso: float
+    spectra: Mapping[str, tuple[Any, Any]],
+    lam_iso: float,
+    *,
+    scan: str | None = None,
 ) -> dict[str, tuple[Any, Any]]:
-    """Divide every spectrum by its own value at the isosbestic wavelength.
+    """Divide every spectrum by its value at the isosbestic wavelength.
 
     At an isosbestic point the signal is the same for every titration state, so
     the ratio to it removes per-well brightness, path length and pipetting while
@@ -345,6 +506,13 @@ def normalise_to_isosbestic(
         Label to ``(wavelengths, Y[n_lambda, n_wells])``.
     lam_iso : float
         The isosbestic wavelength [nm]; interpolated between grid points.
+    scan : str | None
+        Take the per-well reference from this scan and apply it to **every**
+        scan, which is the physical normalisation when several readouts of one
+        well are fitted together: the crossing is a property of the sample, not
+        of the detector window, and an emission scan has no crossing of its own
+        to divide by. ``None`` divides each scan by its own value there, which is
+        what a single-scan normalisation means.
 
     Returns
     -------
@@ -359,6 +527,15 @@ def normalise_to_isosbestic(
     ValueError
         If ``lam_iso`` lies outside a label's wavelength range.
     """
+    if scan is not None:
+        scale, _usable = isosbestic_scale(spectra, lam_iso, scan=scan)
+        return {
+            label: (
+                np.asarray(lam, dtype=np.float64),
+                np.asarray(y, dtype=np.float64) / scale,
+            )
+            for label, (lam, y) in spectra.items()
+        }
     out: dict[str, tuple[Any, Any]] = {}
     for label, (lam, y) in spectra.items():
         lam_a = np.asarray(lam, dtype=np.float64)
@@ -386,6 +563,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     fit_hill: bool = False,
     screen: float | None = None,
     bands: Sequence[str] = EXCITATION_SCAN,
+    isosbestic: float | str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
 
@@ -407,6 +585,9 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         every well.
     bands : Sequence[str]
         Band names whose scans are used whole (default: the excitation scan only).
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting (see :func:`sample_spectra`).
 
     Returns
     -------
@@ -434,6 +615,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=buf,
             bands=bands,
+            isosbestic=isosbestic,
         )
         if not spectra:
             continue

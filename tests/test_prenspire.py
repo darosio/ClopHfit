@@ -11,7 +11,9 @@ from clophfit.prenspire import EnspireFile, Note
 from clophfit.prenspire.spectral import (
     consensus_isosbestic,
     isosbestic_point,
+    isosbestic_scale,
     normalise_to_isosbestic,
+    plate_isosbestic,
 )
 
 data_files_dir = Path(__file__).parent / "EnSpire"
@@ -310,3 +312,120 @@ def test_consensus_isosbestic_pools_measurements() -> None:
     pooled = consensus_isosbestic(datasets)
     each = [isosbestic_point(s, x)["exc"] for s, x in datasets]
     assert abs(pooled - 500.0) <= max(abs(w - 500.0) for w in each) + 0.5
+
+
+def _gained_two_state(
+    seed: int = 5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two-state spectra of one titration with a per-well brightness gain."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    gain = np.random.default_rng(seed).uniform(0.7, 1.3, x.size)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * gain
+    return lam, y, x, gain
+
+
+def test_plate_isosbestic_takes_the_crossing_scan_and_ignores_the_rest() -> None:
+    """Only the scan named as the excitation one locates the crossing."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    # an emission scan that shows no crossing: flat, so its zeros are noise
+    rng = np.random.default_rng(11)
+    lam_em = np.linspace(440.0, 650.0, 80)
+    flat = 1.0 + 0.02 * rng.normal(size=(lam_em.size, x.size))
+    spectra = {"excitation": (lam, y), "emission 420": (lam_em, flat)}
+    found = plate_isosbestic(spectra, x)
+    assert found is not None
+    assert abs(found - 500.0) < 2.0
+
+
+def test_plate_isosbestic_returns_none_without_a_crossing() -> None:
+    """A titration that only changes brightness has no isosbestic point.
+
+    This is the chloride case: bound and free differ in brightness and do not
+    cross inside the measured window, so there is no wavelength to normalise to
+    and the caller must fall back to the raw readout instead of inventing one.
+    """
+    lam = np.linspace(440.0, 650.0, 120)
+    x = np.logspace(0.0, 3.0, 12)
+    base = 1.0 + 0.5 * np.exp(-((lam - 520.0) ** 2) / (2 * 30.0**2))
+    bound = 0.55 * base  # dimmer everywhere, so the two never cross
+    frac = x / (x + 12.0)
+    y = base[:, None] * (1 - frac) + bound[:, None] * frac
+    assert plate_isosbestic({"excitation": (lam, y)}, x) is None
+
+
+def test_isosbestic_scale_supplies_one_reference_for_every_scan() -> None:
+    """One scan's crossing serves every readout of the well.
+
+    An emission scan excited at 420 nm sees the anionic species alone and has no
+    crossing of its own; taking the reference from the excitation scan is what
+    makes the two readouts comparable, and it is why the reference is computed
+    once per plate rather than once per scan.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    lam_em = np.linspace(440.0, 650.0, 80)
+    emission = np.column_stack([np.interp(lam_em, lam, y[:, i]) for i in range(x.size)])
+    spectra = {"excitation": (lam, y), "emission 420": (lam_em, emission)}
+    iso = plate_isosbestic(spectra, x)
+    assert iso is not None
+    scale, usable = isosbestic_scale(spectra, iso)
+    assert usable.all()
+    # with no gain to remove, every well is served the same reference
+    assert np.allclose(scale, scale[0], rtol=0.01)
+    scaled = normalise_to_isosbestic(spectra, iso, scan="excitation")
+    for label in scaled:
+        at = np.array([
+            np.interp(iso, scaled[label][0], scaled[label][1][:, i])
+            for i in range(x.size)
+        ])
+        assert np.allclose(at, 1.0, atol=0.02)
+
+
+def test_a_wrong_reference_wavelength_moves_the_signal_with_the_titrant() -> None:
+    """Off the crossing the correction is titrant-dependent and moves the shape.
+
+    The normalisation only commutes with the titration at a wavelength where both
+    species are equally bright. Twenty nanometres away the reference is a
+    fraction that changes with pH, so the normalised curves stop being two-state -
+    the reason the crossing is located rather than picked.
+    """
+    lam, y, x, _gain = _gained_two_state()
+    iso = plate_isosbestic({"excitation": (lam, y)}, x)
+    assert iso is not None
+    right = normalise_to_isosbestic({"exc": (lam, y)}, iso)["exc"][1]
+    wrong = normalise_to_isosbestic({"exc": (lam, y)}, iso + 20.0)["exc"][1]
+    right_spread = float(np.ptp(right[len(lam) // 2]))
+    wrong_spread = float(np.ptp(wrong[len(lam) // 2]))
+    assert wrong_spread != pytest.approx(right_spread, rel=0.0, abs=1e-9)
+
+
+def test_gain_heterogeneity_tilts_the_crossing_so_x_min_drops_the_acid_end() -> None:
+    """Unequal well brightness moves the slope zero, and x_min pulls it back.
+
+    The crossing is read off a regression of signal on titrant. That regression
+    is only a two-state decomposition when every well weighs the same: with gains
+    the weights no longer sum to zero, the weighted sum of the spectra does not
+    vanish where the species cross, and the zero moves. On the NTT plates the
+    most acidic wells dim beyond the two-state model, which is what ``x_min`` is
+    for. Leaving the wells out is a guess, not a correction - so the crossing
+    this function returns is only as good as the brightness spread of the plate,
+    and on real plates it matches the crossing of the species spectra solved by
+    the whole-spectrum fit to well under a nanometre.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(5.5, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    y *= 0.55 + 0.15 * (x - x.min())  # dim at the acid end
+    naive = plate_isosbestic({"excitation": (lam, y)}, x)
+    guarded = plate_isosbestic({"excitation": (lam, y)}, x, x_min=6.5)
+    assert naive is not None
+    assert guarded is not None
+    assert abs(guarded - 500.0) < abs(naive - 500.0)

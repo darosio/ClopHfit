@@ -537,8 +537,24 @@ class Note:
 
     # MAYBE: Add buffer subtraction logic to prenspire Note.
 
-    def build_titrations(self, ef: EnspireFile) -> None:
-        """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
+    def build_titrations(
+        self, ef: EnspireFile, *, isosbestic: float | str | None = None
+    ) -> None:
+        """Extract titrations from the given ef (_note file like: <well, pH, Cl>).
+
+        Parameters
+        ----------
+        ef : EnspireFile
+            The parsed EnSpire export.
+        isosbestic : float | str | None
+            Divide every well by its signal at the isosbestic point before the
+            titration is assembled, so the legacy projection path is normalised
+            the same way the band and whole-spectrum paths are: a wavelength
+            [nm], ``"auto"`` to locate it per group, or ``None``. The scaling is
+            applied to every label of the group from the excitation scan's
+            crossing, because the crossing belongs to the sample, not to the
+            detector window.
+        """
         if "Labels" not in self._note.columns:
             # the second note dialect names no labels: take the ones the file
             # measured at each row's temperature
@@ -584,10 +600,82 @@ class Note:
                                             group3["Cl"].to_list()
                                         )
                                     meas_dict[label] = value_df
+                                if isosbestic is not None:
+                                    meas_dict = _normalise_titration_isosbestic(
+                                        meas_dict, ef, isosbestic
+                                    )
                                 titrations[name0][name1][f"{grouping}_{name2}"] = (
                                     meas_dict
                                 )
         self.titrations = titrations
+
+
+def _normalise_titration_isosbestic(
+    meas_dict: dict[str, pd.DataFrame],
+    ef: EnspireFile,
+    isosbestic: float | str,
+) -> dict[str, pd.DataFrame]:
+    """Scale one titration group's spectra by its isosbestic signal.
+
+    ``meas_dict`` holds the group's labels as wavelength-indexed frames whose
+    columns are the titrant values, in well order. The crossing is located on
+    the excitation scan (the only scan that carries the two-state crossover) and
+    its per-well value is used as the brightness reference for every label of
+    the group, which is what makes the group's readouts comparable.
+
+    Parameters
+    ----------
+    meas_dict : dict[str, pd.DataFrame]
+        Label to its spectra; wavelengths on the index, titrant per column.
+    ef : EnspireFile
+        The parsed export, for each label's metadata.
+    isosbestic : float | str
+        A wavelength [nm] or ``"auto"``.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        The same frames, normalised. Unchanged when ``"auto"`` finds no crossing,
+        which is what a chloride titration returns.
+    """
+    from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
+        EXCITATION_SCAN_NAMES,
+        isosbestic_scale,
+        plate_isosbestic,
+    )
+
+    excitation = next(
+        (
+            label
+            for label in meas_dict
+            if ef.measurements[label]["metadata"].get("Monochromator") == "Excitation"
+        ),
+        None,
+    )
+    if excitation is None:
+        return meas_dict
+    frame = meas_dict[excitation]
+    spectra = {
+        EXCITATION_SCAN_NAMES[0]: (
+            frame.index.to_numpy(dtype=float),
+            frame.to_numpy(dtype=float),
+        )
+    }
+    x = frame.columns.to_numpy(dtype=float)
+    lam_iso = (
+        plate_isosbestic(spectra, x)
+        if isinstance(isosbestic, str)
+        else float(isosbestic)
+    )
+    if lam_iso is None:
+        return meas_dict
+    scale, _usable = isosbestic_scale(spectra, lam_iso)
+    out: dict[str, pd.DataFrame] = {}
+    for label, one in meas_dict.items():
+        scaled = one.copy()
+        scaled.iloc[:, :] = one.to_numpy(dtype=float) / scale
+        out[label] = scaled
+    return out
 
 
 def merge_enspire_files(files: Sequence[EnspireFile]) -> EnspireFile:

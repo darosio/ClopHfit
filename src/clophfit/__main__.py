@@ -72,7 +72,11 @@ from clophfit.prenspire.mcr import (
     species_by_scan,
     stack_scans,
 )
-from clophfit.prenspire.spectral import fit_titrations_spectral, sample_spectra
+from clophfit.prenspire.spectral import (
+    fit_titrations_spectral,
+    plate_isosbestic,
+    sample_spectra,
+)
 from clophfit.prenspire.thermo import (
     ZERO_C,
     VanthoffModel,
@@ -782,6 +786,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
+@click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape: a wavelength in nm, or 'auto' to locate the crossing per sample and temperature from the excitation scan (the longest-wavelength zero of the signal-versus-titrant slope, the chromophore's, not the protein's own crossing in the far UV). A chloride titration has no such point - bound and free differ in brightness without crossing - so 'auto' normalises nothing there and changes no number. Applies to every method, and writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
     csv_f: str,
@@ -806,6 +811,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     bayes_screen: str | None,
     export: str,
     joins: tuple[str, ...],
+    isosbestic: str | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -866,6 +872,9 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             "--acid-state applies to --method global-bayes and "
             "global-bayes-marginal only"
         )
+    iso = _parse_isosbestic(isosbestic)
+    if iso is not None:
+        _write_isosbestic_table(ef, Path(note_f), Path(out), isosbestic=iso)
     if method in {"band", "both", "all"}:
         fit_enspire_bands(
             ef,
@@ -875,9 +884,10 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             screen=None if screen.lower() == "none" else screen,
             min_rho=min_rho,
             wanted=band_names or bands_module.DIRECT_BANDS,
+            isosbestic=iso,
         )
     if method in {"svd", "both", "all"}:
-        fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose)
+        fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose, isosbestic=iso)
     if method in {"global", "all"}:
         fit_enspire_global(
             ef,
@@ -886,9 +896,10 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             buffer=buffer,
             scans=scans,
             screen=global_screen,
+            isosbestic=iso,
         )
     if method == "vanthoff":
-        fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer)
+        fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer, isosbestic=iso)
     if method == "vanthoff-bayes":
         fit_enspire_vanthoff_bayes(
             ef,
@@ -901,6 +912,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            isosbestic=iso,
         )
     if method == "mcr":
         fit_enspire_mcr(
@@ -926,6 +938,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             x_sigma=x_sigma,
             robust=robust,
             screen=bayes_screen,
+            isosbestic=iso,
         )
     if method == "global-bayes":
         if x_sigma is None:
@@ -943,6 +956,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            isosbestic=iso,
         )
     if method == "global-bayes-marginal":
         if x_sigma is None:
@@ -962,6 +976,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            isosbestic=iso,
         )
     if method == "mcr-bayes":
         if x_sigma is None:
@@ -979,6 +994,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            isosbestic=iso,
         )
     if method == "mcr-constrained-bayes":
         if x_sigma is None:
@@ -997,6 +1013,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             chains=chains,
             cores=cores,
             target_accept=target_accept,
+            isosbestic=iso,
         )
 
 
@@ -1246,6 +1263,117 @@ _MIN_BAYES_WELLS_AFTER_SCREEN = 6  # below this the shared latent axis is not id
 _MIN_VANTHOFF_TEMPS = 2  # one enthalpy needs a pair of temperatures
 
 
+def _parse_isosbestic(value: str | None) -> float | str | None:
+    """Turn ``--normalise-isosbestic`` into a wavelength, ``"auto"`` or None.
+
+    Parameters
+    ----------
+    value : str | None
+        The option as typed: unset, ``"auto"``, or a wavelength in nm.
+
+    Returns
+    -------
+    float | str | None
+        ``None`` when the option is off, ``"auto"`` to locate the crossing, or
+        the wavelength.
+
+    Raises
+    ------
+    click.BadParameter
+        If the value is neither ``"auto"`` nor a positive wavelength.
+    """
+    if value is None:
+        return None
+    text = value.strip().lower()
+    if text in {"auto", "yes", "true"}:
+        return "auto"
+    if text in {"no", "none", "false", ""}:
+        return None
+    try:
+        lam = float(text)
+    except ValueError as err:
+        msg = f"--normalise-isosbestic expects a wavelength in nm or 'auto', got {value!r}"
+        raise click.BadParameter(msg) from err
+    if lam <= 0:
+        msg = f"--normalise-isosbestic expects a positive wavelength, got {lam}"
+        raise click.BadParameter(msg)
+    return lam
+
+
+def _write_isosbestic_table(
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    isosbestic: float | str,
+) -> pd.DataFrame:
+    """Record the crossing each (sample, temperature) was normalised at.
+
+    The wavelength is a fitted-by-search number, not a constant of the method, so
+    it is written beside the K tables instead of being implied by them: a
+    normalised K can only be reproduced with the crossing that produced it.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note_fp : Path
+        The note describing wells, titrant and samples.
+    out_dir : Path
+        Where ``<stem>_isosbestic.csv`` goes.
+    isosbestic : float | str
+        A wavelength [nm] or ``"auto"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (sample, temperature): the wavelength used (``nan`` when the
+        group has no crossing, which is the chloride case) and the wells read.
+    """
+    note = Note(note_fp).note
+    samples = note[note["Name"] != "buffer"]
+    buffers = note[note["Name"] == "buffer"]
+    rows: list[dict[str, object]] = []
+    for (name, temp), group in samples.groupby(
+        ["Name", "Temp"], sort=True, dropna=False
+    ):
+        one = group.drop_duplicates("Well")
+        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
+        wells = one["Well"].tolist()
+        x = np.asarray(one["pH" if is_ph else "Cl"], dtype=np.float64)
+        wanted_temp = float(str(temp))
+        bufw = buffers[np.isclose(buffers["Temp"].astype(float), wanted_temp)][
+            "Well"
+        ].tolist()
+        spectra, used, used_x = sample_spectra(
+            ef,
+            wells,
+            x,
+            str(temp),
+            is_ph=is_ph,
+            buffer_wells=bufw,
+            bands=("exc_anionic",),
+        )
+        # sample_spectra drops blank plate rows, so the crossing is located on
+        # the axis it returns rather than on the note's
+        lam_iso = (
+            plate_isosbestic(spectra, used_x)
+            if isinstance(isosbestic, str)
+            else isosbestic
+        )
+        rows.append({
+            "sample": name,
+            "temp": temp,
+            "isosbestic_nm": lam_iso if lam_iso is not None else np.nan,
+            "n_wells": len(used),
+        })
+    table = pd.DataFrame(rows, columns=["sample", "temp", "isosbestic_nm", "n_wells"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = note_fp.name.removesuffix("_note.csv").removesuffix("_joined_note")
+    table.to_csv(out_dir / f"{stem}_isosbestic.csv", index=False)
+    return table
+
+
 def _resolve_enspire_x_sigma(
     x_sigma: str | None,
     is_ph: bool,
@@ -1301,6 +1429,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
     x_sigma: str | None,
     robust: bool = True,
     screen: str | None = None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Seeded posterior of the shared K per sample/temperature.
 
@@ -1337,6 +1466,11 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
         form. A well flagged in any band is dropped from **every** band: the
         posterior carries one latent axis per well shared by the bands, so the
         bands must keep the same wells. ``None`` keeps every point.
+
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
 
     Returns
     -------
@@ -1375,6 +1509,18 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
             else []
         )
         readouts = bands_module.classify(ef, t, is_ph=is_ph)
+        scale = None
+        if isosbestic is not None:
+            excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
+            if excitation is not None:
+                _lam_iso, scale = bands_module.isosbestic_readout_scale(
+                    ef,
+                    wells,
+                    x,
+                    excitation,
+                    bufw if buffer else (),
+                    isosbestic=isosbestic,
+                )
         data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for r in readouts:
             if r.name not in wanted:
@@ -1385,6 +1531,8 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
                     y, bands_module.band_values(ef, r, bufw)
                 )
             arr = np.array(y, dtype=np.float64)
+            if scale is not None:
+                arr /= scale
             top = float(np.nanmax(np.abs(arr)))
             if not np.isfinite(top) or top <= 0.0:
                 continue
@@ -1542,6 +1690,7 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     screen: str | None,
     min_rho: float,
     wanted: Sequence[str],
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Fit a note's titrations from named bands and write the tables and figure.
 
@@ -1562,6 +1711,11 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     wanted : Sequence[str]
         Bands allowed into the shared K.
 
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
     Returns
     -------
     pd.DataFrame
@@ -1575,6 +1729,7 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
         wanted=wanted,
         min_rho=min_rho,
         screen=screen,
+        isosbestic=isosbestic,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
@@ -1612,6 +1767,7 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     buffer: bool,
     scans: tuple[str, ...] = (),
     screen: float | None = None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Fit a note's titrations from whole spectra and write the table and species spectra.
 
@@ -1634,6 +1790,11 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         dropped and the fit repeated. ``None`` keeps every well, which is what
         this method did before; the band path screens single points by default.
 
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
     Returns
     -------
     pd.DataFrame
@@ -1645,6 +1806,7 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         buffer=buffer,
         screen=screen,
         bands=tuple(scans) if scans else ("exc_anionic",),
+        isosbestic=isosbestic,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
@@ -1689,6 +1851,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Fit whole spectra with a joint posterior over K, x and spectral noise."""
     return _enspire_global_bayes_core(
@@ -1707,6 +1870,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         acid_state=acid_state,
         suffix="global_bayes",
         label="global Bayes",
+        isosbestic=isosbestic,
     )
 
 
@@ -1724,6 +1888,7 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Marginalized whole-spectrum fit: species spectra out of the sampler."""
     return _enspire_global_bayes_core(
@@ -1742,6 +1907,7 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
         acid_state=acid_state,
         suffix="global_bayes_marginal",
         label="global Bayes marginal",
+        isosbestic=isosbestic,
     )
 
 
@@ -1762,6 +1928,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
     acid_state: bool = False,
     suffix: str,
     label: str,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Shared whole-spectrum Bayesian pipeline behind the two fitters.
 
@@ -1796,7 +1963,14 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
         spectra, wells, x = sample_spectra(
-            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=bwells, bands=wanted
+            ef,
+            wells,
+            x,
+            str(temp),
+            is_ph=is_ph,
+            buffer_wells=bwells,
+            bands=wanted,
+            isosbestic=isosbestic,
         )
         if not spectra:
             continue
@@ -2010,7 +2184,12 @@ def _plot_global_bayes(  # ruff: ignore[too-many-statements]
 
 
 def fit_enspire_vanthoff(
-    ef: EnspireFile, note_fp: Path, out_dir: Path, *, buffer: bool
+    ef: EnspireFile,
+    note_fp: Path,
+    out_dir: Path,
+    *,
+    buffer: bool,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Fit a note jointly across temperatures by van't Hoff and write the table.
 
@@ -2025,6 +2204,11 @@ def fit_enspire_vanthoff(
     buffer : bool
         Subtract the buffer well of the same plate column.
 
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
     Returns
     -------
     pd.DataFrame
@@ -2032,7 +2216,9 @@ def fit_enspire_vanthoff(
         ``dH_J_mol`` and ``dS_J_molK`` repeated on each row.
     """
     note_df = Note(note_fp).note
-    table, models = vanthoff_titration(ef, note_df, buffer=buffer)
+    table, models = vanthoff_titration(
+        ef, note_df, buffer=buffer, isosbestic=isosbestic
+    )
     if not models:
         seen = sorted({str(t).split(".")[0] for t in note_df["Temp"].dropna()})
         click.echo(
@@ -2065,6 +2251,7 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Sample the joint van't Hoff fit and write its tables and figure.
 
@@ -2102,6 +2289,11 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
     target_accept : float | None
         NUTS target acceptance; None keeps the sampler default.
 
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
     Returns
     -------
     pd.DataFrame
@@ -2122,7 +2314,9 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
             str, bool, dict[tuple[str, str], tuple[np.ndarray, np.ndarray]], Any, float
         ]
     ] = []
-    for name, info in vanthoff_curves(ef, note, buffer=buffer).items():
+    for name, info in vanthoff_curves(
+        ef, note, buffer=buffer, isosbestic=isosbestic
+    ).items():
         curves = info.curves
         temps = sorted({t for _band, t in curves})
         if len(temps) < _MIN_VANTHOFF_TEMPS:
@@ -2324,6 +2518,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
     buffer: bool,
     scans: tuple[str, ...],
     components: int,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Resolve every sample/temperature by MCR-ALS and write the tables.
 
@@ -2341,6 +2536,11 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
         Scans joined into the data matrix; empty means the excitation scan.
     components : int
         Species to resolve.
+
+    isosbestic : float | str | None
+        Normalise every well by its signal at the isosbestic point before
+        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
+        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
 
     Returns
     -------
@@ -2381,6 +2581,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bufw if buffer else [],
             bands=wanted,
+            isosbestic=isosbestic,
         )
         if not spectra:
             continue
@@ -2454,6 +2655,7 @@ def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Bayesian MCR factorization and draw-wise post-hoc K estimation."""
     note = Note(note_fp).note
@@ -2491,6 +2693,7 @@ def fit_enspire_mcr_bayes(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
+            isosbestic=isosbestic,
         )
         if not scans_data:
             continue
@@ -2747,6 +2950,7 @@ def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
     chains: int,
     cores: int | None,
     target_accept: float | None,
+    isosbestic: float | str | None = None,
 ) -> pd.DataFrame:
     """Run joint Bayesian MCR with titration-constrained profiles and K."""
     note = Note(note_fp).note
@@ -2784,6 +2988,7 @@ def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
+            isosbestic=isosbestic,
         )
         if not scan_data:
             continue
@@ -2877,16 +3082,23 @@ def fit_enspire_mcr_constrained_bayes(  # ruff: ignore[too-many-arguments]
 
 
 # TODO: Simplify this function
-def fit_enspire(  # ruff: ignore[complex-structure, too-many-branches]
+def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many-branches]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
     bands: list[tuple[str, int, int]],
     verbose: int,
+    *,
+    isosbestic: float | str | None = None,
 ) -> None:
-    """Fit prenspire titration (all labels, temp, mutant, titrations)."""
+    """Fit prenspire titration (all labels, temp, mutant, titrations).
+
+    ``isosbestic`` normalises every well by its signal at the isosbestic point
+    before the projection, so the legacy svd path is normalised like the band and
+    whole-spectrum ones (see :meth:`Note.build_titrations`).
+    """
     note = Note(note_fp, verbose=verbose)
-    note.build_titrations(ef)
+    note.build_titrations(ef, isosbestic=isosbestic)
     dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
     ds_data: dict[str, DataArray] = {}
     for name, d_name in note.titrations.items():
@@ -2941,9 +3153,36 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-branches]
 def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:
     print(str(pdf_file))
     print(f"Best fit using '{band_str}' band:\n")
-    ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
-    print(lmfit.ci_report(ci, ndigits=2, with_offset=False))
+    try:
+        ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
+    except (ValueError, TypeError) as err:
+        # The profile interval needs the objective to rise on both sides of the
+        # best fit, and near a flat or bounded parameter it does not, so lmfit
+        # cannot bracket it. The covariance is then the only interval there is:
+        # report it in the same layout rather than losing the K line entirely.
+        print(f"# profile confidence interval unavailable ({err}); using covariance")
+        print(_covariance_report(fit_result, ndigits=2))
+    else:
+        print(lmfit.ci_report(ci, ndigits=2, with_offset=False))
     print(f"\n Plot saved in '{pdf_file}'.\n")
+
+
+def _covariance_report(fit_result: FitResult, *, ndigits: int = 2) -> str:
+    """Build the lmfit confidence-interval layout from the covariance instead.
+
+    The legacy svd path prints a table of the K parameter at the 3, 2 and 1 sigma
+    levels on each side; anything downstream reads that layout. This builds the
+    same seven columns from the fitted standard error, so a run whose profile
+    interval cannot be bracketed still reports a K with an interval.
+    """
+    params = fit_result.result.params if fit_result.result is not None else None
+    if params is None or "K" not in params:
+        return ""
+    k = float(params["K"].value)
+    se = float(params["K"].stderr or np.nan)
+    grid = np.array([-3, -2, -1, 0, 1, 2, 3], dtype=float)
+    values = k + grid * se
+    return "K         : " + " ".join(f"{v:.{ndigits}f}" for v in values)
 
 
 #############################
