@@ -590,8 +590,7 @@ def _resolve_isosbestic(
     note : pd.DataFrame
         Normalised note.
     isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
-        The caller's request; the ``auto-shared``/``auto-scale``/``auto-wavelength``
-        forms need a pass over the plate.
+        The caller's request; ``"auto-scale"`` needs a pass over the plate.
     buffer : bool
         Subtract the buffer wells before locating the crossings.
 
@@ -602,19 +601,14 @@ def _resolve_isosbestic(
         data builders then locate their own). A non-``None`` result also means the
         caller should put a sample's temperatures on one amplitude scale.
     """
-    if isinstance(isosbestic, str) and isosbestic in {
-        "auto-shared",
-        "auto-scale",
-        "auto-wavelength",
-    }:
+    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
         from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
             isosbestic_by_group,
         )
 
-        # auto-scale keeps each temperature's own crossing (the unbiased choice)
-        # and shares only the amplitude; auto-wavelength shares the crossing too
-        shared = isosbestic in {"auto-shared", "auto-wavelength"}
-        return isosbestic_by_group(ef, note, buffer=buffer, shared=shared)
+        # the crossings stay per temperature; what the plate-wide pass buys is
+        # one amplitude scale for the temperatures of a sample
+        return isosbestic_by_group(ef, note, buffer=buffer)
     if isinstance(isosbestic, dict):
         return isosbestic
     return None
@@ -696,12 +690,12 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
     isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
         Normalise every well by its signal at the isosbestic point first (see
         :func:`isosbestic_readout_scale`): a wavelength [nm], ``"auto"`` per
-        (sample, temperature) group, ``"auto-shared"`` for one crossing per
-        sample shared by its temperatures, a mapping of ``(sample, temperature)``
-        to that wavelength, or ``None``. With a per-sample crossing the band
-        maxima are also shared across the sample's temperatures, so the two
-        temperatures keep their measured amplitude ratio instead of each being
-        rescaled to its own peak.
+        (sample, temperature) group, ``"auto-scale"`` for plate-wide crossings
+        with one amplitude scale per sample, a mapping of ``(sample, temperature)``
+        to that wavelength, or ``None``. With ``"auto-scale"`` the band maxima are
+        shared across the sample's temperatures, so the two temperatures keep their
+        measured amplitude ratio instead of each being rescaled to its own peak;
+        the crossings themselves stay per temperature.
 
     Returns
     -------

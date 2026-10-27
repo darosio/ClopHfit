@@ -787,7 +787,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
-@click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale|auto-shared]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. 'auto-shared' (or 'auto-wavelength') uses one crossing for every temperature of a sample: the temperatures are then comparable at one wavelength, but the K of whichever temperature sits further from that wavelength is biased (0.08 pH on NTT/A08 for a 457 nm shared point). A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
+@click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
     csv_f: str,
@@ -1271,7 +1271,7 @@ def _shared_isosbestic(
     *,
     buffer: bool,
 ) -> dict[tuple[str, float], float | None] | None:
-    """Resolve ``auto-shared`` into one crossing per (sample, temperature).
+    """Resolve ``auto-scale`` into one crossing per (sample, temperature).
 
     Parameters
     ----------
@@ -1280,7 +1280,7 @@ def _shared_isosbestic(
     note : pd.DataFrame
         The normalised note.
     isosbestic : float | str | None
-        The option as parsed: a wavelength, ``"auto"``, ``"auto-shared"`` or
+        The option as parsed: a wavelength, ``"auto"``, ``"auto-scale"`` or
         ``None``.
     buffer : bool
         Subtract the buffer wells before locating the crossings.
@@ -1291,13 +1291,8 @@ def _shared_isosbestic(
         The per-sample crossings, or ``None`` when the caller should let each
         group locate its own.
     """
-    if isinstance(isosbestic, str) and isosbestic in {
-        "auto-shared",
-        "auto-scale",
-        "auto-wavelength",
-    }:
-        shared = isosbestic in {"auto-shared", "auto-wavelength"}
-        return isosbestic_by_group(ef, note, buffer=buffer, shared=shared)
+    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
+        return isosbestic_by_group(ef, note, buffer=buffer)
     return None
 
 
@@ -1321,14 +1316,12 @@ def _parse_isosbestic(value: str | None) -> float | str | None:
     value : str | None
         The option as typed: unset, ``"auto"`` (one crossing per sample and
         temperature), ``"auto-scale"`` (the same crossings, with the amplitude
-        shared across a sample's temperatures), ``"auto-shared"`` or
-        ``"auto-wavelength"`` (one crossing per sample as well), or a wavelength
-        in nm.
+        shared across a sample's temperatures), or a wavelength in nm.
 
     Returns
     -------
     float | str | None
-        ``None`` when the option is off, ``"auto"`` or ``"auto-shared"``, or the
+        ``None`` when the option is off, ``"auto"`` or ``"auto-scale"``, or the
         wavelength.
 
     Raises
@@ -1345,11 +1338,6 @@ def _parse_isosbestic(value: str | None) -> float | str | None:
         "true": "auto",
         "auto-scale": "auto-scale",
         "scale": "auto-scale",
-        "auto-shared": "auto-shared",
-        "shared": "auto-shared",
-        "auto-sample": "auto-shared",
-        "auto-wavelength": "auto-wavelength",
-        "one-wavelength": "auto-wavelength",
         "no": None,
         "none": None,
         "false": None,
@@ -1401,8 +1389,8 @@ def _write_isosbestic_table(
     note = Note(note_fp).note
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
-    if isinstance(isosbestic, str) and isosbestic == "auto-shared":
-        shared = isosbestic_by_group(ef, note, shared=True)
+    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
+        shared = isosbestic_by_group(ef, note)
         shared_rows = [
             {
                 "sample": name,

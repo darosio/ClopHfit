@@ -528,13 +528,8 @@ def _resolve_isosbestic(
     dict[tuple[str, float], float | None] | None
         The crossings, or ``None`` when each group locates its own.
     """
-    if isinstance(isosbestic, str) and isosbestic in {
-        "auto-shared",
-        "auto-scale",
-        "auto-wavelength",
-    }:
-        shared = isosbestic in {"auto-shared", "auto-wavelength"}
-        return isosbestic_by_group(ef, note, buffer=buffer, shared=shared)
+    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
+        return isosbestic_by_group(ef, note, buffer=buffer)
     if isinstance(isosbestic, dict):
         return isosbestic
     return None
@@ -625,15 +620,16 @@ def vanthoff_curves(  # ruff: ignore[too-many-arguments]
         Monotonicity gate below which a band is dropped, as in the band path.
     isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
         Normalise every well by its signal at the isosbestic point: a wavelength
-        [nm], ``"auto"`` per temperature, ``"auto-shared"`` for one crossing per
-        sample shared by its temperatures, a mapping of ``(sample, temperature)``
-        to that wavelength, or ``None``. Both the least-squares and the posterior
-        joint fit read these curves, so the option reaches them alike.
+        [nm], ``"auto"`` per temperature, ``"auto-scale"`` for plate-wide
+        crossings with one amplitude scale per sample, a mapping of
+        ``(sample, temperature)`` to that wavelength, or ``None``. Both the
+        least-squares and the posterior joint fit read these curves, so the option
+        reaches them alike.
 
-        A shared crossing is the choice a *joint* fit wants: the same wavelength
-        normalises both temperatures, and the amplitudes stay on one scale, so
-        what the enthalpy sees is the measurement's temperature dependence rather
-        than the normalisation's.
+        ``"auto-scale"`` is the choice a *joint* fit wants: each temperature keeps
+        its own crossing, and the amplitudes stay on one scale, so what the
+        enthalpy sees is the measurement's temperature dependence rather than the
+        normalisation's.
 
     Returns
     -------
@@ -712,8 +708,9 @@ def vanthoff_titration(  # ruff: ignore[too-many-arguments]
     isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
         Normalise every well by its signal at the isosbestic point before the
         joint fit: a wavelength [nm], ``"auto"`` per temperature,
-        ``"auto-shared"`` for one crossing per sample (the choice a joint fit
-        wants, see :func:`vanthoff_curves`), a mapping, or ``None``.
+        ``"auto-scale"`` for one amplitude scale across a sample's temperatures
+        (the choice a joint fit wants, see :func:`vanthoff_curves`), a mapping,
+        or ``None``.
 
     Returns
     -------

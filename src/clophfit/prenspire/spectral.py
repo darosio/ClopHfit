@@ -433,23 +433,17 @@ def isosbestic_by_group(
     note: pd.DataFrame,
     *,
     buffer: bool = True,
-    shared: bool = False,
 ) -> dict[tuple[str, float], float | None]:
     """Locate the crossing of every (sample, temperature) group on one plate.
 
-    A plate holds the same construct at two temperatures, and the crossing moves
-    with temperature (on the NTT plates 4.4 nm lower at 37 C than at 20 C). Two
-    normalisations are defensible and they answer different questions:
-
-    * per group (``shared=False``) - each temperature is divided by its own
-      crossing, which is the least biased choice for a fit that treats the
-      temperatures separately;
-    * per sample (``shared=True``) - one wavelength for every temperature, so the
-      two temperatures are normalised the same way and what is left of their
-      amplitude ratio is the measurement's, not the normalisation's.
-
-    The shared value is the median of the group crossings, which is also the
-    honest summary of a shift that is a property of the sample.
+    Each temperature keeps its own crossing, which is the unbiased choice: the
+    crossing moves with temperature (4.42 +/- 0.41 nm lower at 37 C than at 20 C on
+    every plate of the verification set), so one wavelength for both would put one
+    of them off its own crossing and bias its K. What a joint fit and a two-panel
+    figure need is not one wavelength but one amplitude scale, and that is what
+    :func:`~clophfit.prenspire.bands.fit_titrations` and
+    :func:`~clophfit.prenspire.thermo.vanthoff_curves` do with the table this
+    returns.
 
     Parameters
     ----------
@@ -460,8 +454,6 @@ def isosbestic_by_group(
     buffer : bool
         Subtract the buffer wells of the same plate column before locating the
         crossing.
-    shared : bool
-        Collapse each sample's temperatures onto one crossing.
 
     Returns
     -------
@@ -492,14 +484,6 @@ def isosbestic_by_group(
         out[str(name), float(str(temp))] = (
             plate_isosbestic(spectra, used_x) if spectra else None
         )
-    if shared:
-        for name in {key[0] for key in out}:
-            found = [v for (n, _t), v in out.items() if n == name and v is not None]
-            if not found:
-                continue
-            one_lam = float(np.median(found))
-            for key in [k for k in out if k[0] == name]:
-                out[key] = one_lam
     return out
 
 
@@ -662,8 +646,8 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         Band names whose scans are used whole (default: the excitation scan only).
     isosbestic : float | str | None
         Normalise every well by its signal at the isosbestic point before
-        fitting (see :func:`sample_spectra`); ``"auto-shared"`` uses one crossing
-        for every temperature of a sample.
+        fitting (see :func:`sample_spectra`); ``"auto-scale"`` resolves the
+        crossings for the whole plate at once.
 
     Returns
     -------
@@ -676,14 +660,8 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     lam_map = (
-        isosbestic_by_group(
-            ef,
-            note,
-            buffer=buffer,
-            shared=isosbestic in {"auto-shared", "auto-wavelength"},
-        )
-        if isinstance(isosbestic, str)
-        and isosbestic in {"auto-shared", "auto-scale", "auto-wavelength"}
+        isosbestic_by_group(ef, note, buffer=buffer)
+        if isosbestic == "auto-scale"
         else None
     )
     for (name, temp), group in samples.groupby(

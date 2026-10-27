@@ -550,8 +550,8 @@ class Note:
             Divide every well by its signal at the isosbestic point before the
             titration is assembled, so the legacy projection path is normalised
             the same way the band and whole-spectrum paths are: a wavelength
-            [nm], ``"auto"`` to locate it per group, ``"auto-shared"`` for one
-            crossing per sample shared by its temperatures, or ``None``. The
+            [nm], ``"auto"`` to locate it per group, ``"auto-scale"`` to locate
+            every group on the plate at once, or ``None``. The
             scaling is applied to every label of the group from the excitation
             scan's crossing, because the crossing belongs to the sample, not to
             the detector window.
@@ -567,10 +567,10 @@ class Note:
                 at_temp.get(str(t).split(".")[0], " ".join(ef.measurements))
                 for t in self._note["Temp"]
             ]
-        if isinstance(isosbestic, str) and isosbestic == "auto-shared":
+        if isinstance(isosbestic, str) and isosbestic == "auto-scale":
             from clophfit.prenspire.spectral import isosbestic_by_group  # ruff: ignore[import-outside-top-level]
 
-            lam_map = isosbestic_by_group(ef, self._note, shared=True)
+            lam_map = isosbestic_by_group(ef, self._note)
         else:
             lam_map = {}
         df_no_buffer = self._note.query('Name != "buffer"')
