@@ -1433,7 +1433,9 @@ def _write_isosbestic_table(
         # sample_spectra drops blank plate rows, so the crossing is located on
         # the axis it returns rather than on the note's
         lam_iso = (
-            plate_isosbestic(spectra, used_x)
+            plate_isosbestic(
+                spectra, used_x, x_min=bands_module.PH_ACID_END if is_ph else None
+            )
             if isinstance(isosbestic, str)
             else isosbestic
         )
@@ -1598,6 +1600,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
                     excitation,
                     bufw if buffer else (),
                     isosbestic=lam,
+                    x_min=bands_module.PH_ACID_END if is_ph else None,
                 )
         data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for r in readouts:

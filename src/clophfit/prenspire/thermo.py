@@ -477,6 +477,7 @@ def _curves_by_temp(  # ruff: ignore[too-many-arguments, complex-structure]
                     excitation,
                     bufw if buffer else (),
                     isosbestic=isosbestic,
+                    x_min=bands_module.PH_ACID_END if is_ph else None,
                 )
         for r in readouts:
             if r.name not in wanted:

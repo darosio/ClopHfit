@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from clophfit.fitting.spectral import SpectralFit, fit_spectra_global
-from clophfit.prenspire.bands import band_values, blank_rows, classify
+from clophfit.prenspire.bands import PH_ACID_END, band_values, blank_rows, classify
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -208,7 +208,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         out[scan_name(ef, label)] = (lam, y / float(np.nanmax(np.abs(y))))
     if isosbestic is not None:
         lam_iso = (
-            plate_isosbestic(out, x)
+            plate_isosbestic(out, x, x_min=PH_ACID_END if is_ph else None)
             if isinstance(isosbestic, str)
             else float(isosbestic)
         )

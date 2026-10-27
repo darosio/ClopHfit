@@ -54,6 +54,7 @@ _FLAG = "#d1495b"
 __all__ = [
     "DEFAULT_SCREEN",
     "DIRECT_BANDS",
+    "PH_ACID_END",
     "BandFit",
     "Readout",
     "band_rho",
@@ -108,6 +109,12 @@ ANIONIC_CL = (395.0, 495.0)
 # anionic: 0.46, worst case 0.55 - worse by the same margin, not helped by
 # removing the noisy group.
 DIRECT_BANDS = ("exc_anionic", "em_exc420")
+#: Wells below this pH are left out of the isosbestic search. The most acidic
+#: wells carry an extra drop that the two-state model cannot describe (see
+#: ``isosbestic_point``'s ``x_min``), and including them bends the slope zero: on
+#: the NTT/A11-G02 37 C plate it moves the crossing 450.3 -> 452.6 nm and the band
+#: K by 0.07 pH. A chloride titration has no acid end to guard.
+PH_ACID_END = 6.0
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
 _PROTEIN_EXCITATION = 350.0
@@ -421,6 +428,7 @@ def isosbestic_readout_scale(  # ruff: ignore[too-many-arguments]
     buffer_wells: Sequence[str] = (),
     *,
     isosbestic: float | str,
+    x_min: float | None = None,
 ) -> tuple[float | None, np.ndarray | None]:
     """Per-well brightness reference of one readout, taken at the crossing.
 
@@ -446,6 +454,9 @@ def isosbestic_readout_scale(  # ruff: ignore[too-many-arguments]
         is located, exactly as the band values are.
     isosbestic : float | str
         A wavelength [nm] or ``"auto"``.
+    x_min : float | None
+        Drop the wells below this titrant value before locating the crossing;
+        pass :data:`PH_ACID_END` on a pH titration.
 
     Returns
     -------
@@ -463,7 +474,7 @@ def isosbestic_readout_scale(  # ruff: ignore[too-many-arguments]
     lam, y = scan_spectrum(ef, readout.label, wells, buffer_wells)
     spectra = {EXCITATION_SCAN_NAMES[0]: (lam, y)}
     lam_iso = (
-        plate_isosbestic(spectra, x)
+        plate_isosbestic(spectra, x, x_min=x_min)
         if isinstance(isosbestic, str)
         else float(isosbestic)
     )
@@ -538,6 +549,7 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
                 excitation,
                 buffer_wells,
                 isosbestic=isosbestic,
+                x_min=PH_ACID_END if is_ph else None,
             )
     data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     tops: dict[str, float] = {}
