@@ -2222,13 +2222,19 @@ def residual_lag1_autocorrelation(
     lag_df = pd.DataFrame(rows)
     if lag_df.empty:
         return lag_df, pd.DataFrame()
+
+    def finite_abs_mean(values: pd.Series) -> float:
+        finite = np.abs(values.to_numpy(dtype=float))
+        finite = finite[np.isfinite(finite)]
+        return float(finite.mean()) if finite.size else float("nan")
+
     summary = (
         lag_df
         .groupby(["trace_id", "label"], observed=True)
         .agg(
             lag1_mean=("lag1_res_autocorr", "mean"),
             lag1_median=("lag1_res_autocorr", "median"),
-            lag1_abs_mean=("lag1_res_autocorr", lambda x: float(np.nanmean(np.abs(x)))),
+            lag1_abs_mean=("lag1_res_autocorr", finite_abs_mean),
         )
         .reset_index()
     )

@@ -623,8 +623,11 @@ def _edge_mean(values: np.ndarray, *, start: bool, n_points: int) -> float:
         return 0.0
     n = max(1, min(int(n_points), values.size))
     window = values[:n] if start else values[-n:]
-    out = float(np.nanmean(window))
-    return out if np.isfinite(out) else float(np.nanmean(values))
+    finite_window = window[np.isfinite(window)]
+    if finite_window.size:
+        return float(finite_window.mean())
+    finite_values = values[np.isfinite(values)]
+    return float(finite_values.mean()) if finite_values.size else 0.0
 
 
 def _edge_signal_priors(

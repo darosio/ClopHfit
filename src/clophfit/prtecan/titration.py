@@ -996,10 +996,13 @@ class TitrationResults(ResidualsMixin):
                 x, y, hue = (df_ctr["K"], df_ctr.index, df_ctr["ctrl"])
                 sns.stripplot(x=x, y=y, size=8, orient="h", hue=hue, ax=ax1)
                 ax1.errorbar(x, y, xerr=df_ctr["sK"], fmt=".", c="lightgray", lw=8)
-                ax1.set_yticklabels([
-                    f"{label} *" if str(label) in partial else str(label)
-                    for label in df_ctr.index
-                ])
+                ax1.set_yticks(
+                    range(len(df_ctr)),
+                    labels=[
+                        f"{label} *" if str(label) in partial else str(label)
+                        for label in df_ctr.index
+                    ],
+                )
                 ax1.legend(loc="upper left", frameon=False)
                 ax1.grid(visible=True, axis="both")
                 ax1.set_xticklabels([])
