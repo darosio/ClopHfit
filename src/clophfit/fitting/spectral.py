@@ -274,6 +274,88 @@ def _solve(
     return theta, se, sigma
 
 
+def paired_delta(
+    value_a: float,
+    value_b: float,
+    replicates_a: Sequence[float],
+    replicates_b: Sequence[float],
+    *,
+    z: float = 1.96,
+) -> dict[str, float]:
+    """Difference of two estimates that came from the same replicates.
+
+    Two scans of one plate are not two experiments: they see the same wells, the
+    same preparation and the same pipetting, so their K values are correlated and
+    the variance of their difference is *not* the sum of the variances. With
+    paired replicates (each delete-one-well refit gives one value per scan, or
+    each bootstrap draw gives one per scan) the correlation is preserved by
+    construction, and
+
+        Var(a - b) = Var(a) + Var(b) - 2 Cov(a, b)
+
+    is estimated directly from the paired differences. Quoting the individual
+    errors in quadrature would overstate the difference by about
+    ``1 / sqrt(1 - rho)`` - a factor 2-3 at the rho these plates show.
+
+    Parameters
+    ----------
+    value_a : float
+        The first reported estimate (the fit's own K, not a replicate mean).
+    value_b : float
+        The second reported estimate, from the other scan of the same wells.
+    replicates_a : Sequence[float]
+        Replicate estimates of the first scan.
+    replicates_b : Sequence[float]
+        Replicate estimates of the second scan, in the same order: replicate ``i``
+        of ``a`` and of ``b`` must come from the same resampled or deleted unit.
+    z : float
+        Width of the returned interval, in standard errors (1.96 = 95 %).
+
+    Returns
+    -------
+    dict[str, float]
+        ``delta`` (``value_a - value_b``), ``se_paired`` and ``ci_lo``/``ci_hi``
+        from the paired differences, ``se_independent`` (the quadrature sum that
+        would be wrong), ``rho`` (the replicate-level correlation) and ``n``.
+        ``se_paired`` is ``nan`` when fewer than three replicates are given.
+
+    Raises
+    ------
+    ValueError
+        If the two replicate sequences differ in length.
+    """
+    a = np.asarray(replicates_a, dtype=np.float64)
+    b = np.asarray(replicates_b, dtype=np.float64)
+    if a.size != b.size:
+        msg = f"paired replicates must have the same length, got {a.size} and {b.size}"
+        raise ValueError(msg)
+    delta = float(value_a - value_b)
+    n = int(a.size)
+    out = {
+        "delta": delta,
+        "se_paired": float("nan"),
+        "ci_lo": float("nan"),
+        "ci_hi": float("nan"),
+        "se_independent": float("nan"),
+        "rho": float("nan"),
+        "n": float(n),
+    }
+    if n < 3:  # ruff: ignore[magic-value-comparison] - two replicates cannot give a covariance
+        return out
+    d = a - b
+    se_paired = float(np.std(d, ddof=1))
+    se_ind = float(np.sqrt(np.var(a, ddof=1) + np.var(b, ddof=1)))
+    rho = float(np.corrcoef(a, b)[0, 1])
+    out.update({
+        "se_paired": se_paired,
+        "ci_lo": delta - z * se_paired,
+        "ci_hi": delta + z * se_paired,
+        "se_independent": se_ind,
+        "rho": rho,
+    })
+    return out
+
+
 def _bootstrap_wells(  # ruff: ignore[too-many-arguments]
     x: ArrayF,
     spectra: Sequence[ArrayF],

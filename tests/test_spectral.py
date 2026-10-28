@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.spectral import fit_spectra_global
+from clophfit.fitting.spectral import fit_spectra_global, paired_delta
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
@@ -269,3 +269,34 @@ def test_well_bootstrap_strata_resamples_within_columns() -> None:
     assert np.isfinite(plain.se_boot)
     assert np.isfinite(stratified.se_boot)
     assert stratified.ci_boot[0] < stratified.K < stratified.ci_boot[1]
+
+
+def test_paired_delta_recovers_a_known_correlation() -> None:
+    """Two estimates from the same replicates: the paired error is the right one.
+
+    The replicates are built with a known correlation, so the test can check the
+    three things the estimator exists for: the paired standard error matches the
+    analytic one, it is smaller than the quadrature sum by 1/sqrt(1-rho), and the
+    correlation is recovered.
+    """
+    rng = np.random.default_rng(23)
+    n = 4000
+    common = rng.normal(0.0, 0.10, n)  # the shared well/preparation error
+    a = 7.20 + common + rng.normal(0.0, 0.05, n)
+    b = 7.15 + common + rng.normal(0.0, 0.05, n)
+    out = paired_delta(7.20, 7.15, a, b)
+    # rho follows from the construction: shared term over total variance
+    rho_true = 0.10**2 / (0.10**2 + 0.05**2)
+    analytic = np.sqrt(2 * (0.10**2 + 0.05**2) * (1 - rho_true))
+    assert out["delta"] == pytest.approx(0.05, abs=1e-12)
+    assert out["rho"] == pytest.approx(rho_true, abs=0.03)
+    assert out["se_paired"] == pytest.approx(analytic, rel=0.06)
+    # the quadrature sum is wider by 1/sqrt(1-rho)
+    assert out["se_independent"] == pytest.approx(
+        out["se_paired"] / np.sqrt(1 - rho_true), rel=0.06
+    )
+    assert out["ci_lo"] < out["delta"] < out["ci_hi"]
+    # a short or mismatched series is refused rather than silently used
+    assert np.isnan(paired_delta(7.2, 7.1, a[:2], b[:2])["se_paired"])
+    with pytest.raises(ValueError, match="same length"):
+        paired_delta(7.2, 7.1, a, b[:-1])
