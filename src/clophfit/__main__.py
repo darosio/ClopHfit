@@ -786,6 +786,8 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--robust/--no-robust", "robust", default=True, show_default=True, help="For --method bayes: Student-t (nu = 3) likelihood, which down-weights outliers; --no-robust gives a plain Normal, i.e. maximum likelihood with the latent axis still on.")  # fmt: skip
 @click.option("--bayes-screen", type=str, default=None, help="For --method bayes: point screen applied to the readouts before sampling, in the --screen form (e.g. studentized:0.05:5). A well flagged in any band is dropped from every band, so the posterior and the band fit see the same wells and the latent axis stays shared. Off by default: --robust instead down-weights outliers, which is not the same as deleting them.")  # fmt: skip
 @click.option("--global-screen", type=float, default=None, help="For --method global: family-wise level (e.g. 0.05) of a well screen - a well whose standardized whole-spectrum residual is beyond the chi-square cutoff is dropped and the fit repeated. Off by default, because this method never screened; set it when comparing against the screened band path.")  # fmt: skip
+@click.option("--global-boot", type=int, default=0, show_default=True, help="For --method global: well-cluster bootstrap replicates for the reported interval. The default 0 reports the delete-one-well jackknife only. Every replicate resamples whole wells - all scans and all wavelengths of a well together - because the wavelengths of a spectrum are not independent observations; the Jacobian error of a whole-spectrum fit comes out orders of magnitude too small. 500 is a sensible choice.")  # fmt: skip
+@click.option("--global-strata", type=click.Choice(["none", "column"], case_sensitive=False), default="none", show_default=True, help="For --method global --global-boot: 'column' resamples wells within each plate column, which keeps every replicate spanning the titration axis (the design-preserving choice for these plates); 'none' resamples from one pool.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr (--method mcr-bayes too). Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 @click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
@@ -813,6 +815,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     export: str,
     joins: tuple[str, ...],
     isosbestic: str | None,
+    global_boot: int,
+    global_strata: str,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -898,6 +902,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             scans=scans,
             screen=global_screen,
             isosbestic=iso,
+            n_boot=global_boot,
+            strata=global_strata,
         )
     if method == "vanthoff":
         fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer, isosbestic=iso)
@@ -1849,6 +1855,8 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     scans: tuple[str, ...] = (),
     screen: float | None = None,
     isosbestic: float | str | None = None,
+    n_boot: int = 0,
+    strata: str = "none",
 ) -> pd.DataFrame:
     """Fit a note's titrations from whole spectra and write the table and species spectra.
 
@@ -1875,6 +1883,14 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         Normalise every well by its signal at the isosbestic point before
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+    n_boot : int
+        Well-cluster bootstrap replicates behind the reported interval (0 leaves
+        it to the jackknife alone). Whole wells are resampled, all scans and all
+        wavelengths together, because the wavelengths of one spectrum are not
+        independent observations.
+    strata : str
+        ``"column"`` resamples wells within each plate column so every replicate
+        spans the titration axis; ``"none"`` resamples from one pool.
 
     Returns
     -------
@@ -1888,6 +1904,8 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         screen=screen,
         bands=tuple(scans) if scans else ("exc_anionic",),
         isosbestic=isosbestic,
+        n_boot=n_boot,
+        strata=strata,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")

@@ -99,6 +99,23 @@ class SpectralFit:
         Wells used.
     well_scale : ArrayF
         Fitted per-well amplitudes (all 1 unless ``well_scale`` was requested).
+    kept : np.ndarray
+        Wells kept by the well screen, all True when it was off.
+    residuals : dict[str, ArrayF]
+        Per label, the wavelength-by-well residual matrix
+        ``E_s(lambda, w) = F_s_obs(lambda, w) - F_s_model(lambda, w)``, shape
+        ``(n_lambda, n_wells)``.
+    well_rms : dict[str, ArrayF]
+        Per label, the per-well root-mean-square residual trace across
+        wavelengths, ``R_s(w) = sqrt(mean_lambda E_s(lambda, w)**2)``, shape
+        ``(n_wells,)``.
+    se_boot : float
+        Well-cluster bootstrap standard error of K (resampling entire wells
+        with all their scans and wavelengths kept together; ``nan`` when
+        ``n_boot == 0``).
+    ci_boot : tuple[float, float]
+        95 % percentile interval ``(q025, q975)`` from the well-cluster
+        bootstrap (``(nan, nan)`` when ``n_boot == 0``).
     """
 
     K: float
@@ -115,6 +132,10 @@ class SpectralFit:
     well_scale: ArrayF
     kept: np.ndarray
     """Wells kept by the well screen, all True when it was off."""
+    residuals: dict[str, ArrayF]
+    well_rms: dict[str, ArrayF]
+    se_boot: float = np.nan
+    ci_boot: tuple[float, float] = (np.nan, np.nan)
 
 
 def _fractions(x: ArrayF, theta: ArrayF, model: _Model, *, is_ph: bool) -> ArrayF:
@@ -253,6 +274,85 @@ def _solve(
     return theta, se, sigma
 
 
+def _bootstrap_wells(  # ruff: ignore[too-many-arguments]
+    x: ArrayF,
+    spectra: Sequence[ArrayF],
+    model: _Model,
+    *,
+    theta0: ArrayF,
+    is_ph: bool,
+    n_boot: int,
+    seed: int,
+    strata: Sequence[object] | None = None,
+) -> tuple[float, tuple[float, float]]:
+    """Bootstrap K by resampling whole wells, never single wavelengths.
+
+    The observations of a titration are the wells, not the pixels. Every well
+    contributes one spectrum per scan, all measured on one preparation at one
+    target value, and the wavelengths of a spectrum share their error (lamp
+    drift, pipetting, focus). Resampling single wavelengths multiplies the
+    apparent sample size by a few hundred and shrinks the interval with it - the
+    same mistake the Jacobian makes, and the reason the naive standard error of
+    these fits comes out orders of magnitude too small.
+
+    A draw takes wells with replacement; all scans and all wavelengths of a drawn
+    well move together. ``strata`` keeps the design intact: resampling inside a
+    plate column keeps every replicate spanning the whole titration axis, which
+    is what makes the resampled fit identifiable.
+
+    Replicates start from the best fit, so each is one short least-squares solve
+    rather than a fresh grid search.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant value per well, already screened.
+    spectra : Sequence[ArrayF]
+        One ``(n_lambda, n_wells)`` matrix per label.
+    model : _Model
+        The model the fit used.
+    theta0 : ArrayF
+        Best-fit parameters, the starting point of every replicate.
+    is_ph : bool
+        pH titration (else ligand binding).
+    n_boot : int
+        Number of replicates.
+    seed : int
+        Seed, so the interval reproduces.
+    strata : Sequence[object] | None
+        Optional stratum label per well; ``None`` resamples all wells as one pool.
+
+    Returns
+    -------
+    tuple[float, tuple[float, float]]
+        Standard deviation of the bootstrap K values and their 2.5/97.5
+        percentiles; ``(nan, (nan, nan))`` when fewer than two replicates were
+        usable.
+    """
+    rng = np.random.default_rng(seed)
+    n_wells = x.size
+    if strata is None:
+        groups = [np.arange(n_wells)]
+    else:
+        labels = np.asarray(list(strata), dtype=object)
+        groups = [np.flatnonzero(labels == key) for key in dict.fromkeys(labels)]
+        groups = [g for g in groups if g.size]
+    draws: list[float] = []
+    for _ in range(n_boot):
+        idx = np.concatenate([rng.choice(g, size=g.size, replace=True) for g in groups])
+        if np.unique(idx).size < _MIN_GLOBAL_WELLS:
+            continue
+        theta, *_ = _solve(
+            x[idx], [y[:, idx] for y in spectra], model, is_ph=is_ph, theta0=theta0
+        )
+        draws.append(float(theta[0]))
+    if len(draws) < 2:  # ruff: ignore[magic-value-comparison] - two draws are the minimum for a standard deviation
+        return float("nan"), (float("nan"), float("nan"))
+    values = np.asarray(draws, dtype=np.float64)
+    lo, hi = np.quantile(values, [0.025, 0.975])
+    return float(np.std(values, ddof=1)), (float(lo), float(hi))
+
+
 def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     x: ArrayF,
     spectra: Mapping[str, tuple[ArrayF, ArrayF]],
@@ -263,6 +363,9 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     acid_state: bool = False,
     screen: float | None = None,
     jackknife: bool = True,
+    n_boot: int = 0,
+    seed: int = 0,
+    strata: Sequence[object] | None = None,
 ) -> SpectralFit:
     """Fit K to whole spectra of one or more labels, species spectra eliminated linearly.
 
@@ -296,6 +399,16 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         across the two must say which is which.
     jackknife : bool
         Compute the delete-one-well jackknife standard error (one refit per well).
+    n_boot : int
+        Number of hierarchical well-cluster bootstrap replicates (0 disables).
+        Each bootstrap draw resamples entire wells with replacement so all
+        scans and all wavelengths of a resampled well stay coupled.
+    seed : int
+        Random seed for the well-cluster bootstrap.
+    strata : Sequence[object] | None
+        Optional stratum label per well (e.g. plate column ``01..08``). When
+        given, wells are resampled with replacement within each stratum so
+        every bootstrap replicate spans the full titration design.
 
     Returns
     -------
@@ -340,6 +453,15 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     c = _fractions(xa, theta, model, is_ph=is_ph)
     species, res, scale = _project(c, ys, well_scale=well_scale, sigma=sigma)
     weighted = np.hstack([r / s for r, s in zip(res, sigma, strict=True)])
+    # res[j] has shape (n_wells, n_lambda); store (n_lambda, n_wells) and R_s(w)
+    resid_by_label = {
+        label: np.asarray(r.T, dtype=np.float64)
+        for label, r in zip(labels, res, strict=True)
+    }
+    well_rms_by_label = {
+        label: np.asarray(np.sqrt(np.mean(r**2, axis=1)), dtype=np.float64)
+        for label, r in zip(labels, res, strict=True)
+    }
     se = se_acid = np.nan
     if jackknife:
         thetas = []
@@ -357,6 +479,23 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
             se_acid = float(
                 np.sqrt((k2.size - 1) / k2.size * np.sum((k2 - k2.mean()) ** 2))
             )
+    se_boot = np.nan
+    ci_boot = (np.nan, np.nan)
+    if n_boot > 0:
+        se_boot, ci_boot = _bootstrap_wells(
+            xa,
+            ys,
+            model,
+            theta0=theta,
+            is_ph=is_ph,
+            n_boot=n_boot,
+            seed=seed,
+            strata=(
+                None
+                if strata is None
+                else [str(v) for v in np.asarray(list(strata), dtype=object)[kept]]
+            ),
+        )
     return SpectralFit(
         K=float(theta[0]),
         se=se,
@@ -371,6 +510,10 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         n_wells=int(xa.size),
         well_scale=scale,
         kept=kept,
+        residuals=resid_by_label,
+        well_rms=well_rms_by_label,
+        se_boot=se_boot,
+        ci_boot=ci_boot,
     )
 
 

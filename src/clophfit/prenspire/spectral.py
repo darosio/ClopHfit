@@ -228,6 +228,9 @@ def _row(base: dict[str, object], subset: str, fit: SpectralFit) -> dict[str, ob
         "K": fit.K,
         "se": fit.se,
         "se_naive": fit.se_naive,
+        "se_boot": fit.se_boot,
+        "ci_lo": fit.ci_boot[0],
+        "ci_hi": fit.ci_boot[1],
         "hill": fit.hill,
         "n": fit.n_wells,
         "sv_ratio": float(fit.residual_sv[0] / fit.residual_sv[1]),
@@ -623,6 +626,9 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     screen: float | None = None,
     bands: Sequence[str] = EXCITATION_SCAN,
     isosbestic: float | str | None = None,
+    n_boot: int = 0,
+    seed: int = 0,
+    strata: str = "none",
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
 
@@ -648,6 +654,19 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         Normalise every well by its signal at the isosbestic point before
         fitting (see :func:`sample_spectra`); ``"auto-scale"`` resolves the
         crossings for the whole plate at once.
+    n_boot : int
+        Well-cluster bootstrap replicates for the reported interval (0 leaves it
+        out). The interval resamples whole wells - every scan and every
+        wavelength of a well together - because wavelengths inside a spectrum are
+        not independent observations, and the Jacobian error of a whole-spectrum
+        fit is orders of magnitude too small. See
+        :func:`~clophfit.fitting.spectral.fit_spectra_global`.
+    seed : int
+        Seed of the bootstrap.
+    strata : str
+        ``"none"`` resamples wells from one pool; ``"column"`` resamples within
+        each plate column, which keeps every replicate spanning the titration
+        axis and is the design-preserving choice for these plates.
 
     Returns
     -------
@@ -690,6 +709,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         if not spectra:
             continue
         base: dict[str, object] = {"sample": name, "temp": temp}
+        design = [str(w)[1:] for w in wells] if strata == "column" else None
         fit = fit_spectra_global(
             x,
             spectra,
@@ -697,6 +717,9 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             fit_hill=fit_hill,
             well_scale=well_scale,
             screen=screen,
+            n_boot=n_boot,
+            seed=seed,
+            strata=design,
         )
         fits[f"{name} {temp}"] = fit
         rows.append(_row(base, "all", fit))
@@ -717,3 +740,123 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             rows.append(_row(base, f"row {plate_row}", row_fit))
 
     return pd.DataFrame(rows), fits
+
+
+def scan_outliers(
+    spectra: Mapping[str, tuple[Any, Any]],
+    wells: Sequence[str],
+    x: ArrayF,
+    *,
+    z: float = 6.0,
+    n_states: int = 2,
+) -> pd.DataFrame:
+    """Flag wells whose spectrum no two-state mixture can explain, scan by scan.
+
+    The point of this check is to look at each scan on its own, before any model
+    is fitted and before several scans are combined: a well that is off in one
+    scan only is a measurement fault (bubble, focus, an air gap at 350-390 nm),
+    while a well off in all of them is a bad well or a bad pH.
+
+    Each well is projected onto the subspace spanned by the first ``n_states``
+    singular vectors of the *other* wells and the residual is kept. Projecting on
+    a basis computed without the well is what makes the test honest: fitted on
+    all the wells, a spectral outlier helps define the basis it is then compared
+    with, and hides.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Scan name to ``(wavelengths, Y[n_lambda, n_wells])``, already corrected
+        per well (buffer subtracted).
+    wells : Sequence[str]
+        Well label per column of every ``Y``.
+    x : ArrayF
+        Titrant value per well, for reporting.
+    z : float
+        Robust cut on the residual: a well whose leave-one-out residual root mean
+        square exceeds ``median + z * MAD`` in any scan is flagged.
+    n_states : int
+        Rank of the expected mixture. A two-state titration spans at most rank 2.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (scan, well): ``scan``, ``well``, ``x``, ``rms`` (the
+        leave-one-out residual RMS over wavelengths), ``robust_z`` and
+        ``peak_nm`` (where that residual is largest). Sorted by ``robust_z``
+        descending, so the worst spectrum of the plate is the first row.
+    """
+    rows: list[dict[str, object]] = []
+    for name, (lam, y) in spectra.items():
+        lam_a = np.asarray(lam, dtype=np.float64)
+        ya = np.asarray(y, dtype=np.float64)
+        n_wells = ya.shape[1]
+        if n_wells < n_states + 2:
+            continue
+        rms = np.zeros(n_wells)
+        peak = np.zeros(n_wells)
+        for j in range(n_wells):
+            others = np.delete(ya, j, axis=1)
+            u, _s, _vt = np.linalg.svd(others, full_matrices=False)
+            basis = u[:, :n_states]
+            resid = ya[:, j] - basis @ (basis.T @ ya[:, j])
+            rms[j] = float(np.sqrt(np.mean(resid**2)))
+            peak[j] = float(lam_a[int(np.argmax(np.abs(resid)))])
+        med = float(np.median(rms))
+        mad = float(1.4826 * np.median(np.abs(rms - med)))
+        scale = mad if mad > 0 else float(np.std(rms)) or 1.0
+        robust_z = (rms - med) / scale
+        rows.extend(
+            {
+                "scan": name,
+                "well": wells[j],
+                "x": float(np.asarray(x, dtype=np.float64)[j]),
+                "rms": rms[j],
+                "robust_z": float(robust_z[j]),
+                "peak_nm": peak[j],
+                "flagged": bool(robust_z[j] > z),
+            }
+            for j in range(n_wells)
+        )
+    table = pd.DataFrame(
+        rows,
+        columns=["scan", "well", "x", "rms", "robust_z", "peak_nm", "flagged"],
+    )
+    if table.empty:
+        return table
+    return table.sort_values("robust_z", ascending=False).reset_index(drop=True)
+
+
+def residual_table(fit: SpectralFit, wells: Sequence[str], x: ArrayF) -> pd.DataFrame:
+    """Turn a whole-spectrum fit's residuals into the per-scan R_s(pH) table.
+
+    ``R_s(w)`` is what the residual of a scan looks like as a function of the
+    titration: the root mean square over that scan's wavelengths. Three such
+    traces (one per scan) say *where* a model fails - at the transition, at the
+    acid end, on one side of the crossing - which a single pooled RMS cannot.
+
+    Parameters
+    ----------
+    fit : SpectralFit
+        A fit from :func:`~clophfit.fitting.spectral.fit_spectra_global`.
+    wells : Sequence[str]
+        Well label per column of the residual matrices.
+    x : ArrayF
+        Titrant value per well.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (scan, well): ``scan``, ``well``, ``x`` and ``rms`` (the
+        per-well residual RMS over that scan's wavelengths).
+    """
+    rows: list[dict[str, object]] = []
+    for scan, values in fit.well_rms.items():
+        for j, value in enumerate(np.asarray(values, dtype=np.float64)):
+            rows.append({
+                "scan": scan,
+                "well": wells[j],
+                "x": float(np.asarray(x, dtype=np.float64)[j]),
+                "rms": float(value),
+            })
+    return pd.DataFrame(rows, columns=["scan", "well", "x", "rms"])

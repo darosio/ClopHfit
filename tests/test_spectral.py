@@ -10,7 +10,11 @@ import pytest
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.spectral import fit_spectra_global
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
-from clophfit.prenspire.spectral import fit_titrations_spectral
+from clophfit.prenspire.spectral import (
+    fit_titrations_spectral,
+    residual_table,
+    scan_outliers,
+)
 
 DATA = Path(__file__).parent / "EnSpire"
 LAM = np.arange(400.0, 520.0)
@@ -183,3 +187,85 @@ def test_well_screen_drops_one_broken_spectrum() -> None:
         x, {"exc": (lam, y_clean)}, well_scale=True, jackknife=False, screen=0.05
     )
     assert clean.kept.all()
+
+
+def test_residual_traces_are_per_scan_and_per_well() -> None:
+    """R_s(pH) comes back per scan and per well, and is small for a clean fit."""
+    y, *_ = _spectra(7.4, amount_sd=0.0, seed=11)
+    green = y * 3.0
+    fit = fit_spectra_global(
+        X_PH, {"exc": (LAM, y), "em": (LAM + 100.0, green)}, jackknife=False
+    )
+    table = residual_table(fit, [f"W{i:02d}" for i in range(X_PH.size)], X_PH)
+    assert set(table["scan"]) == {"exc", "em"}
+    assert table.shape[0] == 2 * X_PH.size
+    assert (table["rms"] < 0.02).all()
+    # the scale of the residual follows each scan's own amplitude
+    exc = table[table["scan"] == "exc"]["rms"].to_numpy()
+    em = table[table["scan"] == "em"]["rms"].to_numpy()
+    assert np.median(em) > 2 * np.median(exc)
+
+
+def test_scan_outliers_flags_the_broken_spectrum_of_one_scan() -> None:
+    """A well broken in one scan only is named there and not in the others."""
+    y, *_ = _spectra(7.4, amount_sd=0.0, seed=12)
+    good = y.copy()
+    broken = y.copy()
+    broken[:, 5] *= 1.0 + 0.5 * np.sin(np.linspace(0, 6, LAM.size))
+    wells = [f"W{i:02d}" for i in range(X_PH.size)]
+    table = scan_outliers({"exc": (LAM, good), "em": (LAM, broken)}, wells, X_PH, z=6.0)
+    assert set(table.columns) == {
+        "scan",
+        "well",
+        "x",
+        "rms",
+        "robust_z",
+        "peak_nm",
+        "flagged",
+    }
+    flagged = table[table["flagged"]]
+    assert set(flagged["well"]) == {"W05"}
+    assert set(flagged["scan"]) == {"em"}
+    assert flagged["robust_z"].iloc[0] > 6.0
+    # the residual of the broken well peaks inside the sine's swing
+    assert LAM.min() <= flagged["peak_nm"].iloc[0] <= LAM.max()
+
+
+def test_well_bootstrap_is_wider_than_the_naive_jacobian_error() -> None:
+    """Resampling wells, not pixels, gives the interval the pixels cannot.
+
+    A fit that treats every wavelength as independent reports an error far below
+    the truth: 120 wavelengths of one spectrum are not 120 observations. The
+    well-cluster bootstrap resamples whole spectra, so its interval reflects what
+    would change if the experiment were repeated, which is the number to quote.
+    """
+    y, *_ = _spectra(7.4, amount_sd=0.05, seed=13)
+    fit = fit_spectra_global(
+        X_PH, {"exc": (LAM, y)}, n_boot=200, seed=0, jackknife=True
+    )
+    assert fit.se_boot > 5 * fit.se_naive
+    lo, hi = fit.ci_boot
+    assert lo < fit.K < hi
+    assert 0 < (hi - lo) < 1.0
+    # the jackknife and the bootstrap agree, as two well-level estimates should
+    assert 0.4 < fit.se_boot / fit.se < 2.5
+
+
+def test_well_bootstrap_strata_resamples_within_columns() -> None:
+    """Stratifying by plate column keeps every replicate spanning the axis."""
+    y, *_ = _spectra(7.4, amount_sd=0.02, seed=14)
+    columns = [str(i % 8 + 1).zfill(2) for i in range(X_PH.size)]
+    plain = fit_spectra_global(
+        X_PH, {"exc": (LAM, y)}, n_boot=100, seed=1, jackknife=False
+    )
+    stratified = fit_spectra_global(
+        X_PH,
+        {"exc": (LAM, y)},
+        n_boot=100,
+        seed=1,
+        jackknife=False,
+        strata=columns,
+    )
+    assert np.isfinite(plain.se_boot)
+    assert np.isfinite(stratified.se_boot)
+    assert stratified.ci_boot[0] < stratified.K < stratified.ci_boot[1]
