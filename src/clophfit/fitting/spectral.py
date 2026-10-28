@@ -1133,11 +1133,12 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
       give the sampler somewhere to put systematically shaped residuals - the
       correlated-along-wavelength errors noted in the module docstring -
       instead of letting the shared species spectra absorb them. Coverage
-      testing with AR(1) wavelength noise (benchmarks/mcr_bayes_constrained_eval.py)
+      testing with AR(1) wavelength noise (the evaluation is in the method-sweep
+      summary, not in the package)
       shows the free-parameter version undercovers there (0.30-0.85 observed
       95% coverage) and the noise model here directly targets that failure;
       the marginalized fitter itself still undercovers in the same sweep
-      (0.25-0.70; benchmarks/marginal_bayes_coverage_eval.csv), with
+      (0.25-0.70), with
       ``mcr-constrained-bayes`` best-calibrated from noise 0.06 up (0.80-0.95)
       - so verify coverage for a new data regime with the benchmark before
       trusting the intervals.
