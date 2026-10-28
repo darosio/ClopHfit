@@ -26,7 +26,6 @@ from clophfit.fitting.spectral import (
     fit_spectra_global_bayes_marginal,
 )
 from clophfit.prenspire.bands import estimate_x_error_sigma, fit_bands_bayes
-from clophfit.prenspire.mcr import fit_mcr_bayes, fit_mcr_constrained_bayes
 
 tpath = Path(__file__).parent
 
@@ -103,31 +102,6 @@ def test_global_bayes_rejects_invalid_inputs() -> None:
     yn = np.full_like(y, np.nan)
     with pytest.raises(ValueError, match="finite wavelengths"):
         fit_spectra_global_bayes(x, {"exc": (lam, yn)}, x_sigma=0.1)
-
-
-def test_mcr_bayes_rejects_invalid_inputs() -> None:
-    """Bad MCR inputs fail before any sampling runs."""
-    rng = np.random.default_rng(2)
-    x = np.linspace(5.5, 8.5, 6)
-    d = rng.normal(0.5, 0.05, (6, 10))
-    with pytest.raises(ValueError, match="one x value per well"):
-        fit_mcr_bayes(d, x[:-1], x_sigma=0.1)
-    with pytest.raises(ValueError, match=">=2 feasible species"):
-        fit_mcr_bayes(d, x, x_sigma=0.1, n_species=1)
-    with pytest.raises(ValueError, match=">=2 feasible species"):
-        fit_mcr_bayes(d, x, x_sigma=0.1, n_species=11)
-    with pytest.raises(ValueError, match="positive x_sigma"):
-        fit_mcr_bayes(d, x, x_sigma=-0.1)
-    db = d.copy()
-    db[0, 0] = np.nan
-    with pytest.raises(ValueError, match="must be finite"):
-        fit_mcr_bayes(db, x, x_sigma=0.1)
-    with pytest.raises(ValueError, match="every spectral feature"):
-        fit_mcr_constrained_bayes(d, x, np.zeros(9, dtype=int), x_sigma=0.1)
-    with pytest.raises(ValueError, match="contiguous"):
-        fit_mcr_constrained_bayes(
-            d, x, np.array([0, 0, 2] * 3 + [0], dtype=int), x_sigma=0.1
-        )
 
 
 def _two_state_spectra(
@@ -300,141 +274,6 @@ def test_global_bayes_seed_reproducible() -> None:
     k1 = np.asarray(t1.posterior["K"].values).reshape(-1)
     k2 = np.asarray(t2.posterior["K"].values).reshape(-1)
     assert np.array_equal(k1, k2)
-
-
-@pytest.mark.slow
-def test_mcr_bayes_samples_closed_profiles_and_latent_ph() -> None:
-    """Full Bayesian MCR returns closed and titrant-tracking profiles."""
-    rng = np.random.default_rng(12)
-    x = np.linspace(5.5, 8.5, 8)
-    profile = 1 / (1 + 10 ** (7.0 - x))
-    c = np.column_stack([1 - profile, profile])
-    species = np.vstack([np.linspace(0.1, 0.8, 12), np.linspace(0.9, 0.2, 12)]).T
-    d = c @ species.T + rng.normal(0, 0.008, (x.size, species.shape[0]))
-    trace = fit_mcr_bayes(d, x, x_sigma=0.08, seed=5, draws=120, chains=2, cores=1)
-    sampled_c = np.asarray(trace.posterior["profiles"].values)
-    assert sampled_c.shape[-2:] == (x.size, 2)
-    assert np.allclose(sampled_c.sum(axis=-1), 1.0, atol=1e-6)
-    assert trace.posterior["x_true"].shape[-1] == x.size
-    # one column tracks the titrant (up to the sign closure allows); the
-    # softmax profile prior keeps a little slack around the logistic shape
-    med = np.median(sampled_c.reshape(-1, x.size, 2), axis=0)
-    rho = np.abs(np.corrcoef(x, med.T)[0, 1:])
-    assert rho.max() > 0.85
-
-
-@pytest.mark.slow
-def test_constrained_mcr_bayes_recovers_pka_from_synthetic_spectra() -> None:
-    """The joint MCR model estimates K through its HH-constrained profiles."""
-    rng = np.random.default_rng(31)
-    x = np.linspace(5.3, 8.7, 14)
-    k_true = 7.1
-    f = 1 / (1 + 10 ** (k_true - x))
-    c = np.column_stack([f, 1 - f])
-    species = np.vstack([np.linspace(0.1, 0.7, 18), np.linspace(0.8, 0.2, 18)]).T
-    d = c @ species.T + rng.normal(0, 0.004, (x.size, species.shape[0]))
-    trace = fit_mcr_constrained_bayes(
-        d,
-        x,
-        np.zeros(d.shape[1], dtype=int),
-        x_sigma=0.03,
-        seed=8,
-        draws=500,
-        chains=2,
-        cores=1,
-    )
-    kdraw = np.asarray(trace.posterior["K"].values).reshape(-1)
-    hdi = np.asarray(az.hdi(kdraw, prob=0.94), dtype=float)
-    assert hdi[0] <= k_true <= hdi[1]
-    assert "profiles" in trace.posterior
-    assert "x_true" in trace.posterior
-    med = np.median(
-        np.asarray(trace.posterior["profiles"].values).reshape(-1, x.size, 2), axis=0
-    )
-    assert np.allclose(med.sum(axis=1), 1.0, atol=1e-6)
-    # state 0 = empty (deprotonated, rises with pH); state 1 = protonated
-    assert float(np.corrcoef(x, med[:, 0])[0, 1]) > 0.9
-    assert float(np.corrcoef(x, med[:, 1])[0, 1]) < -0.9
-
-
-@pytest.mark.slow
-def test_cli_constrained_mcr_bayes_writes_joint_outputs(
-    tmp_path: Path, runner: CliRunner
-) -> None:
-    """The joint constrained-MCR CLI writes K, latent-x, trace, and figure."""
-    data = tpath / "EnSpire"
-    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
-    note = tmp_path / "NTT-G10_note.csv"
-    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
-    out = tmp_path / "mcr_constrained_bayes"
-    out.mkdir()
-    result = runner.invoke(
-        ppr,
-        [
-            "--out",
-            str(out),
-            "enspire",
-            str(data / "G10.csv"),
-            str(note),
-            "--method",
-            "mcr-constrained-bayes",
-            "--x-sigma",
-            "auto",
-            "--draws",
-            "100",
-            "--chains",
-            "2",
-            "--cores",
-            "1",
-            "--seed",
-            "6",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out / "NTT-G10_K_mcr_constrained_bayes.csv").exists()
-    assert (out / "NTT-G10_x_mcr_constrained_bayes.csv").exists()
-    assert (out / "NTT-G10_mcr_constrained_bayes.pdf").stat().st_size > 1000
-    assert list(out.glob("*_mcr_constrained_bayes.nc"))
-
-
-@pytest.mark.slow
-def test_cli_mcr_bayes_writes_posterior_outputs(
-    tmp_path: Path, runner: CliRunner
-) -> None:
-    """The mcr-bayes CLI writes K, latent-x, trace, and figure outputs."""
-    data = tpath / "EnSpire"
-    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
-    note = tmp_path / "NTT-G10_note.csv"
-    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
-    out = tmp_path / "mcr_bayes"
-    out.mkdir()
-    result = runner.invoke(
-        ppr,
-        [
-            "--out",
-            str(out),
-            "enspire",
-            str(data / "G10.csv"),
-            str(note),
-            "--method",
-            "mcr-bayes",
-            "--x-sigma",
-            "auto",
-            "--draws",
-            "100",
-            "--chains",
-            "2",
-            "--cores",
-            "1",
-            "--seed",
-            "4",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert (out / "NTT-G10_K_mcr_bayes.csv").exists()
-    assert (out / "NTT-G10_x_mcr_bayes.csv").exists()
-    assert (out / "NTT-G10_mcr_bayes.pdf").stat().st_size > 1000
-    assert list(out.glob("*_mcr_bayes.nc"))
 
 
 @pytest.mark.slow
@@ -682,7 +521,7 @@ def test_cli_marginal_bayes_acid_state_writes_third_state(
 
 @pytest.mark.parametrize(
     "method",
-    ["global-bayes", "global-bayes-marginal", "mcr-bayes", "mcr-constrained-bayes"],
+    ["global-bayes", "global-bayes-marginal"],
 )
 def test_cli_whole_spectrum_bayes_requires_x_sigma(
     tmp_path: Path, runner: CliRunner, method: str

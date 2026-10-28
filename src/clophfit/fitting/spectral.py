@@ -1139,7 +1139,7 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
       95% coverage) and the noise model here directly targets that failure;
       the marginalized fitter itself still undercovers in the same sweep
       (0.25-0.70), with
-      ``mcr-constrained-bayes`` best-calibrated from noise 0.06 up (0.80-0.95)
+      the constrained MCR posterior best-calibrated from noise 0.06 up (0.80-0.95)
       - so verify coverage for a new data regime with the benchmark before
       trusting the intervals.
 
