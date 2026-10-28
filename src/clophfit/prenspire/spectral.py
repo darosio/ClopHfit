@@ -742,13 +742,14 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     return pd.DataFrame(rows), fits
 
 
-def scan_outliers(
+def scan_outliers(  # ruff: ignore[too-many-arguments]
     spectra: Mapping[str, tuple[Any, Any]],
     wells: Sequence[str],
     x: ArrayF,
     *,
     z: float = 6.0,
     n_states: int = 2,
+    min_signal: float = 0.0,
 ) -> pd.DataFrame:
     """Flag wells whose spectrum no two-state mixture can explain, scan by scan.
 
@@ -777,6 +778,12 @@ def scan_outliers(
         square exceeds ``median + z * MAD`` in any scan is flagged.
     n_states : int
         Rank of the expected mixture. A two-state titration spans at most rank 2.
+    min_signal : float
+        Wells whose own peak is below this fraction of the plate's median peak are
+        not tested: a well near the instrument floor carries no shape to judge,
+        and testing it flags the saturating end of a binding ladder - where the
+        bound state is legitimately dark - as broken. They are reported with a
+        ``nan`` statistic and are not flagged. ``0`` tests every well.
 
     Returns
     -------
@@ -806,15 +813,21 @@ def scan_outliers(
         mad = float(1.4826 * np.median(np.abs(rms - med)))
         scale = mad if mad > 0 else float(np.std(rms)) or 1.0
         robust_z = (rms - med) / scale
+        if min_signal > 0.0:
+            peaks = np.nanmax(np.abs(ya), axis=0)
+            dark = peaks < min_signal * float(np.median(peaks))
+            robust_z = np.where(dark, np.nan, robust_z)
         rows.extend(
             {
                 "scan": name,
                 "well": wells[j],
                 "x": float(np.asarray(x, dtype=np.float64)[j]),
                 "rms": rms[j],
-                "robust_z": float(robust_z[j]),
+                "robust_z": float(robust_z[j])
+                if np.isfinite(robust_z[j])
+                else float("nan"),
                 "peak_nm": peak[j],
-                "flagged": bool(robust_z[j] > z),
+                "flagged": bool(np.isfinite(robust_z[j]) and robust_z[j] > z),
             }
             for j in range(n_wells)
         )
