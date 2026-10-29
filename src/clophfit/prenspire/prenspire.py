@@ -538,7 +538,11 @@ class Note:
     # MAYBE: Add buffer subtraction logic to prenspire Note.
 
     def build_titrations(  # ruff: ignore[complex-structure, too-many-branches]
-        self, ef: EnspireFile, *, isosbestic: float | str | None = None
+        self,
+        ef: EnspireFile,
+        *,
+        isosbestic: float | str | None = None,
+        drop_wells: dict[tuple[str, str], list[str]] | None = None,
     ) -> None:
         """Extract titrations from the given ef (_note file like: <well, pH, Cl>).
 
@@ -555,6 +559,10 @@ class Note:
             scaling is applied to every label of the group from the excitation
             scan's crossing, because the crossing belongs to the sample, not to
             the detector window.
+        drop_wells : dict[tuple[str, str], list[str]] | None
+            Wells to leave out, keyed by ``(sample, temperature)`` as strings. The
+            legacy projection path has no screen of its own; this is where a list
+            produced elsewhere (the whole-spectrum screen) enters it.
         """
         if "Labels" not in self._note.columns:
             # the second note dialect names no labels: take the ones the file
@@ -589,7 +597,18 @@ class Note:
                         if len(group2) > threshold:
                             grouped3 = group2.groupby("Labels")
                             for name3, group3 in grouped3:
-                                wells = group3["Well"].to_list()
+                                all_wells = group3["Well"].to_list()
+                                skip = set(
+                                    (drop_wells or {}).get((str(name0), str(name1)), ())
+                                )
+                                keep = [
+                                    i for i, w in enumerate(all_wells) if w not in skip
+                                ]
+                                wells = [all_wells[i] for i in keep]
+                                if group3["pH"].nunique() > group3["Cl"].nunique():
+                                    axis = [group3["pH"].to_list()[i] for i in keep]
+                                else:
+                                    axis = [group3["Cl"].to_list()[i] for i in keep]
                                 meas_dict = {}
                                 for label in str(name3).split():
                                     d = {w: ef.measurements[label][w] for w in wells}
@@ -598,14 +617,7 @@ class Note:
                                         index=ef.measurements[label]["lambda"],
                                         columns=wells,
                                     )
-                                    if group3["pH"].nunique() > group3["Cl"].nunique():
-                                        value_df.columns = pd.Index(
-                                            group3["pH"].to_list()
-                                        )
-                                    else:
-                                        value_df.columns = pd.Index(
-                                            group3["Cl"].to_list()
-                                        )
+                                    value_df.columns = pd.Index(axis)
                                     meas_dict[label] = value_df
                                 lam = (
                                     lam_map.get((str(name0), float(str(name1))))

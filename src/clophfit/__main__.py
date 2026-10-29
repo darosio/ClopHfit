@@ -821,13 +821,6 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __enspire_out_dir__)
-    raw_marker = f"{Path('data') / 'raw'}{Path('/')}"
-    if raw_marker in str(Path(out).resolve()) + "/":
-        ctx.fail(
-            f"--out resolves inside the raw-data tree ({out}). Raw data is immutable: "
-            "pass --out to a derived/ or interim/ directory (or run from the repo root "
-            "and let it default there)"
-        )
     exports = [EnspireFile(Path(csv_f), verbose=verbose)]
     notes = [Path(note_f)] if note_f is not None else []
     for pair in joins:
@@ -882,7 +875,14 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             f"--scan selects whole scans for {sorted(scan_methods)}; "
             f"--method {method} takes its readouts from -b/--bands or from no scan at all"
         )
-    qc_methods = {"global", "global-bayes", "global-bayes-marginal", "all"}
+    qc_methods = {
+        "global",
+        "global-bayes",
+        "global-bayes-marginal",
+        "svd",
+        "both",
+        "all",
+    }
     if global_qc is not None and method not in qc_methods:
         ctx.fail(
             f"--global-qc screens the whole-spectrum methods {sorted(qc_methods)} "
@@ -919,7 +919,15 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             isosbestic=iso,
         )
     if method in {"svd", "both", "all"}:
-        fit_enspire(ef, Path(note_f), Path(out), list(bands), verbose, isosbestic=iso)
+        fit_enspire(
+            ef,
+            Path(note_f),
+            Path(out),
+            list(bands),
+            verbose,
+            isosbestic=iso,
+            qc=global_qc,
+        )
     if method in {"global", "all"}:
         fit_enspire_global(
             ef,
@@ -2768,6 +2776,7 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many
     verbose: int,
     *,
     isosbestic: float | str | None = None,
+    qc: float | None = None,
 ) -> None:
     """Fit prenspire titration (all labels, temp, mutant, titrations).
 
@@ -2776,7 +2785,24 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many
     whole-spectrum ones (see :meth:`Note.build_titrations`).
     """
     note = Note(note_fp, verbose=verbose)
-    note.build_titrations(ef, isosbestic=isosbestic)
+    drop_map: dict[tuple[str, str], list[str]] = {}
+    if qc is not None:
+        # the detector is the whole-spectrum fit; the estimator stays this legacy
+        # projection. One screen per (sample, temperature), over the same scans the
+        # projection pools.
+        screen_table, _fits = fit_titrations_spectral(
+            ef,
+            Note(note_fp).note,
+            bands=("exc_anionic", "em_exc420", "em_exc278"),
+            qc=qc,
+        )
+        for row in screen_table[screen_table.subset == "all"].itertuples():
+            gone = [w for w in str(row.qc_dropped).split(";") if w and w != "-"]
+            if gone:
+                drop_map[str(row.sample), str(row.temp)] = gone
+        for (sample, temp), gone in drop_map.items():
+            print(f"qc: {sample} at {temp}: dropped {', '.join(gone)}")
+    note.build_titrations(ef, isosbestic=isosbestic, drop_wells=drop_map)
     dbands = {label: (ini, fin) for label, ini, fin in bands} if bands else {}
     ds_data: dict[str, DataArray] = {}
     for name, d_name in note.titrations.items():
