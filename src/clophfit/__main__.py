@@ -53,6 +53,7 @@ from clophfit.fitting.errors import (
 from clophfit.fitting.spectral import (
     _fractions,
     _Model,
+    fit_spectra_global,
     fit_spectra_global_bayes,
     fit_spectra_global_bayes_marginal,
 )
@@ -71,6 +72,7 @@ from clophfit.prenspire.mcr import (
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
     isosbestic_by_group,
+    model_outliers,
     plate_isosbestic,
     sample_spectra,
 )
@@ -873,8 +875,13 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             f"--scan selects whole scans for {sorted(scan_methods)}; "
             f"--method {method} takes its readouts from -b/--bands or from no scan at all"
         )
+    qc_methods = {"global", "global-bayes", "global-bayes-marginal", "all"}
+    if global_qc is not None and method not in qc_methods:
+        ctx.fail(
+            f"--global-qc screens the whole-spectrum methods {sorted(qc_methods)} "
+            f"(got --method {method})"
+        )
     whole_ls_options = {
-        "--global-qc": global_qc is not None,
         "--global-boot": global_boot > 0,
         "--global-strata": global_strata.lower() != "none",
         "--global-screen": global_screen is not None,
@@ -1934,6 +1941,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     cores: int | None,
     target_accept: float | None,
     isosbestic: float | str | None = None,
+    qc: float | None = None,
 ) -> pd.DataFrame:
     """Fit whole spectra with a joint posterior over K, x and spectral noise."""
     return _enspire_global_bayes_core(
@@ -1953,6 +1961,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         suffix="global_bayes",
         label="global Bayes",
         isosbestic=isosbestic,
+        qc=qc,
     )
 
 
@@ -1971,6 +1980,7 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     cores: int | None,
     target_accept: float | None,
     isosbestic: float | str | None = None,
+    qc: float | None = None,
 ) -> pd.DataFrame:
     """Marginalized whole-spectrum fit: species spectra out of the sampler."""
     return _enspire_global_bayes_core(
@@ -1990,10 +2000,11 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
         suffix="global_bayes_marginal",
         label="global Bayes marginal",
         isosbestic=isosbestic,
+        qc=qc,
     )
 
 
-def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
+def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-statements]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
@@ -2011,6 +2022,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
     suffix: str,
     label: str,
     isosbestic: float | str | None = None,
+    qc: float | None = None,
 ) -> pd.DataFrame:
     """Shared whole-spectrum Bayesian pipeline behind the two fitters.
 
@@ -2057,6 +2069,21 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
         )
         if not spectra:
             continue
+        qc_dropped: list[str] = []
+        if qc is not None:
+            screen_fit = fit_spectra_global(
+                x, spectra, is_ph=is_ph, well_scale=True, jackknife=False
+            )
+            table = model_outliers(screen_fit, spectra, wells, z=qc)
+            qc_dropped = list(table.attrs.get("flagged_wells", []))
+            if qc_dropped:
+                gone = set(qc_dropped)
+                mask = np.array([w not in gone for w in wells], dtype=bool)
+                spectra = {
+                    key: (lam_arr, y[:, mask]) for key, (lam_arr, y) in spectra.items()
+                }
+                wells = [w for w, k in zip(wells, mask, strict=True) if k]
+                x = x[mask]
         sigma = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
         if sigma is None:
             msg = f"--method {suffix.removeprefix('global_').replace('_', '-')} requires a pH titration and resolvable x-sigma"
@@ -2085,6 +2112,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments]
             "hdi03": lo,
             "hdi97": hi,
             "r_hat": float(az.rhat(trace, var_names=["K"])["K"].item()),
+            "qc_dropped": ";".join(qc_dropped) or "-",
             "ess_bulk": float(az.ess(trace, var_names=["K"])["K"].item()),
             "n": len(wells),
             "x_sigma": sigma,
