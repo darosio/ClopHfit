@@ -1933,6 +1933,11 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
             ax.legend(fontsize=7)
         fig.savefig(out_dir / f"{stem}_species.pdf", bbox_inches="tight")
         plt.close(fig)
+    if "qc_dropped" in table:
+        for row in table[table.subset == "all"].itertuples():
+            gone = str(row.qc_dropped)
+            if gone and gone != "-":
+                click.echo(f"qc: {row.sample} at {row.temp}: dropped {gone}")
     for r in table[table.subset == "all"].to_dict("records"):
         print(
             f"{r['sample']} at {r['temp']}: K {r['K']:.3f} ± {r['se']:.3f} (jackknife) "
