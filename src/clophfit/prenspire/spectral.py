@@ -720,9 +720,20 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             continue
         dropped: list[str] = []
         if qc is not None:
-            qc_table = scan_outliers(spectra, wells, x, z=qc, min_signal=0.05)
-            if not qc_table.empty:
-                dropped = sorted(set(qc_table.loc[qc_table["flagged"], "well"]))
+            # screen against the model, not against the wells: the two species of
+            # a first fit are a fixed basis, which is scale-free (a dark well is
+            # judged on shape) and breaks the symmetry between the two wells of a
+            # replicate column
+            screen_fit = fit_spectra_global(
+                x,
+                spectra,
+                is_ph=is_ph,
+                fit_hill=fit_hill,
+                well_scale=well_scale,
+                jackknife=False,
+            )
+            qc_table = model_outliers(screen_fit, spectra, wells, z=qc)
+            dropped = list(qc_table.attrs.get("flagged_wells", []))
             if dropped:
                 gone = set(dropped)
                 mask = np.array([w not in gone for w in wells], dtype=bool)
@@ -900,3 +911,85 @@ def residual_table(fit: SpectralFit, wells: Sequence[str], x: ArrayF) -> pd.Data
                 "rms": float(value),
             })
     return pd.DataFrame(rows, columns=["scan", "well", "x", "rms"])
+
+
+def model_outliers(
+    fit: SpectralFit,
+    spectra: Mapping[str, tuple[Any, Any]],
+    wells: Sequence[str],
+    *,
+    z: float = 6.0,
+    min_scans: int = 2,
+) -> pd.DataFrame:
+    """Flag wells whose spectrum the fitted two species cannot account for.
+
+    The screen works from the fit, not from the wells: the two species spectra the
+    whole-spectrum model already solved are a *fixed* basis, so a well is judged
+    against what the model says it should look like rather than against its
+    neighbours. Each spectrum is projected onto the span of the two species and the
+    leftover, relative to that well's own norm, is the statistic - a dark well is
+    therefore judged on shape and not on brightness.
+
+    The fixed basis also breaks the symmetry between the two replicate wells of a
+    column: a basis rebuilt from a single sibling cannot say which of the pair is
+    the odd one, while this one names it. On the G02 chloride plate it flags B06
+    (80 mM) at both temperatures with a robust z near 18.
+
+    A well is flagged when it is beyond the cut in at least ``min_scans`` scans, so
+    one noisy readout cannot remove a well on its own; with a single scan the
+    requirement degrades to that scan.
+
+    Parameters
+    ----------
+    fit : SpectralFit
+        A fit of the same wells, from
+        :func:`~clophfit.fitting.spectral.fit_spectra_global`.
+    spectra : Mapping[str, tuple[Any, Any]]
+        Scan name to ``(wavelengths, Y[n_lambda, n_wells])`` - the arrays the fit
+        consumed.
+    wells : Sequence[str]
+        Well label per column of every ``Y``.
+    z : float
+        Robust cut on the relative residual, applied per scan.
+    min_scans : int
+        How many scans must exceed the cut before the well is flagged.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (scan, well) with ``scan``, ``well``, ``rms`` (the relative
+        residual), ``robust_z`` and ``flagged``. The wells that pass the
+        cross-scan rule are listed in ``frame.attrs["flagged_wells"]``.
+    """
+    rows: list[dict[str, object]] = []
+    hits: dict[str, int] = {}
+    for name, (_lam, y) in spectra.items():
+        if name not in fit.species:
+            continue
+        species = np.asarray(fit.species[name], dtype=np.float64)
+        basis, _ = np.linalg.qr(species.T)
+        ya = np.asarray(y, dtype=np.float64)
+        rel = np.zeros(ya.shape[1])
+        for j in range(ya.shape[1]):
+            coef, *_ = np.linalg.lstsq(basis, ya[:, j], rcond=None)
+            r = ya[:, j] - basis @ coef
+            norm = float(np.linalg.norm(ya[:, j]))
+            rel[j] = float(np.linalg.norm(r)) / norm if norm > 0 else 0.0
+        med = float(np.median(rel))
+        mad = float(1.4826 * np.median(np.abs(rel - med)))
+        scale = mad if mad > 0 else float(np.std(rel)) or 1.0
+        rz = (rel - med) / scale
+        for j, well in enumerate(wells):
+            over = bool(rz[j] > z)
+            hits[well] = hits.get(well, 0) + int(over)
+            rows.append({
+                "scan": name,
+                "well": well,
+                "rms": float(rel[j]),
+                "robust_z": float(rz[j]),
+                "flagged": over,
+            })
+    table = pd.DataFrame(rows, columns=["scan", "well", "rms", "robust_z", "flagged"])
+    need = min(min_scans, table["scan"].nunique()) if not table.empty else min_scans
+    table.attrs["flagged_wells"] = sorted(w for w, n in hits.items() if n >= need)
+    return table
