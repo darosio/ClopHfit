@@ -32,11 +32,18 @@ from clophfit.prenspire.bands import PH_ACID_END, band_values, blank_rows, class
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from pathlib import Path
 
     from clophfit.clophfit_types import ArrayF
     from clophfit.prenspire.prenspire import EnspireFile
 
 _MIN_ROW_WELLS = 5
+#: Above this titrant value the axis is a concentration, not a pH; used only to
+#: label a panel, never to fit.
+_MAX_PH = 20.0
+#: Shortest wavelength the crossing search in a panel accepts [nm]; the protein
+#: band below it does not titrate and would supply a crossing of its own.
+_CHROMOPHORE_MIN = 400.0
 #: Refits the screen is allowed after the first drop, to confirm its own verdict.
 _QC_MAX_PASSES = 2
 # The excitation scan alone: on the readout-arm sweep (module docstring) adding the 420 nm emission
@@ -210,7 +217,7 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         out[scan_name(ef, label)] = (lam, y / float(np.nanmax(np.abs(y))))
     if isosbestic is not None:
         lam_iso = (
-            plate_isosbestic(out, x, x_min=PH_ACID_END if is_ph else None)
+            plate_isosbestic(out, x, x_min=PH_ACID_END if is_ph else None, is_ph=is_ph)
             if isinstance(isosbestic, str)
             else float(isosbestic)
         )
@@ -382,13 +389,15 @@ def consensus_isosbestic(
     return float(grid[int(np.argmin(total))])
 
 
-def plate_isosbestic(
+def plate_isosbestic(  # ruff: ignore[too-many-arguments]
     spectra: Mapping[str, tuple[Any, Any]],
     x: ArrayF,
     *,
     scans: Sequence[str] = EXCITATION_SCAN_NAMES,
     x_min: float | None = None,
     max_drift: float | None = 0.20,
+    is_ph: bool = True,
+    prefer_model: bool = True,
 ) -> float | None:
     """Return the crossing the spectra of one titration agree on, or None.
 
@@ -425,6 +434,15 @@ def plate_isosbestic(
         enough that normalising there drove K to its bound. ``None`` accepts any
         crossing, which is what this did before.
 
+    is_ph : bool
+        pH titration; a ligand plate has no crossing of its own and the model rule
+        is skipped for it.
+    prefer_model : bool
+        Try :func:`model_isosbestic` first and fall back to the slope zero. The
+        model rule asks what an isosbestic point is (where the two species spectra
+        cross) and cannot be satisfied by the protein band; the slope rule is the
+        model-free witness kept for the cases where the fit cannot speak.
+
     Returns
     -------
     float | None
@@ -438,6 +456,13 @@ def plate_isosbestic(
     }
     if not chosen:
         return None
+    if prefer_model and is_ph:
+        # ask the model first: the crossing of the two fitted species is what an
+        # isosbestic point *is*, and unlike the slope profile it cannot be
+        # satisfied by the protein band, which does not titrate either
+        from_model = model_isosbestic(chosen, x, is_ph=is_ph, x_min=x_min)
+        if from_model is not None:
+            return from_model
     found = isosbestic_point(chosen, x, x_min=x_min)
     if not found:
         return None
@@ -660,6 +685,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
     seed: int = 0,
     strata: str = "none",
     qc: float | None = None,
+    figure_stem: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
 
@@ -707,6 +733,11 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
         (``min_signal``), so a dark but valid well - the saturating end of a
         ligand ladder - is not mistaken for a broken one. ``None`` fits every
         well, which is what this method did before.
+
+    figure_stem : Path | None
+        When given, write ``<stem>_<sample>_<temp>_panels.pdf`` per group: the data,
+        the model and the species fraction, one row per scan
+        (:func:`plot_global_panels`).
 
     Returns
     -------
@@ -826,6 +857,15 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
                 strata=qc_strata,
             )
         base["qc_passes"] = qc_passes
+        if figure_stem is not None:
+            key = f"{name}_{str(temp).replace('.', 'p')}"
+            plot_global_panels(
+                figure_stem.parent / f"{figure_stem.name}_{key}_panels.pdf",
+                spectra,
+                x,
+                fit,
+                title=f"{name} at {temp}",
+            )
         fits[f"{name} {temp}"] = fit
         rows.append(_row(base, "all", fit))
         for plate_row in sorted({w[0] for w in wells}):
@@ -1080,3 +1120,217 @@ def model_outliers(  # ruff: ignore[too-many-arguments]
         w for w in hits if hits[w] >= need or worst[w] > single
     )
     return table
+
+
+def model_isosbestic(
+    spectra: Mapping[str, tuple[Any, Any]],
+    x: ArrayF,
+    *,
+    is_ph: bool = True,
+    lam_min: float = 420.0,
+    x_min: float | None = None,
+) -> float | None:
+    """Crossing of the two fitted species spectra, not of the slope profile.
+
+    The slope profile answers "where does the signal stop tracking the titrant",
+    and more than one wavelength satisfies that: the protein's own absorbance in
+    the far UV does not titrate either, so on a thin or noisy titration the
+    longest-wavelength zero can be the protein's crossing rather than the
+    chromophore's, and ranking the zeros by how titrant-independent they are picks
+    the protein every time. This asks the question directly instead: fit the two
+    states once, and take the wavelength where the two *species spectra* cross,
+    restricted to the chromophore's region. A non-titrating band cannot cross its
+    own partner there because it does not move between states.
+
+    Parameters
+    ----------
+    spectra : Mapping[str, tuple[Any, Any]]
+        Scan name to ``(wavelengths, Y[n_lambda, n_wells])``.
+    x : ArrayF
+        Titrant value per well.
+    is_ph : bool
+        pH titration (else ligand).
+    lam_min : float
+        Shortest wavelength considered [nm]; the default keeps the protein
+        absorbance out of the search.
+    x_min : float | None
+        Drop the wells below this titrant value before fitting.
+
+    Returns
+    -------
+    float | None
+        The crossing [nm], or ``None`` when the species do not cross above
+        ``lam_min`` or the fit fails.
+    """
+    from clophfit.fitting.spectral import fit_spectra_global  # ruff: ignore[import-outside-top-level]
+
+    xa = np.asarray(x, dtype=np.float64)
+    keep = np.ones(xa.size, dtype=bool) if x_min is None else xa >= x_min
+    if keep.sum() < 5:  # ruff: ignore[magic-value-comparison] - four wells is the fit's own floor
+        return None
+    smooth: dict[str, tuple[Any, Any]] = {}
+    for label, (lam, y) in spectra.items():
+        lam_a = np.asarray(lam, dtype=np.float64)
+        ya = np.asarray(y, dtype=np.float64)
+        smooth[label] = (lam_a, ya[:, keep])
+    try:
+        fit = fit_spectra_global(
+            xa[keep], smooth, is_ph=is_ph, well_scale=True, jackknife=False
+        )
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+    crossings: list[float] = []
+    for label, species in fit.species.items():
+        lam = np.asarray(fit.wavelengths[label], dtype=np.float64)
+        diff = np.asarray(species[0], dtype=np.float64) - np.asarray(
+            species[1], dtype=np.float64
+        )
+        for i in range(lam.size - 1):
+            if lam[i] < lam_min:
+                continue
+            if diff[i] * diff[i + 1] < 0:
+                crossings.append(
+                    float(
+                        lam[i]
+                        + (lam[i + 1] - lam[i]) * diff[i] / (diff[i] - diff[i + 1])
+                    )
+                )
+    if not crossings:
+        return None
+    return max(crossings)
+
+
+def plot_global_panels(  # ruff: ignore[too-many-statements]
+    path: Path,
+    spectra: Mapping[str, tuple[Any, Any]],
+    x: ArrayF,
+    fit: SpectralFit,
+    *,
+    title: str,
+) -> Path:
+    """Draw the data, the model and the species fraction of one whole-spectrum fit.
+
+    The species-only figure that accompanied this fit says what the fit found but
+    not whether it describes the data. These three do: the measured spectra and
+    the model drawn on the same scale (both divided by the signal at the crossing,
+    so the whole family passes through 1.0 there), and the fraction of the basic
+    state per well against the fitted curve. The observed fraction is taken with
+    the fitted per-well amplitude divided out - without that the amount scatter
+    enters the fraction and the points stop following the curve.
+
+    Parameters
+    ----------
+    path : Path
+        Where to write the figure (``.pdf`` or ``.png``, by suffix).
+    spectra : Mapping[str, tuple[Any, Any]]
+        The scans the fit consumed, as ``sample_spectra`` returned them.
+    x : ArrayF
+        Titrant value per well.
+    fit : SpectralFit
+        The fit on exactly those spectra.
+    title : str
+        Panel-group title, usually "<sample> at <temperature>".
+
+    Returns
+    -------
+    Path
+        The path of the figure that was written.
+    """
+    import matplotlib.pyplot as plt  # ruff: ignore[import-outside-top-level]
+    from matplotlib import colormaps  # ruff: ignore[import-outside-top-level]
+    from matplotlib.colors import Normalize  # ruff: ignore[import-outside-top-level]
+
+    scans = [name for name in spectra if name in fit.species]
+    if not scans:
+        return path
+    n = len(scans)
+    fig, axes = plt.subplots(
+        n, 3, figsize=(13.0, 3.6 * n), squeeze=False, constrained_layout=True
+    )
+    mappable = None
+    for row, label in enumerate(scans):
+        lam, y = spectra[label]
+        lam = np.asarray(lam, dtype=np.float64)
+        ya = np.asarray(y, dtype=np.float64)
+        species = np.asarray(fit.species[label], dtype=np.float64)
+        is_ph = float(np.nanmax(x)) < _MAX_PH
+        f = 1.0 / (1.0 + 10.0 ** (x - fit.K)) if is_ph else x / (x + fit.K)
+        model = np.asarray(fit.well_scale)[None, :] * (
+            (1 - f)[None, :] * species[0][:, None] + f[None, :] * species[1][:, None]
+        )
+        diff = species[0] - species[1]
+        zero = [
+            float(lam[i] + (lam[i + 1] - lam[i]) * diff[i] / (diff[i] - diff[i + 1]))
+            for i in range(lam.size - 1)
+            if diff[i] * diff[i + 1] < 0 and lam[i] > _CHROMOPHORE_MIN
+        ]
+        iso = max(zero) if zero else float(lam[int(np.argmin(np.abs(diff)))])
+        ref = np.array([np.interp(iso, lam, ya[:, i]) for i in range(ya.shape[1])])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            data_n, model_n = ya / ref[None, :], model / ref[None, :]
+        cmap = colormaps["coolwarm_r"]
+        norm = Normalize(float(np.nanmin(x)), float(np.nanmax(x)))
+        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        for col, (arr, name) in enumerate((
+            (data_n, "data"),
+            (model_n, "model"),
+        )):
+            ax = axes[row][col]
+            for i in range(ya.shape[1]):
+                ax.plot(lam, arr[:, i], color=cmap(norm(x[i])), lw=1.0, alpha=0.9)
+            ax.axvline(iso, color="k", lw=0.8, ls=":")
+            ax.set_xlabel("wavelength (nm)")
+            ax.set_title(
+                f"{label}: {name} / signal({iso:.0f} nm)", fontsize=9.5, loc="left"
+            )
+        axes[row][0].set_ylabel(f"signal / signal({iso:.0f} nm)")
+        design = species.T
+        coef = np.array([
+            np.linalg.lstsq(design / fit.well_scale[i], ya[:, i], rcond=None)[0]
+            for i in range(ya.shape[1])
+        ])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            obs = coef[:, 1] / coef.sum(axis=1)
+        axf = axes[row][2]
+        axf.plot(
+            x, obs, "o", ms=3.5, color="#2a6f97", label="observed, amplitude removed"
+        )
+        if is_ph:
+            grid = np.linspace(
+                float(np.nanmin(x)) - 0.2, float(np.nanmax(x)) + 0.2, 200
+            )
+            axf.plot(
+                grid,
+                1.0 / (1.0 + 10.0 ** (grid - fit.K)),
+                color="#d1495b",
+                lw=1.6,
+                label=f"fit: K {fit.K:.3f} ± {fit.se:.3f}",
+            )
+            axf.set_xlabel("pH")
+        else:
+            grid = np.logspace(np.log10(0.5), np.log10(float(np.nanmax(x)) * 1.3), 200)
+            axf.plot(
+                grid,
+                grid / (grid + fit.K),
+                color="#d1495b",
+                lw=1.6,
+                label=f"fit: K {fit.K:.3f} ± {fit.se:.3f}",
+            )
+            axf.set_xscale("log")
+            axf.set_xlabel("titrant")
+        axf.set_ylabel(f"fraction of the basic state ({label})")
+        axf.set_title(f"{label}: species fraction", fontsize=9.5, loc="left")
+        axf.legend(fontsize=7, frameon=False)
+    if mappable is not None:
+        fig.colorbar(
+            mappable,
+            ax=[axes[r][c] for r in range(n) for c in (0, 1)],
+            fraction=0.02,
+            pad=0.01,
+            label="pH",
+        )
+    fig.suptitle(title, fontsize=10, x=0.01, ha="left")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path

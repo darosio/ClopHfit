@@ -1901,6 +1901,8 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     pd.DataFrame
         One row per (sample, temperature, subset).
     """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem_guess = note_fp.name.removesuffix("_note.csv")
     table, fits = fit_titrations_spectral(
         ef,
         Note(note_fp).note,
@@ -1911,8 +1913,8 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         n_boot=n_boot,
         strata=strata,
         qc=qc,
+        figure_stem=out_dir / stem_guess,
     )
-    out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
     if fits:
