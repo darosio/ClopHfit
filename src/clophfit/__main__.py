@@ -821,6 +821,13 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __enspire_out_dir__)
+    raw_marker = f"{Path('data') / 'raw'}{Path('/')}"
+    if raw_marker in str(Path(out).resolve()) + "/":
+        ctx.fail(
+            f"--out resolves inside the raw-data tree ({out}). Raw data is immutable: "
+            "pass --out to a derived/ or interim/ directory (or run from the repo root "
+            "and let it default there)"
+        )
     exports = [EnspireFile(Path(csv_f), verbose=verbose)]
     notes = [Path(note_f)] if note_f is not None else []
     for pair in joins:

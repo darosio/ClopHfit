@@ -959,7 +959,7 @@ def model_outliers(  # ruff: ignore[too-many-arguments]
     *,
     z: float = 6.0,
     min_scans: int = 2,
-    z_single: float = 10.0,
+    z_single: float | None = None,
 ) -> pd.DataFrame:
     """Flag wells whose spectrum the fitted two species cannot account for.
 
@@ -995,8 +995,11 @@ def model_outliers(  # ruff: ignore[too-many-arguments]
         Robust cut on the relative residual, applied per scan.
     min_scans : int
         How many scans must exceed ``z`` before the well is flagged.
-    z_single : float
-        A single scan is enough when it puts the well above this much larger cut.
+    z_single : float | None
+        A single scan is enough when it puts the well above this much larger cut;
+        ``None`` sets it to ``5/3 * z``, so raising ``z`` raises both cuts and the
+        option stays monotone. Pinning it at 10 made ``--global-qc 20`` and
+        ``--global-qc 200`` behave exactly like ``--global-qc 6``.
         The two-scan rule protects against one noisy readout, but applied alone it
         also protects a well that only one scan can see is broken - on the G02
         chloride plate B06 sits at z = 16-18 in the 278 nm-excited emission and at
@@ -1044,7 +1047,8 @@ def model_outliers(  # ruff: ignore[too-many-arguments]
     # degrading drops the saturating end of a ligand ladder on the strength of
     # one noisy scan (seen on the G02 chloride plate: A09/B09 at 1000 mM)
     need = min_scans
+    single = 5.0 * z / 3.0 if z_single is None else z_single
     table.attrs["flagged_wells"] = sorted(
-        w for w in hits if hits[w] >= need or worst[w] > z_single
+        w for w in hits if hits[w] >= need or worst[w] > single
     )
     return table
