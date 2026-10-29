@@ -629,6 +629,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
     n_boot: int = 0,
     seed: int = 0,
     strata: str = "none",
+    qc: float | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
 
@@ -667,6 +668,15 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         ``"none"`` resamples wells from one pool; ``"column"`` resamples within
         each plate column, which keeps every replicate spanning the titration
         axis and is the design-preserving choice for these plates.
+    qc : float | None
+        Robust cut for the per-scan screen (:func:`scan_outliers`), applied to the
+        corrected scans *before* the fit: a well whose leave-one-out rank-2
+        residual exceeds ``median + qc * MAD`` in any scan is dropped from every
+        scan of that group, and the dropped wells are recorded in the table. The
+        screen never tests a well whose peak is below 5 % of the plate median
+        (``min_signal``), so a dark but valid well - the saturating end of a
+        ligand ladder - is not mistaken for a broken one. ``None`` fits every
+        well, which is what this method did before.
 
     Returns
     -------
@@ -708,7 +718,24 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
         )
         if not spectra:
             continue
-        base: dict[str, object] = {"sample": name, "temp": temp}
+        dropped: list[str] = []
+        if qc is not None:
+            qc_table = scan_outliers(spectra, wells, x, z=qc, min_signal=0.05)
+            if not qc_table.empty:
+                dropped = sorted(set(qc_table.loc[qc_table["flagged"], "well"]))
+            if dropped:
+                gone = set(dropped)
+                mask = np.array([w not in gone for w in wells], dtype=bool)
+                spectra = {
+                    key: (lam_arr, y[:, mask]) for key, (lam_arr, y) in spectra.items()
+                }
+                wells = [w for w, k in zip(wells, mask, strict=True) if k]
+                x = x[mask]
+        base: dict[str, object] = {
+            "sample": name,
+            "temp": temp,
+            "qc_dropped": ";".join(dropped) or "-",
+        }
         design = [str(w)[1:] for w in wells] if strata == "column" else None
         fit = fit_spectra_global(
             x,
