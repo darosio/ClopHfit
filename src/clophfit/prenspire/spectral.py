@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from clophfit.prenspire.prenspire import EnspireFile
 
 _MIN_ROW_WELLS = 5
+#: Refits the screen is allowed after the first drop, to confirm its own verdict.
+_QC_MAX_PASSES = 2
 # The excitation scan alone: on the readout-arm sweep (module docstring) adding the 420 nm emission
 # scan whole widened the between-session spread (median 0.10 -> 0.14 pH, worst 0.16 -> 0.37).
 EXCITATION_SCAN = ("exc_anionic",)
@@ -616,7 +618,7 @@ def normalise_to_isosbestic(
     return out
 
 
-def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
+def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statements]
     ef: EnspireFile,
     note: pd.DataFrame,
     *,
@@ -747,7 +749,8 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             "temp": temp,
             "qc_dropped": ";".join(dropped) or "-",
         }
-        design = [str(w)[1:] for w in wells] if strata == "column" else None
+        qc_passes = 0
+        qc_strata = [str(w)[1:] for w in wells] if strata == "column" else None
         fit = fit_spectra_global(
             x,
             spectra,
@@ -757,8 +760,44 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments]
             screen=screen,
             n_boot=n_boot,
             seed=seed,
-            strata=design,
+            strata=qc_strata,
         )
+        # verification pass: the screen was computed from a fit that still held the
+        # outliers, so recompute it on the clean model and drop anything it names
+        # now. Bounded, because each pass is a refit and the set is stable after
+        # one or two; the pass count goes into the table so the iteration is
+        # visible rather than implicit.
+        for _ in range(_QC_MAX_PASSES):
+            if qc is None or not spectra:
+                break
+            check = model_outliers(fit, spectra, wells, z=qc)
+            extra = [
+                w for w in check.attrs.get("flagged_wells", []) if w not in dropped
+            ]
+            if not extra:
+                break
+            dropped = [*dropped, *extra]
+            qc_passes += 1
+            gone = set(dropped)
+            mask = np.array([w not in gone for w in wells], dtype=bool)
+            spectra = {
+                key: (lam_arr, y[:, mask]) for key, (lam_arr, y) in spectra.items()
+            }
+            wells = [w for w, keep in zip(wells, mask, strict=True) if keep]
+            x = x[mask]
+            base["qc_dropped"] = ";".join(dropped) or "-"
+            fit = fit_spectra_global(
+                x,
+                spectra,
+                is_ph=is_ph,
+                fit_hill=fit_hill,
+                well_scale=well_scale,
+                screen=screen,
+                n_boot=n_boot,
+                seed=seed,
+                strata=qc_strata,
+            )
+        base["qc_passes"] = qc_passes
         fits[f"{name} {temp}"] = fit
         rows.append(_row(base, "all", fit))
         for plate_row in sorted({w[0] for w in wells}):
