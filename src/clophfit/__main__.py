@@ -2859,7 +2859,7 @@ def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:
     print(f"Best fit using '{band_str}' band:\n")
     try:
         ci = lmfit.conf_interval(fit_result.mini, fit_result.result)
-    except (ValueError, TypeError) as err:
+    except Exception as err:  # ruff: ignore[blind-except] - lmfit raises MinimizerException here
         # The profile interval needs the objective to rise on both sides of the
         # best fit, and near a flat or bounded parameter it does not, so lmfit
         # cannot bracket it. The covariance is then the only interval there is:

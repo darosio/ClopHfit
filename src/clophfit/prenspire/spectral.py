@@ -388,6 +388,7 @@ def plate_isosbestic(
     *,
     scans: Sequence[str] = EXCITATION_SCAN_NAMES,
     x_min: float | None = None,
+    max_drift: float | None = 0.20,
 ) -> float | None:
     """Return the crossing the spectra of one titration agree on, or None.
 
@@ -414,11 +415,21 @@ def plate_isosbestic(
         crossing.
     x_min : float | None
         Drop the wells below this titrant value before locating the crossing.
+    max_drift : float | None
+        Reject the crossing when the signal there still moves with the titrant:
+        a true isosbestic point has the same value in every state, so the wells'
+        relative signal at that wavelength must be flat. Measured as the max-min
+        of the per-tercile median, relative to the plate median. On the good
+        plates it is 0.05-0.08; on a synthetic two-state titration whose true
+        crossing is 458 nm the slope profile reported 485 nm, with a drift large
+        enough that normalising there drove K to its bound. ``None`` accepts any
+        crossing, which is what this did before.
 
     Returns
     -------
     float | None
-        The crossing [nm], or ``None`` when no chosen scan has one.
+        The crossing [nm], or ``None`` when no chosen scan has one, or when the
+        one it found still drifts with the titrant.
     """
     chosen = {
         label: value
@@ -430,7 +441,24 @@ def plate_isosbestic(
     found = isosbestic_point(chosen, x, x_min=x_min)
     if not found:
         return None
-    return float(np.median(list(found.values())))
+    lam_iso = float(np.median(list(found.values())))
+    if max_drift is not None:
+        worst = 0.0
+        for lam, y in chosen.values():
+            lam_a = np.asarray(lam, dtype=np.float64)
+            ya = np.asarray(y, dtype=np.float64)
+            if not lam_a.min() <= lam_iso <= lam_a.max():
+                return None
+            ref = np.array([
+                np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])
+            ])
+            rel = ref / np.median(ref)
+            chunks = np.array_split(np.argsort(np.asarray(x, dtype=float)), 3)
+            med = [float(np.median(rel[c])) for c in chunks if c.size]
+            worst = max(worst, max(med) - min(med))
+        if worst > max_drift:
+            return None
+    return lam_iso
 
 
 def isosbestic_by_group(

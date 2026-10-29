@@ -397,7 +397,10 @@ def test_a_wrong_reference_wavelength_moves_the_signal_with_the_titrant() -> Non
     the reason the crossing is located rather than picked.
     """
     lam, y, x, _gain = _gained_two_state()
-    iso = plate_isosbestic({"excitation": (lam, y)}, x)
+    # the synthetic pair carries a brightness gain that tracks the titrant, so the
+    # drift guard is switched off here: this test is about the reference
+    # wavelength, not about the validity of the crossing
+    iso = plate_isosbestic({"excitation": (lam, y)}, x, max_drift=None)
     assert iso is not None
     right = normalise_to_isosbestic({"exc": (lam, y)}, iso)["exc"][1]
     wrong = normalise_to_isosbestic({"exc": (lam, y)}, iso + 20.0)["exc"][1]
