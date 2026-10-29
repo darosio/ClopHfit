@@ -913,13 +913,14 @@ def residual_table(fit: SpectralFit, wells: Sequence[str], x: ArrayF) -> pd.Data
     return pd.DataFrame(rows, columns=["scan", "well", "x", "rms"])
 
 
-def model_outliers(
+def model_outliers(  # ruff: ignore[too-many-arguments]
     fit: SpectralFit,
     spectra: Mapping[str, tuple[Any, Any]],
     wells: Sequence[str],
     *,
     z: float = 6.0,
     min_scans: int = 2,
+    z_single: float = 10.0,
 ) -> pd.DataFrame:
     """Flag wells whose spectrum the fitted two species cannot account for.
 
@@ -954,7 +955,13 @@ def model_outliers(
     z : float
         Robust cut on the relative residual, applied per scan.
     min_scans : int
-        How many scans must exceed the cut before the well is flagged.
+        How many scans must exceed ``z`` before the well is flagged.
+    z_single : float
+        A single scan is enough when it puts the well above this much larger cut.
+        The two-scan rule protects against one noisy readout, but applied alone it
+        also protects a well that only one scan can see is broken - on the G02
+        chloride plate B06 sits at z = 16-18 in the 278 nm-excited emission and at
+        z ~ 3 in the excitation scan, and requiring both scans left it in the fit.
 
     Returns
     -------
@@ -965,6 +972,7 @@ def model_outliers(
     """
     rows: list[dict[str, object]] = []
     hits: dict[str, int] = {}
+    worst: dict[str, float] = {}
     for name, (_lam, y) in spectra.items():
         if name not in fit.species:
             continue
@@ -984,6 +992,7 @@ def model_outliers(
         for j, well in enumerate(wells):
             over = bool(rz[j] > z)
             hits[well] = hits.get(well, 0) + int(over)
+            worst[well] = max(worst.get(well, -np.inf), float(rz[j]))
             rows.append({
                 "scan": name,
                 "well": well,
@@ -996,5 +1005,7 @@ def model_outliers(
     # degrading drops the saturating end of a ligand ladder on the strength of
     # one noisy scan (seen on the G02 chloride plate: A09/B09 at 1000 mM)
     need = min_scans
-    table.attrs["flagged_wells"] = sorted(w for w, n in hits.items() if n >= need)
+    table.attrs["flagged_wells"] = sorted(
+        w for w in hits if hits[w] >= need or worst[w] > z_single
+    )
     return table
