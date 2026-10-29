@@ -867,6 +867,24 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         ctx.fail(
             "--x-sigma applies to Bayesian methods only (it is a posterior prior, not an LM option)"
         )
+    scan_methods = {"global", "global-bayes", "global-bayes-marginal", "mcr", "all"}
+    if scans and method not in scan_methods:
+        ctx.fail(
+            f"--scan selects whole scans for {sorted(scan_methods)}; "
+            f"--method {method} takes its readouts from -b/--bands or from no scan at all"
+        )
+    whole_ls_options = {
+        "--global-qc": global_qc is not None,
+        "--global-boot": global_boot > 0,
+        "--global-strata": global_strata.lower() != "none",
+        "--global-screen": global_screen is not None,
+    }
+    ignored = [name for name, given in whole_ls_options.items() if given]
+    if ignored and method not in {"global", "all"}:
+        ctx.fail(
+            f"{', '.join(ignored)} apply to --method global only "
+            f"(got --method {method}); they would be silently ignored"
+        )
     if acid_state and method not in {"global-bayes", "global-bayes-marginal"}:
         ctx.fail(
             "--acid-state applies to --method global-bayes and "

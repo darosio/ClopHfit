@@ -936,8 +936,10 @@ def model_outliers(
     (80 mM) at both temperatures with a robust z near 18.
 
     A well is flagged when it is beyond the cut in at least ``min_scans`` scans, so
-    one noisy readout cannot remove a well on its own; with a single scan the
-    requirement degrades to that scan.
+    one noisy readout cannot remove a well on its own. A fit that consumes a single
+    scan therefore flags nothing: one readout cannot corroborate itself, and
+    degrading the rule to it removes the saturating end of a ligand ladder on the
+    strength of one noisy scan.
 
     Parameters
     ----------
@@ -990,6 +992,9 @@ def model_outliers(
                 "flagged": over,
             })
     table = pd.DataFrame(rows, columns=["scan", "well", "rms", "robust_z", "flagged"])
-    need = min(min_scans, table["scan"].nunique()) if not table.empty else min_scans
+    # never degrade to one scan: a single readout cannot corroborate itself, and
+    # degrading drops the saturating end of a ligand ladder on the strength of
+    # one noisy scan (seen on the G02 chloride plate: A09/B09 at 1000 mM)
+    need = min_scans
     table.attrs["flagged_wells"] = sorted(w for w, n in hits.items() if n >= need)
     return table
