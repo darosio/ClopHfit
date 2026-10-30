@@ -168,6 +168,55 @@ class _Model:
     acid_state: bool
     fit_hill: bool
     well_scale: bool
+    species_floor: float | None = None
+
+
+def _species_solve(cs: ArrayF, y: ArrayF, floor: float | None) -> ArrayF:
+    """Species spectra for one scan, optionally bounded below by ``floor``.
+
+    ``y`` is ``(n_lambda, n_wells)`` and ``cs`` is ``(n_wells, n_state)``; each
+    wavelength is an independent small least-squares solve, so a lower bound is
+    applied per wavelength. The bound is shifted into the data
+    (``y - floor * rowsum(cs)`` equals ``cs @ (e - floor)``), which leaves a
+    plain non-negativity problem: with two states its exact solution is the
+    unconstrained one where both coefficients are non-negative, and at the
+    boundary of the offending coefficient otherwise - the problem is a convex
+    quadratic, so no iteration is needed and the whole scan stays vectorised.
+    More states than two fall back to scipy's active-set solver, one call per
+    wavelength.
+    """
+    if floor is None:
+        return np.asarray(np.linalg.lstsq(cs, y.T, rcond=None)[0])
+    target = y.T - floor * np.sum(cs, axis=1)[:, None]
+    n_state = cs.shape[1]
+    if n_state != 2:  # ruff: ignore[magic-value-comparison]
+        from scipy.optimize import nnls  # ruff: ignore[import-outside-top-level]
+
+        out = np.empty((n_state, target.shape[1]))
+        for j in range(target.shape[1]):
+            out[:, j] = nnls(cs, target[:, j])[0]
+        return out + floor
+    x = np.asarray(np.linalg.lstsq(cs, target, rcond=None)[0])
+    # a coefficient below the bound pins that state to it and the other one is
+    # refitted alone; where both are below, the corner is the optimum
+    bad0, bad1 = x[0] < 0.0, x[1] < 0.0
+    both = bad0 & bad1
+    only0 = bad0 & ~both
+    only1 = bad1 & ~both
+    d0 = float(cs[:, 0] @ cs[:, 0])
+    d1 = float(cs[:, 1] @ cs[:, 1])
+    if only0.any():
+        x[0, only0] = 0.0
+        x[1, only0] = np.maximum(
+            (cs[:, 1] @ target[:, only0]) / d1 if d1 > 0.0 else 0.0, 0.0
+        )
+    if only1.any():
+        x[1, only1] = 0.0
+        x[0, only1] = np.maximum(
+            (cs[:, 0] @ target[:, only1]) / d0 if d0 > 0.0 else 0.0, 0.0
+        )
+    x[:, both] = 0.0
+    return x + floor
 
 
 def _project(
@@ -176,18 +225,21 @@ def _project(
     *,
     well_scale: bool = False,
     sigma: Sequence[float] | None = None,
+    floor: float | None = None,
 ) -> tuple[list[ArrayF], list[ArrayF], ArrayF]:
     """Species spectra and residuals per label, and the well scales, at fixed state fractions ``c``.
 
     Without ``well_scale`` the species spectra are one linear least-squares solve. With it, each
     well also gets an amplitude s_w (the protein amount actually in the well, mean 1) shared by all
     labels; the model ``s_w C_w E`` is then bilinear and is solved by alternating least squares.
+    ``floor`` bounds every species spectrum below (see :func:`_species_solve`); ``None`` leaves the
+    solve unconstrained.
     """
     w = np.ones(len(spectra)) if sigma is None else 1 / np.asarray(sigma) ** 2
     scale = np.ones(c.shape[0])
     for _ in range(_AMPLITUDE_ITERATIONS if well_scale else 1):
         cs = c * scale[:, None]
-        species = [np.linalg.lstsq(cs, y.T, rcond=None)[0] for y in spectra]
+        species = [_species_solve(cs, y, floor) for y in spectra]
         if not well_scale:
             break
         model = [c @ e for e in species]  # (n_wells, n_lambda) before scaling
@@ -203,7 +255,7 @@ def _project(
         if converged:
             break
     cs = c * scale[:, None]
-    species = [np.linalg.lstsq(cs, y.T, rcond=None)[0] for y in spectra]
+    species = [_species_solve(cs, y, floor) for y in spectra]
     residuals = [y.T - cs @ e for y, e in zip(spectra, species, strict=True)]
     return species, residuals, scale
 
@@ -247,7 +299,13 @@ def _solve(
 
         def resid(th: ArrayF, s: list[float] = sigma) -> ArrayF:
             c = _fractions(x, th, model, is_ph=is_ph)
-            _, res, _ = _project(c, spectra, well_scale=model.well_scale, sigma=s)
+            _, res, _ = _project(
+                c,
+                spectra,
+                well_scale=model.well_scale,
+                sigma=s,
+                floor=model.species_floor,
+            )
             return np.concatenate([
                 (r / sj).ravel() for r, sj in zip(res, s, strict=True)
             ])
@@ -262,7 +320,13 @@ def _solve(
         fit = least_squares(resid, theta, bounds=(lower, upper), x_scale="jac")
         theta = np.asarray(fit.x, dtype=np.float64)
         c = _fractions(x, theta, model, is_ph=is_ph)
-        _, res, _ = _project(c, spectra, well_scale=model.well_scale, sigma=sigma)
+        _, res, _ = _project(
+            c,
+            spectra,
+            well_scale=model.well_scale,
+            sigma=sigma,
+            floor=model.species_floor,
+        )
         sigma = [float(np.sqrt(np.sum(r**2) / max(r.size - n_par, 1))) for r in res]
         jac = np.asarray(fit.jac, dtype=np.float64)
         cov = (
@@ -360,9 +424,18 @@ def observed_fraction(
     fit: SpectralFit,
     spectra: Mapping[str, tuple[ArrayF, ArrayF]],
     *,
+    is_ph: bool = True,
     n_grid: int = 401,
 ) -> ArrayF | None:
-    """Report the observed basic-state fraction per well, with one value per well.
+    """Report the observed fraction of the state the titrant grows, one value per well.
+
+    On a pH titration that state is the deprotonated, anionic (basic) one - the
+    one that rises with pH, and the form that fluoresces - and on a ligand
+    titration it is the bound one, which rises with the titrant. The fit's
+    ``species[1]`` is the *protonated* (or bound) state, so on a pH titration the
+    two are complements: reporting ``species[1]``'s share and calling it the basic
+    fraction is exactly the confusion between f_basic and f_neutral that this
+    function has to avoid.
 
     One fraction explains every scan of a well: the per-scan amplitude is a free
     scale (a well's amount times each scan's response), so the fraction is fixed
@@ -379,15 +452,18 @@ def observed_fraction(
         The scans the fit consumed, as ``(wavelengths, Y[n_lambda, n_wells])``.
         Only the label and the data are read, in whatever well order the fit
         saw them.
+    is_ph : bool
+        pH titration (report the deprotonated anionic state) or ligand binding
+        (report the bound state). The two are complements of each other, so this
+        decides which share is returned.
     n_grid : int
         Number of fraction values searched, from 1e-3 to 1 - 1e-3.
 
     Returns
     -------
     ArrayF | None
-        The basic-state fraction per well, same well order as the data; ``None``
-        when no data label matches the fit's species, so a caller can skip
-        its marker.
+        The fraction per well, same well order as the data; ``None`` when no data
+        label matches the fit's species, so a caller can skip its marker.
     """
     labels = [label for label in spectra if label in fit.species]
     if not labels:
@@ -417,7 +493,10 @@ def observed_fraction(
     if not np.isfinite(cost).any():
         return None
     best = np.argmin(cost, axis=0)
-    return frac[best]
+    # ``frac`` weights species[1], the protonated state on a pH titration and the
+    # bound state on a ligand one; the reported share is the state the titrant
+    # grows, so the pH case takes the complement
+    return frac[best] if not is_ph else 1.0 - frac[best]
 
 
 def _bootstrap_wells(  # ruff: ignore[too-many-arguments]
@@ -508,6 +587,7 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     well_scale: bool = False,
     acid_state: bool = False,
     screen: float | None = None,
+    species_min: float | None = None,
     jackknife: bool = True,
     n_boot: int = 0,
     seed: int = 0,
@@ -543,6 +623,17 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
         in :attr:`SpectralFit.kept`. ``None`` keeps every well - the band path screens single
         (well, band) points by default, this fit does not screen at all, and a comparison
         across the two must say which is which.
+    species_min : float | None
+        Lower bound on every species spectrum, per wavelength. ``0`` is the
+        physical choice for fluorescence - a pure species cannot emit negative
+        counts, and the unconstrained solve will use a dark species as a free
+        direction when a band's shape does not fit (on the L8 A08 plate the
+        anionic species of the emission-420 scan dipped to -8 % of its own peak
+        around 499 nm). ``None`` leaves the solve unconstrained, which is what
+        every number produced before this option existed used; a small negative
+        floor keeps buffer-subtraction noise unclipped. The bound makes the
+        species solve a constrained least squares, so K is no longer the exact
+        linear projection - on A08 it moved by 0.05 sigma.
     jackknife : bool
         Compute the delete-one-well jackknife standard error (one refit per well).
     n_boot : int
@@ -569,7 +660,12 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     if acid_state and not is_ph:
         msg = "the acid state is defined for pH titrations only"
         raise ValueError(msg)
-    model = _Model(acid_state=acid_state, fit_hill=fit_hill, well_scale=well_scale)
+    model = _Model(
+        acid_state=acid_state,
+        fit_hill=fit_hill,
+        well_scale=well_scale,
+        species_floor=species_min,
+    )
     xa = np.asarray(x, dtype=np.float64)
     if xa.size < _MIN_GLOBAL_WELLS:
         msg = "a global spectral fit needs at least four wells"
@@ -588,8 +684,12 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     theta, se_naive, sigma = _solve(xa, ys, model, is_ph=is_ph)
     kept = np.ones(xa.size, dtype=bool)
     if screen is not None:
+        # the screen is judged on the UNCONSTRAINED projection even when the
+        # species are bounded: its cutoff was calibrated on that residual, and a
+        # constrained solve cannot fit as closely, so screening the bounded fit
+        # would silently change which wells are called broken
         c = _fractions(xa, theta, model, is_ph=is_ph)
-        _, res, _ = _project(c, ys, well_scale=well_scale, sigma=sigma)
+        _, res, _ = _project(c, ys, well_scale=well_scale, sigma=sigma, floor=None)
         kept = _well_screen(res, sigma, alpha=screen)
         if not kept.all():
             xa = xa[kept]
@@ -597,7 +697,9 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
             ys = [y[:, kept] for y in ys]
             theta, se_naive, sigma = _solve(xa, ys, model, is_ph=is_ph)
     c = _fractions(xa, theta, model, is_ph=is_ph)
-    species, res, scale = _project(c, ys, well_scale=well_scale, sigma=sigma)
+    species, res, scale = _project(
+        c, ys, well_scale=well_scale, sigma=sigma, floor=species_min
+    )
     weighted = np.hstack([r / s for r, s in zip(res, sigma, strict=True)])
     # res[j] has shape (n_wells, n_lambda); store (n_lambda, n_wells) and R_s(w)
     resid_by_label = {
@@ -720,6 +822,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     is_ph: bool = True,
     acid_state: bool = False,
     species_basis: int | None = 24,
+    species_min: float | None = None,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -786,6 +889,13 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         reproduces the least-squares species to within the residual scale.
         ``E0_``/``E1_``/``E2_`` are still written at full wavelength
         resolution, so the outputs are unchanged.
+    species_min : float | None
+        Censor the *reported* species draws at this value (see
+        :func:`_censor_species_draws`). It runs after sampling, so the posterior
+        of ``K``, of the latent axis and of the noise scales is exactly the
+        unconstrained one - a hard bound on a sampled species is a truncated
+        prior, which is a different model, and this is not that. ``0`` is the
+        physical floor for fluorescence; ``None`` leaves the draws untouched.
     seed : int
         Random seed; a fixed seed reproduces the posterior.
     draws : int
@@ -901,10 +1011,41 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
             progressbar=False,
         )
         pm.compute_log_likelihood(idata)  # for elpd comparisons across methods
+        if species_min is not None:
+            _censor_species_draws(idata, floor=species_min)
         return idata
 
 
 _RIDGE = 4.0  # precision of the level/linear drift: drift SD ~0.5 in normalized units
+
+
+def _censor_species_draws(idata: az.InferenceData, *, floor: float) -> None:
+    """Censor the reported species draws at ``floor``, in place.
+
+    This is a *reporting* projection, not a posterior: it runs after sampling, so
+    the draws of K, of the latent titrant axis, of the amplitudes and of the noise
+    scales are exactly the unconstrained ones. It has to be that way - in the
+    marginalized model the species are integrated out, so a hard lower bound on
+    them cannot enter the likelihood without becoming a different model (a
+    truncated Gaussian), which is a method of its own and not a floor.
+
+    Censoring rather than re-solving keeps each model's own species scale: the
+    draws already carry the prior's shrinkage toward the least-squares species and
+    the spline's smoothness, and a fresh bounded least-squares solve would throw
+    both away. The cost is that the result is a censored draw, not the mean of a
+    truncated posterior - the flat run at the floor in a plot is exactly that.
+    """
+    post = idata.posterior
+    for var in list(post.data_vars):
+        # species are stored as E0_<scan>, E1_<scan> (and E2_ with an acid state)
+        is_species = var.startswith("E") and var[1:2].isdigit() and var[2:3] == "_"
+        if is_species:
+            da = post[var]
+            post[var] = xr.DataArray(
+                np.maximum(np.asarray(da.values), floor),
+                dims=da.dims,
+                coords=da.coords,
+            )
 
 
 def _well_screen(
@@ -1242,6 +1383,7 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     is_ph: bool = True,
     fit_hill: bool = False,
     acid_state: bool = False,
+    species_min: float | None = None,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -1284,8 +1426,7 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
       shows the free-parameter version undercovers there (0.30-0.85 observed
       95% coverage) and the noise model here directly targets that failure;
       the marginalized fitter itself still undercovers in the same sweep
-      (0.25-0.70), with
-      the constrained MCR posterior best-calibrated from noise 0.06 up (0.80-0.95)
+      (0.25-0.70)
       - so verify coverage for a new data regime with the benchmark before
       trusting the intervals.
 
@@ -1398,4 +1539,6 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
         acid_state=acid_state,
         seed=seed,
     )
+    if species_min is not None:
+        _censor_species_draws(idata, floor=species_min)
     return idata

@@ -750,6 +750,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
     seed: int = 0,
     strata: str = "none",
     qc: float | None = None,
+    species_min: float | None = None,
     inspect: bool = False,
     figure_stem: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
@@ -805,6 +806,11 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
         (``min_signal``), so a dark but valid well - the saturating end of a
         ligand ladder - is not mistaken for a broken one. ``None`` fits every
         well, which is what this method did before.
+    species_min : float | None
+        Lower bound on every species spectrum, per wavelength, passed to
+        :func:`~clophfit.fitting.spectral.fit_spectra_global`. ``0`` is the
+        physical choice for fluorescence; ``None`` (the default) keeps the
+        unconstrained linear solve that every earlier number came from.
     inspect : bool
         With a ``figure_stem``, also write one ``<stem>_global_inspect.txt``
         listing, per (sample, temperature): K and its errors, the wells used and
@@ -885,7 +891,9 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
             # screen against the model, not against the wells: the two species of
             # a first fit are a fixed basis, which is scale-free (a dark well is
             # judged on shape) and breaks the symmetry between the two wells of a
-            # replicate column
+            # replicate column. Always unconstrained: the z was calibrated on that
+            # residual, so bounding the species must not change which wells are
+            # called broken (see _screen_model).
             screen_fit = fit_spectra_global(
                 x,
                 spectra,
@@ -908,6 +916,12 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
             "sample": name,
             "temp": temp,
             "qc_dropped": ";".join(dropped) or "-",
+            # the options that move the numbers, recorded per row so two runs that
+            # differ only in them cannot leave identical tables
+            "scans": ";".join(spectra),
+            "isosbestic_nm": np.nan if iso_nm is None else float(iso_nm),
+            "iso_window_nm": np.nan if iso_nm is None else float(iso_band),
+            "species_min": np.nan if species_min is None else float(species_min),
         }
         qc_passes = 0
         qc_strata = [str(w)[1:] for w in wells] if strata == "column" else None
@@ -918,6 +932,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
             fit_hill=fit_hill,
             well_scale=well_scale,
             screen=screen,
+            species_min=species_min,
             n_boot=n_boot,
             seed=seed,
             strata=qc_strata,
@@ -930,7 +945,24 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
         for _ in range(_QC_MAX_PASSES):
             if qc is None or not spectra:
                 break
-            check = model_outliers(fit, spectra, wells, z=qc)
+            # re-screen on an UNCONSTRAINED refit when the species are bounded: the
+            # bound leaves larger residuals by construction, and the z was
+            # calibrated on the free model, so screening the bounded fit would
+            # change which wells are called broken
+            screen_model = (
+                fit
+                if species_min is None
+                else fit_spectra_global(
+                    x,
+                    spectra,
+                    is_ph=is_ph,
+                    fit_hill=fit_hill,
+                    well_scale=well_scale,
+                    screen=screen,
+                    jackknife=False,
+                )
+            )
+            check = model_outliers(screen_model, spectra, wells, z=qc)
             extra = [
                 w for w in check.attrs.get("flagged_wells", []) if w not in dropped
             ]
@@ -953,6 +985,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
                 fit_hill=fit_hill,
                 well_scale=well_scale,
                 screen=screen,
+                species_min=species_min,
                 n_boot=n_boot,
                 seed=seed,
                 strata=qc_strata,
@@ -973,7 +1006,15 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
         if inspect:
             inspect_lines.append(
                 _group_inspect(
-                    name, temp, x, wells, fit, base, is_ph=is_ph, iso_nm=iso_nm
+                    name,
+                    temp,
+                    x,
+                    wells,
+                    fit,
+                    base,
+                    is_ph=is_ph,
+                    iso_nm=iso_nm,
+                    peaks=peaks,
                 )
             )
         rows.append(_row(base, "all", fit))
@@ -989,6 +1030,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
                 is_ph=is_ph,
                 fit_hill=fit_hill,
                 well_scale=well_scale,
+                species_min=species_min,
                 jackknife=False,
             )
             rows.append(_row(base, f"row {plate_row}", row_fit))
@@ -1323,17 +1365,26 @@ def _group_inspect(  # ruff: ignore[too-many-arguments, too-many-positional-argu
     *,
     is_ph: bool,
     iso_nm: float | None,
+    peaks: Mapping[str, float],
 ) -> str:
     """Assemble one (sample, temperature) block for the ``--inspect`` sidecar.
 
     Text only: a human-readable dump of what the table holds for the group, plus
-    each scan's basic/acidic species peaks and every well's basic fraction and
-    amplitude. Nothing here is written to the panel figure.
+    each scan's basic/acidic species peaks, how far below zero either species
+    dips, and every well's basic fraction and amplitude. Nothing here is written
+    to the panel figure.
     """
     xa = np.asarray(x, dtype=np.float64)
     k = float(fit.K)
-    frac = 1.0 / (1.0 + 10.0 ** (xa - k)) if is_ph else xa / (xa + k)
-    basic = 1.0 - frac
+    # ``acidic`` weights species[1] - the protonated state on a pH titration, the
+    # bound state on a ligand one. The reported share is the state the titrant
+    # grows: the deprotonated anionic (basic) one for pH, the bound one for a
+    # ligand. Naming the protonated share "basic" is the f_basic/f_neutral swap.
+    acidic = 1.0 / (1.0 + 10.0 ** (xa - k)) if is_ph else xa / (xa + k)
+    reported = (1.0 - acidic) if is_ph else acidic
+    frac_key, frac_name = (
+        ("basic", "basic (anionic) fraction") if is_ph else ("bound", "bound fraction")
+    )
     scale = np.asarray(fit.well_scale, dtype=np.float64)
     boot = (
         f" boot {fit.se_boot:.4f} [{fit.ci_boot[0]:.4f}, {fit.ci_boot[1]:.4f}]"
@@ -1356,6 +1407,7 @@ def _group_inspect(  # ruff: ignore[too-many-arguments, too-many-positional-argu
         species = np.asarray(fit.species[label], dtype=np.float64)
         lam = np.asarray(fit.wavelengths.get(label, []), dtype=np.float64)
         rms = float(fit.rms[label])
+        pf = float(peaks.get(label, 1.0))  # back to the scan's measured units
         n_w = float(np.max(np.abs(species)))
         if species.shape[0] >= 2:  # ruff: ignore[magic-value-comparison]
             b0 = int(np.argmax(np.abs(species[0])))
@@ -1367,6 +1419,17 @@ def _group_inspect(  # ruff: ignore[too-many-arguments, too-many-positional-argu
                 f"acidic {float(np.max(np.abs(species[1]))):.3e} @ {a_at}   "
                 f"rms {rms:.3e}"
             )
+            # a species that should be dark in a scan has nothing holding it at
+            # zero, so the unconstrained solve can give it a negative lobe; that
+            # is only visible here, never on the figure
+            dips = [
+                f"{name} min {float(np.min(s)):.3e} ({int(np.sum(s < 0.0))} pts < 0)"
+                for name, s in (
+                    ("basic", species[0] * pf),
+                    ("acidic", species[1] * pf),
+                )
+            ]
+            lines.append("      " + ", ".join(dips))
         else:
             lines.append(f"  {label}: (single species) peak {n_w:.3e}   rms {rms:.3e}")
     sv = np.asarray(fit.residual_sv, dtype=np.float64)
@@ -1374,9 +1437,9 @@ def _group_inspect(  # ruff: ignore[too-many-arguments, too-many-positional-argu
         lines.append(
             f"2-state residual sv {sv[0]:.3e}, {sv[1]:.3e}   ratio {sv[0] / sv[1]:.2f}"
         )
-    lines.append("per-well basic fraction f / amplitude a:")
-    for w, fb, sc in zip(wells, basic, scale, strict=True):
-        lines.append(f"  {w}: f_basic = {fb:.4f}   a = {sc:.4e}")
+    lines.append(f"per-well {frac_name} f / amplitude a:")
+    for w, fb, sc in zip(wells, reported, scale, strict=True):
+        lines.append(f"  {w}: f_{frac_key} = {fb:.4f}   a = {sc:.4e}")
     lines.append("")
     return "\n".join(lines)
 
@@ -1460,7 +1523,24 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     if not scans:
         return path
     is_ph = float(np.nanmax(x)) < _MAX_PH
-    f = 1.0 / (1.0 + 10.0 ** (x - fit.K)) if is_ph else x / (x + fit.K)
+    # the fit's species[1] is the protonated (or bound) state, so this weight and
+    # (1 - f_acid) rebuild the model exactly as _fractions does
+    f_acid = 1.0 / (1.0 + 10.0 ** (x - fit.K)) if is_ph else x / (x + fit.K)
+    # one convention for the drawn fraction: the state the titrant grows - the
+    # deprotonated anionic (basic) state on a pH titration, the bound state on a
+    # ligand one. Calling the protonated share "basic" swaps f_basic for f_neutral.
+    basic_label = "basic (anionic) state" if is_ph else "unbound state"
+    acid_label = "acidic (protonated) state" if is_ph else "bound state"
+    frac_ylabel = (
+        "fraction of the basic (anionic) state"
+        if is_ph
+        else "fraction of the bound state"
+    )
+    frac_title = (
+        "basic (anionic) fraction, one per well"
+        if is_ph
+        else "bound fraction, one per well"
+    )
     grid = (
         np.linspace(float(np.nanmin(x)) - 0.2, float(np.nanmax(x)) + 0.2, 200)
         if is_ph
@@ -1468,8 +1548,12 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     )
 
     def curve(k: float) -> ArrayF:
-        """Fraction of the basic state at one K, on the panel's grid."""
-        return 1.0 / (1.0 + 10.0 ** (grid - k)) if is_ph else grid / (grid + k)
+        """Share of the state the titrant grows at one K, on the panel's grid."""
+        if is_ph:
+            # anionic: 0 at low pH, 1 at high pH, the mirror of the neutral share
+            ratio = 10.0 ** (grid - k)
+            return ratio / (1.0 + ratio)
+        return grid / (grid + k)
 
     fig, axes = plt.subplots(
         1,
@@ -1488,7 +1572,8 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
         ya = np.asarray(y, dtype=np.float64)
         species = np.asarray(fit.species[label], dtype=np.float64)
         model = np.asarray(fit.well_scale)[None, :] * (
-            (1 - f)[None, :] * species[0][:, None] + f[None, :] * species[1][:, None]
+            (1 - f_acid)[None, :] * species[0][:, None]
+            + f_acid[None, :] * species[1][:, None]
         )
         diff = species[0] - species[1]
         if iso_nm is not None:
@@ -1515,15 +1600,13 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
         for i in range(ya.shape[1]):
             ax.plot(lam, m * ya[:, i], color=cmap(norm(x[i])), lw=0.9, alpha=0.45)
             ax.plot(lam, m * model[:, i], color="k", lw=0.6, ls="--", alpha=0.35)
-        ax.plot(
-            lam, m * species[0], color="#2a6f97", lw=2.0, label="basic (anionic) state"
-        )
+        ax.plot(lam, m * species[0], color="#2a6f97", lw=2.0, label=basic_label)
         ax.plot(
             lam,
             m * species[1],
             color="#d1495b",
             lw=2.0,
-            label="acidic (protonated) state",
+            label=acid_label,
         )
         if col == 0:
             # the crossing belongs to the excitation scan: it is the wavelength the
@@ -1554,7 +1637,9 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     # amplitude of a well is a free scale, taken out before the fraction is
     # read, so a well that is merely bright or dim in one scan is not mistaken
     # for a well that is protonated
-    obs = observed_fraction(fit, {label: spectra[label] for label in scans})
+    obs = observed_fraction(
+        fit, {label: spectra[label] for label in scans}, is_ph=is_ph
+    )
     if obs is not None:
         axf.plot(
             x,
@@ -1582,8 +1667,8 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     else:
         axf.set_xscale("log")
         axf.set_xlabel("titrant")
-    axf.set_ylabel("fraction of the basic state")
-    axf.set_title("basic-state fraction, one per well", fontsize=9.5, loc="left")
+    axf.set_ylabel(frac_ylabel)
+    axf.set_title(frac_title, fontsize=9.5, loc="left")
     axf.legend(fontsize=7, frameon=False)
     fig.colorbar(
         plt.cm.ScalarMappable(norm=norm, cmap=cmap),
