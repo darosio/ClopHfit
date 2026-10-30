@@ -1,7 +1,7 @@
 """Per-well latent titrant axis prior of the EnSpire Bayesian methods.
 
 The ``--x-sigma`` posterior treats the note's titrant as a measurement, not an
-exact level: every Bayesian method (bands, whole-spectrum global, MCR and its
+exact level: every Bayesian method (bands, whole-spectrum global and its
 constrained variant) draws a latent ``x_true`` per well. These tests check the
 prior resolution, the synthetic-data recovery of each model, the CLI outputs,
 and the input validation.
@@ -317,6 +317,11 @@ def test_cli_global_bayes_writes_posterior_outputs(
     table = pd.read_csv(out / "NTT-G10_K_global_bayes.csv")
     assert table.K.notna().all()
     assert (table.hdi03 < table.hdi97).all()
+    # the table carries the options that shape it, and the run leaves a record
+    assert {"scans", "isosbestic_nm", "iso_window_nm", "species_min"} <= set(
+        table.columns
+    )
+    assert (out / "NTT-G10_K_global_bayes.json").exists()
     # no r_hat assertion: 100 smoke-test draws do not converge on a real plate
     # (with the default 2000 the r_hat lands well below 1.1)
 
@@ -581,7 +586,7 @@ def test_cli_bayes_x_sigma_auto_and_fixed(tmp_path: Path, runner: CliRunner) -> 
             assert (table["x_sigma"] < 0.5).all()
 
 
-@pytest.mark.parametrize("method", ["band", "svd", "global", "mcr", "vanthoff"])
+@pytest.mark.parametrize("method", ["band", "svd", "global", "vanthoff"])
 def test_cli_rejects_x_sigma_without_bayes(
     tmp_path: Path, runner: CliRunner, method: str
 ) -> None:

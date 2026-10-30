@@ -11,6 +11,7 @@ import pytest
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.spectral import (
     fit_spectra_global,
+    fit_spectra_global_bayes,
     observed_fraction,
     paired_delta,
 )
@@ -449,27 +450,70 @@ def test_one_fraction_per_well_across_scans() -> None:
     A well's two scans differ in amount (0.35x) and shape; the old per-scan
     unmixing read one fraction per scan, trading the well's amplitude into each.
     With one fraction per well across both scans the amplitudes are absorbed by
-    the per-scan scale and the true basic-state fraction comes back.
+    the per-scan scale and the true basic (anionic) fraction comes back.
     """
     x = np.tile(np.linspace(4.0, 9.5, 12), 2)
-    fr = binding_1site(x, 7.4, 0.0, 1.0, is_ph=True)
-    basic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    # binding_1site's f is the PROTONATED share: 1 at low pH, ~0 at high pH
+    f_neutral = np.asarray(binding_1site(x, 7.4, 0.0, 1.0, is_ph=True))
+    anionic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
     acid = 0.6 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
     rng = np.random.default_rng(11)
     spectra: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for name, amount in (("excitation", 1.0), ("emission 420", 0.35)):
-        y = np.outer(basic, 1.0 - fr) + np.outer(acid, fr)
+        y = np.outer(anionic, 1.0 - f_neutral) + np.outer(acid, f_neutral)
         y *= amount
         y += rng.normal(0.0, 5e-3 * amount, y.shape)
         spectra[name] = (LAM, y)
     fit = fit_spectra_global(x, spectra, is_ph=True, jackknife=False)
     assert pytest.approx(7.4, abs=0.1) == fit.K
-    obs = observed_fraction(fit, spectra)
+    obs = observed_fraction(fit, spectra, is_ph=True)
     assert obs is not None
     assert float(obs.size) == x.size
-    assert np.allclose(obs, fr, atol=0.05), (
-        f"observed {obs.round(3)} vs true {fr.round(3)}"
+    # the reported share is the anionic one, so it must RISE with pH
+    assert np.corrcoef(x, obs)[0, 1] > 0.9, obs.round(3)
+    assert np.allclose(obs, 1.0 - f_neutral, atol=0.05), (
+        f"observed {obs.round(3)} vs true anionic {(1 - f_neutral).round(3)}"
     )
+
+
+def test_observed_fraction_reports_the_state_the_titrant_grows() -> None:
+    """PH reports the anionic share, a ligand titration the bound share, both rising.
+
+    The fit's species[1] is the protonated state on a pH plate and the bound state
+    on a ligand plate, so the same column means two different things and only the
+    titration decides which share is "the product". Both must rise with the
+    titrant: naming the protonated share "basic" is the f_basic/f_neutral swap.
+    """
+    # pH: the anionic share is small at low pH, large at high pH
+    x_ph = np.linspace(5.5, 9.5, 9)
+    f_neutral = np.asarray(binding_1site(x_ph, 7.4, 0.0, 1.0, is_ph=True))
+    anionic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    neutral = 0.5 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
+    ph_spectra = {
+        "excitation": (
+            LAM,
+            np.outer(anionic, 1 - f_neutral) + np.outer(neutral, f_neutral),
+        )
+    }
+    ph_fit = fit_spectra_global(x_ph, ph_spectra, is_ph=True, jackknife=False)
+    ph_obs = observed_fraction(ph_fit, ph_spectra, is_ph=True)
+    assert ph_obs is not None
+    assert np.allclose(ph_obs, 1.0 - f_neutral, atol=0.05), ph_obs.round(3)
+    assert ph_obs[0] < 0.05, ph_obs.round(3)
+    assert ph_obs[-1] > 0.95, ph_obs.round(3)
+
+    # ligand: the bound share is small at low [Cl] and large at high [Cl]
+    x_cl = np.array([0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0])
+    f_bound = np.asarray(x_cl / (x_cl + 20.0))
+    cl_spectra = {
+        "excitation": (LAM, np.outer(anionic, 1 - f_bound) + np.outer(neutral, f_bound))
+    }
+    cl_fit = fit_spectra_global(x_cl, cl_spectra, is_ph=False, jackknife=False)
+    cl_obs = observed_fraction(cl_fit, cl_spectra, is_ph=False)
+    assert cl_obs is not None
+    assert np.allclose(cl_obs, f_bound, atol=0.05), cl_obs.round(3)
+    assert cl_obs[0] < 0.05, cl_obs.round(3)
+    assert cl_obs[-1] > 0.85, cl_obs.round(3)
 
 
 def test_observed_fraction_handles_a_mixed_invisible_scan() -> None:
@@ -497,9 +541,9 @@ def test_observed_fraction_handles_a_mixed_invisible_scan() -> None:
         "flat": (LAM, np.outer(flat, np.ones_like(fr))),
     }
     fit = fit_spectra_global(x, spectra, is_ph=True, jackknife=False)
-    obs = observed_fraction(fit, spectra)
+    obs = observed_fraction(fit, spectra, is_ph=True)
     assert obs is not None
-    assert np.all(obs == pytest.approx(fr, abs=0.12))
+    assert np.all(obs == pytest.approx(1.0 - fr, abs=0.12))
 
 
 def test_observed_fraction_returns_none_with_unknown_labels() -> None:
@@ -522,7 +566,7 @@ def test_observed_fraction_returns_none_with_unknown_labels() -> None:
         is_ph=True,
         jackknife=False,
     )
-    assert observed_fraction(dummy, spectra) is None
+    assert observed_fraction(dummy, spectra, is_ph=True) is None
     del dummy
 
 
@@ -644,7 +688,11 @@ def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
     assert "K = " in text
     assert "wells used:" in text
     assert "per-scan species peaks" in text
-    assert "per-well basic fraction" in text
+    # how far below zero each species dips belongs in the dump: the negative lobe
+    # of a species that should be dark is invisible unless it is a number
+    assert "pts < 0" in text
+    assert "per-well basic (anionic) fraction" in text
+    assert "f_basic = " in text
     # one block per (sample, temperature) group, and the amplitudes are present
     assert text.count("==") >= 2
     assert "a = " in text
@@ -653,3 +701,148 @@ def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
     # the panel figure is still written, and no separate species figure appears
     assert sorted(p.name for p in tmp_path.glob("*_panels.pdf"))
     assert not sorted(tmp_path.glob("*_species.pdf"))
+
+
+def test_bounded_two_state_solve_matches_scipy_nnls() -> None:
+    """The closed-form bound is the same solution scipy's NNLS finds.
+
+    Two states make the bounded least squares a 2-variable problem, so the
+    optimum is either the unconstrained solution or the boundary of the one
+    offending coefficient - no iteration. Pinning it against scipy keeps the
+    shortcut honest if the species count or the design ever changes.
+    """
+    from scipy.optimize import nnls  # ruff: ignore[import-outside-top-level]
+
+    from clophfit.fitting.spectral import _species_solve  # ruff: ignore[import-outside-top-level, import-private-name]
+
+    rng = np.random.default_rng(7)
+    worst = 0.0
+    for _ in range(35):
+        n_wells = int(rng.integers(4, 8))
+        c = np.column_stack([
+            rng.uniform(0.1, 1.0, n_wells),
+            rng.uniform(0.1, 1.0, n_wells),
+        ])
+        y = rng.normal(size=(10, n_wells)) * 100.0
+        expected = np.array([nnls(c, y[j, :])[0] for j in range(y.shape[0])]).T
+        got = _species_solve(c, y, 0.0)
+        worst = max(worst, float(np.max(np.abs(got - expected))))
+    assert worst < 1e-9, f"closed form and scipy nnls disagree by {worst:.2e}"
+
+
+def test_species_floor_removes_the_negative_lobe_of_a_dark_species() -> None:
+    """``species_min`` keeps a species that should be dark from going negative.
+
+    On the G10 plate the emission-420 scan's anionic species dips below zero: for
+    each wavelength the species are an independent linear solve, so where that
+    species ought to be dark nothing holds it at zero and it becomes a free
+    direction that absorbs the shape mismatch between the titrant ends. A floor of
+    0 removes the lobe without materially moving K; the unconstrained solve stays
+    the default, so the test also records that the lobe is really there.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    one = note[(note["Name"] == "NTT-G10") & (note["Temp"] == 20.0)].drop_duplicates(
+        "Well"
+    )
+    wells, x = one["Well"].tolist(), one["pH"].to_numpy(float)
+    spectra, wells, x, _peaks = sample_spectra(
+        eff,
+        wells,
+        x,
+        20.0,
+        is_ph=True,
+        buffer_wells=note[note["Name"] == "buffer"]["Well"].tolist(),
+        bands=("exc_anionic", "em_exc420", "em_exc278"),
+    )
+    free = fit_spectra_global(x, spectra, is_ph=True, well_scale=True, jackknife=False)
+    bounded = fit_spectra_global(
+        x, spectra, is_ph=True, well_scale=True, species_min=0.0, jackknife=False
+    )
+    dark = float(np.min(free.species["emission 420"][0]))
+    assert dark < 0.0, f"the fixture no longer reproduces the lobe (min {dark:.3e})"
+    for label, species in bounded.species.items():
+        assert float(np.min(species)) >= -1e-12, f"{label} still dips below the floor"
+    # the constraint is not allowed to move the titration appreciably
+    assert pytest.approx(free.K, abs=0.05) == bounded.K, (
+        f"floor moved K from {free.K:.4f} to {bounded.K:.4f}"
+    )
+
+
+def test_species_floor_does_not_change_which_wells_the_screen_drops() -> None:
+    """The QC screen stays unconstrained, so the bound cannot move its verdict.
+
+    ``--global-qc`` judges a standardized residual whose z was calibrated on the
+    free model. A bounded solve cannot fit as closely, so screening the bounded
+    fit would flag wells the calibration never intended to flag - on L8 A08 it
+    dropped six high-pH wells that the free screen keeps. The screen is therefore
+    always evaluated unconstrained and the bound applies to the reported fit
+    only: same wells dropped, different species.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    note = note[note["Temp"] == 20.0]
+    scans = ("exc_anionic", "em_exc420", "em_exc278")
+
+    def run(species_min: float | None) -> tuple[str, object]:
+        table, fits = fit_titrations_spectral(
+            eff, note, bands=scans, qc=6.0, species_min=species_min
+        )
+        row = table[table.subset == "all"].iloc[0]
+        return str(row.qc_dropped), fits["NTT-G10 20.0"]
+
+    dropped_free, free = run(None)
+    dropped_bound, bounded = run(0.0)
+    assert dropped_bound == dropped_free, (
+        f"the bound changed the screen: {dropped_free!r} -> {dropped_bound!r}"
+    )
+    assert bounded.n_wells == free.n_wells
+    # the bound did reach the reported fit
+    assert float(np.min(free.species["emission 420"][0])) < 0.0
+    for label, species in bounded.species.items():
+        assert float(np.min(species)) >= -1e-12, f"{label} still dips below the floor"
+
+
+def test_species_floor_censors_the_bayes_species_draws_only() -> None:
+    """On the Bayes fitters the floor censors reported species, never the posterior.
+
+    The species are nuisance parameters in the free-species posterior and are
+    integrated out of the marginalized one, so a hard lower bound cannot be part
+    of the likelihood without becoming a truncated model. The floor therefore runs
+    after sampling: every reported species point is at or above it, while the
+    draws of K are bit-identical to the unconstrained run given the same seed.
+    """
+    x = np.tile(np.linspace(5.6, 9.1, 8), 2)
+    f_neutral = np.asarray(binding_1site(x, 7.4, 0.0, 1.0, is_ph=True))
+    anionic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    neutral = 0.5 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
+    rng = np.random.default_rng(3)
+    y = np.outer(anionic, 1.0 - f_neutral) + np.outer(neutral, f_neutral)
+    # a dark species in a second, weakly informative scan is where the unconstrained
+    # posterior goes negative without the floor
+    dark = 0.02 * np.exp(-0.5 * ((LAM - 500.0) / 30.0) ** 2)
+    y2 = np.outer(dark, 1.0 - f_neutral) + np.outer(neutral, f_neutral)
+    y2 += rng.normal(0.0, 2e-3, y2.shape)
+    spectra = {"excitation": (LAM, y), "emission 420": (LAM, y2)}
+
+    kw = {
+        "x_sigma": 0.08,
+        "is_ph": True,
+        "draws": 60,
+        "chains": 2,
+        "tune": 100,
+        "seed": 0,
+    }
+    free = fit_spectra_global_bayes(x, spectra, **kw)
+    bounded = fit_spectra_global_bayes(x, spectra, species_min=0.0, **kw)
+
+    raw = np.asarray(free.posterior["E0_emission 420"].values)
+    assert raw.min() < 0.0, f"the fixture no longer dips negative (min {raw.min():.3e})"
+    for var in bounded.posterior.data_vars:
+        if var.startswith("E") and var[1:2].isdigit():
+            assert float(np.min(np.asarray(bounded.posterior[var].values))) >= 0.0, var
+    # K's posterior must be untouched: the floor is applied after sampling
+    assert np.array_equal(
+        np.asarray(free.posterior["K"].values),
+        np.asarray(bounded.posterior["K"].values),
+    )

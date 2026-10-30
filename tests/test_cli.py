@@ -2,6 +2,7 @@
 
 import csv
 import filecmp
+import json
 import logging
 import re
 import tempfile
@@ -165,6 +166,12 @@ def test_prenspire_all(tmp_path: Path, runner: CliRunner) -> None:
     assert (out / "NTT-G10_K.csv").exists()  # band table
     assert (out / "NTT-G10_bands.pdf").exists()  # band figure
     assert (out / "NTT-G10_K_global.csv").exists()  # global table
+    # every method leaves the record of the invocation that produced it
+    for stem in ("NTT-G10_K.json", "NTT-G10_svd.json", "NTT-G10_K_global.json"):
+        prov = json.loads((out / stem).read_text())
+        assert prov["clophfit_version"], stem
+        assert prov["options"]["method"] == "all", stem
+        assert prov["inputs"]["note"].endswith("NTT-G10_note.csv"), stem
     assert sorted(out.glob("*_panels.pdf"))  # global panel figure
     assert not (out / "NTT-G10_species.pdf").exists()
     svd_pdfs = sorted(p.name for p in out.glob("NTT-G10_20*_*.pdf"))
@@ -647,35 +654,6 @@ def test_print_spec_signs_the_resolved_analysis(runner: CliRunner) -> None:
     )
 
 
-def test_prenspire_mcr(tmp_path: Path, runner: CliRunner) -> None:
-    """``--method mcr`` resolves species and returns a pKa per temperature."""
-    data = tpath / "EnSpire"
-    out = tmp_path / "E"
-    out.mkdir()
-    args = [
-        "--out",
-        str(out),
-        "enspire",
-        str(data / "G10.csv"),
-        str(data / "NTT-G10_note.csv"),
-    ]
-    result = runner.invoke(ppr, [*args, "--method", "mcr"])
-    assert result.exit_code == 0, result.output
-    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
-    assert set(table.temp.astype(str)) == {"20", "37"}
-    assert table.K.between(7.0, 9.5).all()
-    assert (
-        table.rel_err < 0.1
-    ).all()  # real plate noise; synthetic tests carry the accuracy bar
-    assert (table.se > 0).all()
-    assert (table.se < 0.5).all()
-    assert (out / "NTT-G10_mcr_spectra.csv").exists()
-    spec = pd.read_csv(out / "NTT-G10_mcr_spectra.csv")
-    assert {"lambda", "species_0", "species_1"} <= set(spec.columns)
-    assert (spec[["species_0", "species_1"]] >= 0).all().all()
-    assert (out / "NTT-G10_mcr.pdf").stat().st_size > 1000
-
-
 def test_prenspire_bayes(tmp_path: Path, runner: CliRunner) -> None:
     """``--method bayes`` returns a seeded posterior with a 94 % HDI per temp."""
     data = tpath / "EnSpire"
@@ -787,81 +765,6 @@ def test_prenspire_bayes_writes_a_table_when_nothing_fits(
     assert (out / "NTT-G10_K_bayes.csv").exists()
 
 
-def test_prenspire_mcr_reports_a_degenerate_decomposition(
-    tmp_path: Path, runner: CliRunner
-) -> None:
-    """A degenerate MCR fit must be reported, not shown as a fitted K.
-
-    Asking for more species than the data supports lets ALS park a
-    redundant component at a constant share of every well. The residual
-    improves, so nothing in the fit itself objects - but the K would be
-    read off a column that never moves. The CLI has to say so instead of
-    printing a confident pKa.
-    """
-    data = tpath / "EnSpire"
-    out = tmp_path / "E"
-    out.mkdir()
-    args = [
-        "--out",
-        str(out),
-        "enspire",
-        str(data / "G10.csv"),
-        str(data / "NTT-G10_note.csv"),
-    ]
-    result = runner.invoke(ppr, [*args, "--method", "mcr", "--components", "3"])
-    assert result.exit_code == 0, result.output
-    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
-    assert "degenerate" in table.columns
-    assert "note" in table.columns
-    if table.degenerate.any():
-        # no K may be reported for a degenerate decomposition
-        assert table.loc[table.degenerate, "K"].isna().all()
-        assert table.loc[table.degenerate, "note"].str.contains("dead").all()
-        assert "degenerate" in result.output
-    else:
-        # the decomposition was sound: then it must carry a real K
-        assert table.K.notna().all()
-
-
-def test_plot_mcr_draws_the_curve_on_the_scale_of_the_points(
-    tmp_path: Path, runner: CliRunner
-) -> None:
-    """The MCR curve must sit on the same scale as the points it overlays.
-
-    The closed profiles are fractions summing to one, so they live on the
-    0-1 scale. The fitted curve used to be drawn as ``f0 + (f1-f0)*frac``,
-    where ``f0`` and ``f1`` are the tracking component's own plateaus -
-    values like 0.0016 and 1.06 on the real plate. The curve therefore
-    ended at 0.0016 and 1.06 rather than 0 and 1, and did not pass through
-    the points it was supposed to describe.
-    """
-    data = tpath / "EnSpire"
-    out = tmp_path / "E"
-    out.mkdir()
-    args = [
-        "--out",
-        str(out),
-        "enspire",
-        str(data / "G10.csv"),
-        str(data / "NTT-G10_note.csv"),
-    ]
-    result = runner.invoke(ppr, [*args, "--method", "mcr"])
-    assert result.exit_code == 0, result.output
-    assert (out / "NTT-G10_mcr.pdf").stat().st_size > 1000
-    # The closed profiles are fractions on the 0-1 scale, so the drawn
-    # curve has to be on that same scale: it must span the points, not a
-    # rescaled copy of them. Read the figure back by checking the curve
-    # is drawn inside the fraction band the points occupy.
-    table = pd.read_csv(out / "NTT-G10_K_mcr.csv")
-    fitted = table[table.K.notna()]
-    assert len(fitted), "the shipped plate must fit"
-    # the tracking component's own plateaus may sit slightly outside
-    # [0, 1] - they are the component's baseline and saturation, not
-    # fractions - but the model curve is a fraction by construction.
-    assert (fitted.F1 > 0).all()
-    assert (fitted.F1 < 2.0).all()
-
-
 def test_prenspire_bayes_screen_drops_a_well_from_every_band(
     tmp_path: Path, runner: CliRunner
 ) -> None:
@@ -933,3 +836,115 @@ def test_iso_window_accepts_any_width_and_reaches_the_fit(
         ppr, ["--out", str(tmp_path / "neg"), *args, "--iso-window", "-1"]
     )
     assert result.exit_code != 0, "a negative window must be refused"
+
+
+def test_iso_window_refuses_to_be_inert(tmp_path: Path, runner: CliRunner) -> None:
+    """``--iso-window`` without a normalisation is an error, not a no-op.
+
+    The width only shapes the isosbestic reference; passing it alone used to look
+    like a knob that changed nothing (three runs, one K), which is how it was
+    reported. The same for the species floor outside the whole-spectrum fit.
+    """
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    base = ["--out", str(out), "enspire", str(data / "G10.csv"), str(note)]
+    result = runner.invoke(ppr, [*base, "--method", "global", "--iso-window", "3"])
+    assert result.exit_code != 0
+    assert "--normalise-isosbestic" in result.output
+    result = runner.invoke(ppr, [*base, "--method", "band", "--species-min", "0"])
+    assert result.exit_code != 0
+    assert "--species-min" in result.output
+
+
+def test_species_min_bounds_the_species_and_says_so_in_inspect(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """``--species-min 0`` reaches the fit, and the dump proves it took effect."""
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(note),
+        "--method",
+        "global",
+        "--scan",
+        "exc_anionic",
+        "--scan",
+        "em_exc420",
+        "--species-min",
+        "0",
+        "--inspect",
+    ]
+    result = runner.invoke(ppr, args)
+    assert result.exit_code == 0, result.output
+    text = (out / "NTT-G10_global_inspect.txt").read_text()
+    counts = re.findall(r"\((\d+) pts < 0\)", text)
+    assert counts, text[:400]
+    assert set(counts) == {"0"}, f"a species still dips below the floor: {counts}"
+
+
+def test_global_table_records_the_options_that_moved_it(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """Two runs that differ only in a fit option must not leave identical files.
+
+    The K table carries the options that shape its numbers (scans, isosbestic
+    wavelength and window, species floor) and a JSON sidecar carries the whole
+    invocation and the library version, so a folder of results can be traced back
+    to the command that made it.
+    """
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    out = tmp_path / "E"
+    out.mkdir()
+    args = [
+        "--out",
+        str(out),
+        "enspire",
+        str(data / "G10.csv"),
+        str(note),
+        "--method",
+        "global",
+        "--normalise-isosbestic",
+        "auto",
+        "--iso-window",
+        "5",
+        "--species-min",
+        "0",
+    ]
+    result = runner.invoke(ppr, args)
+    assert result.exit_code == 0, result.output
+
+    table = pd.read_csv(out / "NTT-G10_K_global.csv")
+    whole = table[table.subset == "all"]
+    assert {"scans", "isosbestic_nm", "iso_window_nm", "species_min"} <= set(
+        table.columns
+    )
+    assert (whole.iso_window_nm == 5.0).all()
+    assert (whole.species_min == 0.0).all()
+    assert whole.isosbestic_nm.notna().all(), "an auto crossing must be recorded"
+
+    prov = json.loads((out / "NTT-G10_K_global.json").read_text())
+    assert prov["clophfit_version"]
+    assert prov["inputs"]["note"].endswith("NTT-G10_note.csv")
+    assert prov["options"]["iso_band"] == 5.0
+    assert prov["options"]["species_min"] == 0.0
+    assert prov["options"]["isosbestic"] == "auto"
+    # the record must be reproducible byte for byte
+    first = (out / "NTT-G10_K_global.json").read_bytes()
+    result = runner.invoke(ppr, args)
+    assert result.exit_code == 0, result.output
+    assert (out / "NTT-G10_K_global.json").read_bytes() == first
