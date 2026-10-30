@@ -4,15 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
 from clophfit.fitting.models import binding_1site
-from clophfit.fitting.spectral import fit_spectra_global, paired_delta
+from clophfit.fitting.spectral import (
+    fit_spectra_global,
+    observed_fraction,
+    paired_delta,
+)
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
+    isosbestic_scale,
+    normalise_to_isosbestic,
+    plot_global_panels,
     residual_table,
+    sample_spectra,
     scan_outliers,
 )
 
@@ -300,3 +309,347 @@ def test_paired_delta_recovers_a_known_correlation() -> None:
     assert np.isnan(paired_delta(7.2, 7.1, a[:2], b[:2])["se_paired"])
     with pytest.raises(ValueError, match="same length"):
         paired_delta(7.2, 7.1, a, b[:-1])
+
+
+def test_panels_keep_species_on_the_data_scale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A shared constant per panel: data, model and species on the same scale.
+
+    Historically plot_global_panels picked a panel-specific reference for the
+    data (value at the crossing, or a fallback) while drawing the species with
+    yet another (their value at the shared crossing). An emission window whose
+    species are ~0 there (its excitation is 35 nm below) turned that division
+    into a ~1e4-1e5 blow-up that crushed the data curves on the same axes
+    (arslanbaeva L8 NTT-A08 37.0). Since v0.15.4 sample_spectra returns the
+    peak it divided each scan by, and the panel multiplies data, model and
+    species by that one constant, so every panel shows raw / reference and the
+    species sit on the data scale by construction.
+    """
+    iso = 455.6
+    lam_em = np.arange(450.0, 650.0)
+    e0_ex = np.exp(-0.5 * ((LAM - 488) / 12) ** 2)
+    e1_ex = np.exp(-0.5 * ((LAM - 422) / 12) ** 2)
+    # a true crossing: both excitation species take the same value at iso, so the
+    # per-well normalisation there preserves the mixture fractions
+    e1_ex *= float(np.interp(iso, LAM, e0_ex)) / float(np.interp(iso, LAM, e1_ex))
+    e0_em = np.exp(-0.5 * ((lam_em - 510) / 14) ** 2)  # ~0 at iso: dark there
+    e1_em = 0.6 * np.exp(-0.5 * ((lam_em - 590) / 16) ** 2)
+    f = binding_1site(X_PH, 7.4, 0.0, 1.0, is_ph=True)
+    y_ex = np.outer(e0_ex, 1 - f) + np.outer(e1_ex, f)
+    y_em = np.outer(e0_em, 1 - f) + np.outer(e1_em, f)
+    # sample_spectra's normalisation: each scan to its own peak (recorded), then
+    # every scan by the excitation's per-well value at the crossing
+    peak_ex = float(np.nanmax(np.abs(y_ex)))
+    peak_em = float(np.nanmax(np.abs(y_em)))
+    scale = np.array([np.interp(iso, LAM, y_ex[:, i]) for i in range(X_PH.size)])
+    y_ex = y_ex / peak_ex / scale
+    y_em = y_em / peak_em / scale
+    spectra: dict[str, tuple[np.ndarray, np.ndarray]] = {
+        "excitation": (LAM, y_ex),
+        "emission 420": (lam_em, y_em),
+    }
+    fit = fit_spectra_global(X_PH, spectra, is_ph=True, jackknife=False)
+    assert pytest.approx(7.4, abs=0.05) == fit.K
+
+    real_close = plt.close
+    monkeypatch.setattr(plt, "close", lambda *_args, **_kwargs: None)
+    plot_global_panels(
+        tmp_path / "panels.pdf",
+        spectra,
+        X_PH,
+        fit,
+        title="synthetic",
+        iso_nm=iso,
+        peaks={"excitation": peak_ex, "emission 420": peak_em},
+    )
+    fig = plt.gcf()
+    species_labels = {"basic (anionic) state", "acidic (protonated) state"}
+    for ax in fig.get_axes():
+        species = [
+            float(np.nanmax(np.abs(np.asarray(line.get_ydata(), dtype=float))))
+            for line in ax.get_lines()
+            if str(line.get_label()) in species_labels
+        ]
+        if not species:
+            continue  # the fraction panel and the colorbar draw no species
+        data = [
+            float(np.nanmax(np.abs(np.asarray(line.get_ydata(), dtype=float))))
+            for line in ax.get_lines()
+            if str(line.get_label()).startswith("_child")
+        ]
+        assert data, "the panel must draw the wells' spectra"
+        assert max(species) < 50 * max(data), (
+            f"species peak {max(species):.3g} is off the data scale {max(data):.3g}"
+        )
+    observed = [
+        ax
+        for num in plt.get_fignums()
+        for ax in plt.figure(num).get_axes()
+        for line in ax.get_lines()
+        if str(line.get_label()) == "observed, one per well (all scans)"
+    ]
+    assert len(observed) == 1, "the fraction panel draws exactly one observed series"
+    # these spectra carry the isosbestic reference, so the peak multiplies a ratio
+    # back and the axis must not claim measured fluorescence
+    ylabels = {ax.get_ylabel() for ax in fig.get_axes()}
+    assert "signal / well reference" in ylabels, (
+        f"normalised panels must say so; got {sorted(ylabels)}"
+    )
+    real_close(fig)
+
+    # without the normalisation the same peak restores the recorded a.u., and the
+    # axis says Fluorescence (a.u.) rather than hiding the true signal level
+    raw = {"excitation": (LAM, (np.outer(e0_ex, 1 - f) + np.outer(e1_ex, f)) / peak_ex)}
+    raw_fit = fit_spectra_global(X_PH, raw, is_ph=True, jackknife=False)
+    plot_global_panels(
+        tmp_path / "panels_raw.pdf",
+        raw,
+        X_PH,
+        raw_fit,
+        title="synthetic raw",
+        peaks={"excitation": peak_ex},
+    )
+    raw_fig = plt.gcf()
+    raw_labels = {ax.get_ylabel() for ax in raw_fig.get_axes()}
+    assert "Fluorescence (a.u.)" in raw_labels, (
+        f"a.u.-scale panels must say Fluorescence (a.u.); got {sorted(raw_labels)}"
+    )
+    real_close(raw_fig)
+
+
+def test_sample_spectra_returns_the_peak_it_divides_by() -> None:
+    """The 4th return value lets a caller restore raw/reference units.
+
+    sample_spectra divides each scan by its peak (and, with isosbestic, by the
+    excitation value at the crossing). Dropping the peak made plot_global_panels
+    reinvent the scale per panel and disagree with the scale the species were fit
+    on. The peak must come back.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    one = note[(note["Name"] == "NTT-G10") & (note["Temp"] == 20.0)].drop_duplicates(
+        "Well"
+    )
+    wells = one["Well"].tolist()
+    x = one["pH"].to_numpy(float)
+    spectra, _w, _x, peaks = sample_spectra(
+        eff, wells, x, 20.0, is_ph=True, buffer_wells=[]
+    )
+    assert spectra
+    assert set(peaks) == set(spectra)
+    for name, (_lam, y) in spectra.items():
+        assert peaks[name] > 0.0
+        assert float(np.nanmax(np.abs(np.asarray(y, dtype=float)))) <= 1.0 + 1e-9
+
+
+def test_one_fraction_per_well_across_scans() -> None:
+    """Different scan amplitudes must not be mistaken for different fractions.
+
+    A well's two scans differ in amount (0.35x) and shape; the old per-scan
+    unmixing read one fraction per scan, trading the well's amplitude into each.
+    With one fraction per well across both scans the amplitudes are absorbed by
+    the per-scan scale and the true basic-state fraction comes back.
+    """
+    x = np.tile(np.linspace(4.0, 9.5, 12), 2)
+    fr = binding_1site(x, 7.4, 0.0, 1.0, is_ph=True)
+    basic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    acid = 0.6 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
+    rng = np.random.default_rng(11)
+    spectra: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for name, amount in (("excitation", 1.0), ("emission 420", 0.35)):
+        y = np.outer(basic, 1.0 - fr) + np.outer(acid, fr)
+        y *= amount
+        y += rng.normal(0.0, 5e-3 * amount, y.shape)
+        spectra[name] = (LAM, y)
+    fit = fit_spectra_global(x, spectra, is_ph=True, jackknife=False)
+    assert pytest.approx(7.4, abs=0.1) == fit.K
+    obs = observed_fraction(fit, spectra)
+    assert obs is not None
+    assert float(obs.size) == x.size
+    assert np.allclose(obs, fr, atol=0.05), (
+        f"observed {obs.round(3)} vs true {fr.round(3)}"
+    )
+
+
+def test_observed_fraction_handles_a_mixed_invisible_scan() -> None:
+    """A scan that cannot tell the states is not forced to decide.
+
+    The second scan's two species are nearly identical, so its shape alone
+    cannot pin the fraction; the estimator must read the fraction from the
+    informative scan and not be dragged by the uninformative one's amplitude.
+    (Both scans share the fit's wavelength grid, as real readouts of one
+    plate do.)
+    """
+    x = np.linspace(5.5, 9.0, 8)
+    fr = binding_1site(x, 7.4, 0.0, 1.0, is_ph=True)
+    informative = np.exp(-0.5 * ((LAM - 470.0) / 12.0) ** 2)
+    other = 0.8 * np.exp(-0.5 * ((LAM - 430.0) / 12.0) ** 2)
+    flat = 0.5 * informative  # nearly degenerate with informative
+    # same grid as the informative scan (the fit's per-scan basis is rank-1 here,
+    # so the decomposition into two states is arbitrary - which is exactly the
+    # "cannot tell the apart" case we want to exercise)
+    spectra: dict[str, tuple[np.ndarray, np.ndarray]] = {
+        "informative": (
+            LAM,
+            np.outer(informative, 1.0 - fr) + np.outer(other, fr),
+        ),
+        "flat": (LAM, np.outer(flat, np.ones_like(fr))),
+    }
+    fit = fit_spectra_global(x, spectra, is_ph=True, jackknife=False)
+    obs = observed_fraction(fit, spectra)
+    assert obs is not None
+    assert np.all(obs == pytest.approx(fr, abs=0.12))
+
+
+def test_observed_fraction_returns_none_with_unknown_labels() -> None:
+    """A spectra dict that matches no species asks for no marker."""
+    spectra: dict[str, tuple[np.ndarray, np.ndarray]] = {
+        "other": (LAM, np.ones((LAM.size, 4))),
+    }
+    dummy = fit_spectra_global(
+        X_PH,
+        {
+            "excitation": (
+                LAM,
+                np.outer(np.exp(-0.5 * ((LAM - 488) / 12) ** 2), X_PH / X_PH.max())
+                + np.outer(
+                    0.3 * np.exp(-0.5 * ((LAM - 400) / 15) ** 2),
+                    1.0 - X_PH / X_PH.max(),
+                ),
+            ),
+        },
+        is_ph=True,
+        jackknife=False,
+    )
+    assert observed_fraction(dummy, spectra) is None
+    del dummy
+
+
+def test_isosbestic_reference_is_a_mean_over_the_band_never_a_sum() -> None:
+    """The window averaged at the crossing is a *mean*, and it is one wavelength at band 0.
+
+    A sum would scale with how bright the well is, so it would stop being a
+    per-well scale: dividing by it would leave the brightness ratio between wells
+    inside the spectra and the free per-well amplitude could not absorb it. The
+    band is also what makes the reference a little less noisy, so its value must
+    be the hand-computed average and not the centre point either.
+    """
+    lam = np.arange(400.0, 520.0)
+    lam_iso = 455.0
+    # curved in lambda so the band mean, the centre value and the sum all differ
+    shape = 1.0 + 0.01 * (lam - lam_iso) ** 2
+    amount = np.array([1.0e3, 2.0e3, 3.0e3])
+    ya = np.outer(shape, amount)
+    spectra = {"excitation": (lam, ya)}
+
+    banded, usable = isosbestic_scale(spectra, lam_iso, band=3.0)
+    assert usable.all()
+    # |lam - 455| <= 1.5 keeps 454, 455, 456 on a 1 nm grid
+    grid = 1.0 + 0.01 * (np.array([454.0, 455.0, 456.0]) - lam_iso) ** 2
+    assert np.allclose(banded, float(np.mean(grid)) * amount, rtol=1e-12)
+
+    exact, _ = isosbestic_scale(spectra, lam_iso, band=0.0)
+    assert np.allclose(exact, 1.0 * amount, rtol=1e-12), "band 0 is the crossing itself"
+
+    summed = float(np.sum(grid)) * amount
+    assert not np.allclose(banded, summed, rtol=1e-6), "the reference must be a mean"
+
+
+def test_isosbestic_band_averages_whatever_the_grid_puts_inside_it() -> None:
+    """The band has no minimum point count: a coarse grid averages what it has.
+
+    The L1-L4 plates are measured on a 2 nm grid, so a 3 nm band contains exactly
+    two points and a 1 nm band contains none. Requiring three points silently made
+    the window a no-op there - the reference never changed, which is how the flag
+    came to look broken - so two points must be averaged like any other count.
+    """
+    lam_iso = 455.13
+    shape = 1.0 + 0.01 * (np.arange(400.0, 520.0, 2.0) - lam_iso) ** 2
+    amount = np.array([1.0e3, 2.0e3])
+    spectra = {"excitation": (np.arange(400.0, 520.0, 2.0), np.outer(shape, amount))}
+    banded, _ = isosbestic_scale(spectra, lam_iso, band=3.0)
+    # 454 and 456 are the only grid points within 1.5 nm; both go into the mean
+    at = {float(v): s for v, s in zip(np.arange(400.0, 520.0, 2.0), shape, strict=True)}
+    assert np.allclose(
+        banded, float(np.mean([at[454.0], at[456.0]])) * amount, rtol=1e-12
+    )
+    # a band that contains no grid point at all is the interpolated crossing
+    empty, _ = isosbestic_scale(spectra, lam_iso, band=1.0)
+    exact, _ = isosbestic_scale(spectra, lam_iso, band=0.0)
+    assert np.allclose(empty, exact, rtol=1e-12)
+
+
+def test_isosbestic_band_only_rescales_each_well_by_a_constant() -> None:
+    """Widening the crossing band changes each well by a constant, never its shape.
+
+    That constant is what the per-well amplitude in the global fit already fits,
+    so the band is a readout-noise choice: it cannot move the titration. The test
+    pins the structural half of that claim - the band-3 and band-0 normalised
+    spectra differ by one constant per well and by nothing else. (A K-equality
+    assertion would be vacuous on noiseless data: with a free amplitude the model
+    reproduces any K exactly, so the objective is flat in K and the fitted value
+    is decided by conditioning and by the noise.)
+    """
+    iso = 455.6
+    x = np.tile([5.6, 6.3, 6.9, 7.3, 7.9, 8.3, 8.7, 9.1], 3)
+    e0 = np.exp(-0.5 * ((LAM - 488) / 12) ** 2)
+    e1 = np.exp(-0.5 * ((LAM - 422) / 12) ** 2)
+    # a true crossing: both species equally bright at iso
+    e1 *= float(np.interp(iso, LAM, e0)) / float(np.interp(iso, LAM, e1))
+    f = binding_1site(x, 7.4, 0.0, 1.0, is_ph=True)
+    bright = np.linspace(0.8, 1.2, x.size)
+    ya = (np.outer(e0, 1.0 - f) + np.outer(e1, f)) * bright
+    spectra = {"excitation": (LAM, ya)}
+
+    narrow = normalise_to_isosbestic(spectra, iso, band=0.0)["excitation"][1]
+    wide = normalise_to_isosbestic(spectra, iso, band=3.0)["excitation"][1]
+    ratio = wide / narrow
+    assert np.all(np.isfinite(ratio))
+    # one constant per well across every wavelength: a pure per-well rescaling
+    assert np.max(np.ptp(ratio, axis=0)) < 1e-12, (
+        f"the band changed the shape of a spectrum: {np.max(np.ptp(ratio, axis=0)):.3e}"
+    )
+    # and it is not the identity: the two choices really do divide by different values
+    assert not np.allclose(ratio[0], ratio[0, 0], rtol=1e-3)
+
+
+def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``inspect=True`` dumps one text block per group and points at the file.
+
+    The dump is the only place the per-well amplitudes and fractions are written
+    out; the panel figures are unchanged by it, and the screen's verdict stays in
+    the table rather than leaking into the figure.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    note = note[note["Temp"] == 20.0]
+    stem = tmp_path / "NTT-G10"
+    table, fits = fit_titrations_spectral(
+        eff,
+        note,
+        buffer=True,
+        qc=6.0,
+        inspect=True,
+        figure_stem=stem,
+    )
+    assert not table.empty
+    assert fits
+
+    sidecar = tmp_path / "NTT-G10_global_inspect.txt"
+    assert sidecar.exists(), sorted(p.name for p in tmp_path.iterdir())
+    text = sidecar.read_text()
+    assert "K = " in text
+    assert "wells used:" in text
+    assert "per-scan species peaks" in text
+    assert "per-well basic fraction" in text
+    # one block per (sample, temperature) group, and the amplitudes are present
+    assert text.count("==") >= 2
+    assert "a = " in text
+    printed = capsys.readouterr().out
+    assert f"inspect: wrote {sidecar}" in printed
+    # the panel figure is still written, and no separate species figure appears
+    assert sorted(p.name for p in tmp_path.glob("*_panels.pdf"))
+    assert not sorted(tmp_path.glob("*_species.pdf"))

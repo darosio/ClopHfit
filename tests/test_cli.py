@@ -136,7 +136,12 @@ def test_prenspire_global(tmp_path: Path, runner: CliRunner) -> None:
     assert whole.K.between(7.0, 9.0).all()
     assert (whole.se > 0).all()
     assert {"row D", "row E", "row F"} <= set(table.subset)
-    assert (out / "NTT-G10_species.pdf").stat().st_size > 1000
+    # one panel figure per group carries the data, the model and the species; the
+    # separate species figure was redundant with it and is gone
+    panels = sorted(out.glob("*_panels.pdf"))
+    assert panels, sorted(p.name for p in out.iterdir())
+    assert all(p.stat().st_size > 1000 for p in panels)
+    assert not (out / "NTT-G10_species.pdf").exists()
 
 
 def test_prenspire_all(tmp_path: Path, runner: CliRunner) -> None:
@@ -160,7 +165,8 @@ def test_prenspire_all(tmp_path: Path, runner: CliRunner) -> None:
     assert (out / "NTT-G10_K.csv").exists()  # band table
     assert (out / "NTT-G10_bands.pdf").exists()  # band figure
     assert (out / "NTT-G10_K_global.csv").exists()  # global table
-    assert (out / "NTT-G10_species.pdf").exists()  # global figure
+    assert sorted(out.glob("*_panels.pdf"))  # global panel figure
+    assert not (out / "NTT-G10_species.pdf").exists()
     svd_pdfs = sorted(p.name for p in out.glob("NTT-G10_20*_*.pdf"))
     assert svd_pdfs  # at least one svd figure
 
@@ -894,3 +900,36 @@ def test_prenspire_bayes_screen_drops_a_well_from_every_band(
     assert n_screened < n_plain
     table = pd.read_csv(screened / "NTT-G10_K_bayes.csv")
     assert table.K.notna().all()
+
+
+def test_iso_window_accepts_any_width_and_reaches_the_fit(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """``--iso-window`` takes any width in nm, and the width must reach the fit.
+
+    Two widths that fallback to the same reference (0 and 1 nm on this plate's
+    grid) give the same K, but a wider one is not allowed to be silently ignored:
+    the reference is computed over the points the band really holds. A negative
+    width is meaningless and must be refused rather than read as "no window".
+    """
+    data = tpath / "EnSpire"
+    lines = (data / "NTT-G10_note.csv").read_text().splitlines()
+    note = tmp_path / "NTT-G10_note.csv"
+    note.write_text("\n".join([lines[0], *(ln for ln in lines[1:] if ",20.0," in ln)]))
+    args = ["enspire", str(data / "G10.csv"), str(note), "--method", "global"]
+    args = [*args, "--normalise-isosbestic", "auto"]
+    ks: dict[float, float] = {}
+    for width in (0.0, 1.0, 7.5):
+        out = tmp_path / f"w{width}"
+        out.mkdir()
+        result = runner.invoke(
+            ppr, ["--out", str(out), *args, "--iso-window", str(width)]
+        )
+        assert result.exit_code == 0, result.output
+        table = pd.read_csv(out / "NTT-G10_K_global.csv")
+        ks[width] = float(table[table.subset == "all"].K.iloc[0])
+    assert all(7.0 < k < 9.0 for k in ks.values()), ks
+    result = runner.invoke(
+        ppr, ["--out", str(tmp_path / "neg"), *args, "--iso-window", "-1"]
+    )
+    assert result.exit_code != 0, "a negative window must be refused"
