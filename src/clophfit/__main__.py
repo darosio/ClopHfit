@@ -41,6 +41,7 @@ os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
 from clophfit import (
     __enspire_out_dir__,
     __tecan_out_dir__,
+    __version__,
     configure_logging,
     fitting,
 )
@@ -64,11 +65,6 @@ from clophfit.prenspire import (
     merge_enspire_files,
 )
 from clophfit.prenspire.bands import ZERO_AT
-from clophfit.prenspire.mcr import (
-    mcr_titration,
-    model_fraction,
-    species_by_scan,
-)
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
     isosbestic_by_group,
@@ -95,7 +91,7 @@ from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     import xarray as xr
 
@@ -766,16 +762,16 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and one <stem>_<sample>_<temp>_panels.pdf per group, plus <stem>_global_inspect.txt with --inspect. (The discarded wells stay in --global-qc and the K table, not the panel PDF.) global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf.  vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. both runs band and svd; all runs band, svd and global.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and one <stem>_<sample>_<temp>_panels.pdf per group, plus <stem>_global_inspect.txt with --inspect. (The discarded wells stay in --global-qc and the K table, not the panel PDF.) global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf.  vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. both runs band and svd; all runs band, svd and global.")  # fmt: skip
 @click.option("--join", "joins", multiple=True, metavar="CSV:NOTE", help="Additional export:note pair to fit together with the first, for a titration split over several EnSpire files (e.g. 20 C in one export, 37 C in another, each with its own note). The exports must carry disjoint measurement labels; the notes are concatenated (each keeps its Temp) and written next to the outputs as <stem>_joined_note.csv, so nothing under data/ changes. --method vanthoff then fits one thermodynamic pair across every temperature.")  # fmt: skip
 @click.option("--export", "export", type=click.Choice(["auto", "always", "never"], case_sensitive=False), default="auto", show_default=True, help="What to do with the per-measurement tables and figures written before the fit. auto (default) writes the canonical <export>_<label>.csv/json/png and rewrites one only when the export is newer than it, so calling several methods on one plate reuses the same files instead of piling up timestamped copies; always rewrites everything; never writes nothing and only fits.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
 @click.option("--screen", default=bands_module.DEFAULT_SCREEN, show_default=True, help="Point screen for --method band, as method:threshold:min_keep. 'studentized' takes a family-wise alpha and a Bonferroni-corrected Student-t cutoff; 'mad' takes a robust z. Pass 'none' to fit every point.")  # fmt: skip
 @click.option("--min-rho", default=0.8, show_default=True, help="For --method band: smallest |Spearman rho| between a band and the titrant, taken within each replicate row, for that band to carry K. A flat band has no K to give.")  # fmt: skip
 @click.option("--band-name", "band_names", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Bands allowed into the shared K; repeatable. Default is the two direct readouts (exc_anionic + em_exc420); exc_neutral and em_exc278 are reported but not fitted by default.")  # fmt: skip
-@click.option("--scan", "scans", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Scans --method global or mcr takes whole; repeatable. Default is the excitation scan only: on the 25-plate readout sweep, adding the 420 nm emission scan whole widened the between-session spread (see clophfit/prenspire/spectral.py), so all-scans is offered for comparison, not as the default.")  # fmt: skip
+@click.option("--scan", "scans", multiple=True, type=click.Choice(["exc_anionic", "exc_neutral", "em_exc420", "em_exc278"]), help="Scans --method global takes whole; repeatable. Default is the excitation scan only: on the 25-plate readout sweep, adding the 420 nm emission scan whole widened the between-session spread (see clophfit/prenspire/spectral.py), so all-scans is offered for comparison, not as the default.")  # fmt: skip
 @click.option("--seed", type=int, default=0, show_default=True, help="NUTS seed for --method bayes; fixes the posterior draws so the 94 % HDI is reproducible run to run.")  # fmt: skip
-@click.option("--draws", type=int, default=4000, show_default=True, help="Posterior draws per chain for the Bayesian methods (tuning is half of that). The band-level and MCR ones sample in under a minute; each whole-spectrum one takes proportionally longer per draw, so budget minutes-per-scan there.")  # fmt: skip
+@click.option("--draws", type=int, default=4000, show_default=True, help="Posterior draws per chain for the Bayesian methods (tuning is half of that). The band-level ones sample in under a minute; each whole-spectrum one takes proportionally longer per draw, so budget minutes-per-scan there.")  # fmt: skip
 @click.option("--chains", type=click.IntRange(min=1), default=4, show_default=True, help="MCMC chains for the Bayesian methods. Four chains are the sanity floor for R-hat: a lost or label-flipped chain is cheap insurance when it can be seen, and a fixed --seed stays reproducible whether the chains run sequentially or in parallel.")  # fmt: skip
 @click.option("--cores", type=click.IntRange(min=1), help="CPU cores for --method bayes chain parallelism. Unset runs the chains in parallel (PyMC default, capped at the core count); 1 runs them sequentially.")  # fmt: skip
 @click.option("--target-accept", type=float, help="NUTS target acceptance for --method bayes, in (0, 1). Unset keeps the sampler default; higher (e.g. 0.9) trades step size for better mixing.")  # fmt: skip
@@ -787,22 +783,38 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--global-boot", type=int, default=0, show_default=True, help="For --method global: well-cluster bootstrap replicates for the reported interval. The default 0 reports the delete-one-well jackknife only. Every replicate resamples whole wells - all scans and all wavelengths of a well together - because the wavelengths of a spectrum are not independent observations; the Jacobian error of a whole-spectrum fit comes out orders of magnitude too small. 500 is a sensible choice.")  # fmt: skip
 @click.option("--global-qc", type=float, default=None, metavar="Z", help="For --method global: run the per-scan screen (leave-one-out rank-2 SVD of each corrected scan) before the fit and drop wells whose residual exceeds median + Z*MAD in any scan, from every scan of the group. Z=6 is what the pH verification plates were calibrated at. Wells whose peak is below 5 %% of the plate median are never tested, so the dark saturating end of a ligand ladder is not mistaken for a broken well. The dropped wells are recorded in the K table.")  # fmt: skip
 @click.option("--global-strata", type=click.Choice(["none", "column"], case_sensitive=False), default="none", show_default=True, help="For --method global --global-boot: 'column' resamples wells within each plate column, which keeps every replicate spanning the titration axis (the design-preserving choice for these plates); 'none' resamples from one pool.")  # fmt: skip
-@click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr. Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 @click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
 @click.option(
     "--iso-window",
     "iso_band",
-    default=3.0,
-    show_default=True,
+    default=None,
+    show_default="3",
     type=click.FloatRange(min=0.0),
     metavar="NM",
     help="Width in nm of the band averaged at the isosbestic crossing to form the "
-    "per-well reference, for --normalise-isosbestic. The reference is always a "
-    "mean over that band, never a sum, and every measured point inside it is "
-    "used: 3 nm averages 3 points of a 1 nm grid and 2 points of a 2 nm grid, "
-    "and 0 means the interpolated crossing itself. It only changes a per-well "
-    "constant, which the global fit's free well amplitude already fits, so it "
-    "is a readout-noise choice and moves K far less than its own error bar.",
+    "per-well reference, for --normalise-isosbestic. It does nothing without "
+    "that option and is refused there rather than ignored. The reference is "
+    "always a mean over the band, never a sum, and every measured point inside "
+    "it is used: 3 nm averages 3 points of a 1 nm grid and 2 points of a 2 nm "
+    "grid, and 0 means the interpolated crossing itself. It changes only a "
+    "per-well constant, which the global fit's free well amplitude already "
+    "fits, so it is a readout-noise choice and moves K far less than its error.",
+)
+@click.option(
+    "--species-min",
+    "species_min",
+    default=None,
+    type=float,
+    metavar="FLOOR",
+    help="Bound every species spectrum below by FLOOR, per wavelength, for the "
+    "whole-spectrum methods. 0 is the physical choice for fluorescence - a pure "
+    "species cannot emit negative counts - and it removes the negative lobe the "
+    "unconstrained solve gives a species that should be dark in a scan (L8 A08 "
+    "emission 420: -8 percent of its own peak at 499 nm). A small negative floor "
+    "keeps buffer-subtraction noise unclipped. With --method global the bound is "
+    "inside the fit, so K moves slightly and --global-qc still screens the "
+    "unconstrained model; with global-bayes and global-bayes-marginal it can only "
+    "censor the reported species draws, leaving the K posterior untouched.",
 )
 @click.option(
     "--inspect",
@@ -811,9 +823,9 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     default=False,
     help="With --method global, also write <stem>_global_inspect.txt: per "
     "(sample, temp) K and its errors, the wells used and the wells the screen "
-    "dropped, each scan's basic/acidic species peaks and residual RMS, the "
-    "2-state residual sv, and every well's basic fraction and amplitude. Text "
-    "only - the panel figure and --global-qc output are unchanged.",
+    "dropped, each scan's basic/acidic species peaks, how far below zero either "
+    "species dips, the 2-state residual sv, and every well's basic fraction and "
+    "amplitude. Text only - the panel figure and --global-qc output are unchanged.",
 )
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
@@ -826,7 +838,6 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     min_rho: float,
     band_names: tuple[str, ...],
     scans: tuple[str, ...],
-    components: int,
     seed: int,
     draws: int,
     chains: int,
@@ -840,7 +851,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     export: str,
     joins: tuple[str, ...],
     isosbestic: str | None,
-    iso_band: float,
+    iso_band: float | None,
+    species_min: float | None,
     global_boot: int,
     global_strata: str,
     global_qc: float | None,
@@ -897,7 +909,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         ctx.fail(
             "--x-sigma applies to Bayesian methods only (it is a posterior prior, not an LM option)"
         )
-    scan_methods = {"global", "global-bayes", "global-bayes-marginal", "mcr", "all"}
+    scan_methods = {"global", "global-bayes", "global-bayes-marginal", "all"}
     if scans and method not in scan_methods:
         ctx.fail(
             f"--scan selects whole scans for {sorted(scan_methods)}; "
@@ -932,12 +944,40 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             f"--inspect dumps the global fit (got --method {method}); "
             "it would be silently ignored"
         )
+    species_min_methods = {
+        "global",
+        "global-bayes",
+        "global-bayes-marginal",
+        "all",
+    }
+    if species_min is not None and method not in species_min_methods:
+        ctx.fail(
+            f"--species-min bounds the species of the whole-spectrum fits "
+            f"{sorted(species_min_methods)} (got --method {method}); it would be "
+            "silently ignored"
+        )
+    if iso_band is not None and isosbestic is None:
+        # the width only exists for the normalisation it shapes; without one it
+        # used to look like a knob that did nothing, which is how it was reported
+        ctx.fail(
+            "--iso-window sets the band of the isosbestic reference, so it needs "
+            "--normalise-isosbestic (a wavelength, 'auto' or 'auto-scale')"
+        )
+    window_methods = {"global", "global-bayes", "global-bayes-marginal", "all"}
+    if iso_band is not None and method not in window_methods:
+        ctx.fail(
+            f"--iso-window shapes the whole-spectrum normalisation "
+            f"{sorted(window_methods)} (got --method {method}); the band and svd "
+            "paths divide by the reference whole"
+        )
     if acid_state and method not in {"global-bayes", "global-bayes-marginal"}:
         ctx.fail(
             "--acid-state applies to --method global-bayes and "
             "global-bayes-marginal only"
         )
     iso = _parse_isosbestic(isosbestic)
+    # one record of this invocation, written beside whatever each method produces
+    run_provenance = _provenance(ctx)
     if iso is not None:
         _write_isosbestic_table(ef, Path(note_f), Path(out), isosbestic=iso)
     if method in {"band", "both", "all"}:
@@ -950,6 +990,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             min_rho=min_rho,
             wanted=band_names or bands_module.DIRECT_BANDS,
             isosbestic=iso,
+            provenance=run_provenance,
         )
     if method in {"svd", "both", "all"}:
         fit_enspire(
@@ -960,6 +1001,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             verbose,
             isosbestic=iso,
             qc=global_qc,
+            provenance=run_provenance,
         )
     if method in {"global", "all"}:
         fit_enspire_global(
@@ -970,14 +1012,23 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             scans=scans,
             screen=global_screen,
             isosbestic=iso,
-            iso_band=iso_band,
+            iso_band=3.0 if iso_band is None else iso_band,
+            species_min=species_min,
             n_boot=global_boot,
             strata=global_strata,
             qc=global_qc,
             inspect=inspect,
+            provenance=run_provenance,
         )
     if method == "vanthoff":
-        fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer, isosbestic=iso)
+        fit_enspire_vanthoff(
+            ef,
+            Path(note_f),
+            Path(out),
+            buffer=buffer,
+            isosbestic=iso,
+            provenance=run_provenance,
+        )
     if method == "vanthoff-bayes":
         fit_enspire_vanthoff_bayes(
             ef,
@@ -991,15 +1042,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             cores=cores,
             target_accept=target_accept,
             isosbestic=iso,
-        )
-    if method == "mcr":
-        fit_enspire_mcr(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            scans=scans,
-            components=components,
+            provenance=run_provenance,
         )
     if method == "bayes":
         fit_enspire_bayes(
@@ -1035,6 +1078,9 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             cores=cores,
             target_accept=target_accept,
             isosbestic=iso,
+            species_min=species_min,
+            iso_band=3.0 if iso_band is None else iso_band,
+            provenance=run_provenance,
         )
     if method == "global-bayes-marginal":
         if x_sigma is None:
@@ -1055,6 +1101,9 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             cores=cores,
             target_accept=target_accept,
             isosbestic=iso,
+            species_min=species_min,
+            iso_band=3.0 if iso_band is None else iso_band,
+            provenance=run_provenance,
         )
 
 
@@ -1121,106 +1170,6 @@ def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
         right.set_ylabel(ax_labels.right_y)
         if ax_labels.right_log:
             right.set_yscale("log")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    plt.close(fig)
-
-
-def _mcr_scan_names(
-    spectra: dict[str, dict[str, pd.DataFrame]],
-) -> dict[str, list[str]]:
-    """List the scan names of each sample, in the order the columns carry them."""
-    out: dict[str, list[str]] = {}
-    for sample, by_temp in spectra.items():
-        names: list[str] = []
-        for frame in by_temp.values():
-            for name in frame["scan"].tolist():
-                if name not in names:
-                    names.append(str(name))
-        out[sample] = names
-    return out
-
-
-def _plot_mcr(
-    profiles: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]],
-    spectra: dict[str, dict[str, pd.DataFrame]],
-    fits: dict[str, dict[str, tuple[float, float, float, float, bool, float]]],
-    pdf_path: Path,
-) -> None:
-    """Per sample: profile points as symbols, with the fitted curve drawn.
-
-    The resolved spectra are drawn one panel per scan: an excitation scan
-    and an emission scan measure different things, and their wavelength
-    ranges overlap without the values at an overlapping wavelength being
-    the same measurement. One ramp would misplace every wavelength.
-    """
-    n = len(profiles)
-    scans = _mcr_scan_names(spectra)
-    n_scans = max(len(s) for s in scans.values()) if scans else 1
-    fig, axes = plt.subplots(
-        n,
-        1 + n_scans,
-        figsize=(5.4 * (1 + n_scans), 4.0 * n),
-        squeeze=False,
-        constrained_layout=True,
-    )
-    for row, (sample, by_temp) in enumerate(sorted(profiles.items())):
-        left = axes[row][0]
-        for i, (t, (x, c)) in enumerate(sorted(by_temp.items())):
-            style = "-" if i == 0 else "--"
-            k, se, _f0, _f1, is_ph, rel_err = fits[sample][t]
-            degenerate = not np.isfinite(k)
-            for j in range(c.shape[1]):
-                left.plot(x, c[:, j], "o", ms=4, color=f"C{j}", alpha=0.85)
-            if degenerate:
-                # a degenerate decomposition: the curve would be drawn over
-                # a profile that never moves, so say so instead
-                left.plot([], [], " ", label=f"{t} C: not fitted (degenerate)")
-                continue
-            grid = np.linspace(float(np.min(x)), float(np.max(x)), 200)
-            # The points are closed fractions on the 0-1 scale. The curve
-            # is the model's bound fraction in the same units, so the two
-            # share one axis and the distance between them is a real
-            # measure of how well the model describes the component.
-            frac = model_fraction(grid, k, is_ph=is_ph)
-            unit = "" if is_ph else " mM"
-            left.plot(
-                grid,
-                frac,
-                color="k",
-                lw=1.4,
-                ls=style,
-                label=f"{t} C: {k:.2f}{unit} +/- {se:.2f} (err {rel_err:.2f})",
-            )
-        left.legend(fontsize=7)
-        left.set_title(f"{sample}: components and fitted curve")
-        left.set_xlabel("pH" if next(iter(fits[sample].values()))[4] else "ligand (mM)")
-        left.set_ylabel("closed fraction")
-
-        names = scans.get(sample, [])
-        for s_index, name in enumerate(names):
-            panel = axes[row][1 + s_index]
-            for i, (t, (_x, c)) in enumerate(sorted(by_temp.items())):
-                style = "-" if i == 0 else "--"
-                # a scan may be missing at one temperature - the plate
-                # need not be read the same way at both
-                by_scan = species_by_scan(spectra[sample][t], c.shape[1])
-                if name not in by_scan:
-                    continue
-                waves, curves = by_scan[name]
-                for j, curve in enumerate(curves):
-                    panel.plot(
-                        waves,
-                        curve,
-                        style,
-                        color=f"C{j}",
-                        label=f"species {j}" if i == 0 else None,
-                    )
-            panel.legend(fontsize=7)
-            panel.set_title(f"{sample}: resolved spectra, scan {name}")
-            panel.set_xlabel("wavelength (nm)")
-            panel.set_ylabel("spectral abundance")
-        for s_index in range(len(names), n_scans):
-            axes[row][1 + s_index].set_axis_off()
     fig.savefig(pdf_path, bbox_inches="tight")
     plt.close(fig)
 
@@ -1396,6 +1345,53 @@ def _parse_isosbestic(value: str | None) -> float | str | None:
     return lam
 
 
+def _provenance(ctx: Context) -> dict[str, object]:
+    """Collect the parameters one invocation was given, ready to be written as JSON.
+
+    ``ctx.params`` holds what click parsed, so the record is the invocation rather
+    than a hand-written summary that can drift from it. Unset options are left
+    out, keys are sorted by the writer, and nothing here is time-dependent: the
+    same command produces the same file.
+    """
+    out: dict[str, object] = {"command": ctx.info_name or "enspire"}
+    for key, value in ctx.params.items():
+        if value is None or value in ((), []):
+            continue
+        if isinstance(value, tuple):
+            out[key] = [str(item) for item in value]
+        elif isinstance(value, Path):
+            out[key] = str(value)
+        else:
+            out[key] = value
+    return out
+
+
+def _write_provenance(
+    path: Path,
+    *,
+    inputs: Mapping[str, str],
+    options: Mapping[str, object] | None,
+    outputs: Sequence[str],
+) -> Path:
+    """Record how a result was produced, beside the result, as JSON.
+
+    The table's columns already carry the options that move its numbers; this
+    carries the rest - the library version and the whole invocation - so a folder
+    of results can be traced back to the command that made it. Sorted keys, no
+    timestamp: the same run writes the same bytes.
+    """
+    payload = {
+        "clophfit_version": __version__,
+        "inputs": dict(inputs),
+        "options": dict(options or {}),
+        "outputs": list(outputs),
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def _write_isosbestic_table(
     ef: EnspireFile,
     note_fp: Path,
@@ -1548,6 +1544,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
     robust: bool = True,
     screen: str | None = None,
     isosbestic: float | str | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Seeded posterior of the shared K per sample/temperature.
 
@@ -1589,6 +1586,10 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
         Normalise every well by its signal at the isosbestic point before
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
+    provenance : Mapping[str, object] | None
+        The options this run was asked for, written beside the tables as JSON
+        together with the library version and the input files.
 
     Returns
     -------
@@ -1725,6 +1726,12 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_bayes.csv", index=False)
+    _write_provenance(
+        out_dir / f"{stem}_K_bayes.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{stem}_K_bayes.csv", f"{stem}_K_bayes.pdf"],
+    )
     if figdata:
         _plot_bayes(figdata, out_dir / f"{stem}_K_bayes.pdf")
     for row in table[table["K"].notna()].itertuples():
@@ -1812,6 +1819,7 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
     min_rho: float,
     wanted: Sequence[str],
     isosbestic: float | str | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Fit a note's titrations from named bands and write the tables and figure.
 
@@ -1836,6 +1844,10 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
         Normalise every well by its signal at the isosbestic point before
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
+    provenance : Mapping[str, object] | None
+        The options this run was asked for, written beside the tables as JSON
+        together with the library version and the input files.
 
     Returns
     -------
@@ -1869,6 +1881,12 @@ def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
             bands_module.plot_sample(ax, sample, title)
         fig.savefig(out_dir / f"{stem}_bands.pdf", bbox_inches="tight")
         plt.close(fig)
+    _write_provenance(
+        out_dir / f"{stem}_K.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{stem}_K.csv", f"{stem}_bands.pdf"],
+    )
     head = fits.table[
         (fits.table.band == "all (shared K)") & (fits.table.subset == "screened")
     ]
@@ -1890,10 +1908,12 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     screen: float | None = None,
     isosbestic: float | str | None = None,
     iso_band: float = 3.0,
+    species_min: float | None = None,
     n_boot: int = 0,
     strata: str = "none",
     qc: float | None = None,
     inspect: bool = False,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Fit a note's titrations from whole spectra and write the table and its panel figures.
 
@@ -1926,6 +1946,10 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         interpolated value at the crossing (one wavelength). It changes only a
         per-well constant, which the free well amplitude already fits, so it
         moves K by far less than its error bar.
+    species_min : float | None
+        Lower bound on every species spectrum, per wavelength (see
+        :func:`~clophfit.fitting.spectral.fit_spectra_global`); ``None`` keeps
+        the unconstrained linear solve.
     n_boot : int
         Well-cluster bootstrap replicates behind the reported interval (0 leaves
         it to the jackknife alone). Whole wells are resampled, all scans and all
@@ -1944,6 +1968,12 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         species peaks and residual RMS, the 2-state residual sv, and every
         well's basic fraction and amplitude. The panel figure and the
         ``--global-qc`` output are unchanged.
+    provenance : Mapping[str, object] | None
+        The options this run was asked for, written beside the table as
+        ``<stem>_K_global.json`` together with the library version and the input
+        files. The table's own columns already carry the options that move the
+        numbers; this records the whole invocation so a folder of results can be
+        traced back to the command that made it.
 
     Returns
     -------
@@ -1952,6 +1982,16 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     stem_guess = note_fp.name.removesuffix("_note.csv")
+    if qc is not None and species_min is not None:
+        # the screen judges standardized residuals and its cutoff was calibrated on
+        # the unconstrained model, so it is always evaluated unconstrained; say so
+        # once, because the two fits then differ in the species but not in which
+        # wells survive
+        click.echo(
+            f"note: --global-qc {qc:g} screens the unconstrained model even with "
+            f"--species-min {species_min:g}, so the cutoff keeps its calibration; "
+            "the bound applies to the reported fit only"
+        )
     table = fit_titrations_spectral(
         ef,
         Note(note_fp).note,
@@ -1960,6 +2000,7 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         bands=tuple(scans) if scans else ("exc_anionic",),
         isosbestic=isosbestic,
         iso_band=iso_band,
+        species_min=species_min,
         n_boot=n_boot,
         strata=strata,
         qc=qc,
@@ -1968,6 +2009,12 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     )[0]
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
+    _write_provenance(
+        out_dir / f"{stem}_K_global.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{stem}_K_global.csv"],
+    )
     if "qc_dropped" in table:
         for row in table[table.subset == "all"].itertuples():
             gone = str(row.qc_dropped)
@@ -1997,6 +2044,9 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     target_accept: float | None,
     isosbestic: float | str | None = None,
     qc: float | None = None,
+    species_min: float | None = None,
+    iso_band: float = 3.0,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Fit whole spectra with a joint posterior over K, x and spectral noise."""
     return _enspire_global_bayes_core(
@@ -2017,6 +2067,9 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         label="global Bayes",
         isosbestic=isosbestic,
         qc=qc,
+        species_min=species_min,
+        iso_band=iso_band,
+        provenance=provenance,
     )
 
 
@@ -2036,6 +2089,9 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     target_accept: float | None,
     isosbestic: float | str | None = None,
     qc: float | None = None,
+    species_min: float | None = None,
+    iso_band: float = 3.0,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Marginalized whole-spectrum fit: species spectra out of the sampler."""
     return _enspire_global_bayes_core(
@@ -2056,6 +2112,9 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
         label="global Bayes marginal",
         isosbestic=isosbestic,
         qc=qc,
+        species_min=species_min,
+        iso_band=iso_band,
+        provenance=provenance,
     )
 
 
@@ -2077,7 +2136,10 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     suffix: str,
     label: str,
     isosbestic: float | str | None = None,
+    iso_band: float = 3.0,
     qc: float | None = None,
+    species_min: float | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Shared whole-spectrum Bayesian pipeline behind the two fitters.
 
@@ -2112,6 +2174,23 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         wells = one["Well"].tolist()
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        lam = _lam_for(isosbestic, lam_map, name, temp)
+        if isinstance(lam, str):
+            # resolve "auto" here, as the least-squares path does, so the crossing
+            # that was actually used can go into the table instead of the word
+            raw, _raw_w, raw_x, _raw_peaks = sample_spectra(
+                ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=bwells, bands=wanted
+            )
+            lam = (
+                plate_isosbestic(
+                    raw,
+                    raw_x,
+                    x_min=bands_module.PH_ACID_END if is_ph else None,
+                    is_ph=is_ph,
+                )
+                if raw
+                else None
+            )
         spectra, wells, x, _peaks = sample_spectra(
             ef,
             wells,
@@ -2120,7 +2199,8 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             is_ph=is_ph,
             buffer_wells=bwells,
             bands=wanted,
-            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
+            isosbestic=lam,
+            iso_band=iso_band,
         )
         if not spectra:
             continue
@@ -2153,6 +2233,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             chains=chains,
             cores=cores,
             target_accept=target_accept or 0.9,
+            species_min=species_min,
             **({"acid_state": acid_state} if acid_state else {}),
         )
         kdraw = np.asarray(trace.posterior["K"].values).reshape(-1)
@@ -2171,6 +2252,12 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             "ess_bulk": float(az.ess(trace, var_names=["K"])["K"].item()),
             "n": len(wells),
             "x_sigma": sigma,
+            # the options that shape the numbers, as the least-squares global
+            # table records them
+            "scans": ";".join(spectra),
+            "isosbestic_nm": np.nan if lam is None else float(lam),
+            "iso_window_nm": np.nan if lam is None else float(iso_band),
+            "species_min": np.nan if species_min is None else float(species_min),
         })
         xdraw = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
         figdata.append((str(name), str(temp), is_ph, wells, x, spectra, trace))
@@ -2192,6 +2279,17 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     stem = note_fp.name.removesuffix("_note.csv")
     table = pd.DataFrame(rows)
     table.to_csv(out_dir / f"{stem}_K_{suffix}.csv", index=False)
+    _write_provenance(
+        out_dir / f"{stem}_K_{suffix}.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[
+            f"{stem}_K_{suffix}.csv",
+            f"{stem}_x_{suffix}.csv",
+            f"{stem}_{suffix}.pdf",
+            f"<stem>_<sample>_<temp>_{suffix}.nc",
+        ],
+    )
     pd.DataFrame(x_rows).to_csv(out_dir / f"{stem}_x_{suffix}.csv", index=False)
     _plot_global_bayes(figdata, out_dir / f"{stem}_{suffix}.pdf")
     return table
@@ -2349,13 +2447,14 @@ def _plot_global_bayes(  # ruff: ignore[too-many-statements]
     plt.close(fig)
 
 
-def fit_enspire_vanthoff(
+def fit_enspire_vanthoff(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note_fp: Path,
     out_dir: Path,
     *,
     buffer: bool,
     isosbestic: float | str | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Fit a note jointly across temperatures by van't Hoff and write the table.
 
@@ -2375,6 +2474,10 @@ def fit_enspire_vanthoff(
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
 
+    provenance : Mapping[str, object] | None
+        The options this run was asked for, written beside the tables as JSON
+        together with the library version and the input files.
+
     Returns
     -------
     pd.DataFrame
@@ -2389,12 +2492,18 @@ def fit_enspire_vanthoff(
         seen = sorted({str(t).split(".")[0] for t in note_df["Temp"].dropna()})
         click.echo(
             f"vanthoff: the note carries temperature(s) {seen}; a joint fit "
-            "needs at least two - nothing written, use --method band, global or mcr"
+            "needs at least two - nothing written, use --method band or global"
         )
         return pd.DataFrame()
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_vanthoff.csv", index=False)
+    _write_provenance(
+        out_dir / f"{stem}_K_vanthoff.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{stem}_K_vanthoff.csv", f"{stem}_K_vanthoff.pdf"],
+    )
     for r in table[table["K"].notna()].itertuples():
         kind, unit = ("pKa", "") if models[str(r.sample)].is_ph else ("Kd", " mM")
         print(
@@ -2418,6 +2527,7 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
     cores: int | None,
     target_accept: float | None,
     isosbestic: float | str | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Sample the joint van't Hoff fit and write its tables and figure.
 
@@ -2459,6 +2569,10 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
         Normalise every well by its signal at the isosbestic point before
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+
+    provenance : Mapping[str, object] | None
+        The options this run was asked for, written beside the tables as JSON
+        together with the library version and the input files.
 
     Returns
     -------
@@ -2554,6 +2668,12 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
         figdata.append((str(name), info.is_ph, curves, trace, m))
     table = pd.DataFrame(rows)
     table.to_csv(out_dir / f"{stem}_K_vanthoff_bayes.csv", index=False)
+    _write_provenance(
+        out_dir / f"{stem}_K_vanthoff_bayes.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{stem}_K_vanthoff_bayes.csv", f"{stem}_K_vanthoff_bayes.pdf"],
+    )
     if x_rows:
         pd.DataFrame(x_rows).to_csv(
             out_dir / f"{stem}_x_vanthoff_bayes.csv", index=False
@@ -2676,138 +2796,6 @@ def _plot_vanthoff_bayes(  # ruff: ignore[too-many-statements]
     plt.close(fig)
 
 
-def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
-    ef: EnspireFile,
-    note_fp: Path,
-    out_dir: Path,
-    *,
-    buffer: bool,
-    scans: tuple[str, ...],
-    components: int,
-    isosbestic: float | str | None = None,
-) -> pd.DataFrame:
-    """Resolve every sample/temperature by MCR-ALS and write the tables.
-
-    Parameters
-    ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
-    note_fp : Path
-        The note describing wells, titrant and samples.
-    out_dir : Path
-        Where the K table and the resolved species spectra go.
-    buffer : bool
-        Subtract the buffer well of the same plate column.
-    scans : tuple[str, ...]
-        Scans joined into the data matrix; empty means the excitation scan.
-    components : int
-        Species to resolve.
-
-    isosbestic : float | str | None
-        Normalise every well by its signal at the isosbestic point before
-        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
-        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per (sample, temperature): K, se, rho, rel_err.
-    """
-    note_df = Note(note_fp).note
-    samples = note_df[note_df["Name"] != "buffer"]
-    buffers = note_df[note_df["Name"] == "buffer"]
-    wanted = tuple(scans) if scans else ("exc_anionic",)
-    lam_map = _shared_isosbestic(ef, note_df, isosbestic, buffer=buffer)
-    tables: list[pd.DataFrame] = []
-    prof_by_sample: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
-    spe_by_sample: dict[str, dict[str, pd.DataFrame]] = {}
-    fits_by_sample: dict[
-        str, dict[str, tuple[float, float, float, float, bool, float]]
-    ] = {}
-    for (name, temp), group in samples.groupby(
-        ["Name", "Temp"], sort=True, dropna=False
-    ):
-        t = str(temp).split(".")[0]
-        one = group.drop_duplicates("Well")
-        wells = one["Well"].tolist()
-        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
-        titrant = one["pH"] if is_ph else one["Cl"]
-        x = np.array(titrant.astype(float), dtype=np.float64)
-        bufw = (
-            buffers[np.isclose(buffers["Temp"].astype(float), float(t))][
-                "Well"
-            ].tolist()
-            if len(buffers)
-            else []
-        )
-        spectra, _used, used_x, _peaks = sample_spectra(
-            ef,
-            wells,
-            x,
-            t,
-            is_ph=is_ph,
-            buffer_wells=bufw if buffer else [],
-            bands=wanted,
-            isosbestic=_lam_for(isosbestic, lam_map, name, temp),
-        )
-        if not spectra:
-            continue
-        table, specs, profs = mcr_titration(
-            {t: [(label, pair) for label, pair in spectra.items()]},
-            {t: np.asarray(used_x, dtype=float)},
-            n_species=components,
-            is_ph=is_ph,
-        )
-        if not len(table):
-            continue
-        label = cast("str", name)
-        table.insert(0, "sample", label)
-        tables.append(table)
-        prof_by_sample.setdefault(label, {}).update(profs)
-        spe_by_sample.setdefault(label, {}).update(specs)
-        row = table.iloc[0]
-        fits_by_sample.setdefault(label, {})[t] = (
-            float(row["K"]),
-            float(row["se"]),
-            float(row["F0"]),
-            float(row["F1"]),
-            is_ph,
-            float(row["rel_err"]),
-        )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = note_fp.name.removesuffix("_note.csv")
-    table = (
-        pd.concat(tables, ignore_index=True)
-        if tables
-        else pd.DataFrame(columns=["sample", "temp", "K", "se"])
-    )
-    table.to_csv(out_dir / f"{stem}_K_mcr.csv", index=False)
-    if spe_by_sample:
-        frames = []
-        for sname, by_temp in sorted(spe_by_sample.items()):
-            for tt, frame in sorted(by_temp.items()):
-                d = frame.copy()
-                d.insert(0, "sample", sname)
-                d.insert(1, "temp", tt)
-                frames.append(d)
-        pd.concat(frames, ignore_index=True).to_csv(
-            out_dir / f"{stem}_mcr_spectra.csv", index=False
-        )
-    if prof_by_sample:
-        _plot_mcr(
-            prof_by_sample, spe_by_sample, fits_by_sample, out_dir / f"{stem}_mcr.pdf"
-        )
-    for r in table[table["K"].notna()].itertuples():
-        print(
-            f"{r.sample} at {r.temp}: K {r.K:.3f} +/- {r.se:.3f} "
-            f"(rho {r.rho:.2f}, rel err {r.rel_err:.3f}) over {r.n} wells"
-        )
-    for r in table[table["K"].isna()].itertuples():
-        note = getattr(r, "note", "")
-        print(f"{r.sample} at {r.temp}: not fitted ({note})")
-    return table
-
-
 def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many-branches]
     ef: EnspireFile,
     note_fp: Path,
@@ -2817,6 +2805,7 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many
     *,
     isosbestic: float | str | None = None,
     qc: float | None = None,
+    provenance: Mapping[str, object] | None = None,
 ) -> None:
     """Fit prenspire titration (all labels, temp, mutant, titrations).
 
@@ -2892,6 +2881,14 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many
                         if spectra_gres.bands.figure:
                             spectra_gres.bands.figure.savefig(pdf_file)
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
+    # the legacy path writes one figure per (sample, temperature, label) and keeps
+    # no K table of its own, so the record names the figures as its outputs
+    _write_provenance(
+        out_dir / f"{note_fp.name.removesuffix('_note.csv')}_svd.json",
+        inputs={"data": str(ef.file), "note": str(note_fp)},
+        options=provenance,
+        outputs=[f"{note_fp.name.removesuffix('_note.csv')}_<sample>_<temp>_*.pdf"],
+    )
 
 
 def _print_result(fit_result: FitResult, pdf_file: Path, band_str: str) -> None:

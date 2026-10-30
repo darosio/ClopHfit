@@ -335,11 +335,6 @@ extend-ignore-re = [
 
 
 [tool.typos.default.extend-words]
-# ALS: alternating least squares (the MCR-ALS method). Without this the
-# spell-checker "corrects" it to ALSO, corrupting the method's own name
-# (both cases: identifiers are matched case-insensitively).
-ALS = "ALS"
-als = "als"
 arange = "arange"
 arosio = "Arosio"
 setp = "setp"

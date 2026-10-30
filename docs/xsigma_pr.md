@@ -84,6 +84,6 @@ upper-bound σ_x, and is the recommended default when replicate rows exist.
 
 ## Out of scope (separate PR)
 
-- MCR/global readout support for `ppr enspire --method bayes`
+- whole-spectrum global readout support for `ppr enspire --method bayes`
   (`ppr pka` already has `--method bayes` + `n_xerr`).
 - Centering/scaling `x_true` for better mixing (the r̂ caveat above).
