@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from clophfit.fitting.spectral import SpectralFit, fit_spectra_global
+from clophfit.fitting.spectral import (
+    SpectralFit,
+    fit_spectra_global,
+    observed_fraction,
+)
 from clophfit.prenspire.bands import PH_ACID_END, band_values, blank_rows, classify
 
 if TYPE_CHECKING:
@@ -166,7 +170,8 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
     buffer_wells: Sequence[str],
     bands: Sequence[str] = EXCITATION_SCAN,
     isosbestic: float | str | None = None,
-) -> tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]:
+    iso_band: float = 3.0,
+) -> tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF, dict[str, float]]:
     """Corrected whole spectra of one sample, one entry per scan.
 
     Parameters
@@ -192,19 +197,35 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         ``"auto"`` to locate it with :func:`plate_isosbestic`, or ``None``.
         ``"auto"`` on a titration with no crossing (a chloride one) normalises
         nothing and changes no number.
+    iso_band : float
+        Full width [nm] of the window averaged at the isosbestic crossing to form
+        the per-well reference (a mean, never a sum; see :func:`isosbestic_scale`).
+        Every measured point inside the band is averaged; the default 3.0 nm
+        averages the 3 points of a 1 nm grid and the 2 of a 2 nm grid, and ``0``
+        uses the interpolated value at the crossing itself.
 
     Returns
     -------
-    tuple[dict[str, tuple[ArrayF, ArrayF]], list[str], ArrayF]
-        Scan name to (wavelengths, Y[n_lambda, n_wells]), the wells used and
-        their x values. The key is the scan's name (see :func:`scan_name`),
-        not its plate label, so the same measurement keeps one name at
-        every temperature.
+    dict[str, tuple[ArrayF, ArrayF]]
+        Scan name to (wavelengths, Y[n_lambda, n_wells]). The key is the scan's
+        name (see :func:`scan_name`), not its plate label, so the same
+        measurement keeps one name at every temperature.
+    list[str]
+        The wells used, after any buffer row was set aside.
+    ArrayF
+        The titrant value of each well, aligned with the columns of Y.
+    dict[str, float]
+        Scan name to the largest absolute value the scan held before it was
+        divided by it. With it any consumer recovers the pre-division units
+        exactly - dividing one scan by the other at one wavelength is the ratio
+        of two measured quantities - by multiplying Y back by the scan's peak,
+        so the same ratio can be drawn at a second wavelength without
+        re-scaling the species there.
     """
     readouts = classify(ef, temp, is_ph=is_ph)
     labels = list(dict.fromkeys(r.label for r in readouts if r.name in bands))
     if not labels:
-        return {}, wells, x
+        return {}, wells, x, {}
     blanks = blank_rows(band_values(ef, readouts[0], wells))
     if blanks:
         found = [w for w in wells if w[0] in blanks]
@@ -212,9 +233,12 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
         wells, x = [wells[i] for i in keep], x[keep]
         buffer_wells = list(buffer_wells) or found
     out: dict[str, tuple[ArrayF, ArrayF]] = {}
+    peaks: dict[str, float] = {}
     for label in labels:
         lam, y = scan_spectrum(ef, label, wells, buffer_wells)
-        out[scan_name(ef, label)] = (lam, y / float(np.nanmax(np.abs(y))))
+        name = scan_name(ef, label)
+        peaks[name] = float(np.nanmax(np.abs(y)))
+        out[name] = (lam, y / peaks[name])
     if isosbestic is not None:
         lam_iso = (
             plate_isosbestic(out, x, x_min=PH_ACID_END if is_ph else None, is_ph=is_ph)
@@ -226,8 +250,8 @@ def sample_spectra(  # ruff: ignore[too-many-arguments]
                 (k for k in out if k == "excitation" or k.startswith("excitation ")),
                 next(iter(out)),
             )
-            out = normalise_to_isosbestic(out, lam_iso, scan=key)
-    return out, wells, x
+            out = normalise_to_isosbestic(out, lam_iso, scan=key, band=iso_band)
+    return out, wells, x, peaks
 
 
 def _row(base: dict[str, object], subset: str, fit: SpectralFit) -> dict[str, object]:
@@ -536,7 +560,7 @@ def isosbestic_by_group(
             if buffer
             else []
         )
-        spectra, _used, used_x = sample_spectra(
+        spectra, _used, used_x, _peaks = sample_spectra(
             ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=bufw
         )
         out[str(name), float(str(temp))] = (
@@ -545,13 +569,32 @@ def isosbestic_by_group(
     return out
 
 
+def _isosbestic_reference(
+    lam: ArrayF, y: ArrayF, lam_iso: float, band: float
+) -> ArrayF:
+    """Per-well reference at the crossing: the mean over ``band``, or the point itself.
+
+    Every measured point that falls inside ``band`` goes into the mean - two points
+    are as legitimate as five, and requiring a minimum silently turned the window
+    off on a plate measured on a coarse grid (a 3 nm window holds only two points
+    of a 2 nm grid). A non-positive band, or one that contains no grid point at
+    all, degrades to the interpolated crossing. One implementation for both
+    normalisation paths, so they can never drift apart.
+    """
+    if band > 0.0:
+        window = np.abs(lam - lam_iso) <= band / 2.0
+        if window.any():
+            return np.asarray(np.mean(y[window], axis=0), dtype=np.float64)
+    return np.array([np.interp(lam_iso, lam, y[:, i]) for i in range(y.shape[1])])
+
+
 def isosbestic_scale(
     spectra: Mapping[str, tuple[Any, Any]],
     lam_iso: float,
     *,
     scan: str | None = None,
     floor: float = 0.02,
-    half_width: float = 2.0,
+    band: float = 3.0,
 ) -> tuple[ArrayF, ArrayF]:
     """Per-well brightness reference at the crossing, and the wells it can serve.
 
@@ -574,10 +617,16 @@ def isosbestic_scale(
         A reference below this fraction of the well's own peak is not used: at
         the instrument's floor the ratio divides by noise.
 
-    half_width : float
-        Half-width [nm] of the window averaged at the crossing to form the
-        reference. That value is a ratio, so its readout noise is carried into
-        every wavelength of the well; a few points reduce it.
+    band : float
+        Full width [nm] of the window averaged at the crossing to form the
+        reference. It is always a *mean* over that band, never a sum: a mean makes
+        every well read 1.0 at the crossing, which is what the panel's a.u. axis
+        display multiplies back by the scan's own peak, and it does not jump with
+        the width. Every measured point inside the band is averaged - the count is
+        whatever the plate's grid allows, one point at 1 nm spacing and two on the
+        2 nm grid of the L1-L4 plates. A non-positive band, or one that holds no
+        grid point at all, uses the interpolated value at the crossing
+        (``--iso-window 0``).
 
     Returns
     -------
@@ -600,16 +649,12 @@ def isosbestic_scale(
     if not lam_a.min() <= lam_iso <= lam_a.max():
         msg = f"{key}: isosbestic {lam_iso:.1f} nm is outside {lam_a.min():.0f}-{lam_a.max():.0f} nm"
         raise ValueError(msg)
-    # the reference is the mean over a small window at the crossing, not a single
-    # point: the value there is a *ratio*, so readout noise on it is carried into
-    # every wavelength of that well. Five points at 1 nm spacing cost nothing and
-    # cut that noise by about sqrt(5).
-    window = np.abs(lam_a - lam_iso) <= half_width
-    ref = (
-        np.mean(ya[window], axis=0)
-        if window.sum() >= 3  # ruff: ignore[magic-value-comparison]
-        else np.array([np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])])
-    )
+    # the reference is the MEAN over a small window at the crossing, not a sum: a
+    # mean puts every well at 1.0 there and is invariant to how many grid points
+    # the band happens to hold. The value at the crossing is a *ratio*, so readout
+    # noise on it is carried into every wavelength of the well, and averaging a few
+    # points cuts that noise. See :func:`_isosbestic_reference` for the fallback.
+    ref = _isosbestic_reference(lam_a, ya, lam_iso, band)
     usable = np.asarray(
         np.isfinite(ref) & (np.abs(ref) > floor * np.max(np.abs(ya), axis=0)),
         dtype=bool,
@@ -624,6 +669,7 @@ def normalise_to_isosbestic(
     lam_iso: float,
     *,
     scan: str | None = None,
+    band: float = 3.0,
 ) -> dict[str, tuple[Any, Any]]:
     """Divide every spectrum by its value at the isosbestic wavelength.
 
@@ -645,6 +691,11 @@ def normalise_to_isosbestic(
         of the detector window, and an emission scan has no crossing of its own
         to divide by. ``None`` divides each scan by its own value there, which is
         what a single-scan normalisation means.
+    band : float
+        Full width [nm] of the window averaged at the crossing to form the per-well
+        reference. It is a *mean*, never a sum; every measured point inside the
+        band is averaged, and ``<= 0`` uses the interpolated value at the crossing.
+        See :func:`isosbestic_scale`.
 
     Returns
     -------
@@ -660,7 +711,7 @@ def normalise_to_isosbestic(
         If ``lam_iso`` lies outside a label's wavelength range.
     """
     if scan is not None:
-        scale, _usable = isosbestic_scale(spectra, lam_iso, scan=scan)
+        scale, _usable = isosbestic_scale(spectra, lam_iso, scan=scan, band=band)
         return {
             label: (
                 np.asarray(lam, dtype=np.float64),
@@ -675,9 +726,7 @@ def normalise_to_isosbestic(
         if not lam_a.min() <= lam_iso <= lam_a.max():
             msg = f"{label}: isosbestic {lam_iso:.1f} nm is outside {lam_a.min():.0f}-{lam_a.max():.0f} nm"
             raise ValueError(msg)
-        ref = np.array([
-            np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])
-        ])
+        ref = _isosbestic_reference(lam_a, ya, lam_iso, band)
         floor = 0.02 * np.max(np.abs(ya), axis=0)
         usable = np.isfinite(ref) & (np.abs(ref) > floor)
         scaled = ya.copy()
@@ -686,7 +735,7 @@ def normalise_to_isosbestic(
     return out
 
 
-def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statements, complex-structure]
+def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branches, too-many-statements, complex-structure]
     ef: EnspireFile,
     note: pd.DataFrame,
     *,
@@ -696,10 +745,12 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
     screen: float | None = None,
     bands: Sequence[str] = EXCITATION_SCAN,
     isosbestic: float | str | None = None,
+    iso_band: float = 3.0,
     n_boot: int = 0,
     seed: int = 0,
     strata: str = "none",
     qc: float | None = None,
+    inspect: bool = False,
     figure_stem: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, SpectralFit]]:
     """Fit every sample of a note with the whole-spectrum global model.
@@ -726,6 +777,12 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
         Normalise every well by its signal at the isosbestic point before
         fitting (see :func:`sample_spectra`); ``"auto-scale"`` resolves the
         crossings for the whole plate at once.
+    iso_band : float
+        Full width [nm] of the window averaged at the isosbestic crossing to form
+        the per-well reference (a mean, never a sum - see :func:`isosbestic_scale`).
+        Every measured point inside the band is averaged; the default 3.0 nm
+        averages the 3 points of a 1 nm grid and the 2 of a 2 nm grid, and ``0``
+        uses the interpolated value at the crossing itself.
     n_boot : int
         Well-cluster bootstrap replicates for the reported interval (0 leaves it
         out). The interval resamples whole wells - every scan and every
@@ -748,6 +805,13 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
         (``min_signal``), so a dark but valid well - the saturating end of a
         ligand ladder - is not mistaken for a broken one. ``None`` fits every
         well, which is what this method did before.
+    inspect : bool
+        With a ``figure_stem``, also write one ``<stem>_global_inspect.txt``
+        listing, per (sample, temperature): K and its errors, the wells used and
+        the wells the screen dropped, each scan's basic/acidic species peaks and
+        residual RMS, the two-state residual singular values, and every well's
+        basic fraction and amplitude. The panel figure and the ``--global-qc``
+        output are unchanged - this is a text dump only.
 
     figure_stem : Path | None
         When given, write ``<stem>_<sample>_<temp>_panels.pdf`` per group: the data,
@@ -762,6 +826,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
     """
     rows: list[dict[str, object]] = []
     fits: dict[str, SpectralFit] = {}
+    inspect_lines: list[str] = []
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     lam_map = (
@@ -786,7 +851,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
         if isinstance(lam, str):
             # resolve "auto"/"auto-scale" here rather than inside sample_spectra, so
             # the figure can be divided by the same wavelength the fit used
-            raw, _w, xr = sample_spectra(
+            raw, _w, xr, _peaks = sample_spectra(
                 ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=buf, bands=bands
             )
             iso_nm = (
@@ -802,7 +867,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
             lam = iso_nm
         elif isinstance(lam, float):
             iso_nm = lam
-        spectra, wells, x = sample_spectra(
+        spectra, wells, x, peaks = sample_spectra(
             ef,
             wells,
             x,
@@ -811,6 +876,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
             buffer_wells=buf,
             bands=bands,
             isosbestic=lam,
+            iso_band=iso_band,
         )
         if not spectra:
             continue
@@ -901,8 +967,15 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
                 fit,
                 title=f"{name} at {temp}",
                 iso_nm=iso_nm,
+                peaks=peaks,
             )
         fits[f"{name} {temp}"] = fit
+        if inspect:
+            inspect_lines.append(
+                _group_inspect(
+                    name, temp, x, wells, fit, base, is_ph=is_ph, iso_nm=iso_nm
+                )
+            )
         rows.append(_row(base, "all", fit))
         for plate_row in sorted({w[0] for w in wells}):
             sel = np.array([w[0] == plate_row for w in wells])
@@ -920,6 +993,10 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
             )
             rows.append(_row(base, f"row {plate_row}", row_fit))
 
+    if inspect and figure_stem is not None:
+        insp_fp = figure_stem.parent / f"{figure_stem.name}_global_inspect.txt"
+        insp_fp.write_text("\n".join(inspect_lines).rstrip("\n") + "\n")
+        print(f"inspect: wrote {insp_fp}")
     return pd.DataFrame(rows), fits
 
 
@@ -1236,6 +1313,74 @@ def model_isosbestic(
     return max(crossings)
 
 
+def _group_inspect(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
+    name: object,
+    temp: object,
+    x: ArrayF,
+    wells: Sequence[str],
+    fit: SpectralFit,
+    base: Mapping[str, object],
+    *,
+    is_ph: bool,
+    iso_nm: float | None,
+) -> str:
+    """Assemble one (sample, temperature) block for the ``--inspect`` sidecar.
+
+    Text only: a human-readable dump of what the table holds for the group, plus
+    each scan's basic/acidic species peaks and every well's basic fraction and
+    amplitude. Nothing here is written to the panel figure.
+    """
+    xa = np.asarray(x, dtype=np.float64)
+    k = float(fit.K)
+    frac = 1.0 / (1.0 + 10.0 ** (xa - k)) if is_ph else xa / (xa + k)
+    basic = 1.0 - frac
+    scale = np.asarray(fit.well_scale, dtype=np.float64)
+    boot = (
+        f" boot {fit.se_boot:.4f} [{fit.ci_boot[0]:.4f}, {fit.ci_boot[1]:.4f}]"
+        if np.isfinite(fit.se_boot)
+        else ""
+    )
+    dropped = str(base.get("qc_dropped", "-"))
+    hill = f"   hill {fit.hill:.3f}" if abs(fit.hill - 1.0) > 1e-9 else ""  # ruff: ignore[magic-value-comparison]
+    lines: list[str] = [
+        f"== {name} at {temp} ==",
+        f"K = {k:.4f} +/- {fit.se:.4f} (jackknife){boot}{hill}",
+        f"wells used: {fit.n_wells}   dropped: {dropped}",
+    ]
+    if iso_nm is not None:
+        lines.append(f"isosbestic crossing: {iso_nm:.2f} nm")
+    lines.append(
+        "per-scan species peaks and residual RMS (scan divided by its own peak):"
+    )
+    for label in sorted(fit.species):
+        species = np.asarray(fit.species[label], dtype=np.float64)
+        lam = np.asarray(fit.wavelengths.get(label, []), dtype=np.float64)
+        rms = float(fit.rms[label])
+        n_w = float(np.max(np.abs(species)))
+        if species.shape[0] >= 2:  # ruff: ignore[magic-value-comparison]
+            b0 = int(np.argmax(np.abs(species[0])))
+            a0 = int(np.argmax(np.abs(species[1])))
+            b_at = f"{lam[b0]:.0f} nm" if lam.size else "?"
+            a_at = f"{lam[a0]:.0f} nm" if lam.size else "?"
+            lines.append(
+                f"  {label}: basic {n_w:.3e} @ {b_at}   "
+                f"acidic {float(np.max(np.abs(species[1]))):.3e} @ {a_at}   "
+                f"rms {rms:.3e}"
+            )
+        else:
+            lines.append(f"  {label}: (single species) peak {n_w:.3e}   rms {rms:.3e}")
+    sv = np.asarray(fit.residual_sv, dtype=np.float64)
+    if sv.size >= 2 and sv[1] > 0.0:  # ruff: ignore[magic-value-comparison]
+        lines.append(
+            f"2-state residual sv {sv[0]:.3e}, {sv[1]:.3e}   ratio {sv[0] / sv[1]:.2f}"
+        )
+    lines.append("per-well basic fraction f / amplitude a:")
+    for w, fb, sc in zip(wells, basic, scale, strict=True):
+        lines.append(f"  {w}: f_basic = {fb:.4f}   a = {sc:.4e}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     path: Path,
     spectra: Mapping[str, tuple[Any, Any]],
@@ -1244,16 +1389,26 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     *,
     title: str,
     iso_nm: float | None = None,
+    peaks: Mapping[str, float] | None = None,
 ) -> Path:
     """Draw the data, the model and the species fraction of one whole-spectrum fit.
 
     The species-only figure that accompanied this fit says what the fit found but
     not whether it describes the data. These three do: the measured spectra and
-    the model drawn on the same scale (both divided by the signal at the crossing,
-    so the whole family passes through 1.0 there), and the fraction of the basic
-    state per well against the fitted curve. The observed fraction is taken with
-    the fitted per-well amplitude divided out - without that the amount scatter
-    enters the fraction and the points stop following the curve.
+    the model drawn on the same scale, and the fraction of the basic state per
+    well against the fitted curve. Every quantity a panel draws carries one
+    shared constant - the division of its scan by its peak (``peaks``,
+    returned by ``sample_spectra``), on top of the well reference that already
+    divided both the data and the species (the excitation value at the shared
+    crossing, applied by ``sample_spectra``). So each panel shows the scan in
+    its own measured units - the excitation family passes through 1.0 there when
+    that reference was applied - and
+    the species sit on the data scale by construction, because they were fit
+    on those data and are rescaled by the same constant.
+
+    The observed fraction is one per well, shared across scans
+    (:func:`observed_fraction`): the per-scan amplitude of a well is a free
+    scale, so unmixing the scans separately would trade it into the fraction.
 
     Parameters
     ----------
@@ -1269,9 +1424,14 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
         Panel-group title, usually "<sample> at <temperature>".
 
     iso_nm : float | None
-        The wavelength the fit divided every scan by. When given, every panel is
-        drawn on that same per-well reference and only the first panel marks it;
-        ``None`` falls back to each scan's own species crossing.
+        The shared crossing [nm]; only the first panel marks it, as the
+        wavelength the fit divided every scan by. ``None`` falls back to each
+        scan's own species crossing.
+
+    peaks : Mapping[str, float] | None
+        The peak that ``sample_spectra`` divided each scan by (its 4th return
+        value). Each panel multiplies data, model and species by it to restore
+        the scan's measured units; ``None`` draws the panels as given.
 
     Returns
     -------
@@ -1286,16 +1446,16 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     # exports) cannot carry a crossing, a species pair or a fraction: drawing it
     # divides by a species value that is zero and reports a crossing at the edge
     # of its window. Those scans are dropped from the figure, not from the fit.
-    peaks = {
+    tops = {
         name: float(np.nanmax(np.abs(np.asarray(y, dtype=np.float64))))
         for name, (_lam, y) in spectra.items()
         if name in fit.species
     }
-    top = max(peaks.values()) if peaks else 0.0
+    topmost = max(tops.values()) if tops else 0.0
     scans = [
         name
         for name in spectra
-        if name in fit.species and top > 0 and peaks[name] > 0.05 * top
+        if name in fit.species and topmost > 0 and tops[name] > 0.05 * topmost
     ]
     if not scans:
         return path
@@ -1322,7 +1482,6 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
         colormaps["coolwarm_r"],
         Normalize(float(np.nanmin(x)), float(np.nanmax(x))),
     )
-    marks = ("o", "s", "^", "v")
     for col, label in enumerate(scans):
         lam, y = spectra[label]
         lam = np.asarray(lam, dtype=np.float64)
@@ -1343,50 +1502,38 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
                 if diff[i] * diff[i + 1] < 0 and lam[i] > _CHROMOPHORE_MIN
             ]
             iso = max(zero) if zero else float(lam[int(np.argmin(np.abs(diff)))])
-        # The excitation panel is divided by its value at the crossing, which is
-        # what makes the family cross at 1.0; every panel uses the same per-well
-        # reference because the amount it corrects for belongs to the well, not to
-        # the scan. A scan with no signal at that wavelength (an emission window
-        # whose largest reading sits at its edge) falls back to preserving the
-        # well-to-well ratios of its own integral, so it stays on the same
-        # correction instead of collapsing to zero.
-        ref = np.array([np.interp(iso, lam, ya[:, i]) for i in range(ya.shape[1])])
-        if np.nanmedian(np.abs(ref)) < 0.05 * float(np.nanmax(np.abs(ya))):
-            ref = np.array([np.nanmean(ya[:, i]) for i in range(ya.shape[1])])
-        with np.errstate(divide="ignore", invalid="ignore"):
-            data_n, model_n = ya / ref[None, :], model / ref[None, :]
-        data_n = np.where(np.isfinite(data_n), data_n, np.nan)
-        model_n = np.where(np.isfinite(model_n), model_n, np.nan)
+        # one shared constant per panel: the peak this scan was divided by
+        # (``peaks``, straight from ``sample_spectra``). When the fit also divided
+        # every scan by its excitation value at the crossing
+        # (--normalise-isosbestic), multiplying by that peak restores the well's own
+        # a.u. scale; when it did not, the peak division is all there was. Data,
+        # model and species all carry the same constant, so the species stay on the
+        # data scale by construction instead of being rescaled onto the scale of
+        # some other scan.
+        m = float(peaks[label]) if peaks is not None and label in peaks else 1.0
         ax = axes[0][col]
         for i in range(ya.shape[1]):
-            ax.plot(lam, data_n[:, i], color=cmap(norm(x[i])), lw=0.9, alpha=0.45)
-            ax.plot(lam, model_n[:, i], color="k", lw=0.6, ls="--", alpha=0.35)
-        e_iso = 0.5 * (
-            np.interp(iso, lam, species[0]) + np.interp(iso, lam, species[1])
-        )
-        if not np.isfinite(e_iso) or abs(e_iso) < 1e-12:  # ruff: ignore[magic-value-comparison]
-            e_iso = float(np.nanmax(np.abs(species)))
+            ax.plot(lam, m * ya[:, i], color=cmap(norm(x[i])), lw=0.9, alpha=0.45)
+            ax.plot(lam, m * model[:, i], color="k", lw=0.6, ls="--", alpha=0.35)
         ax.plot(
-            lam,
-            species[0] / e_iso,
-            color="#2a6f97",
-            lw=2.0,
-            label="basic (anionic) state",
+            lam, m * species[0], color="#2a6f97", lw=2.0, label="basic (anionic) state"
         )
         ax.plot(
             lam,
-            species[1] / e_iso,
+            m * species[1],
             color="#d1495b",
             lw=2.0,
-            ls="-",
             label="acidic (protonated) state",
         )
         if col == 0:
             # the crossing belongs to the excitation scan: it is the wavelength the
-            # fit divided every scan by, not a feature of an emission window
+            # fit divided every scan by, not a feature of an emission window. Only
+            # claim a divisor when one was actually applied (--normalise-isosbestic);
+            # otherwise the line just marks where the two fitted species cross.
             ax.axvline(iso, color="k", lw=0.8, ls=":")
+            what = "shared divisor" if iso_nm is not None else "species cross at"
             ax.set_title(
-                f"{label}: {fit.n_wells} wells, shared divisor {iso:.1f} nm",
+                f"{label}: {fit.n_wells} wells, {what} {iso:.1f} nm",
                 fontsize=9.5,
                 loc="left",
             )
@@ -1394,28 +1541,31 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
             ax.set_title(f"{label}: {fit.n_wells} wells", fontsize=9.5, loc="left")
         ax.legend(fontsize=6.5, frameon=False, loc="upper left")
         ax.set_xlabel("wavelength (nm)")
-        ax.set_ylabel("signal / well reference")
-
-        # per-scan observed fraction, with the fitted amplitude divided out
-        design = species.T
-        coef = np.array([
-            np.linalg.lstsq(design / fit.well_scale[i], ya[:, i], rcond=None)[0]
-            for i in range(ya.shape[1])
-        ])
-        with np.errstate(divide="ignore", invalid="ignore"):
-            obs = coef[:, 1] / coef.sum(axis=1)
-        axf = axes[0][-1]
+        # Without --normalise-isosbestic the panel is the well's own measurement:
+        # sample_spectra only divided it by the scan peak, and multiplying back
+        # restores the a.u. it was recorded in. With the normalisation the fit has
+        # divided every well by its crossing value, so what the peak multiplies back
+        # is a ratio, not the measured a.u. - and the axis says so.
+        ax.set_ylabel(
+            "Fluorescence (a.u.)" if iso_nm is None else "signal / well reference"
+        )
+    axf = axes[0][-1]
+    # one observed fraction per well, across all of its scans: the per-scan
+    # amplitude of a well is a free scale, taken out before the fraction is
+    # read, so a well that is merely bright or dim in one scan is not mistaken
+    # for a well that is protonated
+    obs = observed_fraction(fit, {label: spectra[label] for label in scans})
+    if obs is not None:
         axf.plot(
             x,
             obs,
-            marks[col % len(marks)],
+            "o",
             ms=3.2,
             mec="none",
-            color="#2a6f97" if col == 0 else "#6a994e",
-            alpha=0.75,
-            label=f"{label}: observed",
+            color="#2a6f97",
+            alpha=0.8,
+            label="observed, one per well (all scans)",
         )
-    axf = axes[0][-1]
     band = 1.96 * fit.se
     axf.fill_between(
         grid,
@@ -1433,7 +1583,7 @@ def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
         axf.set_xscale("log")
         axf.set_xlabel("titrant")
     axf.set_ylabel("fraction of the basic state")
-    axf.set_title("species fraction, both scans", fontsize=9.5, loc="left")
+    axf.set_title("basic-state fraction, one per well", fontsize=9.5, loc="left")
     axf.legend(fontsize=7, frameon=False)
     fig.colorbar(
         plt.cm.ScalarMappable(norm=norm, cmap=cmap),

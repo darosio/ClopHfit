@@ -356,6 +356,70 @@ def paired_delta(
     return out
 
 
+def observed_fraction(
+    fit: SpectralFit,
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    n_grid: int = 401,
+) -> ArrayF | None:
+    """Report the observed basic-state fraction per well, with one value per well.
+
+    One fraction explains every scan of a well: the per-scan amplitude is a free
+    scale (a well's amount times each scan's response), so the fraction is fixed
+    by shape alone, and a well that is merely bright or dim in one scan is not
+    mistaken for a well that is protonated. For each well the fraction is the
+    grid value minimising the summed least-squares over its contributing scans,
+    and what is reported is that value - one point per well on the titration.
+
+    Parameters
+    ----------
+    fit : SpectralFit
+        The whole-spectrum fit; its per-scan species form each scan's basis.
+    spectra : Mapping[str, tuple[ArrayF, ArrayF]]
+        The scans the fit consumed, as ``(wavelengths, Y[n_lambda, n_wells])``.
+        Only the label and the data are read, in whatever well order the fit
+        saw them.
+    n_grid : int
+        Number of fraction values searched, from 1e-3 to 1 - 1e-3.
+
+    Returns
+    -------
+    ArrayF | None
+        The basic-state fraction per well, same well order as the data; ``None``
+        when no data label matches the fit's species, so a caller can skip
+        its marker.
+    """
+    labels = [label for label in spectra if label in fit.species]
+    if not labels:
+        return None
+    n_w = min(
+        np.asarray(data[1], dtype=np.float64).shape[1] for data in spectra.values()
+    )
+    frac = np.linspace(1e-3, 1.0 - 1e-3, n_grid)
+    cost = np.zeros((n_grid, n_w), dtype=np.float64)
+    for label in labels:
+        basic = np.asarray(fit.species[label][0], dtype=np.float64)
+        delta = np.asarray(
+            fit.species[label][1] - fit.species[label][0], dtype=np.float64
+        )
+        y = np.asarray(spectra[label][1], dtype=np.float64)[:, :n_w]
+        a = basic @ y
+        b = delta @ y
+        c0 = float(basic @ basic)
+        c1 = float(basic @ delta)
+        c2 = float(delta @ delta)
+        norm_sq = np.sum(y**2, axis=0)
+        cc = c0 + frac * (2.0 * c1 + frac * c2)
+        num = (a[None, :] + frac[:, None] * b[None, :]) ** 2
+        with np.errstate(divide="ignore", invalid="ignore"):
+            scan_cost = np.abs(norm_sq[None, :]) - num / cc[:, None]
+        cost += np.where(np.isfinite(scan_cost), scan_cost, np.inf)
+    if not np.isfinite(cost).any():
+        return None
+    best = np.argmin(cost, axis=0)
+    return frac[best]
+
+
 def _bootstrap_wells(  # ruff: ignore[too-many-arguments]
     x: ArrayF,
     spectra: Sequence[ArrayF],

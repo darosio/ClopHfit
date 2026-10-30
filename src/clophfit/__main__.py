@@ -766,7 +766,7 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     type=(str, int, int),
     help="Label and band interval (format: LABEL LOWER UPPER)",
 )
-@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and <stem>_species.pdf. global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf.  vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. both runs band and svd; all runs band, svd and global.")  # fmt: skip
+@click.option("--method", type=click.Choice(["band", "svd", "both", "global", "global-bayes", "global-bayes-marginal", "vanthoff", "vanthoff-bayes", "mcr", "bayes", "all"], case_sensitive=False), default="band", show_default=True, help="How spectra become one number per well. band averages named windows (anionic 480-495, neutral 395-410, emission 500-520) and lets them share K; svd projects whole spectra on their first principal component, as this command always did. Neither is uniformly more precise -- on replicate rows of one plate they trade places -- but band keeps plateaus in measured units, cross-checks its bands against each other, and names a readout that has stopped titrating. global (prototype) fits every wavelength of the excitation scan with one K, the two species spectra solved linearly and a per-well amplitude, with a jackknife error; it writes <stem>_K_global.csv and one <stem>_<sample>_<temp>_panels.pdf per group, plus <stem>_global_inspect.txt with --inspect. (The discarded wells stay in --global-qc and the K table, not the panel PDF.) global-bayes puts the same whole-spectrum model on a seeded NUTS posterior with a latent per-well titrant axis (--x-sigma required), reporting the K median and 94 % HDI in <stem>_K_global_bayes.csv, the latent axis in <stem>_x_global_bayes.csv and <stem>_global_bayes.pdf.  vanthoff fits every temperature of the note at once, tied by pKa(T) = dH/(2.303 R T) - dS/(2.303 R): the bands of all temperatures share one thermodynamic pair while plateaus stay free per band and temperature; pH plates fit pKa(T) (linear in 1/T), ligand plates pKd(T) - so Kd is exponential in 1/T and reported in the x units; needs at least two temperatures and writes <stem>_K_vanthoff.csv and <stem>_K_vanthoff.pdf (curves with the joint model, and the constant vs 1/T). vanthoff-bayes puts that same joint model on a seeded NUTS posterior: the shared thermodynamic pair and the per-band plateaus are sampled together, so dH and dS carry their own 94 % HDI instead of a propagated one; it writes <stem>_K_vanthoff_bayes.csv (K per temperature with hdi03/hdi97, r_hat and ess_bulk), <stem>_K_vanthoff_bayes.pdf (the joint model with its credible band, and the constant vs 1/T) and one <stem>_<sample>_vanthoff_bayes.nc trace per sample; --x-sigma adds the latent per-well titrant axis, as for the other Bayesian methods. mcr resolves each temperature's spectra into non-negative closed concentration profiles and species spectra by alternating least squares (--components species; default 2), then fits Henderson-Hasselbalch (pH plates) or Langmuir (ligand plates) to the tracking component; it writes <stem>_K_mcr.csv, <stem>_mcr_spectra.csv and <stem>_mcr.pdf. bayes puts a seeded PyMC/NUTS posterior on the same corrected band readouts as band, combining the excitation and emission scans into one shared K, and reports the median and 94 % HDI (hdi03/hdi97, r_hat, ess_bulk) in <stem>_K_bayes.csv and <stem>_K_bayes.pdf: the successor of the legacy svd+emcee HDI - same Bayesian interval, stable readout, reproducible seed. both runs band and svd; all runs band, svd and global.")  # fmt: skip
 @click.option("--join", "joins", multiple=True, metavar="CSV:NOTE", help="Additional export:note pair to fit together with the first, for a titration split over several EnSpire files (e.g. 20 C in one export, 37 C in another, each with its own note). The exports must carry disjoint measurement labels; the notes are concatenated (each keeps its Temp) and written next to the outputs as <stem>_joined_note.csv, so nothing under data/ changes. --method vanthoff then fits one thermodynamic pair across every temperature.")  # fmt: skip
 @click.option("--export", "export", type=click.Choice(["auto", "always", "never"], case_sensitive=False), default="auto", show_default=True, help="What to do with the per-measurement tables and figures written before the fit. auto (default) writes the canonical <export>_<label>.csv/json/png and rewrites one only when the export is newer than it, so calling several methods on one plate reuses the same files instead of piling up timestamped copies; always rewrites everything; never writes nothing and only fits.")  # fmt: skip
 @click.option("--buffer/--no-buffer", default=True, show_default=True, help="For --method band: subtract the buffer well of the same plate column. A row sitting at the instrument's floor is treated as buffer even when the note names it after the mutant.")  # fmt: skip
@@ -789,6 +789,32 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
 @click.option("--global-strata", type=click.Choice(["none", "column"], case_sensitive=False), default="none", show_default=True, help="For --method global --global-boot: 'column' resamples wells within each plate column, which keeps every replicate spanning the titration axis (the design-preserving choice for these plates); 'none' resamples from one pool.")  # fmt: skip
 @click.option("--components", type=int, default=2, show_default=True, help="Species to resolve for --method mcr. Ask for 3 where --method global reports a high sv_ratio: a third non-negative component that keeps absorbing signal is evidence against the two-state model, not a fix for a bad plate.")  # fmt: skip
 @click.option("--normalise-isosbestic", "isosbestic", type=str, default=None, metavar="[NM|auto|auto-scale]", help="Divide every well by its signal at the isosbestic point before fitting, which removes how much protein the well holds, its path length and its brightness while keeping the titration's shape. 'auto' locates one crossing per (sample, temperature). 'auto-scale' keeps those crossings and puts a sample's temperatures on ONE amplitude scale, which is what preserves the measured 20/37 C brightness ratio - use it whenever the two temperatures are drawn or fitted together. A number is a fixed wavelength in nm. A chloride titration has no such point - bound and free differ in brightness without crossing - so the auto forms normalise nothing there and change no number. Writes <stem>_isosbestic.csv recording the wavelength each group used.")  # fmt: skip
+@click.option(
+    "--iso-window",
+    "iso_band",
+    default=3.0,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    metavar="NM",
+    help="Width in nm of the band averaged at the isosbestic crossing to form the "
+    "per-well reference, for --normalise-isosbestic. The reference is always a "
+    "mean over that band, never a sum, and every measured point inside it is "
+    "used: 3 nm averages 3 points of a 1 nm grid and 2 points of a 2 nm grid, "
+    "and 0 means the interpolated crossing itself. It only changes a per-well "
+    "constant, which the global fit's free well amplitude already fits, so it "
+    "is a readout-noise choice and moves K far less than its own error bar.",
+)
+@click.option(
+    "--inspect",
+    "inspect",
+    is_flag=True,
+    default=False,
+    help="With --method global, also write <stem>_global_inspect.txt: per "
+    "(sample, temp) K and its errors, the wells used and the wells the screen "
+    "dropped, each scan's basic/acidic species peaks and residual RMS, the "
+    "2-state residual sv, and every well's basic fraction and amplitude. Text "
+    "only - the panel figure and --global-qc output are unchanged.",
+)
 def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-branches, too-many-statements]
     ctx: Context,
     csv_f: str,
@@ -814,9 +840,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     export: str,
     joins: tuple[str, ...],
     isosbestic: str | None,
+    iso_band: float,
     global_boot: int,
     global_strata: str,
     global_qc: float | None,
+    inspect: bool,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -899,6 +927,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             f"{', '.join(ignored)} apply to --method global only "
             f"(got --method {method}); they would be silently ignored"
         )
+    if inspect and method not in {"global", "all"}:
+        ctx.fail(
+            f"--inspect dumps the global fit (got --method {method}); "
+            "it would be silently ignored"
+        )
     if acid_state and method not in {"global-bayes", "global-bayes-marginal"}:
         ctx.fail(
             "--acid-state applies to --method global-bayes and "
@@ -937,9 +970,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             scans=scans,
             screen=global_screen,
             isosbestic=iso,
+            iso_band=iso_band,
             n_boot=global_boot,
             strata=global_strata,
             qc=global_qc,
+            inspect=inspect,
         )
     if method == "vanthoff":
         fit_enspire_vanthoff(ef, Path(note_f), Path(out), buffer=buffer, isosbestic=iso)
@@ -1426,7 +1461,7 @@ def _write_isosbestic_table(
         bufw = buffers[np.isclose(buffers["Temp"].astype(float), wanted_temp)][
             "Well"
         ].tolist()
-        spectra, used, used_x = sample_spectra(
+        spectra, used, used_x, _peaks = sample_spectra(
             ef,
             wells,
             x,
@@ -1854,11 +1889,13 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     scans: tuple[str, ...] = (),
     screen: float | None = None,
     isosbestic: float | str | None = None,
+    iso_band: float = 3.0,
     n_boot: int = 0,
     strata: str = "none",
     qc: float | None = None,
+    inspect: bool = False,
 ) -> pd.DataFrame:
-    """Fit a note's titrations from whole spectra and write the table and species spectra.
+    """Fit a note's titrations from whole spectra and write the table and its panel figures.
 
     Parameters
     ----------
@@ -1883,6 +1920,12 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         Normalise every well by its signal at the isosbestic point before
         fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
         ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
+    iso_band : float
+        Full width [nm] of the window averaged at the isosbestic crossing to form
+        the per-well reference (a mean, never a sum); ``0`` uses the exact
+        interpolated value at the crossing (one wavelength). It changes only a
+        per-well constant, which the free well amplitude already fits, so it
+        moves K by far less than its error bar.
     n_boot : int
         Well-cluster bootstrap replicates behind the reported interval (0 leaves
         it to the jackknife alone). Whole wells are resampled, all scans and all
@@ -1895,6 +1938,12 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
         Robust cut of the per-scan screen, run before the fit (see
         :func:`~clophfit.prenspire.spectral.scan_outliers`); ``None`` fits every
         well.
+    inspect : bool
+        Also write ``<stem>_global_inspect.txt`` - a per-(sample, temperature)
+        text dump of K and its errors, the wells used and dropped, each scan's
+        species peaks and residual RMS, the 2-state residual sv, and every
+        well's basic fraction and amplitude. The panel figure and the
+        ``--global-qc`` output are unchanged.
 
     Returns
     -------
@@ -1903,38 +1952,22 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     stem_guess = note_fp.name.removesuffix("_note.csv")
-    table, fits = fit_titrations_spectral(
+    table = fit_titrations_spectral(
         ef,
         Note(note_fp).note,
         buffer=buffer,
         screen=screen,
         bands=tuple(scans) if scans else ("exc_anionic",),
         isosbestic=isosbestic,
+        iso_band=iso_band,
         n_boot=n_boot,
         strata=strata,
         qc=qc,
+        inspect=inspect,
         figure_stem=out_dir / stem_guess,
-    )
+    )[0]
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
-    if fits:
-        fig, axes = plt.subplots(
-            1,
-            len(fits),
-            figsize=(5.4 * len(fits), 4.0),
-            constrained_layout=True,
-            squeeze=False,
-        )
-        for ax, (title, fit) in zip(axes[0], fits.items(), strict=True):
-            for label, species in fit.species.items():
-                lam = fit.wavelengths[label]
-                ax.plot(lam, species[0], label=f"{label} basic/free")
-                ax.plot(lam, species[1], "--", label=f"{label} acidic/bound")
-            ax.set_title(f"{title}: K {fit.K:.3f} ± {fit.se:.3f}")
-            ax.set_xlabel("wavelength (nm)")
-            ax.legend(fontsize=7)
-        fig.savefig(out_dir / f"{stem}_species.pdf", bbox_inches="tight")
-        plt.close(fig)
     if "qc_dropped" in table:
         for row in table[table.subset == "all"].itertuples():
             gone = str(row.qc_dropped)
@@ -2079,7 +2112,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         wells = one["Well"].tolist()
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
-        spectra, wells, x = sample_spectra(
+        spectra, wells, x, _peaks = sample_spectra(
             ef,
             wells,
             x,
@@ -2707,7 +2740,7 @@ def fit_enspire_mcr(  # ruff: ignore[too-many-arguments]
             if len(buffers)
             else []
         )
-        spectra, _used, used_x = sample_spectra(
+        spectra, _used, used_x, _peaks = sample_spectra(
             ef,
             wells,
             x,
