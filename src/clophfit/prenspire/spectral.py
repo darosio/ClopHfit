@@ -551,6 +551,7 @@ def isosbestic_scale(
     *,
     scan: str | None = None,
     floor: float = 0.02,
+    half_width: float = 2.0,
 ) -> tuple[ArrayF, ArrayF]:
     """Per-well brightness reference at the crossing, and the wells it can serve.
 
@@ -573,6 +574,11 @@ def isosbestic_scale(
         A reference below this fraction of the well's own peak is not used: at
         the instrument's floor the ratio divides by noise.
 
+    half_width : float
+        Half-width [nm] of the window averaged at the crossing to form the
+        reference. That value is a ratio, so its readout noise is carried into
+        every wavelength of the well; a few points reduce it.
+
     Returns
     -------
     tuple[ArrayF, ArrayF]
@@ -594,7 +600,16 @@ def isosbestic_scale(
     if not lam_a.min() <= lam_iso <= lam_a.max():
         msg = f"{key}: isosbestic {lam_iso:.1f} nm is outside {lam_a.min():.0f}-{lam_a.max():.0f} nm"
         raise ValueError(msg)
-    ref = np.array([np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])])
+    # the reference is the mean over a small window at the crossing, not a single
+    # point: the value there is a *ratio*, so readout noise on it is carried into
+    # every wavelength of that well. Five points at 1 nm spacing cost nothing and
+    # cut that noise by about sqrt(5).
+    window = np.abs(lam_a - lam_iso) <= half_width
+    ref = (
+        np.mean(ya[window], axis=0)
+        if window.sum() >= 3  # ruff: ignore[magic-value-comparison]
+        else np.array([np.interp(lam_iso, lam_a, ya[:, i]) for i in range(ya.shape[1])])
+    )
     usable = np.asarray(
         np.isfinite(ref) & (np.abs(ref) > floor * np.max(np.abs(ya), axis=0)),
         dtype=bool,
@@ -671,7 +686,7 @@ def normalise_to_isosbestic(
     return out
 
 
-def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statements]
+def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statements, complex-structure]
     ef: EnspireFile,
     note: pd.DataFrame,
     *,
@@ -767,6 +782,26 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
             if lam_map is not None
             else isosbestic
         )
+        iso_nm: float | None = None
+        if isinstance(lam, str):
+            # resolve "auto"/"auto-scale" here rather than inside sample_spectra, so
+            # the figure can be divided by the same wavelength the fit used
+            raw, _w, xr = sample_spectra(
+                ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=buf, bands=bands
+            )
+            iso_nm = (
+                plate_isosbestic(
+                    raw,
+                    xr,
+                    x_min=PH_ACID_END if is_ph else None,
+                    is_ph=is_ph,
+                )
+                if raw
+                else None
+            )
+            lam = iso_nm
+        elif isinstance(lam, float):
+            iso_nm = lam
         spectra, wells, x = sample_spectra(
             ef,
             wells,
@@ -865,6 +900,7 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-statem
                 x,
                 fit,
                 title=f"{name} at {temp}",
+                iso_nm=iso_nm,
             )
         fits[f"{name} {temp}"] = fit
         rows.append(_row(base, "all", fit))
@@ -1200,13 +1236,14 @@ def model_isosbestic(
     return max(crossings)
 
 
-def plot_global_panels(  # ruff: ignore[too-many-statements]
+def plot_global_panels(  # ruff: ignore[too-many-arguments, too-many-statements]
     path: Path,
     spectra: Mapping[str, tuple[Any, Any]],
     x: ArrayF,
     fit: SpectralFit,
     *,
     title: str,
+    iso_nm: float | None = None,
 ) -> Path:
     """Draw the data, the model and the species fraction of one whole-spectrum fit.
 
@@ -1231,6 +1268,11 @@ def plot_global_panels(  # ruff: ignore[too-many-statements]
     title : str
         Panel-group title, usually "<sample> at <temperature>".
 
+    iso_nm : float | None
+        The wavelength the fit divided every scan by. When given, every panel is
+        drawn on that same per-well reference and only the first panel marks it;
+        ``None`` falls back to each scan's own species crossing.
+
     Returns
     -------
     Path
@@ -1240,50 +1282,121 @@ def plot_global_panels(  # ruff: ignore[too-many-statements]
     from matplotlib import colormaps  # ruff: ignore[import-outside-top-level]
     from matplotlib.colors import Normalize  # ruff: ignore[import-outside-top-level]
 
-    scans = [name for name in spectra if name in fit.species]
+    # a scan with no signal above the buffer (the 420 nm emission of some 2013
+    # exports) cannot carry a crossing, a species pair or a fraction: drawing it
+    # divides by a species value that is zero and reports a crossing at the edge
+    # of its window. Those scans are dropped from the figure, not from the fit.
+    peaks = {
+        name: float(np.nanmax(np.abs(np.asarray(y, dtype=np.float64))))
+        for name, (_lam, y) in spectra.items()
+        if name in fit.species
+    }
+    top = max(peaks.values()) if peaks else 0.0
+    scans = [
+        name
+        for name in spectra
+        if name in fit.species and top > 0 and peaks[name] > 0.05 * top
+    ]
     if not scans:
         return path
-    n = len(scans)
-    fig, axes = plt.subplots(
-        n, 3, figsize=(13.0, 3.6 * n), squeeze=False, constrained_layout=True
+    is_ph = float(np.nanmax(x)) < _MAX_PH
+    f = 1.0 / (1.0 + 10.0 ** (x - fit.K)) if is_ph else x / (x + fit.K)
+    grid = (
+        np.linspace(float(np.nanmin(x)) - 0.2, float(np.nanmax(x)) + 0.2, 200)
+        if is_ph
+        else np.logspace(np.log10(0.5), np.log10(float(np.nanmax(x)) * 1.3), 200)
     )
-    mappable = None
-    for row, label in enumerate(scans):
+
+    def curve(k: float) -> ArrayF:
+        """Fraction of the basic state at one K, on the panel's grid."""
+        return 1.0 / (1.0 + 10.0 ** (grid - k)) if is_ph else grid / (grid + k)
+
+    fig, axes = plt.subplots(
+        1,
+        len(scans) + 1,
+        figsize=(4.3 * (len(scans) + 1), 3.9),
+        squeeze=False,
+        constrained_layout=True,
+    )
+    cmap, norm = (
+        colormaps["coolwarm_r"],
+        Normalize(float(np.nanmin(x)), float(np.nanmax(x))),
+    )
+    marks = ("o", "s", "^", "v")
+    for col, label in enumerate(scans):
         lam, y = spectra[label]
         lam = np.asarray(lam, dtype=np.float64)
         ya = np.asarray(y, dtype=np.float64)
         species = np.asarray(fit.species[label], dtype=np.float64)
-        is_ph = float(np.nanmax(x)) < _MAX_PH
-        f = 1.0 / (1.0 + 10.0 ** (x - fit.K)) if is_ph else x / (x + fit.K)
         model = np.asarray(fit.well_scale)[None, :] * (
             (1 - f)[None, :] * species[0][:, None] + f[None, :] * species[1][:, None]
         )
         diff = species[0] - species[1]
-        zero = [
-            float(lam[i] + (lam[i + 1] - lam[i]) * diff[i] / (diff[i] - diff[i + 1]))
-            for i in range(lam.size - 1)
-            if diff[i] * diff[i + 1] < 0 and lam[i] > _CHROMOPHORE_MIN
-        ]
-        iso = max(zero) if zero else float(lam[int(np.argmin(np.abs(diff)))])
+        if iso_nm is not None:
+            iso = float(iso_nm)
+        else:
+            zero = [
+                float(
+                    lam[i] + (lam[i + 1] - lam[i]) * diff[i] / (diff[i] - diff[i + 1])
+                )
+                for i in range(lam.size - 1)
+                if diff[i] * diff[i + 1] < 0 and lam[i] > _CHROMOPHORE_MIN
+            ]
+            iso = max(zero) if zero else float(lam[int(np.argmin(np.abs(diff)))])
+        # The excitation panel is divided by its value at the crossing, which is
+        # what makes the family cross at 1.0; every panel uses the same per-well
+        # reference because the amount it corrects for belongs to the well, not to
+        # the scan. A scan with no signal at that wavelength (an emission window
+        # whose largest reading sits at its edge) falls back to preserving the
+        # well-to-well ratios of its own integral, so it stays on the same
+        # correction instead of collapsing to zero.
         ref = np.array([np.interp(iso, lam, ya[:, i]) for i in range(ya.shape[1])])
+        if np.nanmedian(np.abs(ref)) < 0.05 * float(np.nanmax(np.abs(ya))):
+            ref = np.array([np.nanmean(ya[:, i]) for i in range(ya.shape[1])])
         with np.errstate(divide="ignore", invalid="ignore"):
             data_n, model_n = ya / ref[None, :], model / ref[None, :]
-        cmap = colormaps["coolwarm_r"]
-        norm = Normalize(float(np.nanmin(x)), float(np.nanmax(x)))
-        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-        for col, (arr, name) in enumerate((
-            (data_n, "data"),
-            (model_n, "model"),
-        )):
-            ax = axes[row][col]
-            for i in range(ya.shape[1]):
-                ax.plot(lam, arr[:, i], color=cmap(norm(x[i])), lw=1.0, alpha=0.9)
+        data_n = np.where(np.isfinite(data_n), data_n, np.nan)
+        model_n = np.where(np.isfinite(model_n), model_n, np.nan)
+        ax = axes[0][col]
+        for i in range(ya.shape[1]):
+            ax.plot(lam, data_n[:, i], color=cmap(norm(x[i])), lw=0.9, alpha=0.45)
+            ax.plot(lam, model_n[:, i], color="k", lw=0.6, ls="--", alpha=0.35)
+        e_iso = 0.5 * (
+            np.interp(iso, lam, species[0]) + np.interp(iso, lam, species[1])
+        )
+        if not np.isfinite(e_iso) or abs(e_iso) < 1e-12:  # ruff: ignore[magic-value-comparison]
+            e_iso = float(np.nanmax(np.abs(species)))
+        ax.plot(
+            lam,
+            species[0] / e_iso,
+            color="#2a6f97",
+            lw=2.0,
+            label="basic (anionic) state",
+        )
+        ax.plot(
+            lam,
+            species[1] / e_iso,
+            color="#d1495b",
+            lw=2.0,
+            ls="-",
+            label="acidic (protonated) state",
+        )
+        if col == 0:
+            # the crossing belongs to the excitation scan: it is the wavelength the
+            # fit divided every scan by, not a feature of an emission window
             ax.axvline(iso, color="k", lw=0.8, ls=":")
-            ax.set_xlabel("wavelength (nm)")
             ax.set_title(
-                f"{label}: {name} / signal({iso:.0f} nm)", fontsize=9.5, loc="left"
+                f"{label}: {fit.n_wells} wells, shared divisor {iso:.1f} nm",
+                fontsize=9.5,
+                loc="left",
             )
-        axes[row][0].set_ylabel(f"signal / signal({iso:.0f} nm)")
+        else:
+            ax.set_title(f"{label}: {fit.n_wells} wells", fontsize=9.5, loc="left")
+        ax.legend(fontsize=6.5, frameon=False, loc="upper left")
+        ax.set_xlabel("wavelength (nm)")
+        ax.set_ylabel("signal / well reference")
+
+        # per-scan observed fraction, with the fitted amplitude divided out
         design = species.T
         coef = np.array([
             np.linalg.lstsq(design / fit.well_scale[i], ya[:, i], rcond=None)[0]
@@ -1291,44 +1404,44 @@ def plot_global_panels(  # ruff: ignore[too-many-statements]
         ])
         with np.errstate(divide="ignore", invalid="ignore"):
             obs = coef[:, 1] / coef.sum(axis=1)
-        axf = axes[row][2]
+        axf = axes[0][-1]
         axf.plot(
-            x, obs, "o", ms=3.5, color="#2a6f97", label="observed, amplitude removed"
+            x,
+            obs,
+            marks[col % len(marks)],
+            ms=3.2,
+            mec="none",
+            color="#2a6f97" if col == 0 else "#6a994e",
+            alpha=0.75,
+            label=f"{label}: observed",
         )
-        if is_ph:
-            grid = np.linspace(
-                float(np.nanmin(x)) - 0.2, float(np.nanmax(x)) + 0.2, 200
-            )
-            axf.plot(
-                grid,
-                1.0 / (1.0 + 10.0 ** (grid - fit.K)),
-                color="#d1495b",
-                lw=1.6,
-                label=f"fit: K {fit.K:.3f} ± {fit.se:.3f}",
-            )
-            axf.set_xlabel("pH")
-        else:
-            grid = np.logspace(np.log10(0.5), np.log10(float(np.nanmax(x)) * 1.3), 200)
-            axf.plot(
-                grid,
-                grid / (grid + fit.K),
-                color="#d1495b",
-                lw=1.6,
-                label=f"fit: K {fit.K:.3f} ± {fit.se:.3f}",
-            )
-            axf.set_xscale("log")
-            axf.set_xlabel("titrant")
-        axf.set_ylabel(f"fraction of the basic state ({label})")
-        axf.set_title(f"{label}: species fraction", fontsize=9.5, loc="left")
-        axf.legend(fontsize=7, frameon=False)
-    if mappable is not None:
-        fig.colorbar(
-            mappable,
-            ax=[axes[r][c] for r in range(n) for c in (0, 1)],
-            fraction=0.02,
-            pad=0.01,
-            label="pH",
-        )
+    axf = axes[0][-1]
+    band = 1.96 * fit.se
+    axf.fill_between(
+        grid,
+        curve(fit.K + band),
+        curve(fit.K - band),
+        color="#d1495b",
+        alpha=0.18,
+        lw=0,
+        label=f"K {fit.K:.3f} +/- {band:.3f} (1.96 sigma, jackknife)",
+    )
+    axf.plot(grid, curve(fit.K), color="#d1495b", lw=1.6, label="fitted curve")
+    if is_ph:
+        axf.set_xlabel("pH")
+    else:
+        axf.set_xscale("log")
+        axf.set_xlabel("titrant")
+    axf.set_ylabel("fraction of the basic state")
+    axf.set_title("species fraction, both scans", fontsize=9.5, loc="left")
+    axf.legend(fontsize=7, frameon=False)
+    fig.colorbar(
+        plt.cm.ScalarMappable(norm=norm, cmap=cmap),
+        ax=[axes[0][c] for c in range(len(scans))],
+        fraction=0.02,
+        pad=0.01,
+        label="pH",
+    )
     fig.suptitle(title, fontsize=10, x=0.01, ha="left")
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, bbox_inches="tight")
