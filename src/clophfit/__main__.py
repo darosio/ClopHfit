@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.metadata
 import json
 import logging
 import os
@@ -45,12 +46,14 @@ from clophfit import (
     configure_logging,
     fitting,
 )
+from clophfit.fitting.bayes import well_groups
 from clophfit.fitting.bayes_config import RobustConfig, SamplerConfig
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import (
     DataValidationError,
     MissingDependencyError,
 )
+from clophfit.fitting.model_validation import trace_diagnostics
 from clophfit.fitting.spectral import (
     _fractions,
     _Model,
@@ -817,6 +820,35 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     "censor the reported species draws, leaving the K posterior untouched.",
 )
 @click.option(
+    "--x-pool",
+    "x_pool",
+    type=click.Choice(["free", "shared", "partial"], case_sensitive=False),
+    default="free",
+    show_default=True,
+    help="How the Bayesian methods treat the latent titrant axis across replicate "
+    "wells. free: every well gets its own x_true ~ N(x_note, sigma), which is right "
+    "where the recorded axis can be wrong (an unverified Cl concentration) but "
+    "makes three wells of one solution three different truths. shared: the wells "
+    "of one replicate group share a single truth. partial: they share a group "
+    "truth while a well may still deviate, with the deviation scale inferred - it "
+    "nests the other two and reports how much pooling the data warrant. Default "
+    "free: a 45-plate recovery study shows pooling cuts the K bias roughly in "
+    "half (0.028 to 0.022 pH under a poisoned axis, and 0.005 to 0.0001 on a clean "
+    "one) but at 4 chains x 2000 draws the pooled fits still mix poorly there "
+    "(ESS ~20-70, r-hat up to 1.6) while free is clean, so it is offered rather "
+    "than assumed. The shared and partial structures need --x-sigma.",
+)
+@click.option(
+    "--x-groups",
+    "x_groups",
+    type=click.Choice(["column", "none"], case_sensitive=False),
+    default="column",
+    show_default=True,
+    help="What a replicate group is for --x-pool: 'column' reads it from the "
+    "trailing column number of the well label (A04/B04/C04 are one solution), as "
+    "the column QC strata do; 'none' makes every well its own group.",
+)
+@click.option(
     "--inspect",
     "inspect",
     is_flag=True,
@@ -857,6 +889,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     global_strata: str,
     global_qc: float | None,
     inspect: bool,
+    x_pool: str,
+    x_groups: str,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -904,6 +938,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     if x_sigma is not None and method not in {
         "bayes",
         "global-bayes",
+        "global-bayes-marginal",
         "vanthoff-bayes",
     }:
         ctx.fail(
@@ -944,6 +979,27 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             f"--inspect dumps the global fit (got --method {method}); "
             "it would be silently ignored"
         )
+    bayes_methods = {
+        "bayes",
+        "global-bayes",
+        "global-bayes-marginal",
+        "vanthoff-bayes",
+    }
+    if method not in bayes_methods and (x_pool != "free" or x_groups != "column"):
+        ctx.fail(
+            f"--x-pool and --x-groups shape the Bayesian latent axis "
+            f"{sorted(bayes_methods)} (got --method {method})"
+        )
+    if method in bayes_methods and x_pool != "free" and x_sigma is None:
+        # a pooled truth needs a scale; without one, say so and fall back rather
+        # than silently fitting a different structure than the table will record
+        click.echo(
+            f"note: --x-pool {x_pool} needs --x-sigma (the recorded axis's error "
+            "scale, 'auto' to estimate it from the replicate spread); fitting the "
+            "free axis instead and recording x_pool=free",
+            err=True,
+        )
+        x_pool = "free"
     species_min_methods = {
         "global",
         "global-bayes",
@@ -1060,6 +1116,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             robust=robust,
             screen=bayes_screen,
             isosbestic=iso,
+            provenance=run_provenance,
         )
     if method == "global-bayes":
         if x_sigma is None:
@@ -1080,6 +1137,8 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             isosbestic=iso,
             species_min=species_min,
             iso_band=3.0 if iso_band is None else iso_band,
+            x_pool=x_pool,
+            x_groups=x_groups,
             provenance=run_provenance,
         )
     if method == "global-bayes-marginal":
@@ -1103,8 +1162,87 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             isosbestic=iso,
             species_min=species_min,
             iso_band=3.0 if iso_band is None else iso_band,
+            x_pool=x_pool,
+            x_groups=x_groups,
             provenance=run_provenance,
         )
+
+
+#: Screening floors for a posterior, not convergence criteria: they catch a
+#: posterior that is visibly unhealthy, and passing them proves nothing.
+_RHAT_SCREEN = 1.01
+_ESS_BULK_SCREEN = 400.0
+_BFMI_SCREEN = 0.3
+#: share of trajectories hitting the depth cap before the geometry is suspect
+_TREEDEPTH_SCREEN = 0.2
+
+
+def _diag_number(diag: Mapping[str, object], key: str) -> float | None:
+    """Read one screening number, or ``None`` when the sampler did not record it."""
+    value = diag.get(key)
+    if value is None:
+        return None
+    try:
+        out = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _axis_scale(trace: object, name: str) -> float:
+    """Posterior median of an inferred axis scale, or NaN when the model has none.
+
+    ``free`` has no group or well scale, so the column is NaN rather than a
+    number that would look like a fitted quantity.
+    """
+    post = getattr(trace, "posterior", None)
+    if post is None or name not in post:
+        return float("nan")
+    return float(np.median(np.asarray(post[name].values)))
+
+
+def _posterior_screen(diag: Mapping[str, object]) -> str:
+    """Say whether a posterior passed the sampler's screening floors.
+
+    The floors are screening values, not convergence criteria: no divergences,
+    rank r-hat below 1.01, bulk ESS above 400, energy BFMI above 0.3. Passing them
+    still does not establish that the model is identified or the priors sensible,
+    and the line stays silent when all four pass.
+    """
+    problems: list[str] = []
+    divergences = _diag_number(diag, "n_divergences")
+    if divergences:
+        problems.append(f"{divergences:.0f} divergences")
+    rhat = _diag_number(diag, "rhat_max")
+    if rhat is not None and rhat > _RHAT_SCREEN:
+        problems.append(f"r-hat {rhat:.3f}")
+    ess = _diag_number(diag, "ess_bulk_min")
+    if ess is not None and ess < _ESS_BULK_SCREEN:
+        problems.append(f"bulk ESS {ess:.0f}")
+    bfmi = _diag_number(diag, "bfmi")
+    if bfmi is not None and bfmi < _BFMI_SCREEN:
+        problems.append(f"BFMI {bfmi:.2f}")
+    depth = _diag_number(diag, "reached_max_treedepth_frac")
+    if depth is not None and depth > _TREEDEPTH_SCREEN:
+        problems.append(f"{100 * depth:.0f}% at max tree depth")
+    if not problems:
+        return ""
+    return "  ! screen: " + ", ".join(problems) + " (screening only, not proof)"
+
+
+def _posterior_columns(diag: Mapping[str, object]) -> dict[str, object]:
+    """Collect the screening numbers as table columns beside the estimate."""
+    return {
+        "n_divergences": diag.get("n_divergences", np.nan),
+        "rhat_max": diag.get("rhat_max", np.nan),
+        "ess_bulk_min": diag.get("ess_bulk_min", np.nan),
+        "ess_tail_min": diag.get("ess_tail_min", np.nan),
+        "bfmi": diag.get("bfmi", np.nan),
+        "max_treedepth": diag.get("max_treedepth", np.nan),
+        "n_reached_max_treedepth": diag.get("n_reached_max_treedepth", np.nan),
+        "reached_max_treedepth_frac": diag.get("reached_max_treedepth_frac", np.nan),
+        "sampler": diag.get("sampler", "unknown"),
+    }
 
 
 def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
@@ -1366,6 +1504,23 @@ def _provenance(ctx: Context) -> dict[str, object]:
     return out
 
 
+def _bayes_run(options: Mapping[str, object] | None) -> bool:
+    """Whether this invocation sampled a posterior, i.e. needs its stack recorded."""
+    method = str((options or {}).get("method", "")).lower()
+    return "bayes" in method
+
+
+def _sampler_stack() -> dict[str, str]:
+    """Versions of the packages that determine a posterior, when they are installed."""
+    out: dict[str, str] = {}
+    for name in ("pymc", "pytensor", "arviz", "nutpie", "h5netcdf"):
+        try:
+            out[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return out
+
+
 def _write_provenance(
     path: Path,
     *,
@@ -1380,12 +1535,15 @@ def _write_provenance(
     of results can be traced back to the command that made it. Sorted keys, no
     timestamp: the same run writes the same bytes.
     """
-    payload = {
+    payload: dict[str, object] = {
         "clophfit_version": __version__,
         "inputs": dict(inputs),
         "options": dict(options or {}),
         "outputs": list(outputs),
     }
+    if _bayes_run(options):
+        # a posterior is only reproducible against the sampler stack that made it
+        payload["environment"] = _sampler_stack()
     path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -1697,6 +1855,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
             x_sigma=x_res,
         )
         label = cast("str", name)
+        diag = trace_diagnostics(bb.trace, summary_var_names=["K"])
         rows.append({
             "sample": label,
             "temp": t,
@@ -1707,6 +1866,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
             "ess_bulk": bb.ess,
             "n": n_kept,
             "x_sigma": x_res,
+            **_posterior_columns(diag),
         })
         figdata.append((label, t, data, bb, is_ph))
     table = pd.DataFrame(
@@ -1721,6 +1881,15 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
             "ess_bulk",
             "n",
             "x_sigma",
+            "n_divergences",
+            "rhat_max",
+            "ess_bulk_min",
+            "ess_tail_min",
+            "bfmi",
+            "max_treedepth",
+            "n_reached_max_treedepth",
+            "reached_max_treedepth_frac",
+            "sampler",
         ],
     )
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1740,6 +1909,12 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
         print(
             f"{row.sample} at {row.temp}: K {row.K:.3f} HDI94 [{row.hdi03:.3f}, {row.hdi97:.3f}] "
             f"rhat {row.r_hat:.3f} ess {row.ess_bulk:.0f} on {row.n} points{xsig}"
+            + _posterior_screen({
+                "n_divergences": row.n_divergences,
+                "rhat_max": row.rhat_max,
+                "ess_bulk_min": row.ess_bulk_min,
+                "bfmi": row.bfmi,
+            })
         )
     return table
 
@@ -2046,6 +2221,8 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     qc: float | None = None,
     species_min: float | None = None,
     iso_band: float = 3.0,
+    x_pool: str = "partial",
+    x_groups: str = "column",
     provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Fit whole spectra with a joint posterior over K, x and spectral noise."""
@@ -2069,6 +2246,8 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         qc=qc,
         species_min=species_min,
         iso_band=iso_band,
+        x_pool=x_pool,
+        x_groups=x_groups,
         provenance=provenance,
     )
 
@@ -2091,6 +2270,8 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     qc: float | None = None,
     species_min: float | None = None,
     iso_band: float = 3.0,
+    x_pool: str = "partial",
+    x_groups: str = "column",
     provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Marginalized whole-spectrum fit: species spectra out of the sampler."""
@@ -2114,6 +2295,8 @@ def fit_enspire_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
         qc=qc,
         species_min=species_min,
         iso_band=iso_band,
+        x_pool=x_pool,
+        x_groups=x_groups,
         provenance=provenance,
     )
 
@@ -2139,6 +2322,8 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     iso_band: float = 3.0,
     qc: float | None = None,
     species_min: float | None = None,
+    x_pool: str = "partial",
+    x_groups: str = "column",
     provenance: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     """Shared whole-spectrum Bayesian pipeline behind the two fitters.
@@ -2174,6 +2359,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         wells = one["Well"].tolist()
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
+        groups = well_groups(wells) if x_groups == "column" else None
         lam = _lam_for(isosbestic, lam_map, name, temp)
         if isinstance(lam, str):
             # resolve "auto" here, as the least-squares path does, so the crossing
@@ -2234,6 +2420,8 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             cores=cores,
             target_accept=target_accept or 0.9,
             species_min=species_min,
+            x_pool=cast("Any", x_pool),
+            x_groups=groups,
             **({"acid_state": acid_state} if acid_state else {}),
         )
         kdraw = np.asarray(trace.posterior["K"].values).reshape(-1)
@@ -2241,6 +2429,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         lo, hi = float(hdi[0]), float(hdi[1])
         key = f"{name}_{str(temp).replace('.', 'p')}"
         trace.to_netcdf(out_dir / f"{key}_{suffix}.nc")
+        diag = trace_diagnostics(trace, summary_var_names=["K"])
         rows.append({
             "sample": name,
             "temp": temp,
@@ -2252,12 +2441,16 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             "ess_bulk": float(az.ess(trace, var_names=["K"])["K"].item()),
             "n": len(wells),
             "x_sigma": sigma,
+            **_posterior_columns(diag),
             # the options that shape the numbers, as the least-squares global
             # table records them
             "scans": ";".join(spectra),
             "isosbestic_nm": np.nan if lam is None else float(lam),
             "iso_window_nm": np.nan if lam is None else float(iso_band),
             "species_min": np.nan if species_min is None else float(species_min),
+            "x_pool": x_pool,
+            "x_axis_group_sd": _axis_scale(trace, "x_true_group_sd"),
+            "x_axis_well_sd": _axis_scale(trace, "x_true_well_sd"),
         })
         xdraw = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
         figdata.append((str(name), str(temp), is_ph, wells, x, spectra, trace))
@@ -2268,6 +2461,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
                 "temp": temp,
                 "well": well,
                 "x_note": x[i],
+                "x_shift": float(median) - float(x[i]),
                 "x_median": median,
                 "hdi03": qlo,
                 "hdi97": qhi,
@@ -2275,6 +2469,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         print(
             f"{name} at {temp}: {label} K {np.median(kdraw):.3f} "
             f"94% HDI [{lo:.3f}, {hi:.3f}] x_sigma {sigma:.3f}"
+            + _posterior_screen(diag)
         )
     stem = note_fp.name.removesuffix("_note.csv")
     table = pd.DataFrame(rows)
@@ -2631,6 +2826,7 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
             kdraw = np.asarray(trace.posterior[f"K_{t}"].values).reshape(-1)
             lo, hi = (float(v) for v in az.hdi(kdraw, prob=0.94))
             median = float(np.median(kdraw))
+            diag = trace_diagnostics(trace, summary_var_names=[f"K_{t}"])
             rows.append({
                 "sample": name,
                 "temp": t,
@@ -2643,10 +2839,12 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
                 "dS_J_molK": float(np.median(ds_draws)),
                 "n": n,
                 "x_sigma": np.nan if sigma is None else sigma,
+                **_posterior_columns(diag),
             })
             kind, unit = ("pKa", "") if info.is_ph else ("Kd", " mM")
             print(
                 f"{name} at {t}: {kind} {median:.3f}{unit} 94% HDI [{lo:.3f}, {hi:.3f}]"
+                + _posterior_screen(diag)
             )
             if sigma is None:
                 continue

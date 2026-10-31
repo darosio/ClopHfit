@@ -6,8 +6,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pymc as pm
 import pytest
 
+from clophfit.fitting.bayes import create_x_true_pooled, well_groups
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.spectral import (
     fit_spectra_global,
@@ -846,3 +848,165 @@ def test_species_floor_censors_the_bayes_species_draws_only() -> None:
         np.asarray(free.posterior["K"].values),
         np.asarray(bounded.posterior["K"].values),
     )
+
+
+def _replicate_plate(
+    recorded_shift: float, *, seed: int = 5
+) -> tuple[
+    np.ndarray, np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]], np.ndarray
+]:
+    """Three replicate rows of one ladder, whose recorded axis is off by a shift.
+
+    The wells of a column are one solution, so their true fraction is identical;
+    only the recorded axis differs, which is what a pH plate looks like when the
+    electrode drifts between replicate rows.
+    """
+    x_nominal = np.array([6.0, 6.5, 7.0, 7.4, 7.8, 8.3, 8.8, 9.2])
+    x_true = np.tile(x_nominal, 3)
+    x_recorded = x_true + np.tile([-recorded_shift, 0.0, recorded_shift], 8)
+    frac = np.asarray(binding_1site(x_true, 7.4, 0.0, 1.0, is_ph=True))
+    anionic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    neutral = 0.5 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
+    rng = np.random.default_rng(seed)
+    y = np.outer(anionic, 1.0 - frac) + np.outer(neutral, frac)
+    y += rng.normal(0.0, 2e-3, y.shape)
+    wells = [f"{row}0{i + 1}" for row in "ABC" for i in range(8)]
+    return x_recorded, x_true, {"excitation": (LAM, y)}, well_groups(wells)
+
+
+def test_pooled_axis_binds_the_wells_of_one_replicate_to_one_truth() -> None:
+    """The three pooling structures differ in their graph, and in nothing else.
+
+    ``free`` gives every well its own latent value, ``shared`` binds the wells of a
+    group to a single variable, and ``partial`` adds the inferred well-deviation
+    scale that nests the other two. Pinned structurally because the *accuracy* of
+    pooling cannot be tested on this fixture: the whole-spectrum fit seeds its
+    species prior from a least-squares fit on the recorded axis, so a poisoned
+    axis is inherited by the prior and caps the gain (measured: truth 7.400, LS on
+    a 0.6-shifted axis 7.196, free 7.317, shared 7.344). Making pooling pay
+    requires seeding the species without that prefit.
+    """
+    x_rec, _x_true, _spectra, groups = _replicate_plate(0.3)
+    with pm.Model() as free_model:
+        create_x_true_pooled(x_rec, pool="free", x_sigma=0.12)
+    with pm.Model() as shared_model:
+        create_x_true_pooled(x_rec, pool="shared", x_sigma=0.12, groups=groups)
+    with pm.Model() as partial_model:
+        create_x_true_pooled(x_rec, pool="partial", x_sigma=0.12, groups=groups)
+    assert "x_true_group_z" not in free_model.named_vars
+    assert "x_true_group_z" in shared_model.named_vars
+    assert "x_true_well_sd" not in shared_model.named_vars
+    assert "x_true_well_sd" in partial_model.named_vars
+    # non-centred: the scale multiplies a unit normal, so tau never becomes the
+    # mouth of a funnel (that cost 33-98 divergences when it was centred)
+    assert "x_true_group_sd" in partial_model.named_vars
+    assert "x_true_well_z" in partial_model.named_vars
+    # a pooled structure without its groups or its scale is refused, not fudged
+    with pytest.raises(ValueError, match="replicate groups"), pm.Model():
+        create_x_true_pooled(x_rec, pool="shared", x_sigma=0.12)
+
+
+def test_partial_pooling_infers_the_deviation_scale() -> None:
+    """``partial`` adds the well-deviation scale and keeps the group structure.
+
+    With the rows genuinely sharing a truth the inferred ``omega`` must sit near
+    the axis error rather than swallowing the whole ladder, which is what makes
+    it a reportable quantity on a Cl plate where the same scale is the pipetting
+    error.
+    """
+    x_rec, _x_true, spectra, groups = _replicate_plate(0.0)
+    idata = fit_spectra_global_bayes(
+        x_rec,
+        spectra,
+        x_pool="partial",
+        x_groups=groups,
+        x_sigma=0.12,
+        is_ph=True,
+        draws=250,
+        chains=2,
+        tune=250,
+        seed=1,
+    )
+    omega = float(np.median(np.asarray(idata.posterior["x_true_well_sd"].values)))
+    tau = float(np.median(np.asarray(idata.posterior["x_true_group_sd"].values)))
+    assert 0.0 < omega < 1.0, f"omega {omega:.3f} must be a scale, not the ladder"
+    assert 0.0 < tau < 1.0, f"tau {tau:.3f} must be a scale, not the ladder"
+    # free has no such variable at all
+    free = fit_spectra_global_bayes(
+        x_rec,
+        spectra,
+        x_pool="free",
+        x_sigma=0.12,
+        is_ph=True,
+        draws=100,
+        chains=2,
+        tune=150,
+        seed=1,
+    )
+    assert "x_true_well_sd" not in free.posterior
+
+
+def test_edge_seeded_species_prior_is_available_and_distinct() -> None:
+    """The fit-free species prior exists and is a different starting point.
+
+    It is *not* the default: an edge mean is a worse prior centre than the prefit
+    for the free axis (measured K 8.85 against 7.32 at a truth of 7.40), so
+    shipping it would trade one bias for another. The switch stays so the
+    iterative re-seeding can be built on it and compared.
+    """
+    from clophfit.fitting.spectral import _edge_species_prior  # ruff: ignore[import-outside-top-level, import-private-name]
+
+    x = np.array([6.0, 6.5, 7.0, 7.4, 7.8, 8.3, 8.8, 9.2])
+    frac = np.asarray(binding_1site(x, 7.4, 0.0, 1.0, is_ph=True))
+    anionic = np.exp(-0.5 * ((LAM - 490.0) / 15.0) ** 2)
+    neutral = 0.5 * np.exp(-0.5 * ((LAM - 430.0) / 14.0) ** 2)
+    spectra = {"exc": (LAM, np.outer(anionic, 1 - frac) + np.outer(neutral, frac))}
+    prior = _edge_species_prior(spectra, x, is_ph=True, states=2)
+    assert prior is not None
+    assert prior["exc"].shape == (2, LAM.size)
+    # the high-pH end is the anionic one, and it dominates there
+    assert np.allclose(prior["exc"][1], neutral, atol=0.15)
+    # a three-state model has no pure middle state, so it declines to guess
+    assert _edge_species_prior(spectra, x, is_ph=True, states=3) is None
+
+
+def test_pooling_the_axis_does_not_move_k_on_a_real_plate() -> None:
+    """``--x-pool partial`` must be a structural change, not a new number.
+
+    On the committed G10 plate the three structures agree to a few thousandths of
+    a pH unit - far inside the HDI - so making partial pooling the CLI default
+    cannot silently rewrite a published K. The test pins that agreement, which is
+    what licenses the default.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    one = note[(note["Name"] == "NTT-G10") & (note["Temp"] == 20.0)].drop_duplicates(
+        "Well"
+    )
+    wells, x = one["Well"].tolist(), one["pH"].to_numpy(float)
+    spectra, wells, x, _peaks = sample_spectra(
+        eff,
+        wells,
+        x,
+        20.0,
+        is_ph=True,
+        buffer_wells=note[note["Name"] == "buffer"]["Well"].tolist(),
+    )
+    groups = well_groups(wells)
+    ks: dict[str, float] = {}
+    for pool in ("free", "shared", "partial"):
+        idata = fit_spectra_global_bayes(
+            x,
+            spectra,
+            x_sigma=0.08,
+            is_ph=True,
+            x_pool=pool,
+            x_groups=None if pool == "free" else groups,
+            draws=150,
+            chains=2,
+            tune=150,
+            seed=3,
+        )
+        ks[pool] = float(np.median(np.asarray(idata.posterior["K"].values).reshape(-1)))
+    spread = max(ks.values()) - min(ks.values())
+    assert spread < 0.1, f"the pooling structure moved K by {spread:.3f}: {ks}"

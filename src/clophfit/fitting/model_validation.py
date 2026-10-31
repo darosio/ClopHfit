@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import itertools
+import re
 import typing as _t
 import warnings
 from dataclasses import dataclass
@@ -1429,7 +1430,7 @@ def x_axis_sanity(trace: _t.Any) -> dict[str, _t.Any]:
     return out
 
 
-def trace_diagnostics(
+def trace_diagnostics(  # ruff: ignore[too-many-statements]
     trace: _t.Any,
     *,
     compute_loo: bool = False,
@@ -1444,15 +1445,45 @@ def trace_diagnostics(
             row["n_divergences"] = int(ss["diverging"].sum().values)
         if "tree_depth" in ss:
             row["tree_depth_max"] = int(ss["tree_depth"].max().values)
-        if "reached_max_treedepth" in ss:
-            row["n_reached_max_treedepth"] = int(
-                ss["reached_max_treedepth"].sum().values
-            )
+        # the sampler records whether a trajectory hit its cap; which variable
+        # carries that differs by backend (PyMC NUTS: reached_max_treedepth,
+        # nutpie: maxdepth_reached). The cap itself is a setting of the sampler,
+        # so it is never inferred from the largest depth observed here.
+        for flag in ("reached_max_treedepth", "maxdepth_reached"):
+            if flag in ss:
+                reached = np.asarray(ss[flag].values)
+                row["n_reached_max_treedepth"] = int(reached.sum())
+                if reached.size:
+                    row["reached_max_treedepth_frac"] = float(np.mean(reached))
+                break
         if "energy" in ss:
             energy = ss["energy"].values.ravel()
             row["energy_sd"] = float(np.nanstd(energy))
+        # the sampler records which backend ran and, with it, the depth cap it was
+        # given - read both from the trace instead of inferring either
+        attrs = dict(getattr(ss, "attrs", {}))
+        if "inference_library" in attrs:
+            row["sampler"] = str(attrs["inference_library"])
+        if "inference_library_version" in attrs:
+            row["sampler_version"] = str(attrs["inference_library_version"])
+        settings = attrs.get("inference_library_settings")
+        if isinstance(settings, str) and '"maxdepth"' in settings:
+            found = re.search(r'"maxdepth":\s*(\d+)', settings)
+            if found is not None:
+                row["max_treedepth"] = int(found.group(1))
     except Exception as e:
         row["sample_stats_error"] = repr(e)
+
+    try:
+        # energy Bayesian fraction of missing information, pooled over chains:
+        # below 0.3 the geometric exploration is suspect even when r-hat is clean.
+        # ArviZ 1 returns a DataTree here, an InferenceData/DataArray before it.
+        raw = az.bfmi(trace)
+        ds = getattr(raw, "ds", None)
+        values = ds["energy"].values if ds is not None else np.asarray(raw)
+        row["bfmi"] = float(np.nanmean(np.asarray(values, dtype=float)))
+    except Exception as e:
+        row["bfmi_error"] = repr(e)
 
     if summary_var_names is None:
         summary_var_names = [

@@ -38,7 +38,7 @@ without that column and limits the shift on a denatured plate to 0.13 pH (1.34 w
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pymc as pm  # type: ignore[import-untyped]
@@ -49,7 +49,10 @@ from scipy.optimize import least_squares
 from scipy.special import logsumexp
 from scipy.stats import chi2
 
+from clophfit.fitting.bayes import XPool, create_x_true_pooled
 from clophfit.fitting.models import binding_1site
+
+SpeciesInit = Literal["edges", "iterated", "prefit"]
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -765,6 +768,99 @@ def fit_spectra_global(  # ruff: ignore[too-many-arguments]
     )
 
 
+def _edge_species_prior(
+    clean: Mapping[str, tuple[np.ndarray, np.ndarray]],
+    x: ArrayF,
+    *,
+    is_ph: bool,
+    states: int,
+    edge_frac: float = 0.25,
+) -> dict[str, np.ndarray] | None:
+    """Species spectra read off the titrant ends, without any fit.
+
+    The prior mean of the species must not come from a least-squares fit on the
+    *recorded* axis. That axis is exactly the one the latent model treats as
+    noisy - a drifting electrode, an unverified pipetted concentration - so a
+    prefit makes the prior inherit the bias the pooled axis exists to remove: on
+    a synthetic plate whose replicate rows share one fraction but carry an axis
+    off by 0.6, the least-squares fit reads 7.196 against a truth of 7.400, and a
+    prior centred there caps what pooling can recover (7.344 instead of 7.40).
+
+    The wells at the ends of the ladder are nearly pure, so their mean spectrum is
+    an anchored but fit-free guess: ``state 0`` from the high-x end for a pH
+    titration (deprotonated, anionic) or the low-x end for a ligand one (free),
+    ``state 1`` from the other end. A three-state (acid) model has no pure well for
+    its middle state, so it keeps the prefit prior and this returns ``None``.
+
+    Measured, and it is not a cure. Parameter recovery with 12-15 synthetic
+    plates at 4 chains x 2000 draws, truth K 7.400:
+
+    =============  ==============  ======================
+    prior centre   clean axis      axis off by 0.3 per row
+    ==============  ==============  ======================
+    prefit (default) -0.0035        -0.0278
+    edges            +0.0804        -0.0053
+    iterated         +0.0531        -0.0210
+    ==============  ==============  ======================
+
+    The edge mean is contaminated - the "most acidic" well is still a few per cent
+    of the other species - and that contamination pulls K up by about 0.08 whether
+    or not the axis is wrong. On a poisoned axis that upward pull happens to cancel
+    the downward bias of the prefit, which is a coincidence and not something to
+    rely on: its coverage there is fine, but on a clean axis it covers the truth
+    0 of 15 times. Widening the prior (5x -> 20x the residual rms) makes both
+    centres worse (-0.040 and -0.033), so the centre, not the width, is what
+    matters.
+
+    The conclusion is that the prior centre is not the lever: the residual bias
+    under a 2.5 sigma axis offset is a property of the model at that offset, and
+    the honest response to a badly recorded axis is to record it properly (calibrate
+    the electrode, verify the concentration), not to hope a latent axis absorbs it.
+    The prefit therefore stays the default, being right where the axis is right,
+    which is the ordinary case; ``"edges"`` and ``"iterated"`` remain for studies
+    that expect a contaminated axis.
+
+    Parameters
+    ----------
+    clean : Mapping[str, tuple[np.ndarray, np.ndarray]]
+        Per label, ``(wavelengths, Y[n_lambda, n_wells])`` as the fit receives it.
+    x : ArrayF
+        Titrant value per well.
+    is_ph : bool
+        pH titration or ligand binding; it decides which end is which state.
+    states : int
+        Number of species; anything but two falls back to the prefit.
+    edge_frac : float
+        Share of the wells counted as one end, at least two wells.
+
+    Returns
+    -------
+    dict[str, np.ndarray] | None
+        Per label a ``(states, n_lambda)`` prior mean, or ``None`` when the ends
+        cannot carry it.
+    """
+    if states != 2 or x.size < 4:  # ruff: ignore[magic-value-comparison]
+        return None
+    order = np.argsort(np.asarray(x, dtype=np.float64), kind="stable")
+    n_edge = max(2, round(edge_frac * x.size))
+    low, high = order[:n_edge], order[-n_edge:]
+    out: dict[str, np.ndarray] = {}
+    for name, (_lam, values) in clean.items():
+        ya = np.asarray(values, dtype=np.float64)
+
+        with np.errstate(invalid="ignore"):
+            acidic = np.nanmean(ya[:, low], axis=1)
+            basic = np.nanmean(ya[:, high], axis=1)
+        # state 0/1 follow _fractions: for a pH titration state 1 is the protonated
+        # species (its weight is f = 1/(1+10^(x-K))), so it sits at the LOW-x end;
+        # for a ligand, state 1 is the bound species, so it sits at the HIGH-x end
+        prior = np.vstack([basic, acidic]) if is_ph else np.vstack([acidic, basic])
+        if not np.all(np.isfinite(prior)):
+            return None
+        out[name] = prior
+    return out
+
+
 def _clean_spectra(
     x: ArrayF,
     spectra: Mapping[str, tuple[ArrayF, ArrayF]],
@@ -823,6 +919,10 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     acid_state: bool = False,
     species_basis: int | None = 24,
     species_min: float | None = None,
+    x_pool: XPool = "free",
+    x_groups: Sequence[int] | None = None,
+    species_init: SpeciesInit = "prefit",
+    species_prior_scale: float = 5.0,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -896,6 +996,28 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         unconstrained one - a hard bound on a sampled species is a truncated
         prior, which is a different model, and this is not that. ``0`` is the
         physical floor for fluorescence; ``None`` leaves the draws untouched.
+    x_pool : XPool
+        How the wells' latent titrant axis is pooled across replicate wells
+        (see :func:`~clophfit.fitting.bayes.create_x_true_pooled`): ``"free"``
+        gives every well its own ``x_true ~ N(x, x_sigma)``; ``"shared"`` gives
+        the wells of one replicate group a single truth; ``"partial"`` lets the
+        group share a truth and infers how far a well may still deviate.
+    x_groups : Sequence[int] | None
+        Replicate-group index per well, from
+        :func:`~clophfit.fitting.bayes.well_groups`; required by ``"shared"`` and
+        ``"partial"``.
+    species_init : SpeciesInit
+        Where the species prior's *centre* comes from: ``"prefit"`` (the
+        least-squares species, the default), ``"edges"`` (the mean spectrum at each
+        end of the ladder, fit-free) or ``"iterated"`` (one pass with ``"edges"``,
+        then re-seed from that posterior). See :func:`_edge_species_prior` for the
+        measured recovery table: none of them is uniformly right, and the prefit is
+        the one that is right when the recorded axis is.
+    species_prior_scale : float
+        Width of the species prior, in units of the least-squares residual rms.
+        Widening it makes recovery worse at both prior centres (-0.040 and -0.033
+        against -0.028 at the default 5), so it is exposed for study rather than
+        tuned.
     seed : int
         Random seed; a fixed seed reproduces the posterior.
     draws : int
@@ -908,6 +1030,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
         NUTS target acceptance, for better mixing at the price of step size.
     tune : int | None
         Tuning draws; None keeps ``draws // 2``.
+
 
     Returns
     -------
@@ -935,6 +1058,42 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
     states = 3 if acid_state else 2
     # Seed the chains from the least-squares solution, as the marginalized
     # twin does: the pK of the acid state is only identified relative to K.
+    edge_prior = (
+        _edge_species_prior(clean, xa, is_ph=is_ph, states=3 if acid_state else 2)
+        if species_init in {"edges", "iterated"}
+        else None
+    )
+    if species_init == "iterated":
+        # one pass on the pooled axis with the fit-free prior, then re-seed the
+        # species from THAT posterior: the prior is then free of the recorded axis
+        # without being a raw average of near-pure wells
+        first = fit_spectra_global_bayes(
+            x,
+            spectra,
+            x_sigma=x_sigma,
+            is_ph=is_ph,
+            acid_state=acid_state,
+            species_basis=species_basis,
+            x_pool=x_pool,
+            x_groups=x_groups,
+            species_init="edges",
+            seed=seed,
+            draws=max(draws // 2, 200),
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            tune=tune,
+        )
+        edge_prior = {
+            name: np.median(
+                np.stack([
+                    np.asarray(first.posterior[f"E{s}_{name}"].values)
+                    for s in range(3 if acid_state else 2)
+                ]),
+                axis=(1, 2),
+            )
+            for name in clean
+        }
     theta_start = {"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))}
     if acid_state:
         theta_start["delta"] = float(
@@ -947,7 +1106,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
             if acid_state
             else None
         )
-        x_true = pm.Normal("x_true", mu=xa, sigma=x_sigma, shape=xa.size)
+        x_true = create_x_true_pooled(xa, pool=x_pool, x_sigma=x_sigma, groups=x_groups)
         fraction = _fractions_rows(
             k, delta, None, x_true, is_ph=is_ph, acid_state=acid_state
         )
@@ -957,7 +1116,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
             amp_raw / pt.mean(amp_raw),  # type: ignore[no-untyped-call]
         )
         for name, (_lam, y) in clean.items():
-            species = init.species[name]
+            species = edge_prior[name] if edge_prior is not None else init.species[name]
             resid_scale = max(init.rms[name], 1e-6)
             n_lam = y.shape[0]
             n_coef = int(species_basis) if species_basis is not None else 0
@@ -972,7 +1131,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
                             pm.Normal(
                                 f"c{s}_{name}",
                                 mu=np.asarray(basis.T @ species[s], dtype=np.float64),
-                                sigma=5 * resid_scale,
+                                sigma=species_prior_scale * resid_scale,
                                 shape=basis.shape[1],
                             ),
                         ),
@@ -984,7 +1143,7 @@ def fit_spectra_global_bayes(  # ruff: ignore[too-many-arguments]
                     pm.Normal(
                         f"E{s}_{name}",
                         mu=species[s],
-                        sigma=5 * resid_scale,
+                        sigma=species_prior_scale * resid_scale,
                         shape=n_lam,
                     )
                     for s in range(states)
@@ -1384,6 +1543,10 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     fit_hill: bool = False,
     acid_state: bool = False,
     species_min: float | None = None,
+    x_pool: XPool = "free",
+    x_groups: Sequence[int] | None = None,
+    species_init: SpeciesInit = "prefit",
+    species_prior_scale: float = 5.0,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -1407,6 +1570,12 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     and ``offset`` scales) instead of two 30-60 dimensional species vectors
     per scan, removing the strongly correlated posterior geometry of the
     free-parameter version.
+
+
+    The latent axis takes the same ``x_pool`` structure as the free-species fit:
+    ``"free"`` gives every well its own truth, ``"shared"`` gives the wells of one
+    replicate group a single one, and ``"partial"`` shares a group truth while
+    inferring how far a well may deviate.
 
     Two refinements against :func:`fit_spectra_global_bayes`:
 
@@ -1451,8 +1620,50 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
     )
     lo, hi = _k_bounds(xa, is_ph=is_ph)
     top = max(float(np.max(np.abs(values))) for _lam, values in clean.values())
+    edge_prior = (
+        _edge_species_prior(clean, xa, is_ph=is_ph, states=2)
+        if species_init in {"edges", "iterated"}
+        else None
+    )
+    if species_init == "iterated":
+        # as in the free-species fitter: one pooled-axis pass, then re-seed
+        first = fit_spectra_global_bayes_marginal(
+            x,
+            spectra,
+            x_sigma=x_sigma,
+            is_ph=is_ph,
+            fit_hill=fit_hill,
+            acid_state=acid_state,
+            x_pool=x_pool,
+            x_groups=x_groups,
+            species_init="edges",
+            seed=seed,
+            draws=max(draws // 2, 200),
+            chains=chains,
+            cores=cores,
+            target_accept=target_accept,
+            tune=tune,
+        )
+        edge_prior = {
+            name: np.median(
+                np.stack([
+                    np.asarray(first.posterior[f"E{s}_{name}"].values)
+                    for s in range(3 if acid_state else 2)
+                ]),
+                axis=(1, 2),
+            )
+            * top
+            for name in clean
+        }
     species_mean = {
-        name: np.asarray(init.species[name], dtype=np.float64) / top for name in clean
+        name: (
+            np.asarray(
+                edge_prior[name] if edge_prior is not None else init.species[name],
+                dtype=np.float64,
+            )
+            / top
+        )
+        for name in clean
     }
     theta_start: dict[str, float] = {"K": float(np.clip(init.K, lo + 1e-9, hi - 1e-9))}
     if acid_state:
@@ -1472,7 +1683,7 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
             else None
         )
         hill = pm.Uniform("hill", lower=0.2, upper=5.0) if fit_hill else None
-        x_true = pm.Normal("x_true", mu=xa, sigma=x_sigma, shape=xa.size)
+        x_true = create_x_true_pooled(xa, pool=x_pool, x_sigma=x_sigma, groups=x_groups)
         amp_raw = pm.LogNormal("amplitude_raw", mu=0.0, sigma=0.25, shape=xa.size)
         amplitude = pm.Deterministic(
             "amplitude",
@@ -1488,7 +1699,9 @@ def fit_spectra_global_bayes_marginal(  # ruff: ignore[too-many-arguments]
             rms = max(float(init.rms[name]) / top, 1e-6)
             sb = pm.HalfNormal(f"offset_{name}", sigma=2 * rms)
             sigma = pm.HalfNormal(f"sigma_{name}", sigma=2 * rms)
-            s_e = pm.HalfNormal(f"species_scale_{name}", sigma=5 * rms)
+            s_e = pm.HalfNormal(
+                f"species_scale_{name}", sigma=species_prior_scale * rms
+            )
             smooth = pm.HalfNormal(f"smooth_{name}", sigma=5 * rms)
             curv = pt.as_tensor_variable(
                 _second_difference(n_lam).T @ _second_difference(n_lam)

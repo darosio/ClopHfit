@@ -218,6 +218,8 @@ def test_prenspire_vanthoff_bayes(tmp_path: Path, runner: CliRunner) -> None:
             *args,
             "--method",
             "vanthoff-bayes",
+            "--x-pool",
+            "free",
             "--x-sigma",
             "auto",
             "--draws",
@@ -683,6 +685,24 @@ def test_prenspire_bayes(tmp_path: Path, runner: CliRunner) -> None:
     assert table.r_hat.notna().all()
     assert (table.r_hat < 1.1).all()
     assert (out / "NTT-G10_K_bayes.pdf").stat().st_size > 1000
+    # the posterior's own screening numbers travel with it, so a reader can see
+    # that the estimate was sampled rather than assume it
+    assert {
+        "n_divergences",
+        "rhat_max",
+        "ess_bulk_min",
+        "ess_tail_min",
+        "bfmi",
+        "max_treedepth",
+        "n_reached_max_treedepth",
+        "sampler",
+    } <= set(table.columns)
+    assert (table.n_divergences == 0).all()
+    assert table.sampler.isin(["pymc", "nutpie"]).all()
+    assert table.bfmi.notna().all()
+    # and the sampling stack is recorded beside it
+    prov = json.loads((out / "NTT-G10_K_bayes.json").read_text())
+    assert {"pymc", "arviz"} <= set(prov["environment"])
 
 
 def test_plot_bayes_skips_a_sample_the_sampler_could_not_fit(
@@ -755,6 +775,8 @@ def test_prenspire_bayes_writes_a_table_when_nothing_fits(
             str(note),
             "--method",
             "bayes",
+            "--x-pool",
+            "free",
             "--draws",
             "50",
             "--seed",
