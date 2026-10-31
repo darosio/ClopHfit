@@ -230,3 +230,48 @@ Check CSV file headers for metadata.
 1. Automated regression testing for fitting method changes
 1. Method selection logic based on estimated error ratios
 1. Real-time benchmark dashboard
+
+## Latent-axis pooling recovery
+
+#### `axis_pooling_recovery.py`
+
+Parameter recovery for the whole-spectrum Bayesian fits' latent titrant axis:
+does giving the wells of one replicate a shared truth instead of one truth each
+reduce the K bias, and at what sampling cost? Synthetic plates carry three
+replicate rows of one ladder sharing one fraction, with a per-row offset in the
+*recorded* axis. Reports bias ± SE over datasets, RMSE, 94 % coverage,
+divergences, bulk ESS and rank r-hat per cell.
+
+```bash
+# the published table (~1 h per structure at this size)
+uv run python benchmarks/axis_pooling_recovery.py --datasets 45 \
+    --shift 0.0 0.3 --structures free shared partial --out recovery.csv
+
+# smoke test only - 2 datasets cannot resolve anything
+uv run python benchmarks/axis_pooling_recovery.py --datasets 2 --draws 300 \
+    --structures free --shift 0.3
+```
+
+Findings this script produced, and the reason the help text and the
+docstrings of `fit_spectra_global_bayes` / `_edge_species_prior` quote them:
+
+- **Pooling the axis helps, modestly.** 45 datasets per cell at 4 chains x 2000
+  draws: with the recorded axis off by 0.3 the bias goes from -0.0280 ± 0.0007
+  (free) to -0.0221 ± 0.0004 (shared) / -0.0228 ± 0.0005 (partial); with a clean
+  axis free carries a -0.0050 bias of its own that pooling removes (+0.0001).
+- **Pooling is not free.** The pooled structures had 33-98 divergences and
+  r-hat up to 1.53 where free had none, so `--x-pool` defaults to `free`. A
+  non-centred parameterisation removed the divergences (< 2 per fit) and the
+  clean-axis r-hat (1.03), but the poisoned-axis ESS stayed near 20.
+- **The species prior dominates what pooling cannot fix.** With 12-15 datasets
+  per cell the K bias under a poisoned axis is -0.0278 with the least-squares
+  species prior, -0.0210 iterated, and -0.0053 with a fit-free edge mean - but
+  that same edge mean costs +0.0804 on a clean axis (coverage 0 of 15), because
+  the "purest" well is still a few per cent of the other species. Widening the
+  prior hurts both (-0.040, -0.033). No prior centre is uniformly right, so the
+  bias under a 2.5 sigma axis offset is a property of the model, and the honest
+  remedy is to record the axis properly.
+
+A single synthetic plate cannot resolve effects of this size: at 300 and 400
+draws the same comparisons reordered, and one dataset at 400 draws produced the
+opposite conclusion. Use >= 12 datasets and 4 chains x 2000 draws minimum.
