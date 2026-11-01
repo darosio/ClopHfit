@@ -896,3 +896,35 @@ needed.
   workflow, diagnostic floors (r-hat 1.01, bulk ESS 400, BFMI 0.3) and the
   "record the resolved environment and backend" rule are what the diagnostics and
   provenance in this tree implement.
+
+* TODO Exploit the buffer's Delta_pH(20 -> 37 C) as shared knowledge
+  Measured from the notes (no fit): across the 10 pH plates of the L8/L1-L4
+  verification sets that carry two temperatures, the recorded pH difference
+  37 C minus 20 C is **-0.270 +/- 0.022** (sd across plates), i.e. -0.0159
+  pH/degC - consistent with a HEPES-like buffer (-0.014 pH/degC; Tris -0.028,
+  phosphate -0.0028). The scatter across mutants and runs is four times smaller
+  than the within-plate per-column spread (0.071), so it is one shared constant
+  of the buffer system, not biology. One pH plate (random1_A11_G02) records 0.000
+  and needs checking.
+
+  Every Cl note (11 of 11) records **identical pH at both temperatures**, so the
+  temperature dependence was not tracked there. If the 37 C readings were not
+  measured at 37 C, that axis is high by ~0.27 and the error propagates into any
+  temperature comparison of the Cl plates.
+
+  Three ways to use it, in order of value:
+  1. Constrain the joint fits. In the two-temperature models (vanthoff,
+     vanthoff-bayes, and any joint global fit) replace the independent per-well
+     axis with x(37, i) = x(20, i) + Delta, Delta ~ Normal(-0.270, 0.022) taken
+     from the notes or given as --dpH-buffer. That halves the axis parameters and
+     breaks the between-temperature half of the K-x ridge with a physically
+     justified constraint rather than a prior pulled out of the fit.
+  2. QC before fitting. Delta is computable from the note alone, so a plate that
+     deviates from -0.270 by more than ~3 sd (0.07) had a temperature,
+     equilibration or electrode problem; flag it before any spectrum is fitted.
+  3. Decontaminate Delta_H. If the recorded pH at each temperature is not the true
+     pH, an axis offset delta biases the van't Hoff slope by 2.303 R delta / d(1/T):
+     at 0.27 pH over 20 -> 37 C that is 27.6 kJ/mol, against the 43.2 kJ/mol the
+     G10 fit reported. Decide per experiment whether the electrode was read at
+     temperature (then the axis is right and only the constraint applies) or set
+     once at room temperature (then Delta_H must be corrected).
