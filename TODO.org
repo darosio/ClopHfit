@@ -946,32 +946,31 @@ needed.
     two-temperature plate: the tie must narrow the Delta_H interval without moving
     its centre. If it moves the centre, the recorded axis is not the true one and
     the Delta_H correction (below) is the real task.
-  * Protocol, confirmed: the electrode was calibrated at room temperature and each
-    well read at its nominal temperature. That makes the recorded 20 C axis the
-    reference-quality one and leaves the 37 C axis carrying whatever the meter did
-    with its slope. An uncompensated Nernst slope would give a scale error
-    eps = (293.15/310.15 - 1)(pH - pH_cal) = -0.0548 per pH unit, linear in pH, zero
-    at the calibration point. Measured over the ten trusted plates (n = 80):
-
-        dPH = -0.0625 +/- 0.0342  -0.0264 +/- 0.0045 * pH    (residual sd 0.045)
-
-    so the slope is 5.9 sigma from zero and 6.3 sigma from the uncompensated
-    prediction - roughly half of it, i.e. the meter compensated part of the way or
-    the buffer contributes a pH dependence of its own. The two cannot be separated
-    with these data.
-  * Consequence for Delta_H, and a retraction of the 28 kJ/mol figure recorded
-    earlier: that assumed a temperature-dependent *offset*. A scale error does not
-    behave like one - only its value at the pKa matters, and it cancels with the
-    calibration point:
-
-        pKa 7.4, pH_cal 7.0 -> axis error -0.011 pH -> dH bias -1.1 kJ/mol
-        pKa 7.7, pH_cal 7.0 -> axis error -0.018 pH -> dH bias -1.9 kJ/mol
-
-    against the 43 kJ/mol fitted. So under this protocol the existing Delta_H values
-    are not contaminated in any way that matters, and the shared-Delta model is a
-    *precision and QC* device - it reduces axis noise and yields a per-plate axis
-    quality - not a rescue from a large systematic error.
-  * Design consequence: the tie must be a per-column offset (x_37 = x_20 + measured
-    dPH of that column), which is what the plan above says. It is not a pure
-    equality because the residual includes the scale term; the 0.034 width absorbs
-    that over a ladder of a few pH units.
+  * Protocol and attribution, confirmed by the experimenter:
+    - The electrode was calibrated at room temperature and each well read at its
+      nominal temperature.
+    - The measured pH values are close to the truth: the recorded 20 C axis is the
+      reference-quality one and the 37 C axis is not corrupted by the meter.
+    - The 37-20 C difference is the BUFFER - a mixture of phosphate and other
+      components, so polyprotic - and the measured pH dependence is consistent with
+      that buffer over the ladder range.
+    Consequences:
+    1. Nothing needs correcting. The buffer's dPH is real chemistry that the model
+       should use, not remove, and no Delta_H correction applies. A Nernst
+       slope-error hypothesis was considered and is rejected: it predicts a slope of
+       -0.0548 per pH unit for an uncompensated electrode, the data give -0.0264
+       +/- 0.0045, and that value is explained by the buffer mixture instead.
+    2. The empirical curve dPH(pH) = amp / (1 + 10^((pKa - pH) * w)) with amp
+       -0.285, pKa 5.53, w 1.00 (residual 0.034, ten trusted plates) is therefore a
+       SUMMARY of a polyprotic mixture, not a physical model - a mixture has no
+       single inflection. It is fine for a prior centre and a screen; it should not
+       be read as identifying one buffer pKa.
+    3. The shared-Delta model is a precision and QC device only: it cannot remove a
+       systematic error because there is none to remove. What it buys is that a
+       shared, well-measured dPH (0.034) is 2.4-3.5x tighter than the x_sigma of
+       0.08-0.12 currently put on each well's axis, and that each plate's deviation
+       from the shared curve becomes a measured axis-quality number.
+    4. The tie itself uses the MEASURED per-column dPH from the notes, not the
+       fitted curve, so the empirical nature of the curve costs nothing there. The
+       curve matters only for a single-temperature plate, for the screen, and as a
+       fallback prior.
