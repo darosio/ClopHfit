@@ -160,7 +160,14 @@ def weighted_mean_reference(arrays: list[np.ndarray]) -> tuple[np.ndarray, np.nd
     if not flat:
         msg = "No arrays provided for weighted reference."
         raise ValueError(msg)
-    variances = np.array([np.nanvar(arr, ddof=1) for arr in flat], dtype=float)
+    variances = np.array(
+        [
+            float(np.var(finite, ddof=1)) if finite.size > 1 else np.nan
+            for arr in flat
+            for finite in [arr[np.isfinite(arr)]]
+        ],
+        dtype=float,
+    )
     exact = np.isfinite(variances) & (variances == 0)
     if exact.any():
         weights = exact.astype(float)

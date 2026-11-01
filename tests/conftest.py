@@ -9,7 +9,9 @@ Read more about conftest.py under:
 
 import os
 import tempfile
+from collections.abc import Iterator
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -33,6 +35,13 @@ _TEST_TMPDIR = tempfile.mkdtemp(prefix="clophfit-tmp-")
 os.environ.setdefault("TMPDIR", _TEST_TMPDIR)
 os.environ.setdefault("TEMP", _TEST_TMPDIR)
 os.environ.setdefault("TMP", _TEST_TMPDIR)
+
+
+@pytest.fixture(autouse=True)
+def close_figures_after_test() -> Iterator[None]:
+    """Close figures after each test to avoid leaking pyplot state."""
+    yield
+    plt.close("all")
 
 
 @pytest.fixture

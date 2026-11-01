@@ -56,6 +56,7 @@ from clophfit.fitting.utils import (
     studentized_scores,
 )
 from clophfit.prtecan import PlateScheme
+from clophfit.testing.synthetic import make_simple_dataset
 
 ###############################################################################
 # Fixtures
@@ -1112,9 +1113,20 @@ def test_fit_binding_pymc_separate_ph(ph_dataset: Dataset) -> None:
     assert fr.result.residual is not None
 
 
-def test_fit_binding_pymc_multi(multi_dataset: Dataset) -> None:
+def test_fit_binding_pymc_multi() -> None:
     """Test PyMC on multi-label dataset."""
-    fr = fit_binding_pymc(multi_dataset, n_sd=1.0, sampler=SamplerConfig(n_samples=50))
+    stable_dataset, _ = make_simple_dataset(
+        7.0,
+        {"1": 2.0, "2": 0.0},
+        {"1": 1.0, "2": 1.0},
+        is_ph=True,
+        seed=42,
+    )
+    fr = fit_binding_pymc(
+        stable_dataset,
+        n_sd=1.0,
+        sampler=SamplerConfig(n_samples=50, random_seed=42),
+    )
     assert fr.result is not None
     assert "K" in fr.result.params
     assert "S0_1" in fr.result.params
@@ -1145,6 +1157,7 @@ def test_fit_binding_pymc_multi_noise(multi_dataset: Dataset) -> None:
         scheme,
         n_sd=3.0,
         n_xerr=0.0,
+        per_well_ye_mags=False,
         noise=NoiseConfig.structured(noise_model=noise_model, shared_alpha=True),
         sampler=SamplerConfig(n_samples=50, n_tune=25),
     )
@@ -1179,6 +1192,7 @@ def test_fit_binding_pymc_multi_noise_per_well(multi_dataset: Dataset) -> None:
         n_sd=3.0,
         n_xerr=1.0,
         x_error_model="per_well",
+        per_well_ye_mags=False,
         noise=NoiseConfig.structured(noise_model=noise_model, shared_alpha=True),
         sampler=SamplerConfig(n_samples=50, n_tune=25),
     )

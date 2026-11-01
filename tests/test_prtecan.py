@@ -295,9 +295,10 @@ class TestLabelblock:
         return lb0, lb1
 
     @pytest.fixture(scope="class")
-    def labelblocks(self) -> tuple[Labelblock, Labelblock]:
+    @classmethod
+    def labelblocks(cls) -> tuple[Labelblock, Labelblock]:
         """Fixture that provides two labelblocks."""
-        return self._get_two_labelblocks()
+        return cls._get_two_labelblocks()
 
     def test_metadata(self, labelblocks: tuple[Labelblock, Labelblock]) -> None:
         """It parses "Temperature" metadata."""
@@ -385,7 +386,8 @@ class TestTecanfile:
     """Test Tecanfile class."""
 
     @pytest.fixture(scope="class")
-    def tecanfile(self) -> Tecanfile:
+    @classmethod
+    def tecanfile(cls) -> Tecanfile:
         """Create tecanfile fixture."""
         return Tecanfile(data_tests / "140220/pH8.3_200214.xls")
 
@@ -442,7 +444,8 @@ class TestLabelblocksGroup:
     """Test LabelblocksGroup class."""
 
     @pytest.fixture(scope="class")
-    def labelblocks_group(self) -> LabelblocksGroup:
+    @classmethod
+    def labelblocks_group(cls) -> LabelblocksGroup:
         """Create labelblocks group fixture."""
         tf1 = Tecanfile(data_tests / "L1/290513_5.5.xls")
         tf2 = Tecanfile(data_tests / "L1/290513_7.2.xls")
@@ -607,7 +610,8 @@ class TestBuffer:
     """Test Buffer class."""
 
     @pytest.fixture(scope="class")
-    def titration(self) -> Titration:
+    @classmethod
+    def titration(cls) -> Titration:
         """Create titration fixture."""
         tf = Tecanfile(data_tests / "140220/pH6.5_200214.xls")
         return Titration([tf], x=np.array([6.5]), is_ph=True)
@@ -663,7 +667,8 @@ class TestTitration:
     """Test Titration class - basic functionality."""
 
     @pytest.fixture(scope="class")
-    def titration(self) -> Titration:
+    @classmethod
+    def titration(cls) -> Titration:
         """Create titration fixture for testing."""
         tf = Tecanfile(data_tests / "140220/pH6.5_200214.xls")
         return Titration([tf], x=np.array([6.5]), is_ph=True)
@@ -963,7 +968,8 @@ class TestTecanfilesGroup:
         """Test TfG with 2 LbG in the same order."""
 
         @pytest.fixture(autouse=True, scope="class")
-        def tfg(self) -> TecanfilesGroup:
+        @classmethod
+        def tfg(cls) -> TecanfilesGroup:
             """Set up TecanfilesGroup."""
             filenames = ["290513_5.5.xls", "290513_7.2.xls"]
             tecanfiles = [Tecanfile(data_tests / "L1" / f) for f in filenames]
@@ -1114,17 +1120,20 @@ class TestTitrationAdvanced:
         return Titration.fromlistfile(data_tests / "L1" / "list.pH.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
-    def tit_ph(self) -> Titration:
+    @classmethod
+    def tit_ph(cls) -> Titration:
         """Set up a pH titration."""
         return Titration.fromlistfile(data_tests / "140220" / "list.pH.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
-    def tit_cl(self) -> Titration:
+    @classmethod
+    def tit_cl(cls) -> Titration:
         """Set up a Cl titration."""
         return Titration.fromlistfile(data_tests / "140220" / "list.cl.csv", is_ph=True)
 
     @pytest.fixture(scope="class")
-    def tit1(self) -> Titration:
+    @classmethod
+    def tit1(cls) -> Titration:
         """Set up a titration with a single Tecan file."""
         tf = prtecan.Tecanfile(data_tests / "140220" / "pH6.5_200214.xls")
         return prtecan.Titration([tf], x=np.array([6.5]), is_ph=True)
@@ -1275,7 +1284,8 @@ class TestTitrationAnalysis:
     """Test TitrationAnalysis class."""
 
     @pytest.fixture(autouse=True, scope="class")
-    def tit(self) -> Titration:
+    @classmethod
+    def tit(cls) -> Titration:
         """Set up TitrationAnalysis."""
         tit = Titration.fromlistfile(data_tests / "140220/list.pH.csv", is_ph=True)
         tit.load_additions(data_tests / "140220/additions.pH")
