@@ -897,34 +897,50 @@ needed.
   "record the resolved environment and backend" rule are what the diagnostics and
   provenance in this tree implement.
 
-* TODO Exploit the buffer's Delta_pH(20 -> 37 C) as shared knowledge
-  Measured from the notes (no fit): across the 10 pH plates of the L8/L1-L4
-  verification sets that carry two temperatures, the recorded pH difference
-  37 C minus 20 C is **-0.270 +/- 0.022** (sd across plates), i.e. -0.0159
-  pH/degC - consistent with a HEPES-like buffer (-0.014 pH/degC; Tris -0.028,
-  phosphate -0.0028). The scatter across mutants and runs is four times smaller
-  than the within-plate per-column spread (0.071), so it is one shared constant
-  of the buffer system, not biology. One pH plate (random1_A11_G02) records 0.000
-  and needs checking.
+* TODO Exploit the buffer's Delta_pH(20 -> 37 C), which is a function of pH
+  Measured from the notes alone (no fit), 88 matched columns over the 10 pH plates
+  of the L8/L1-L4 verification sets that carry two temperatures. The difference is
+  NOT one constant: it rises in magnitude with pH and saturates,
 
-  Every Cl note (11 of 11) records **identical pH at both temperatures**, so the
-  temperature dependence was not tracked there. If the 37 C readings were not
-  measured at 37 C, that axis is high by ~0.27 and the error propagates into any
-  temperature comparison of the Cl plates.
+  | pH bin    | n  | dPH    | sd   |
+  |-----------+----+--------+------|
+  | 4.5-5.5   |  3 | -0.099 | 0.086 |
+  | 5.5-6.0   |  8 | -0.154 | 0.017 |
+  | 6.0-6.5   | 11 | -0.243 | 0.086 |
+  | 6.5-7.0   | 11 | -0.246 | 0.100 |
+  | 7.0-7.5   | 11 | -0.243 | 0.089 |
+  | 7.5-8.0   |  6 | -0.272 | 0.136 |
+  | 8.0-8.5   | 16 | -0.295 | 0.083 |
+  | 8.5-9.5   | 22 | -0.257 | 0.087 |
 
-  Three ways to use it, in order of value:
-  1. Constrain the joint fits. In the two-temperature models (vanthoff,
-     vanthoff-bayes, and any joint global fit) replace the independent per-well
-     axis with x(37, i) = x(20, i) + Delta, Delta ~ Normal(-0.270, 0.022) taken
-     from the notes or given as --dpH-buffer. That halves the axis parameters and
-     breaks the between-temperature half of the K-x ridge with a physically
-     justified constraint rather than a prior pulled out of the fit.
-  2. QC before fitting. Delta is computable from the note alone, so a plate that
-     deviates from -0.270 by more than ~3 sd (0.07) had a temperature,
-     equilibration or electrode problem; flag it before any spectrum is fitted.
-  3. Decontaminate Delta_H. If the recorded pH at each temperature is not the true
-     pH, an axis offset delta biases the van't Hoff slope by 2.303 R delta / d(1/T):
-     at 0.27 pH over 20 -> 37 C that is 27.6 kJ/mol, against the 43.2 kJ/mol the
-     G10 fit reported. Decide per experiment whether the electrode was read at
-     temperature (then the axis is right and only the constraint applies) or set
-     once at room temperature (then Delta_H must be corrected).
+  with dPH -> 0 at low pH (the buffer is fully protonated there), a 3-parameter
+  empirical curve fits it with a residual sd of 0.088 pH:
+
+      dPH(pH) = amp / (1 + 10 ** ((pKa - pH) * w))
+      amp = -0.2673 +/- 0.0126     pKa = 5.54 +/- 0.19     w = 1.00 +/- 0.50
+
+  i.e. -0.084 at pH 5.2, -0.198 at pH 6.0, -0.258 at pH 7.0, -0.266 at pH 8.0. The
+  inflection near pH 5.5 and Hill slope ~1 say the coefficient is governed by one
+  protonation step of the buffer; the identity of the buffer is the experimenter's
+  to confirm (a MES/citrate-like pKa, not Tris).
+
+  Correction to an earlier note here: the Cl plates all sit at pH 5.20, where this
+  curve predicts -0.08 +/- 0.09, so their notes recording identical pH at both
+  temperatures is consistent with the measurement, not evidence of a copied note.
+  The earlier "note-copy" reading was wrong. What remains worth checking is that
+  the difference is recorded as exactly 0.000 rather than as the predicted -0.08,
+  which matters only if a Cl plate is fitted at more than one temperature.
+
+  Three uses, in order of value:
+  1. Constrain the two-temperature fits with x(37, i) = x(20, i) + dPH(pH_i),
+     evaluated at that well's pH, width the 0.088 residual rather than the 0.022
+     across-plate sd (that one averaged the ladder and so hid the pH dependence).
+     This halves the axis parameters and breaks the between-temperature half of the
+     K-x ridge on physical grounds.
+  2. Screen plates before fitting: dPH is computable from the note, so compare the
+     note's own 37-20 C difference against dPH(pH) and flag beyond ~3 sd.
+  3. Decontaminate Delta_H: an axis offset delta biases the van't Hoff slope by
+     2.303 R delta / d(1/T), which is 27.6 kJ/mol at 0.27 pH. Because delta now
+     depends on pH, the bias has to be recomputed per plate over its actual pH
+     range: full size for a 7-9 ladder, about a third of it for a ladder sitting at
+     pH 5-6.
