@@ -974,3 +974,30 @@ needed.
        fitted curve, so the empirical nature of the curve costs nothing there. The
        curve matters only for a single-temperature plate, for the screen, and as a
        fallback prior.
+
+* TODO Delta_H per mutant: estimate the spread hierarchically, don't compare point estimates
+  Delta_H is a property of each mutant's chromophore environment, and
+  dPK(20 -> 37 C) = Delta_H * d(1/T) / (2.303 R) = Delta_H / 102200 J/mol, i.e.
+  0.001 pH per 0.1 kJ/mol. So a per-mutant spread is expected a priori and there is
+  no single value to compare against.
+
+  Measured (vanthoff-bayes, --x-sigma auto, --dpH-buffer auto, 1000 x 4):
+    A04 D21H   dPKa 0.426 -> 43.6 kJ/mol
+    A06 E115V  dPKa 0.430 -> 44.0      (unusable: 286 divergences, r-hat 1.18, ESS 16)
+    E08 N170D  dPKa 0.465 -> 47.5
+  With pKa HDIs ~0.15 wide, dPKa carries +/-0.2, i.e. Delta_H carries +/-20 kJ/mol.
+  The spread is 4 kJ/mol, chi-square for heterogeneity 0.03 on 2 dof: the three are
+  consistent with one common value and no per-mutant difference is resolvable.
+
+  To resolve it: fit Delta_H_m ~ N(mu, tau) hierarchically across mutants with each
+  mutant's pKa and Delta_S free, which estimates the between-mutant spread with its
+  own uncertainty - the same partial-pooling idea that failed for the axis, but here
+  it is one number per mutant rather than a ridge in 24 dimensions. Enthalpy-entropy
+  compensation would drive tau to zero, which is itself the reportable result.
+
+  Two prerequisites, in order:
+  1. Rule out a pKa(20) bias first. The ladders run 5.8-9.15 at 20 C and top out at
+     8.94 at 37 C, while pKa(20) comes out 8.1-8.2 - thin leverage on the basic
+     plateau exactly where the 20 C pKa is set, and a +0.15 bias there would explain
+     the whole gap to the expected 0.2-0.3 on its own.
+  2. Budget 2000 x 4 minimum and drop A06 until it samples cleanly.
