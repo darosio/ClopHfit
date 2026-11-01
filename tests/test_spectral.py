@@ -1010,3 +1010,30 @@ def test_pooling_the_axis_does_not_move_k_on_a_real_plate() -> None:
         ks[pool] = float(np.median(np.asarray(idata.posterior["K"].values).reshape(-1)))
     spread = max(ks.values()) - min(ks.values())
     assert spread < 0.1, f"the pooling structure moved K by {spread:.3f}: {ks}"
+
+
+def test_column_axis_tie_pairs_the_two_temperatures_by_column() -> None:
+    """The tie matches wells by column and reports the recorded pH offset.
+
+    A column is one nominal target, so the same column at two temperatures is the
+    same solution and the recorded pH difference is the buffer's doing. The helper
+    must pair by that column, and refuse rather than pair wrongly when the two well
+    lists do not correspond.
+    """
+    from clophfit.fitting.bayes import column_axis_tie  # ruff: ignore[import-outside-top-level]
+
+    pair, offset = column_axis_tie(
+        ["A01", "A02", "B01", "B02"],
+        np.array([8.85, 8.53, 8.86, 8.54]),
+        ["A01", "A02", "B01", "B02"],
+        np.array([8.70, 8.39, 8.71, 8.40]),
+    )
+    assert list(pair) == [0, 1, 2, 3]
+    assert np.allclose(offset, [-0.15, -0.14, -0.15, -0.14])
+    # a well with no partner at the other temperature is refused, not guessed
+    assert column_axis_tie(["A01"], np.array([8.0]), ["A05"], np.array([7.9])) is None
+    # more wells in a column than the reference has is refused too
+    assert (
+        column_axis_tie(["A01"], np.array([8.0]), ["A01", "B01"], np.array([7.9, 7.8]))
+        is None
+    )

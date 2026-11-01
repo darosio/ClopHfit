@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 from lmfit import Parameters
+from pytensor.tensor import as_tensor_variable
 
 from clophfit.prenspire import bands as bands_module
 from clophfit.prenspire.bands import (
@@ -268,6 +269,7 @@ def fit_vanthoff_model_bayes(  # ruff: ignore[too-many-arguments]
     *,
     is_ph: bool = True,
     x_sigma: float | None = None,
+    axis_tie: Mapping[str, tuple[ArrayF, ArrayF]] | None = None,
     seed: int = 0,
     draws: int = 2000,
     chains: int = 2,
@@ -306,6 +308,11 @@ def fit_vanthoff_model_bayes(  # ruff: ignore[too-many-arguments]
         reported ``K`` is Kd on the x scale).
     x_sigma : float | None
         Prior SD on each well's true titrant value,
+    axis_tie : Mapping[str, tuple[ArrayF, ArrayF]] | None
+        Per tied temperature, the index into the reference temperature's wells and
+        the pH offset to add; those temperatures' latent axes then follow the
+        reference instead of being sampled. See
+        :func:`~clophfit.fitting.bayes.column_axis_tie`.
         ``x_true ~ N(note value, x_sigma)``, per well and temperature.
         ``None`` keeps the axis fixed at the note values, as the
         least-squares fit does.
@@ -372,8 +379,19 @@ def fit_vanthoff_model_bayes(  # ruff: ignore[too-many-arguments]
         pm.Deterministic("dH_J_mol", sign * LN10 * R_GAS * b)
         pm.Deterministic("dS_J_molK", -sign * LN10 * R_GAS * (a - b * m))
         xd: dict[str, np.ndarray | pm.math.TensorVariable] = {}
+        reference = temps[0]
         for t in temps:
-            if x_sigma is None:
+            if axis_tie is not None and t in axis_tie:
+                # this temperature's axis is the reference temperature's plus a
+                # measured offset per column: a column is one nominal target and the
+                # buffer's pH moves the same way for every well in it, so only the
+                # reference's axes stay free and the K-x ridge loses its
+                # between-temperature half
+                pair, offset = axis_tie[t]
+                xd[t] = pm.Deterministic(
+                    f"x_true_{t}", xd[reference][pair] + as_tensor_variable(offset)
+                )
+            elif x_sigma is None:
                 xd[t] = axis[t]
             else:
                 xd[t] = pm.Normal(

@@ -46,7 +46,7 @@ from clophfit import (
     configure_logging,
     fitting,
 )
-from clophfit.fitting.bayes import well_groups
+from clophfit.fitting.bayes import column_axis_tie, well_groups
 from clophfit.fitting.bayes_config import RobustConfig, SamplerConfig
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.errors import (
@@ -820,6 +820,19 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     "censor the reported species draws, leaving the K posterior untouched.",
 )
 @click.option(
+    "--dpH-buffer",
+    "dph_buffer",
+    default=None,
+    metavar="[auto|DPH]",
+    help="For --method vanthoff-bayes: tie every temperature's latent axis to the "
+    "lowest one, well by column, plus that column's pH difference. 'auto' reads the "
+    "difference from the note, which is what the buffer actually did; a number uses "
+    "it for every column. A column is one nominal target and the buffer's pH moves "
+    "with temperature the same way across a plate, so only the reference "
+    "temperature's axes stay free - which removes the between-temperature half of "
+    "the K-x ridge. Ignored when the wells do not pair by column.",
+)
+@click.option(
     "--x-pool",
     "x_pool",
     type=click.Choice(["free", "shared", "partial"], case_sensitive=False),
@@ -891,6 +904,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     inspect: bool,
     x_pool: str,
     x_groups: str,
+    dph_buffer: str | None,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -989,6 +1003,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         ctx.fail(
             f"--x-pool and --x-groups shape the Bayesian latent axis "
             f"{sorted(bayes_methods)} (got --method {method})"
+        )
+    if dph_buffer is not None and method != "vanthoff-bayes":
+        ctx.fail(
+            f"--dpH-buffer ties the axes of the joint van't Hoff fit (got "
+            f"--method {method}); the per-temperature fitters have no axis to tie"
         )
     if method in bayes_methods and x_pool != "free" and x_sigma is None:
         # a pooled truth needs a scale; without one, say so and fall back rather
@@ -1099,6 +1118,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             target_accept=target_accept,
             isosbestic=iso,
             provenance=run_provenance,
+            dph_buffer=dph_buffer,
         )
     if method == "bayes":
         fit_enspire_bayes(
@@ -1243,6 +1263,79 @@ def _posterior_columns(diag: Mapping[str, object]) -> dict[str, object]:
         "reached_max_treedepth_frac": diag.get("reached_max_treedepth_frac", np.nan),
         "sampler": diag.get("sampler", "unknown"),
     }
+
+
+def _vanthoff_axis_tie(
+    note: pd.DataFrame,
+    name: str,
+    wells: Mapping[str, Sequence[str]],
+    temps: Sequence[str],
+    dph_buffer: str | None,
+) -> dict[str, tuple[np.ndarray, np.ndarray]] | None:
+    """Tie each temperature's axis to the lowest one, well by column.
+
+    A column is one nominal target and the buffer's pH moves with temperature the
+    same way for every well in it, so only the reference temperature's latent axes
+    need to be free: the others follow from them plus a measured offset. That
+    removes the between-temperature half of the K-x ridge.
+
+    Parameters
+    ----------
+    note : pd.DataFrame
+        The normalised note, carrying ``Well`` and ``pH``.
+    name : str
+        Sample name, to pick its wells out of the note.
+    wells : Mapping[str, Sequence[str]]
+        Wells used at each temperature.
+    temps : Sequence[str]
+        The temperatures, ascending; the first is the reference.
+    dph_buffer : str | None
+        ``"auto"`` reads each column's offset from the note, a number uses it for
+        every column, ``None`` ties nothing.
+
+    Returns
+    -------
+    dict[str, tuple[np.ndarray, np.ndarray]] | None
+        Per tied temperature, the index into the reference wells and the offset, or
+        ``None`` when nothing is tied - including when the wells do not pair by
+        column, which is reported rather than silently ignored.
+    """
+    if dph_buffer is None:
+        return None
+    subset = note[note["Name"].astype(str) == name]
+    recorded = {
+        str(well): float(ph)
+        for well, ph in zip(subset["Well"], subset["pH"], strict=True)
+    }
+    reference = temps[0]
+    ph = {
+        t: np.array([recorded.get(str(w), np.nan) for w in wells[t]], dtype=np.float64)
+        for t in temps
+    }
+    auto = dph_buffer.strip().lower() == "auto"
+    if not auto:
+        try:
+            delta = float(dph_buffer)
+        except ValueError:
+            click.echo(
+                f"note: --dpH-buffer expects 'auto' or a pH offset, got {dph_buffer!r}; "
+                "the axes stay independent"
+            )
+            return None
+    tie: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for t in temps[1:]:
+        got = column_axis_tie(
+            list(wells[reference]), ph[reference], list(wells[t]), ph[t]
+        )
+        if got is None:
+            click.echo(
+                f"note: --dpH-buffer could not pair the {t} wells with the "
+                f"{reference} wells by column; the axes stay independent"
+            )
+            return None
+        pair, offsets = got
+        tie[t] = (pair, offsets if auto else np.full_like(offsets, delta))
+    return tie or None
 
 
 def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
@@ -2723,6 +2816,7 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
     target_accept: float | None,
     isosbestic: float | str | None = None,
     provenance: Mapping[str, object] | None = None,
+    dph_buffer: str | None = None,
 ) -> pd.DataFrame:
     """Sample the joint van't Hoff fit and write its tables and figure.
 
@@ -2768,6 +2862,10 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
     provenance : Mapping[str, object] | None
         The options this run was asked for, written beside the tables as JSON
         together with the library version and the input files.
+    dph_buffer : str | None
+        ``"auto"`` ties each temperature's latent axis to the lowest one plus that
+        column's recorded pH difference; a number uses it for every column; ``None``
+        leaves the axes independent.
 
     Returns
     -------
@@ -2808,10 +2906,12 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
         if x_sigma is not None and sigma is None:
             msg = "--method vanthoff-bayes could not resolve --x-sigma for this note"
             raise click.ClickException(msg)
+        axis_tie = _vanthoff_axis_tie(note, str(name), info.wells, temps, dph_buffer)
         trace = fit_vanthoff_model_bayes(
             curves,
             is_ph=info.is_ph,
             x_sigma=sigma,
+            axis_tie=axis_tie,
             seed=seed,
             draws=draws,
             chains=chains,

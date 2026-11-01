@@ -1602,6 +1602,68 @@ def well_groups(wells: Sequence[str]) -> np.ndarray:
     return out
 
 
+def column_axis_tie(
+    wells_low: Sequence[str],
+    ph_low: ArrayF,
+    wells_high: Sequence[str],
+    ph_high: ArrayF,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Match two temperatures' wells by column and return the index plus the pH offset.
+
+    One temperature's titration axis is the other's plus one offset per column: a
+    column holds one nominal target, and the buffer's pH moves with temperature the
+    same way for every well in it. Tying that removes the between-temperature half
+    of the K-x ridge - only the reference temperature's axes stay free, and the
+    other follows from them plus a measured offset.
+
+    The match is on the trailing column number of the well label, the same replicate
+    unit as :func:`well_groups` and the ``column`` QC strata.
+
+    Parameters
+    ----------
+    wells_low : Sequence[str]
+        Well labels of the lower temperature.
+    ph_low : ArrayF
+        Recorded pH of each lower-temperature well, in the same order.
+    wells_high : Sequence[str]
+        Well labels of the higher temperature.
+    ph_high : ArrayF
+        Recorded pH of each higher-temperature well, in the same order.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray] | None
+        For every high-temperature well, the index of the low-temperature well of
+        the same column and the recorded pH difference ``ph_high - ph_low``; or
+        ``None`` when the two lists do not match by column, so a caller falls back
+        to an independent axis rather than tie the wrong wells together.
+    """
+    index: dict[str, list[int]] = {}
+    for i, well in enumerate(wells_low):
+        found = re.match(r"^[A-Za-z]+(\d+)$", str(well).strip())
+        if found is None:
+            return None
+        index.setdefault(found.group(1), []).append(i)
+    pair = np.empty(len(wells_high), dtype=int)
+    offsets = np.empty(len(wells_high), dtype=np.float64)
+    used: dict[str, int] = {}
+    for i, well in enumerate(wells_high):
+        found = re.match(r"^[A-Za-z]+(\d+)$", str(well).strip())
+        if found is None:
+            return None
+        column = found.group(1)
+        candidates = index.get(column)
+        if not candidates:
+            return None
+        k = used.get(column, 0)
+        if k >= len(candidates):
+            return None
+        pair[i] = candidates[k]
+        used[column] = k + 1
+        offsets[i] = float(ph_high[i]) - float(ph_low[pair[i]])
+    return pair, offsets
+
+
 def create_x_true_pooled(
     xc: ArrayF,
     *,
