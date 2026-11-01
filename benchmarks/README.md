@@ -275,3 +275,21 @@ docstrings of `fit_spectra_global_bayes` / `_edge_species_prior` quote them:
 A single synthetic plate cannot resolve effects of this size: at 300 and 400
 draws the same comparisons reordered, and one dataset at 400 draws produced the
 opposite conclusion. Use >= 12 datasets and 4 chains x 2000 draws minimum.
+
+### A dead end worth recording: marginalising the axis by quadrature
+
+Integrating the latent axis out instead of sampling it is the obvious way to kill
+the K-x ridge - the axis enters through a sigmoid, so it has no closed form, but a
+9-node Gauss-Hermite rule over N(x_note, sigma) turns each well's likelihood into a
+fixed-weight Gaussian mixture. It was implemented and measured: the quadrature was
+correct (weights summing to 1, sensible nodes) and the fit ran, but 12 datasets at
+4 chains x 2000 draws gave **ESS 5, r-hat 2.9, and a +0.17 bias on a clean axis**,
+against ESS 500 and r-hat 1.02 when the axis is sampled. Twenty-four wells times
+nine nodes is 9^24 ways to assign wells to nodes: the product of mixtures is
+multimodal and NUTS cannot move. The smooth ridge is the lesser evil.
+
+The remaining candidate is a Gibbs step: x is one-dimensional per well, so a
+Metropolis-within-Gibbs update conditional on (K, species, noise) keeps the
+likelihood Gaussian and the parameter space small. Until that is measured, the
+pooled structures' low ESS stands as an open problem, which is why --x-pool
+defaults to free.
