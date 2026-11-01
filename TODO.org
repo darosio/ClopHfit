@@ -841,3 +841,58 @@ test_pipetting_step_sigmas_isotonic_pulls_down_leading_spike. Existing min-gap /
 lower-bound truncation (min_x_step, lower_nsd) kept. Left as-is: hierarchical_per_well
 (acid_drop) uses a different difference-based scheme; revisit separately if
 needed.
+
+* TODO Bayesian whole-spectrum: sampler geometry for the pooled latent axis
+  The K↔x ridge costs the pooled structures their effective sample size, and the
+  default therefore stays ``--x-pool free``. Measured with
+  benchmarks/axis_pooling_recovery.py (45 datasets/cell, 4 chains x 2000 draws):
+  pooling halves the poisoned-axis bias (-0.0280 free vs -0.0221 shared) and
+  removes the -0.0050 the free axis carries even on a clean one, but the pooled
+  fits reach 33-98 divergences and r-hat 1.53 where free has none.
+  Two fixes tried and measured, both recorded in benchmarks/README.md:
+  - non-centred parameterisation (x_group = mean + tau*z): divergences gone
+    (<2 per fit), clean-axis r-hat 1.03, but poisoned-axis ESS stays ~20.
+  - quadrature-marginalisation of the axis (9-node Gauss-Hermite, mixture
+    likelihood): ESS 5, r-hat 2.9, +0.17 bias on a clean axis - 9^24 ways to
+    assign 24 wells to 9 nodes, so the product of mixtures is multimodal. Code
+    reverted; do not re-derive.
+  Next candidate: Metropolis-within-Gibbs per well. x is 1-D, so a Gaussian
+  random-walk (or slice) update conditional on (K, species, noise) keeps the
+  likelihood Gaussian and the parameter space small. Accept only when the
+  benchmark gives ESS > 400 and r-hat < 1.01 across datasets at the same bias;
+  then flip the CLI default to partial on that evidence.
+
+* TODO Bayesian methods still on the free axis only
+  --x-pool is wired into global-bayes and global-bayes-marginal only. The band-level
+  ``bayes`` (via fit_binding_pymc, which builds its own x_true) and
+  ``vanthoff-bayes`` (x_true per temperature in prenspire/thermo.py) still fit each
+  well's axis independently. The helper (create_x_true_pooled, well_groups) is in
+  fitting/bayes.py and the plumbing is mechanical. vanthoff-bayes has the extra
+  wrinkle that replicates live within a temperature, so the groups are per
+  temperature.
+
+* TODO Prior predictive and posterior predictive checks for the EnSpire Bayes methods
+  Neither exists, and the PyMC workflow calls for both before a posterior is
+  trusted. Prior predictive: draw from the generative model at the prefit and
+  compare the band readout ranges per plate, to catch a prior that implies
+  impossible data. Posterior predictive: simulate per-well spectra from every
+  posterior draw and compare residual structure, tails and wavelength correlation
+  with the observed residuals - the residual tables the least-squares path already
+  produces are the template. This is the missing evidence that the model describes
+  the data at all, as opposed to fitting it.
+
+* TODO Audit follow-ups that the recovery study made concrete
+  - K's prior is a hard Uniform over the data range +/-1: report the posterior mass
+    within 1 % of either bound (boundary pile-up), and consider a TruncatedNormal
+    centred on the prefit instead.
+  - vanthoff-bayes uses absolute prior scales (plateaus Normal(LS, 0.1), sigma
+    HalfNormal(0.05)) that are only valid for top-normalised bands, plus floors on
+    A and B (0.5, 200) that can dominate an uninformative plate.
+  - The species prior centre matters more than pooling (benchmarks/README.md):
+    prefit -0.0035 clean / -0.0278 poisoned, edge mean +0.0804 clean (coverage 0 of
+    15) / -0.0053 poisoned. No centre is uniformly right; the honest remedy under a
+    badly recorded axis is to record the axis properly.
+  Worked with the pymc skill (/home/dati/arslanbaeva/.agents/skills/pymc): its
+  workflow, diagnostic floors (r-hat 1.01, bulk ESS 400, BFMI 0.3) and the
+  "record the resolved environment and backend" rule are what the diagnostics and
+  provenance in this tree implement.
