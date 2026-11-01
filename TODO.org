@@ -898,61 +898,58 @@ needed.
   provenance in this tree implement.
 
 * TODO Exploit the buffer's Delta_pH(20 -> 37 C), which is a function of pH
-  Measured from the notes alone (no fit), 224 matched (mutant, column) pairs over
-  the pH plates of the L8/L1-L4 verification sets. The difference is NOT one
-  constant: it rises in magnitude with pH and saturates,
-
-  | pH bin    |  n | dPH    | sd    |
-  |-----------+----+--------+-------|
-  | 4.5-5.5   |  3 | -0.139 | 0.011 |
-  | 5.5-6.0   | 25 | -0.107 | 0.056 |
-  | 6.0-6.5   | 25 | -0.186 | 0.058 |
-  | 6.5-7.0   | 28 | -0.232 | 0.075 |
-  | 7.0-7.5   | 29 | -0.192 | 0.080 |
-  | 7.5-8.0   | 26 | -0.237 | 0.113 |
-  | 8.0-8.5   | 32 | -0.256 | 0.058 |
-  | 8.5-9.5   | 56 | -0.204 | 0.062 |
-
-  with dPH -> 0 at low pH (the buffer is fully protonated there). A 3-parameter
-  empirical curve fits it with a residual sd of 0.075 pH:
+  Measured from the notes alone (no fit). The pH titration notes of the L8/L1-L4
+  verification sets give 80 matched (mutant, column) pairs over ten plates, and
+  the difference rises in magnitude with pH and saturates,
 
       dPH(pH) = amp / (1 + 10 ** ((pKa - pH) * w))
-      amp = -0.2259 +/- 0.0075    pKa = 5.73 +/- 0.12    w = 0.93
+      amp = -0.2848 +/- 0.0051    pKa = 5.53 +/- 0.07    w = 1.00
+      residual sd = 0.034 pH      (n = 80, ten plates)
 
-  i.e. -0.07 at pH 5.2, -0.17 at pH 6.0, -0.22 at pH 7.0, -0.23 at pH 8.5. The
-  inflection near pH 5.7 and Hill slope ~1 say one protonation step governs it;
-  the buffer identity is the experimenter's to confirm (a MES/citrate-like pKa,
-  not Tris). The residual sd is the honest width of this knowledge: plate-to-plate
-  scatter is as large as the within-plate spread, so the curve is a prior centre,
-  not a calibration.
+  i.e. -0.09 at pH 5.2, -0.21 at pH 6.0, -0.27 at pH 7.0, -0.285 above pH 8. The
+  inflection near pH 5.5 and Hill slope 1 say one protonation step governs it; the
+  buffer identity is the experimenter's to confirm (a MES/citrate-like pKa, not
+  Tris).
 
-  Two data-layout facts that the first pass got wrong, both worth keeping:
-  - `random1_A11_G02_purified` is organised as ONE NOTE PER TEMPERATURE
-    (`..._20C_note.csv`, `..._37C_note.csv`, each carrying both mutants), not as one
-    combined note. Paired correctly its dPH is -0.15 (A11) / -0.19 (G02), flatter
-    than the other plates, and it is what pulls the fitted amp from -0.27 to -0.23.
-    Fitting such a plate needs the notes joined: `ppr enspire 20C.csv 20C_note.csv
+  Excluded on purpose: `random1_A11_G02_purified`, whose pH values were taken
+  during the set-up phase of the acquisition and are trusted less. Including its
+  144 pairs doubles the residual (0.034 -> 0.075) and pulls the amplitude from
+  -0.285 to -0.226, so it is a real outlier source rather than extra data. Any
+  future refit should keep it out unless the plate is re-measured.
+
+  Two data-layout facts worth keeping:
+  - `random1_A11_G02_purified` is stored as ONE NOTE PER TEMPERATURE
+    (`..._20C_note.csv`, `..._37C_note.csv`, each carrying both mutants). Such a
+    plate is fitted by joining the notes: `ppr enspire 20C.csv 20C_note.csv
     --join 37C.csv:37C_note.csv`, which writes a combined `_joined_note.csv` beside
-    the outputs. Verified on this plate: both mutants fit at both temperatures.
-  - `pKa_lysate/random1_A11_G02_note.csv` really does record the SAME pH at both
-    temperatures (24 of 24 pairs identical), so that note carries no axis
-    measurement at 37 C and must be excluded from any dPH analysis. It is not a
-    copying artefact, it is a single-temperature record.
-  The Cl plates all sit at pH 5.20 where the curve gives -0.07 +/- 0.08, so their
+    the outputs. Verified: both mutants fit at both temperatures.
+  - `pKa_lysate/random1_A11_G02_note.csv` records the SAME pH at both temperatures
+    (24 of 24 pairs identical), so it carries no 37 C axis measurement at all and
+    must be excluded from any dPH analysis - not suspected, just unusable.
+  The Cl plates all sit at pH 5.20 where the curve gives -0.09 +/- 0.03, so their
   notes recording identical pH at both temperatures is consistent with the
-  measurement rather than a defect.
+  measurement.
 
-  Three uses, in order of value:
-  1. Constrain the two-temperature fits with x(37, i) = x(20, i) + dPH(pH_i),
-     evaluated at that well's pH, with the 0.075 residual as its width (not the
-     0.022 across-plate sd of a ladder-averaged difference, which hid the pH
-     dependence). This halves the axis parameters and breaks the
-     between-temperature half of the K-x ridge on physical grounds.
-  2. Screen plates before fitting: dPH is computable from the note, so compare a
-     plate's own 37-20 C difference against dPH(pH) and flag beyond ~3 sd. A ladder
-     spanning 5.5-9.2 should show a RANGE of dPH, not one number.
-  3. Decontaminate Delta_H: an axis offset delta biases the van't Hoff slope by
-     2.303 R delta / d(1/T), i.e. 23 kJ/mol at 0.23 pH - against the 43 kJ/mol the
-     G10 fit reported. Because delta depends on pH, recompute per plate over its
-     actual pH range: near the full size for a 7-9 ladder, about a third of it for
-     a ladder sitting at pH 5-6.
+  Next step, not yet implemented: constrain the two-temperature fits.
+  * In `fit_vanthoff_model_bayes` (prenspire/thermo.py) each temperature currently
+    gets `x_true_{t} ~ Normal(axis_{t}, x_sigma)`, independent. Replace the 37 C
+    prior with `x_true_37[i] ~ Normal(x_true_20[paired(i)] + dPH(pH_i), 0.034)`,
+    where `paired(i)` is the well of the same column at 20 C and dPH comes from
+    the joined note. That halves the axis parameters and removes the
+    between-temperature half of the K-x ridge on physical grounds.
+  * Needs a helper beside `well_groups` in fitting/bayes.py that returns, from the
+    two temperature blocks, the pairing index and the per-column measured dPH
+    (columns are the replicate unit, as there). Testable without sampling.
+  * Take the curve parameters, not a hardcoded 0.034, from a module constant that
+    records the exclusions and the n it was fitted on.
+  * Before trusting it, re-run benchmarks/axis_pooling_recovery.py on a synthetic
+    two-temperature plate: the tie must narrow the Delta_H interval without moving
+    its centre. If it moves the centre, the recorded axis is not the true one and
+    the Delta_H correction (below) is the real task.
+  * Scope note: this is a *noise* constraint. It does not fix a systematic axis
+    offset. If the electrode was read at 20 C and the reading used at 37 C, the
+    recorded 37 C pH is high by |dPH| and Delta_H must be corrected instead: an
+    axis offset delta biases the van't Hoff slope by 2.303 R delta / d(1/T), which
+    at 0.28 pH is 28 kJ/mol against the 43 kJ/mol the G10 fit reported. Which case
+    applies is a question about the protocol, and the recorded dPH matching the
+    buffer curve suggests the electrode was read at temperature.
