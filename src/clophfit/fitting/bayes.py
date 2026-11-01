@@ -8,7 +8,7 @@ import os
 import re
 import typing
 import warnings
-from collections.abc import Mapping, Mapping as MappingABC
+from collections.abc import Mapping, Mapping as MappingABC, Sequence
 from typing import Any, Literal
 
 import arviz as az  # type: ignore[import-untyped]
@@ -59,8 +59,6 @@ from .data_structures import (
 )
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from clophfit.clophfit_types import ArrayF
     from clophfit.prtecan import PlateScheme
 
@@ -1558,6 +1556,148 @@ def _build_multi_x_start(
         sigma=x_start_between_sigma,
         dims="well",
     )
+
+
+XPool = Literal["free", "shared", "partial"]
+
+
+def well_groups(wells: Sequence[str]) -> np.ndarray:
+    """Replicate-group index per well, from the trailing column number of its label.
+
+    EnSpire notes lay one temperature out as replicate rows of one nominal target
+    series, so ``A04``/``B04``/``C04`` are three wells of the *same* solution: the
+    recorded titrant differs between them only by the axis error. Grouping on the
+    column is therefore the replicate unit, and it is the same key the ``column``
+    QC strata use.
+
+    Parameters
+    ----------
+    wells : Sequence[str]
+        Well labels, e.g. ``["A04", "B04", "A05"]``.
+
+    Returns
+    -------
+    np.ndarray
+        Group index per well, in ``0..n_groups-1``, ordered by first appearance.
+
+    Raises
+    ------
+    ValueError
+        If a label carries no trailing column number, so a silent fallback cannot
+        pretend every well is its own replicate when it is not.
+    """
+    index: dict[str, int] = {}
+    out = np.empty(len(wells), dtype=int)
+    for i, well in enumerate(wells):
+        found = re.match(r"^[A-Za-z]+(\d+)$", str(well).strip())
+        if found is None:
+            msg = (
+                f"well {well!r} has no trailing column number, so the replicate "
+                "groups cannot be read from it; group the wells explicitly or use "
+                "the free axis"
+            )
+            raise ValueError(msg)
+        column = found.group(1)
+        out[i] = index.setdefault(column, len(index))
+    return out
+
+
+def create_x_true_pooled(
+    xc: ArrayF,
+    *,
+    pool: XPool = "free",
+    x_sigma: float | None = None,
+    groups: Sequence[int] | None = None,
+    name: str = "x_true",
+) -> ArrayF | pm.Deterministic:
+    """Latent titrant axis, with the wells of one replicate sharing their truth.
+
+    The recorded axis is a measurement of a value the wells of a replicate group
+    share, so three structures are offered and two of them nest the third:
+
+    ``free``
+        ``x_true_i ~ N(x_i, x_sigma)``, independent per well - what every fit did
+        before this existed. It lets a well move (a wrongly pipetted concentration, a
+        drifting electrode) but it also *believes* three different recorded values
+        for one solution, so a shared fraction at three different recorded axes can
+        only be reconciled by moving K.
+    ``shared``
+        ``x_g ~ N(mean(x_i in g), tau)`` and every well of ``g`` uses ``x_g``: the
+        wells are one solution, and the recorded spread is the axis error rather
+        than truth.
+    ``partial``
+        ``x_g ~ N(mean(x_i in g), tau)`` and ``x_true_i ~ N(x_g, omega)``: the group
+        shares a truth but a well may still deviate, and ``omega`` is inferred. It
+        nests ``shared`` (``omega -> 0``) and, without the mean-1 style constraint
+        ``free`` lacks, approximates ``free`` as ``omega`` grows, so the data decide
+        how much pooling is warranted instead of the caller asserting it. On a
+        ligand plate the posterior ``omega`` is the pipetting error the note never
+        measured; on a pH plate a large ``omega`` says the rows were not one
+        solution after all.
+
+    ``tau`` and ``omega`` are inferred (half-normal around the measurement-error
+    scale ``x_sigma``), so neither the pooling strength nor the axis noise is a
+    plug-in. A missing ``x_sigma`` fixes the axis at the recorded values, which is
+    only meaningful for ``free``.
+
+    Parameters
+    ----------
+    xc : ArrayF
+        Recorded titrant value per well.
+    pool : XPool
+        ``free``, ``shared`` or ``partial`` as above.
+    x_sigma : float | None
+        Measurement-error scale of the recorded axis, in its own units. It is the
+        centre of the half-normal priors on ``tau`` and ``omega``; ``None`` fixes
+        the axis.
+    groups : Sequence[int] | None
+        Group index per well (see :func:`well_groups`); required for ``shared``
+        and ``partial``.
+    name : str
+        Name of the returned deterministic variable.
+
+    Returns
+    -------
+    ArrayF | pm.Deterministic
+        The latent axis, ready to use in a model.
+
+    Raises
+    ------
+    ValueError
+        For a pooled structure without groups or without a measurement-error
+        scale, rather than silently fitting something else.
+    """
+    xa = np.asarray(xc, dtype=np.float64)
+    if pool == "free" or x_sigma is None or not np.isfinite(x_sigma):
+        if x_sigma is None or not np.isfinite(x_sigma):
+            return pm.Deterministic(name, as_tensor_variable(xa))
+        return pm.Normal(
+            name, mu=as_tensor_variable(xa), sigma=float(x_sigma), shape=xa.size
+        )
+    if groups is None:
+        msg = f"a {pool!r} axis needs the replicate groups; pass --x-groups column"
+        raise ValueError(msg)
+    idx = np.asarray(groups, dtype=int)
+    if idx.size != xa.size:
+        msg = f"groups has {idx.size} entries for {xa.size} wells"
+        raise ValueError(msg)
+    n_groups = int(idx.max()) + 1 if idx.size else 0
+    group_mean = np.array([float(np.mean(xa[idx == g])) for g in range(n_groups)])
+    scale = float(x_sigma)
+    # non-centred: the group value is mean + tau * z with z ~ N(0, 1). Written
+    # centred instead, tau and the group values form a funnel - measured at 4
+    # chains x 2000 draws it produced 33-98 divergences and r-hat up to 1.53,
+    # against 0 divergences for the free axis, because a small tau forces the
+    # group values into a narrow mouth that NUTS cannot follow.
+    tau = pm.HalfNormal(f"{name}_group_sd", sigma=scale)
+    z_group = pm.Normal(f"{name}_group_z", mu=0.0, sigma=1.0, shape=n_groups)
+    group_mu = as_tensor_variable(group_mean)
+    shared = group_mu + tau * z_group
+    if pool == "shared":
+        return pm.Deterministic(name, shared[idx])
+    omega = pm.HalfNormal(f"{name}_well_sd", sigma=scale)
+    z_well = pm.Normal(f"{name}_well_z", mu=0.0, sigma=1.0, shape=xa.size)
+    return pm.Deterministic(name, shared[idx] + omega * z_well)
 
 
 def create_x_true(

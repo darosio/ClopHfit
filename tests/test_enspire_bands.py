@@ -21,6 +21,8 @@ from clophfit.prenspire.bands import (
     fit_titrations,
     screen_bands,
 )
+from clophfit.prenspire.spectral import isosbestic_by_group
+from clophfit.prenspire.thermo import vanthoff_curves
 
 DATA = Path(__file__).parent / "EnSpire"
 
@@ -201,6 +203,79 @@ class TestTitrations:
             "em_exc420",
             "em_exc278",
         }
+
+
+def test_isosbestic_normalisation_keeps_the_band_k_and_drops_the_scale(
+    g10: EnspireFile,
+) -> None:
+    """Normalising every well to the crossing moves the band K a little, not a lot.
+
+    The band fit keeps one plateau pair for the whole plate, so per-well amount
+    and brightness sit in the residual; dividing each well by its signal at the
+    isosbestic point takes them out before the fit. What must not happen is a
+    different titration: the two runs have to describe the same K, with the
+    normalised one no less precise.
+    """
+    note = Note(DATA / "NTT-G10_note.csv").note
+    raw = fit_titrations(g10, note, screen="studentized:0.05:5")
+    scaled = fit_titrations(g10, note, screen="studentized:0.05:5", isosbestic="auto")
+
+    def head(fits: object) -> pd.Series:
+        table = fits.table  # type: ignore[attr-defined]
+        rows = table[
+            (table["band"] == "all (shared K)") & (table["subset"] == "screened")
+        ]
+        return rows.set_index("temp")["K"].astype(float)
+
+    a, b = head(raw), head(scaled)
+    assert not a.empty
+    assert np.allclose(a.index, b.index)
+    assert np.all(np.abs(a.to_numpy() - b.to_numpy()) < 0.15)
+    assert not np.allclose(a.to_numpy(), b.to_numpy())
+
+
+def test_sharing_the_crossing_across_temperatures(g10: EnspireFile) -> None:
+    """One crossing per sample for both temperatures, and one amplitude scale.
+
+    ``auto`` locates a crossing per temperature and scales each group to its own
+    peak, so the 37 C / 20 C amplitude ratio comes out exactly 1 by construction.
+    ``auto-scale`` keeps those crossings - the unbiased ones - and shares the
+    amplitude instead, which is what leaves the measured temperature dependence in
+    the curves.
+    """
+    note = Note(DATA / "NTT-G10_note.csv").note
+
+    def ratios(mode: str | None) -> dict[str, float]:
+        info = vanthoff_curves(g10, note, isosbestic=mode)["NTT-G10"]
+        out: dict[str, float] = {}
+        for band in ("exc_anionic", "em_exc420"):
+            amps = {
+                float(t): float(np.nanmax(y))
+                for (b, t), (_x, y) in info.curves.items()
+                if b == band
+            }
+            if len(amps) == 2:
+                out[band] = amps[37.0] / amps[20.0]
+        return out
+
+    per_group = ratios("auto")
+    shared_scale = ratios("auto-scale")
+    assert per_group
+    assert all(np.isclose(v, 1.0) for v in per_group.values())
+    assert any(not np.isclose(v, 1.0, atol=0.02) for v in shared_scale.values())
+
+
+def test_each_temperature_keeps_its_own_crossing(g10: EnspireFile) -> None:
+    """The crossing moves with temperature, so one group's value is not another's.
+
+    This is why the plate-wide pass resolves a crossing per group instead of one
+    per sample: a single wavelength would put one of the two temperatures off its
+    own crossing, and the K of that temperature with it.
+    """
+    note = Note(DATA / "NTT-G10_note.csv").note
+    found = [v for v in isosbestic_by_group(g10, note).values() if v is not None]
+    assert len(found) == 2
+    assert max(found) - min(found) > 0.5
 
 
 def test_fit_bands_bayes_recovers_k_with_hdi() -> None:

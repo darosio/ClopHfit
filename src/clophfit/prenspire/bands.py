@@ -26,6 +26,7 @@ well-to-well noise while shifting K by a third of a standard error.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 import arviz as az  # type: ignore[import-untyped]
@@ -53,6 +54,7 @@ _FLAG = "#d1495b"
 __all__ = [
     "DEFAULT_SCREEN",
     "DIRECT_BANDS",
+    "PH_ACID_END",
     "BandFit",
     "Readout",
     "band_rho",
@@ -107,6 +109,12 @@ ANIONIC_CL = (395.0, 495.0)
 # anionic: 0.46, worst case 0.55 - worse by the same margin, not helped by
 # removing the noisy group.
 DIRECT_BANDS = ("exc_anionic", "em_exc420")
+#: Wells below this pH are left out of the isosbestic search. The most acidic
+#: wells carry an extra drop that the two-state model cannot describe (see
+#: ``isosbestic_point``'s ``x_min``), and including them bends the slope zero: on
+#: the NTT/A11-G02 37 C plate it moves the crossing 450.3 -> 452.6 nm and the band
+#: K by 0.07 pH. A chloride titration has no acid end to guard.
+PH_ACID_END = 6.0
 # point screen handed to fit_binding_glob unless asked otherwise
 DEFAULT_SCREEN = "studentized:0.05:5"
 _PROTEIN_EXCITATION = 350.0
@@ -412,6 +420,70 @@ def fit_bands(
     return BandFit(k, lo, hi, se, rms, kept, total - kept, plateaus, masks)
 
 
+def isosbestic_readout_scale(  # ruff: ignore[too-many-arguments]
+    ef: EnspireFile,
+    wells: Sequence[str],
+    x: np.ndarray,
+    readout: Readout,
+    buffer_wells: Sequence[str] = (),
+    *,
+    isosbestic: float | str,
+    x_min: float | None = None,
+) -> tuple[float | None, np.ndarray | None]:
+    """Per-well brightness reference of one readout, taken at the crossing.
+
+    A band readout is one number per well, so normalising it to the isosbestic
+    point means reading the whole excitation scan the window came from and
+    dividing the well by its signal where the two species cross: the ratio
+    removes how much protein the well holds and how brightly it is measured,
+    and keeps the fraction. This is the band-level counterpart of
+    :func:`~clophfit.prenspire.spectral.sample_spectra`'s ``isosbestic``.
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    wells : Sequence[str]
+        Wells of this sample, in the order of ``x``.
+    x : np.ndarray
+        Titrant value per well.
+    readout : Readout
+        The band whose scan supplies the spectrum; its label names the scan.
+    buffer_wells : Sequence[str]
+        Buffer wells of the same plate column, subtracted before the crossing
+        is located, exactly as the band values are.
+    isosbestic : float | str
+        A wavelength [nm] or ``"auto"``.
+    x_min : float | None
+        Drop the wells below this titrant value before locating the crossing;
+        pass :data:`PH_ACID_END` on a pH titration.
+
+    Returns
+    -------
+    tuple[float | None, np.ndarray | None]
+        The crossing used and the scale per well, or ``(None, None)`` when
+        ``"auto"`` finds none - which is what a chloride titration returns.
+    """
+    from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
+        EXCITATION_SCAN_NAMES,
+        isosbestic_scale,
+        plate_isosbestic,
+        scan_spectrum,
+    )
+
+    lam, y = scan_spectrum(ef, readout.label, wells, buffer_wells)
+    spectra = {EXCITATION_SCAN_NAMES[0]: (lam, y)}
+    lam_iso = (
+        plate_isosbestic(spectra, x, x_min=x_min)
+        if isinstance(isosbestic, str)
+        else float(isosbestic)
+    )
+    if lam_iso is None:
+        return None, None
+    scale, _usable = isosbestic_scale(spectra, lam_iso)
+    return lam_iso, scale
+
+
 def _sample_bands(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     wells: list[str],
@@ -420,7 +492,10 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
     *,
     is_ph: bool,
     buffer_wells: Sequence[str],
-) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]:
+    isosbestic: float | str | None = None,
+) -> tuple[
+    dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray, dict[str, float]
+]:
     """Band values of one sample, buffer-subtracted and scaled to its own max.
 
     Blank plate rows are detected and removed from the sample here, and serve
@@ -441,15 +516,21 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         see :func:`classify`.
     buffer_wells : Sequence[str]
         Buffer wells declared by the note, if any.
+    isosbestic : float | str | None
+        Normalise each well by its signal at the isosbestic point, before the
+        band is scaled to its own maximum (see
+        :func:`isosbestic_readout_scale`); ``None`` keeps the raw readout.
 
     Returns
     -------
-    tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray]
-        Band name to (x, y), the wells actually used, and their x values.
+    tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str], np.ndarray, dict[str, float]]
+        Band name to (x, y), the wells actually used, their x values, and the
+        per-band maximum each band was divided by - the last one so that a caller
+        can put the temperatures of one sample back on a common scale.
     """
     readouts = classify(ef, temp, is_ph=is_ph)
     if not readouts:
-        return {}, wells, x
+        return {}, wells, x, {}
     probe = band_values(ef, readouts[0], wells)
     blanks = blank_rows(probe)
     if blanks:
@@ -457,14 +538,32 @@ def _sample_bands(  # ruff: ignore[too-many-arguments]
         keep = [i for i, w in enumerate(wells) if w[0] not in blanks]
         wells, x = [wells[i] for i in keep], x[keep]
         buffer_wells = list(buffer_wells) or found
+    scale = None
+    if isosbestic is not None:
+        excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
+        if excitation is not None:
+            _lam_iso, scale = isosbestic_readout_scale(
+                ef,
+                wells,
+                x,
+                excitation,
+                buffer_wells,
+                isosbestic=isosbestic,
+                x_min=PH_ACID_END if is_ph else None,
+            )
     data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    tops: dict[str, float] = {}
     for readout in readouts:
         y = band_values(ef, readout, wells)
         if buffer_wells:
             y = subtract_buffer(y, band_values(ef, readout, buffer_wells))
-        top = float(np.abs(y).max())
-        data[readout.name] = (x, (y / top if top else y).to_numpy())
-    return data, wells, x
+        arr = np.array(y, dtype=float)
+        if scale is not None:
+            arr /= scale
+        top = float(np.abs(arr).max())
+        tops[readout.name] = top
+        data[readout.name] = (x, arr / top if top else arr)
+    return data, wells, x, tops
 
 
 def _row_fits(
@@ -487,6 +586,93 @@ def _row_fits(
     return out
 
 
+def _resolve_isosbestic(
+    ef: EnspireFile,
+    note: pd.DataFrame,
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None,
+    *,
+    buffer: bool,
+) -> dict[tuple[str, float], float | None] | None:
+    """Turn a per-sample request into one crossing per (sample, temperature).
+
+    Parameters
+    ----------
+    ef : EnspireFile
+        The parsed EnSpire export.
+    note : pd.DataFrame
+        Normalised note.
+    isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
+        The caller's request; ``"auto-scale"`` needs a pass over the plate.
+    buffer : bool
+        Subtract the buffer wells before locating the crossings.
+
+    Returns
+    -------
+    dict[tuple[str, float], float | None] | None
+        The resolved crossings, or ``None`` when the request is per group (the
+        data builders then locate their own). A non-``None`` result also means the
+        caller should put a sample's temperatures on one amplitude scale.
+    """
+    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
+        from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
+            isosbestic_by_group,
+        )
+
+        # the crossings stay per temperature; what the plate-wide pass buys is
+        # one amplitude scale for the temperatures of a sample
+        return isosbestic_by_group(ef, note, buffer=buffer)
+    if isinstance(isosbestic, dict):
+        return isosbestic
+    return None
+
+
+def _lam_for(
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None,
+    lam_map: dict[tuple[str, float], float | None] | None,
+    name: str,
+    temp: object,
+) -> float | str | None:
+    """Pick the crossing for one (sample, temperature) group."""
+    if lam_map is None:
+        return isosbestic if not isinstance(isosbestic, Mapping) else None
+    return lam_map.get((name, float(str(temp))))
+
+
+def _share_band_scale(
+    gathered: list[
+        tuple[
+            str,
+            object,
+            bool,
+            list[str],
+            np.ndarray,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            dict[str, float],
+        ]
+    ],
+) -> None:
+    """Rescale a sample's temperatures onto one amplitude scale, in place.
+
+    Each group was divided by its own peak, which puts both temperatures at unit
+    maximum and throws away how much brighter one of them was. When the crossing
+    is shared per sample the amplitudes have to be on one scale too, otherwise the
+    two temperatures of one sample cannot be drawn, or fitted jointly, on the same
+    axis: the group's own peak is divided out against the sample's, band by band.
+    """
+    by_sample: dict[str, dict[str, float]] = {}
+    for name, _temp, _is_ph, _wells, _x, data, tops in gathered:
+        shared = by_sample.setdefault(name, {})
+        for band, (bx, by) in data.items():
+            _ = (bx, by)
+            shared[band] = max(shared.get(band, 0.0), tops.get(band, 0.0))
+    for name, _temp, _is_ph, _wells, _x, data, tops in gathered:
+        shared = by_sample[name]
+        for band, (bx, by) in list(data.items()):
+            top, common = tops.get(band, 0.0), shared.get(band, 0.0)
+            if top > 0 and common > 0:
+                data[band] = (bx, by * (top / common))
+
+
 def fit_titrations(  # ruff: ignore[too-many-arguments]
     ef: EnspireFile,
     note: pd.DataFrame,
@@ -495,6 +681,7 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
     wanted: Sequence[str] = DIRECT_BANDS,
     min_rho: float = 0.8,
     screen: str | None = DEFAULT_SCREEN,
+    isosbestic: float | str | Mapping[tuple[str, float], float | None] | None = None,
 ) -> TitrationFits:
     """Fit every sample of a note from its bands.
 
@@ -512,6 +699,15 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         Monotonicity gate for a band.
     screen : str | None
         Point screen handed to :func:`fit_binding_glob`.
+    isosbestic : float | str | Mapping[tuple[str, float], float | None] | None
+        Normalise every well by its signal at the isosbestic point first (see
+        :func:`isosbestic_readout_scale`): a wavelength [nm], ``"auto"`` per
+        (sample, temperature) group, ``"auto-scale"`` for plate-wide crossings
+        with one amplitude scale per sample, a mapping of ``(sample, temperature)``
+        to that wavelength, or ``None``. With ``"auto-scale"`` the band maxima are
+        shared across the sample's temperatures, so the two temperatures keep their
+        measured amplitude ratio instead of each being rescaled to its own peak;
+        the crossings themselves stay per temperature.
 
     Returns
     -------
@@ -524,6 +720,20 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
     drawable: dict[str, Sample] = {}
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
+    lam_map = _resolve_isosbestic(ef, note, isosbestic, buffer=buffer)
+    # gather first, fit second: a per-sample crossing has to be shared by the
+    # temperatures before any of them is scaled
+    gathered: list[
+        tuple[
+            str,
+            object,
+            bool,
+            list[str],
+            np.ndarray,
+            dict[str, tuple[np.ndarray, np.ndarray]],
+            dict[str, float],
+        ]
+    ] = []
     for (name, temp), group in samples.groupby(
         ["Name", "Temp"], sort=True, dropna=False
     ):
@@ -532,11 +742,22 @@ def fit_titrations(  # ruff: ignore[too-many-arguments]
         wells = one["Well"].tolist()
         x = one["pH" if is_ph else "Cl"].astype(float).to_numpy()
         buf = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
-        data, wells, x = _sample_bands(
-            ef, wells, x, str(temp), is_ph=is_ph, buffer_wells=buf
+        lam = _lam_for(isosbestic, lam_map, str(name), temp)
+        data, wells, x, tops = _sample_bands(
+            ef,
+            wells,
+            x,
+            str(temp),
+            is_ph=is_ph,
+            buffer_wells=buf,
+            isosbestic=lam,
         )
         if not data:
             continue
+        gathered.append((str(name), temp, is_ph, wells, x, data, tops))
+    if lam_map is not None:
+        _share_band_scale(gathered)
+    for name, temp, is_ph, wells, _x, data, _tops in gathered:
         keep, rejected = screen_bands(data, wells, wanted=wanted, min_rho=min_rho)
         base: dict[str, object] = {"sample": name, "temp": temp}
         for band, why in rejected.items():

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import collections
+import copy
 import csv
 import re
 import warnings
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -22,7 +22,7 @@ from clophfit.utils import lookup_listoflines
 # MAYBE: kd1.csv kd2.csv kd3.csv kd1-nota kd2-nota kd3-nota --> Titration
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from types import BuiltinFunctionType
 
 
@@ -92,32 +92,70 @@ class EnspireFile:
             csvl[ini - 1 : fin], csvl[fin + 1 :], verboseprint
         )
 
-    def export_measurements(self, out_dir: Path = Path(__enspire_out_dir__)) -> None:
-        """Save measurements, metadata and plots into out_dir."""
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for measurement_name, measurement_data in self.measurements.items():
-            # Prepare data dictionary and construct DataFrame
-            data_dict = {"lambda": measurement_data["lambda"]}
-            data_dict.update({well: measurement_data[well] for well in self.wells})
+    def export_measurements(
+        self,
+        out_dir: Path = Path(__enspire_out_dir__),
+        *,
+        mode: str = "auto",
+    ) -> list[str]:
+        """Write each measurement's table, metadata and figure into ``out_dir``.
 
-            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
+        The file names are canonical - ``<export stem>_<label>.csv/json/png`` - so
+        a second run over the same export lands on the same files instead of
+        accumulating timestamped copies. Running several fitting methods on one
+        plate used to leave five copies of every table and figure in the output
+        directory, because an existing file made the writer append a timestamp.
+
+        Parameters
+        ----------
+        out_dir : Path
+            Destination directory; created when missing.
+        mode : str
+            ``"auto"`` (default) rewrites a measurement only when the export is
+            newer than what was written (or the files are missing), ``"always"``
+            rewrites every time, ``"never"`` writes nothing.
+
+        Returns
+        -------
+        list[str]
+            Base names written, in measurement order; empty when everything was
+            already up to date.
+
+        Raises
+        ------
+        ValueError
+            If ``mode`` is not one of the three accepted values.
+        """
+        if mode not in {"auto", "always", "never"}:
+            msg = f"export mode must be auto, always or never, not {mode!r}"
+            raise ValueError(msg)
+        if mode == "never":
+            return []
+        out_dir.mkdir(parents=True, exist_ok=True)
+        written: list[str] = []
+        source_mtime = self.file.stat().st_mtime
+        for measurement_name, measurement_data in self.measurements.items():
             basename = f"{self.file.stem}_{measurement_name}"
-            # Check for existing file and append timestamp if necessary
             csv_file = out_dir / f"{basename}.csv"
-            if csv_file.exists():
-                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")  # ruff: ignore[datetime-timezone-utc] [for py3.10]
-                basename = f"{self.file.stem}_{measurement_name}_{timestamp}"
-                csv_file = out_dir / f"{basename}.csv"
             md_file = out_dir / f"{basename}.json"
             png_file = out_dir / f"{basename}.png"
-            # Export data and metadata
+            targets = (csv_file, md_file, png_file)
+            if mode == "auto" and all(
+                path.exists() and path.stat().st_mtime >= source_mtime
+                for path in targets
+            ):
+                continue
+            data_dict: dict[str, Any] = {"lambda": measurement_data["lambda"]}
+            data_dict.update({well: measurement_data[well] for well in self.wells})
+            dfdata = pd.DataFrame(data=data_dict).set_index("lambda")
             dfdata.to_csv(csv_file)
             pd.DataFrame([measurement_data["metadata"]]).to_json(md_file, indent=4)
-            # Create and save plot
             fig, ax = plt.subplots()
             dfdata.plot(title=measurement_name, legend=False, ax=ax)
-            plt.savefig(png_file)
+            fig.savefig(png_file)
             plt.close(fig)
+            written.append(basename)
+        return written
 
     # Helpers
     @staticmethod
@@ -499,8 +537,33 @@ class Note:
 
     # MAYBE: Add buffer subtraction logic to prenspire Note.
 
-    def build_titrations(self, ef: EnspireFile) -> None:
-        """Extract titrations from the given ef (_note file like: <well, pH, Cl>)."""
+    def build_titrations(  # ruff: ignore[complex-structure, too-many-branches]
+        self,
+        ef: EnspireFile,
+        *,
+        isosbestic: float | str | None = None,
+        drop_wells: dict[tuple[str, str], list[str]] | None = None,
+    ) -> None:
+        """Extract titrations from the given ef (_note file like: <well, pH, Cl>).
+
+        Parameters
+        ----------
+        ef : EnspireFile
+            The parsed EnSpire export.
+        isosbestic : float | str | None
+            Divide every well by its signal at the isosbestic point before the
+            titration is assembled, so the legacy projection path is normalised
+            the same way the band and whole-spectrum paths are: a wavelength
+            [nm], ``"auto"`` to locate it per group, ``"auto-scale"`` to locate
+            every group on the plate at once, or ``None``. The
+            scaling is applied to every label of the group from the excitation
+            scan's crossing, because the crossing belongs to the sample, not to
+            the detector window.
+        drop_wells : dict[tuple[str, str], list[str]] | None
+            Wells to leave out, keyed by ``(sample, temperature)`` as strings. The
+            legacy projection path has no screen of its own; this is where a list
+            produced elsewhere (the whole-spectrum screen) enters it.
+        """
         if "Labels" not in self._note.columns:
             # the second note dialect names no labels: take the ones the file
             # measured at each row's temperature
@@ -512,6 +575,12 @@ class Note:
                 at_temp.get(str(t).split(".")[0], " ".join(ef.measurements))
                 for t in self._note["Temp"]
             ]
+        if isinstance(isosbestic, str) and isosbestic == "auto-scale":
+            from clophfit.prenspire.spectral import isosbestic_by_group  # ruff: ignore[import-outside-top-level]
+
+            lam_map = isosbestic_by_group(ef, self._note)
+        else:
+            lam_map = {}
         df_no_buffer = self._note.query('Name != "buffer"')
         threshold = 3
         grouped0 = df_no_buffer.groupby("Name")
@@ -528,7 +597,18 @@ class Note:
                         if len(group2) > threshold:
                             grouped3 = group2.groupby("Labels")
                             for name3, group3 in grouped3:
-                                wells = group3["Well"].to_list()
+                                all_wells = group3["Well"].to_list()
+                                skip = set(
+                                    (drop_wells or {}).get((str(name0), str(name1)), ())
+                                )
+                                keep = [
+                                    i for i, w in enumerate(all_wells) if w not in skip
+                                ]
+                                wells = [all_wells[i] for i in keep]
+                                if group3["pH"].nunique() > group3["Cl"].nunique():
+                                    axis = [group3["pH"].to_list()[i] for i in keep]
+                                else:
+                                    axis = [group3["Cl"].to_list()[i] for i in keep]
                                 meas_dict = {}
                                 for label in str(name3).split():
                                     d = {w: ef.measurements[label][w] for w in wells}
@@ -537,16 +617,135 @@ class Note:
                                         index=ef.measurements[label]["lambda"],
                                         columns=wells,
                                     )
-                                    if group3["pH"].nunique() > group3["Cl"].nunique():
-                                        value_df.columns = pd.Index(
-                                            group3["pH"].to_list()
-                                        )
-                                    else:
-                                        value_df.columns = pd.Index(
-                                            group3["Cl"].to_list()
-                                        )
+                                    value_df.columns = pd.Index(axis)
                                     meas_dict[label] = value_df
+                                lam = (
+                                    lam_map.get((str(name0), float(str(name1))))
+                                    if lam_map
+                                    else isosbestic
+                                )
+                                if lam is not None:
+                                    meas_dict = _normalise_titration_isosbestic(
+                                        meas_dict, ef, lam
+                                    )
                                 titrations[name0][name1][f"{grouping}_{name2}"] = (
                                     meas_dict
                                 )
         self.titrations = titrations
+
+
+def _normalise_titration_isosbestic(
+    meas_dict: dict[str, pd.DataFrame],
+    ef: EnspireFile,
+    isosbestic: float | str,
+) -> dict[str, pd.DataFrame]:
+    """Scale one titration group's spectra by its isosbestic signal.
+
+    ``meas_dict`` holds the group's labels as wavelength-indexed frames whose
+    columns are the titrant values, in well order. The crossing is located on
+    the excitation scan (the only scan that carries the two-state crossover) and
+    its per-well value is used as the brightness reference for every label of
+    the group, which is what makes the group's readouts comparable.
+
+    Parameters
+    ----------
+    meas_dict : dict[str, pd.DataFrame]
+        Label to its spectra; wavelengths on the index, titrant per column.
+    ef : EnspireFile
+        The parsed export, for each label's metadata.
+    isosbestic : float | str
+        A wavelength [nm] or ``"auto"``.
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        The same frames, normalised. Unchanged when ``"auto"`` finds no crossing,
+        which is what a chloride titration returns.
+    """
+    from clophfit.prenspire.spectral import (  # ruff: ignore[import-outside-top-level]
+        EXCITATION_SCAN_NAMES,
+        isosbestic_scale,
+        plate_isosbestic,
+    )
+
+    excitation = next(
+        (
+            label
+            for label in meas_dict
+            if ef.measurements[label]["metadata"].get("Monochromator") == "Excitation"
+        ),
+        None,
+    )
+    if excitation is None:
+        return meas_dict
+    frame = meas_dict[excitation]
+    spectra = {
+        EXCITATION_SCAN_NAMES[0]: (
+            frame.index.to_numpy(dtype=float),
+            frame.to_numpy(dtype=float),
+        )
+    }
+    x = frame.columns.to_numpy(dtype=float)
+    lam_iso = (
+        plate_isosbestic(spectra, x)
+        if isinstance(isosbestic, str)
+        else float(isosbestic)
+    )
+    if lam_iso is None:
+        return meas_dict
+    scale, _usable = isosbestic_scale(spectra, lam_iso)
+    out: dict[str, pd.DataFrame] = {}
+    for label, one in meas_dict.items():
+        scaled = one.copy()
+        scaled.iloc[:, :] = one.to_numpy(dtype=float) / scale
+        out[label] = scaled
+    return out
+
+
+def merge_enspire_files(files: Sequence[EnspireFile]) -> EnspireFile:
+    """Combine the measurements of several exports of the same plate.
+
+    A construct can be titrated at two temperatures in two separate EnSpire
+    exports, with its own note each time; a van't Hoff fit needs both in one
+    place. The exports carry disjoint measurement labels (the instrument numbers
+    them E/B/F at 37 C and C/D/A at 20 C on the same plate), so the merge is a
+    union - and a *loud* failure if two files ever share a label, because then
+    they are not two temperatures of one experiment but two experiments.
+
+    Parameters
+    ----------
+    files : Sequence[EnspireFile]
+        The exports to combine, first one first.
+
+    Returns
+    -------
+    EnspireFile
+        An export carrying every file's measurements and the union of their wells.
+        Its ``file`` is the first input, which is what the export names use.
+
+    Raises
+    ------
+    ValueError
+        If the list is empty or two files share a measurement label.
+    """
+    if not files:
+        msg = "merge_enspire_files needs at least one export"
+        raise ValueError(msg)
+    # start from the first export *as given* (no re-read: a caller may have
+    # filtered its measurements), with its own containers
+    merged = copy.copy(files[0])
+    merged.measurements = dict(files[0].measurements)
+    merged.wells = list(files[0].wells)
+    for other in files[1:]:
+        clash = set(merged.measurements) & set(other.measurements)
+        if clash:
+            msg = (
+                f"{other.file.name} repeats measurement label(s) "
+                f"{sorted(clash)}; two exports of one experiment must carry "
+                "disjoint labels (different temperatures are labelled E/B/F and "
+                "C/D/A), so these are not two temperatures of one titration"
+            )
+            raise ValueError(msg)
+        merged.measurements.update(other.measurements)
+        merged.wells = sorted(set(merged.wells) | set(other.wells))
+    return merged

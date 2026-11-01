@@ -1075,3 +1075,43 @@ def test_residual_diagnostics_analysis_methods_smoke() -> None:
     lag, lag_summary = diag.analysis.lag1_autocorrelation()
     assert isinstance(lag, pd.DataFrame)
     assert isinstance(lag_summary, pd.DataFrame)
+
+
+def test_trace_diagnostics_reads_the_sampler_and_bfmi_from_the_trace() -> None:
+    """The sampler, its depth cap and BFMI come from the trace, never from a guess.
+
+    The cap is a setting of the sampler, so it must be read from the settings the
+    sampler recorded rather than inferred from the deepest trajectory observed;
+    BFMI needs the energy statistic and ArviZ 1 returns it as a DataTree.
+    """
+    rng = np.random.default_rng(0)
+    n_chain, n_draw = 2, 200
+    energy = rng.normal(size=(n_chain, n_draw))
+    ss = xr.Dataset(
+        {
+            "diverging": (("chain", "draw"), np.zeros((n_chain, n_draw), bool)),
+            "energy": (("chain", "draw"), energy),
+            "maxdepth_reached": (
+                ("chain", "draw"),
+                rng.random((n_chain, n_draw)) < 0.3,
+            ),
+        },
+        attrs={
+            "inference_library": "nutpie",
+            "inference_library_version": "0.0-test",
+            "inference_library_settings": '{"settings": {"maxdepth": 12}}',
+        },
+    )
+    posterior = xr.Dataset({
+        "K": (("chain", "draw"), rng.normal(7.5, 0.05, (n_chain, n_draw)))
+    })
+    # ArviZ 1 hands the InferenceData role to xarray's DataTree
+    trace = xr.DataTree.from_dict({"posterior": posterior, "sample_stats": ss})
+    row = trace_diagnostics(trace, summary_var_names=["K"])
+    assert row["sampler"] == "nutpie"
+    assert row["sampler_version"] == "0.0-test"
+    assert row["max_treedepth"] == 12, "the cap must come from the settings"
+    assert row["n_reached_max_treedepth"] == int(ss["maxdepth_reached"].sum())
+    assert 0.0 < row["reached_max_treedepth_frac"] < 1.0
+    assert np.isfinite(row["bfmi"])
+    assert "bfmi_error" not in row

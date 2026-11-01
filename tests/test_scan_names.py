@@ -68,7 +68,7 @@ def test_the_emission_scans_are_named_by_their_fixed_wavelength() -> None:
 def test_a_scan_name_does_not_depend_on_the_temperature() -> None:
     """The same measurement must carry the same name at every temperature.
 
-    This is the property the MCR figure needs: it draws one panel per
+    This is the property a per-scan figure needs: it draws one panel per
     scan, and the two temperatures of a sample must land on the same
     panel rather than on two panels of their own.
     """
@@ -89,7 +89,7 @@ def test_two_scans_of_one_kind_at_one_temperature_get_different_names() -> None:
     """A plate may hold two excitation scans; they must not share a name.
 
     Both are real measurements - the plate was read twice with the
-    filter in different positions - and the MCR matrix keeps one column
+    filter in different positions - and the per-scan matrix keeps one column
     block per scan, so two blocks with one name would be indistinguishable.
     """
     ef = _stub_plate([

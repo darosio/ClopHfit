@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import pytest
 
-from clophfit.prenspire import titrant_kind
-from clophfit.prenspire.thermo import LN10, R_GAS, fit_vanthoff_model
+from clophfit.prenspire import EnspireFile, merge_enspire_files, titrant_kind
+from clophfit.prenspire.thermo import (
+    LN10,
+    R_GAS,
+    fit_vanthoff_model,
+    fit_vanthoff_model_bayes,
+)
 
 T20, T37 = 293.15, 310.15
 DH_TRUE = 41_000.0  # J/mol
@@ -155,3 +163,125 @@ def test_vanthoff_fits_each_sample_on_its_own_titrant_axis() -> None:
     assert abs(cl_fit.k_by_temp["20"][0] - kd) / kd < 0.15
     # and the model carries the sign of its own titration
     assert ph_fit.dh != cl_fit.dh or ph_fit.ds != cl_fit.ds
+
+
+def _pair_data(
+    *, is_ph: bool = True, noise: float = 0.01, seed: int = 3
+) -> dict[tuple[str, str], tuple[np.ndarray, np.ndarray]]:
+    """Two bands at two temperatures under the true pair, in the fitter's shape."""
+    rng = np.random.default_rng(seed)
+    inv = {"20": 1.0 / T20, "37": 1.0 / T37}
+    m = float(np.mean(list(inv.values())))
+    data: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
+    for band, (s0, s1) in (("exc_anionic", (0.05, 1.0)), ("em_exc420", (0.30, 1.15))):
+        for t in ("20", "37"):
+            if is_ph:
+                x = np.linspace(4.0, 9.5, 15)
+                y = curve(x, pka_at(1.0 / inv[t]), s0, s1)
+            else:
+                x = np.asarray(cl_levels, dtype=float)
+                y = s0 + (s1 - s0) * x / (x + np.power(10.0, 1.4 - 30.0 * (inv[t] - m)))
+            data[band, t] = (x, y + rng.normal(0.0, noise, x.size))
+    return data
+
+
+@pytest.mark.slow
+def test_bayes_fit_recovers_the_thermodynamic_pair() -> None:
+    """The posterior of the joint fit lands on the pair the LS fit recovers."""
+    data = _pair_data()
+    ls = fit_vanthoff_model(data)
+    trace = fit_vanthoff_model_bayes(
+        data, seed=3, draws=300, chains=2, cores=1, target_accept=0.95
+    )
+    post = trace.posterior
+    for t, temp_k in (("20", T20), ("37", T37)):
+        pka = np.asarray(post[f"K_{t}"]).ravel()
+        assert abs(float(np.median(pka)) - pka_at(temp_k)) < 0.05
+        assert abs(float(np.median(pka)) - ls.k_by_temp[t][0]) < 0.05
+        # a pH plate's plotted constant is the fitted pKa itself
+        assert np.allclose(pka, np.asarray(post[f"pK_{t}"]).ravel())
+    dh = np.asarray(post["dH_J_mol"]).ravel()
+    assert abs(float(np.median(dh)) - DH_TRUE) < 0.15 * DH_TRUE
+    # a sampled interval, not one propagated from two correlated coefficients
+    lo, hi = np.quantile(dh, [0.03, 0.97])
+    assert lo < DH_TRUE < hi
+    assert float(np.median(np.asarray(post["dS_J_molK"]).ravel())) == pytest.approx(
+        DS_TRUE, abs=15.0
+    )
+    # the plateaus are sampled, one pair per (band, temperature)
+    assert {"s0_exc_anionic_20", "s1_em_exc420_37"} <= set(post.data_vars)
+
+
+@pytest.mark.slow
+def test_bayes_fit_reports_kd_and_accepts_a_latent_axis() -> None:
+    """A ligand pair is sampled as pKd, reported as Kd, and x_true is drawn."""
+    data = _pair_data(is_ph=False, noise=0.005, seed=4)
+    trace = fit_vanthoff_model_bayes(
+        data, is_ph=False, x_sigma=5.0, seed=6, draws=250, chains=2, cores=1
+    )
+    post = trace.posterior
+    ls = fit_vanthoff_model(data, is_ph=False)
+    kd = np.asarray(post["K_20"]).ravel()
+    assert (
+        abs(float(np.median(kd)) - ls.k_by_temp["20"][0]) / ls.k_by_temp["20"][0] < 0.2
+    )
+    # Kd = 10^pKd on the native x scale, unlike the pH plate's pKa
+    assert np.allclose(kd, np.power(10.0, np.asarray(post["pK_20"]).ravel()))
+    # one latent axis per temperature, shared by that temperature's bands
+    n_wells = data["em_exc420", "20"][0].size
+    assert np.asarray(post["x_true_20"]).shape[-1] == n_wells
+    assert np.asarray(post["x_true_37"]).shape[-1] == n_wells
+
+
+def test_bayes_fit_validates_before_sampling() -> None:
+    """A single temperature, a bad prior width and a split axis all fail early."""
+    x = np.linspace(4.0, 9.5, 15)
+    with pytest.raises(ValueError, match="at least 2 temperatures"):
+        fit_vanthoff_model_bayes({("exc_anionic", "20"): (x, curve(x, 7.5, 0.1, 1.0))})
+    two = {
+        ("exc_anionic", "20"): (x, curve(x, 7.5, 0.1, 1.0)),
+        ("exc_anionic", "37"): (x, curve(x, 7.4, 0.1, 1.0)),
+    }
+    with pytest.raises(ValueError, match="x_sigma must be positive"):
+        fit_vanthoff_model_bayes(two, x_sigma=0.0)
+    split = {
+        **two,
+        ("em_exc420", "20"): (x + 0.5, curve(x, 7.5, 0.1, 1.0)),
+        ("em_exc420", "37"): (x, curve(x, 7.4, 0.1, 1.0)),
+    }
+    with pytest.raises(ValueError, match="disagree on their titrant axis"):
+        fit_vanthoff_model_bayes(split)
+
+
+def test_merge_of_two_temperature_exports_and_vanthoff() -> None:
+    """A titration split over two exports fits one thermodynamic pair.
+
+    The instrument labels the same three scans E/B/F at 37 C and C/D/A at 20 C,
+    so two exports of one plate carry disjoint labels and can be merged; a
+    collision means the files are not two temperatures of one experiment and
+    must fail loudly rather than overwrite a measurement.
+    """
+    source = Path(__file__).parent / "EnSpire" / "G10.csv"
+    whole = EnspireFile(source)
+    hot = EnspireFile(source)
+    cold = EnspireFile(source)
+    hot.measurements = {
+        k: v
+        for k, v in whole.measurements.items()
+        if str(v["metadata"].get("temp")) == "37"
+    }
+    cold.measurements = {
+        k: v
+        for k, v in whole.measurements.items()
+        if str(v["metadata"].get("temp")) == "20"
+    }
+    assert set(hot.measurements).isdisjoint(cold.measurements)
+    merged = merge_enspire_files([cold, hot])
+    assert set(merged.measurements) == set(whole.measurements)
+    assert {str(m["metadata"].get("temp")) for m in merged.measurements.values()} == {
+        "20",
+        "37",
+    }
+    # a repeated label is two experiments, not two temperatures: refuse
+    with pytest.raises(ValueError, match="repeats measurement label"):
+        merge_enspire_files([whole, whole])

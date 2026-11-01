@@ -1,11 +1,20 @@
 """Test prenspire module."""
 
+import os
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from clophfit.prenspire import EnspireFile, Note
+from clophfit.prenspire.spectral import (
+    consensus_isosbestic,
+    isosbestic_point,
+    isosbestic_scale,
+    normalise_to_isosbestic,
+    plate_isosbestic,
+)
 
 data_files_dir = Path(__file__).parent / "EnSpire"
 esff = data_files_dir.joinpath
@@ -196,3 +205,230 @@ class TestNote:
         assert tit0[5.2][272] == 3151
         tit5 = n1.titrations["H148G"][20]["pH_8.2"]["A"]
         assert tit5[667.0][500] == 8734
+
+
+def test_export_measurements_is_idempotent(tmp_path: Path) -> None:
+    """A second call lands on the same files instead of adding timestamped copies.
+
+    Running several fitting methods on one plate used to leave five copies of
+    every table and figure in the output directory, because an existing file made
+    the writer append a timestamp. The export is a pure function of the input
+    file, so the canonical names are reused: rewritten when the export is newer
+    than them, skipped when it is not.
+    """
+    source = Path(__file__).parent / "EnSpire" / "G10.csv"
+    ef = EnspireFile(source)
+    first = ef.export_measurements(tmp_path)
+    assert first
+    listing = sorted(p.name for p in tmp_path.iterdir())
+    assert ef.export_measurements(tmp_path) == []  # up to date: nothing rewritten
+    assert sorted(p.name for p in tmp_path.iterdir()) == listing
+    assert ef.export_measurements(tmp_path, mode="never") == []
+    # an export older than the source is rewritten in place, same names
+    for target in tmp_path.iterdir():
+        os.utime(target, (1.0, 1.0))
+    assert ef.export_measurements(tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == listing
+
+
+def _two_state_spectra(
+    n_lam: int = 120, crossing: int = 500
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Two species spectra that cross exactly at ``crossing`` nm."""
+    lam = np.linspace(380.0, 580.0, n_lam)
+    e0 = 0.15 + 0.85 * np.exp(-((lam - 520.0) ** 2) / (2 * 30.0**2))
+    e1 = e0.copy()
+    # make them differ only by a ramp that vanishes at the crossing
+    e1 = e0 * (1.0 + 0.9 * (crossing - lam) / (crossing - lam.min()))
+    return lam, e0, e1
+
+
+def test_isosbestic_point_finds_the_known_crossing() -> None:
+    """Two species crossing at 500 nm give a slope zero there, not elsewhere."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    found = isosbestic_point({"exc": (lam, y)}, x)
+    assert abs(found["exc"] - 500.0) < 1.5
+
+
+def test_normalising_to_isosbestic_puts_every_spectrum_on_one() -> None:
+    """After the normalization every well passes through 1.0 at the crossing."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    rng = np.random.default_rng(5)
+    # per-well brightness and pipetting, which the normalization must remove
+    gain = rng.uniform(0.7, 1.3, x.size)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * gain
+    y += rng.normal(0, 0.002, y.shape)
+    iso = isosbestic_point({"exc": (lam, y)}, x)["exc"]
+    scaled = normalise_to_isosbestic({"exc": (lam, y)}, iso)["exc"][1]
+    at = np.array([np.interp(iso, lam, scaled[:, i]) for i in range(x.size)])
+    assert np.allclose(at, 1.0, atol=0.01)
+    # the per-well gain is gone: at 520 nm the normalised signal matches the
+    # noise-free model normalised the same way, whatever the well's brightness
+    model = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    want = model[np.argmin(np.abs(lam - 520.0))] / model[np.argmin(np.abs(lam - iso))]
+    got = scaled[np.argmin(np.abs(lam - 520.0))]
+    # the crossing is located to about a nanometre, and the model's slope there
+    # turns a 1 nm offset into a few percent, so this is a 5 % check
+    assert np.allclose(got, want, atol=0.06)
+
+
+def test_acid_end_bends_the_crossing_so_it_is_excluded() -> None:
+    """The acid-end drop moves the apparent crossing; x_min keeps it in place.
+
+    This is the case the NTT 37 C plate shows: the most acidic wells fall below
+    the two-state model, and including them drags the slope zero away from the
+    chromophore's real crossing.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(5.5, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    # the three most acidic wells are blue-shifted by 3 nm, the artefact a
+    # degraded or partly denatured sample shows: the crossing moves with it
+    shifted = np.array([np.interp(lam - 3.0, lam, y[:, i]) for i in range(3)]).T
+    y[:, :3] = shifted
+    naive = isosbestic_point({"exc": (lam, y)}, x)["exc"]
+    guarded = isosbestic_point({"exc": (lam, y)}, x, x_min=6.5)["exc"]
+    assert abs(guarded - 500.0) < 2.0
+    assert abs(guarded - 500.0) < abs(naive - 500.0)
+
+
+def test_consensus_isosbestic_pools_measurements() -> None:
+    """Two noisy measurements give a consensus closer to the truth than either."""
+    lam, e0, e1 = _two_state_spectra()
+    datasets = []
+    for seed, k in ((1, 7.1), (2, 7.4)):
+        rng = np.random.default_rng(seed)
+        x = np.linspace(6.0, 8.5, 12)
+        frac = 1.0 / (1.0 + 10.0 ** (k - x))
+        y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+        y += rng.normal(0, 0.006, y.shape)
+        datasets.append(({"exc": (lam, y)}, x))
+    pooled = consensus_isosbestic(datasets)
+    each = [isosbestic_point(s, x)["exc"] for s, x in datasets]
+    assert abs(pooled - 500.0) <= max(abs(w - 500.0) for w in each) + 0.5
+
+
+def _gained_two_state(
+    seed: int = 5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two-state spectra of one titration with a per-well brightness gain."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    gain = np.random.default_rng(seed).uniform(0.7, 1.3, x.size)
+    y = (e0[:, None] * (1 - frac) + e1[:, None] * frac) * gain
+    return lam, y, x, gain
+
+
+def test_plate_isosbestic_takes_the_crossing_scan_and_ignores_the_rest() -> None:
+    """Only the scan named as the excitation one locates the crossing."""
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    # an emission scan that shows no crossing: flat, so its zeros are noise
+    rng = np.random.default_rng(11)
+    lam_em = np.linspace(440.0, 650.0, 80)
+    flat = 1.0 + 0.02 * rng.normal(size=(lam_em.size, x.size))
+    spectra = {"excitation": (lam, y), "emission 420": (lam_em, flat)}
+    found = plate_isosbestic(spectra, x)
+    assert found is not None
+    assert abs(found - 500.0) < 2.0
+
+
+def test_plate_isosbestic_returns_none_without_a_crossing() -> None:
+    """A titration that only changes brightness has no isosbestic point.
+
+    This is the chloride case: bound and free differ in brightness and do not
+    cross inside the measured window, so there is no wavelength to normalise to
+    and the caller must fall back to the raw readout instead of inventing one.
+    """
+    lam = np.linspace(440.0, 650.0, 120)
+    x = np.logspace(0.0, 3.0, 12)
+    base = 1.0 + 0.5 * np.exp(-((lam - 520.0) ** 2) / (2 * 30.0**2))
+    bound = 0.55 * base  # dimmer everywhere, so the two never cross
+    frac = x / (x + 12.0)
+    y = base[:, None] * (1 - frac) + bound[:, None] * frac
+    assert plate_isosbestic({"excitation": (lam, y)}, x) is None
+
+
+def test_isosbestic_scale_supplies_one_reference_for_every_scan() -> None:
+    """One scan's crossing serves every readout of the well.
+
+    An emission scan excited at 420 nm sees the anionic species alone and has no
+    crossing of its own; taking the reference from the excitation scan is what
+    makes the two readouts comparable, and it is why the reference is computed
+    once per plate rather than once per scan.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(6.0, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    lam_em = np.linspace(440.0, 650.0, 80)
+    emission = np.column_stack([np.interp(lam_em, lam, y[:, i]) for i in range(x.size)])
+    spectra = {"excitation": (lam, y), "emission 420": (lam_em, emission)}
+    iso = plate_isosbestic(spectra, x)
+    assert iso is not None
+    scale, usable = isosbestic_scale(spectra, iso)
+    assert usable.all()
+    # with no gain to remove, every well is served the same reference
+    assert np.allclose(scale, scale[0], rtol=0.01)
+    scaled = normalise_to_isosbestic(spectra, iso, scan="excitation")
+    for label in scaled:
+        at = np.array([
+            np.interp(iso, scaled[label][0], scaled[label][1][:, i])
+            for i in range(x.size)
+        ])
+        assert np.allclose(at, 1.0, atol=0.02)
+
+
+def test_a_wrong_reference_wavelength_moves_the_signal_with_the_titrant() -> None:
+    """Off the crossing the correction is titrant-dependent and moves the shape.
+
+    The normalisation only commutes with the titration at a wavelength where both
+    species are equally bright. Twenty nanometres away the reference is a
+    fraction that changes with pH, so the normalised curves stop being two-state -
+    the reason the crossing is located rather than picked.
+    """
+    lam, y, x, _gain = _gained_two_state()
+    # the synthetic pair carries a brightness gain that tracks the titrant, so the
+    # drift guard is switched off here: this test is about the reference
+    # wavelength, not about the validity of the crossing
+    iso = plate_isosbestic({"excitation": (lam, y)}, x, max_drift=None)
+    assert iso is not None
+    right = normalise_to_isosbestic({"exc": (lam, y)}, iso)["exc"][1]
+    wrong = normalise_to_isosbestic({"exc": (lam, y)}, iso + 20.0)["exc"][1]
+    right_spread = float(np.ptp(right[len(lam) // 2]))
+    wrong_spread = float(np.ptp(wrong[len(lam) // 2]))
+    assert wrong_spread != pytest.approx(right_spread, rel=0.0, abs=1e-9)
+
+
+def test_gain_heterogeneity_tilts_the_crossing_so_x_min_drops_the_acid_end() -> None:
+    """Unequal well brightness moves the slope zero, and x_min pulls it back.
+
+    The crossing is read off a regression of signal on titrant. That regression
+    is only a two-state decomposition when every well weighs the same: with gains
+    the weights no longer sum to zero, the weighted sum of the spectra does not
+    vanish where the species cross, and the zero moves. On the NTT plates the
+    most acidic wells dim beyond the two-state model, which is what ``x_min`` is
+    for. Leaving the wells out is a guess, not a correction - so the crossing
+    this function returns is only as good as the brightness spread of the plate,
+    and on real plates it matches the crossing of the species spectra solved by
+    the whole-spectrum fit to well under a nanometre.
+    """
+    lam, e0, e1 = _two_state_spectra()
+    x = np.linspace(5.5, 8.5, 12)
+    frac = 1.0 / (1.0 + 10.0 ** (7.2 - x))
+    y = e0[:, None] * (1 - frac) + e1[:, None] * frac
+    y *= 0.55 + 0.15 * (x - x.min())  # dim at the acid end
+    naive = plate_isosbestic({"excitation": (lam, y)}, x)
+    guarded = plate_isosbestic({"excitation": (lam, y)}, x, x_min=6.5)
+    assert naive is not None
+    assert guarded is not None
+    assert abs(guarded - 500.0) < abs(naive - 500.0)
