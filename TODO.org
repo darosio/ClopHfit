@@ -898,49 +898,61 @@ needed.
   provenance in this tree implement.
 
 * TODO Exploit the buffer's Delta_pH(20 -> 37 C), which is a function of pH
-  Measured from the notes alone (no fit), 88 matched columns over the 10 pH plates
-  of the L8/L1-L4 verification sets that carry two temperatures. The difference is
-  NOT one constant: it rises in magnitude with pH and saturates,
+  Measured from the notes alone (no fit), 224 matched (mutant, column) pairs over
+  the pH plates of the L8/L1-L4 verification sets. The difference is NOT one
+  constant: it rises in magnitude with pH and saturates,
 
-  | pH bin    | n  | dPH    | sd   |
-  |-----------+----+--------+------|
-  | 4.5-5.5   |  3 | -0.099 | 0.086 |
-  | 5.5-6.0   |  8 | -0.154 | 0.017 |
-  | 6.0-6.5   | 11 | -0.243 | 0.086 |
-  | 6.5-7.0   | 11 | -0.246 | 0.100 |
-  | 7.0-7.5   | 11 | -0.243 | 0.089 |
-  | 7.5-8.0   |  6 | -0.272 | 0.136 |
-  | 8.0-8.5   | 16 | -0.295 | 0.083 |
-  | 8.5-9.5   | 22 | -0.257 | 0.087 |
+  | pH bin    |  n | dPH    | sd    |
+  |-----------+----+--------+-------|
+  | 4.5-5.5   |  3 | -0.139 | 0.011 |
+  | 5.5-6.0   | 25 | -0.107 | 0.056 |
+  | 6.0-6.5   | 25 | -0.186 | 0.058 |
+  | 6.5-7.0   | 28 | -0.232 | 0.075 |
+  | 7.0-7.5   | 29 | -0.192 | 0.080 |
+  | 7.5-8.0   | 26 | -0.237 | 0.113 |
+  | 8.0-8.5   | 32 | -0.256 | 0.058 |
+  | 8.5-9.5   | 56 | -0.204 | 0.062 |
 
-  with dPH -> 0 at low pH (the buffer is fully protonated there), a 3-parameter
-  empirical curve fits it with a residual sd of 0.088 pH:
+  with dPH -> 0 at low pH (the buffer is fully protonated there). A 3-parameter
+  empirical curve fits it with a residual sd of 0.075 pH:
 
       dPH(pH) = amp / (1 + 10 ** ((pKa - pH) * w))
-      amp = -0.2673 +/- 0.0126     pKa = 5.54 +/- 0.19     w = 1.00 +/- 0.50
+      amp = -0.2259 +/- 0.0075    pKa = 5.73 +/- 0.12    w = 0.93
 
-  i.e. -0.084 at pH 5.2, -0.198 at pH 6.0, -0.258 at pH 7.0, -0.266 at pH 8.0. The
-  inflection near pH 5.5 and Hill slope ~1 say the coefficient is governed by one
-  protonation step of the buffer; the identity of the buffer is the experimenter's
-  to confirm (a MES/citrate-like pKa, not Tris).
+  i.e. -0.07 at pH 5.2, -0.17 at pH 6.0, -0.22 at pH 7.0, -0.23 at pH 8.5. The
+  inflection near pH 5.7 and Hill slope ~1 say one protonation step governs it;
+  the buffer identity is the experimenter's to confirm (a MES/citrate-like pKa,
+  not Tris). The residual sd is the honest width of this knowledge: plate-to-plate
+  scatter is as large as the within-plate spread, so the curve is a prior centre,
+  not a calibration.
 
-  Correction to an earlier note here: the Cl plates all sit at pH 5.20, where this
-  curve predicts -0.08 +/- 0.09, so their notes recording identical pH at both
-  temperatures is consistent with the measurement, not evidence of a copied note.
-  The earlier "note-copy" reading was wrong. What remains worth checking is that
-  the difference is recorded as exactly 0.000 rather than as the predicted -0.08,
-  which matters only if a Cl plate is fitted at more than one temperature.
+  Two data-layout facts that the first pass got wrong, both worth keeping:
+  - `random1_A11_G02_purified` is organised as ONE NOTE PER TEMPERATURE
+    (`..._20C_note.csv`, `..._37C_note.csv`, each carrying both mutants), not as one
+    combined note. Paired correctly its dPH is -0.15 (A11) / -0.19 (G02), flatter
+    than the other plates, and it is what pulls the fitted amp from -0.27 to -0.23.
+    Fitting such a plate needs the notes joined: `ppr enspire 20C.csv 20C_note.csv
+    --join 37C.csv:37C_note.csv`, which writes a combined `_joined_note.csv` beside
+    the outputs. Verified on this plate: both mutants fit at both temperatures.
+  - `pKa_lysate/random1_A11_G02_note.csv` really does record the SAME pH at both
+    temperatures (24 of 24 pairs identical), so that note carries no axis
+    measurement at 37 C and must be excluded from any dPH analysis. It is not a
+    copying artefact, it is a single-temperature record.
+  The Cl plates all sit at pH 5.20 where the curve gives -0.07 +/- 0.08, so their
+  notes recording identical pH at both temperatures is consistent with the
+  measurement rather than a defect.
 
   Three uses, in order of value:
   1. Constrain the two-temperature fits with x(37, i) = x(20, i) + dPH(pH_i),
-     evaluated at that well's pH, width the 0.088 residual rather than the 0.022
-     across-plate sd (that one averaged the ladder and so hid the pH dependence).
-     This halves the axis parameters and breaks the between-temperature half of the
-     K-x ridge on physical grounds.
-  2. Screen plates before fitting: dPH is computable from the note, so compare the
-     note's own 37-20 C difference against dPH(pH) and flag beyond ~3 sd.
+     evaluated at that well's pH, with the 0.075 residual as its width (not the
+     0.022 across-plate sd of a ladder-averaged difference, which hid the pH
+     dependence). This halves the axis parameters and breaks the
+     between-temperature half of the K-x ridge on physical grounds.
+  2. Screen plates before fitting: dPH is computable from the note, so compare a
+     plate's own 37-20 C difference against dPH(pH) and flag beyond ~3 sd. A ladder
+     spanning 5.5-9.2 should show a RANGE of dPH, not one number.
   3. Decontaminate Delta_H: an axis offset delta biases the van't Hoff slope by
-     2.303 R delta / d(1/T), which is 27.6 kJ/mol at 0.27 pH. Because delta now
-     depends on pH, the bias has to be recomputed per plate over its actual pH
-     range: full size for a 7-9 ladder, about a third of it for a ladder sitting at
-     pH 5-6.
+     2.303 R delta / d(1/T), i.e. 23 kJ/mol at 0.23 pH - against the 43 kJ/mol the
+     G10 fit reported. Because delta depends on pH, recompute per plate over its
+     actual pH range: near the full size for a 7-9 ladder, about a third of it for
+     a ladder sitting at pH 5-6.
