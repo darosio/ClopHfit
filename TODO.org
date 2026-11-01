@@ -1001,3 +1001,26 @@ needed.
      plateau exactly where the 20 C pKa is set, and a +0.15 bias there would explain
      the whole gap to the expected 0.2-0.3 on its own.
   2. Budget 2000 x 4 minimum and drop A06 until it samples cleanly.
+
+* TODO The marginalized fitter's species prior collapses - reported spectra are wrong
+  Measured while wiring the PPC on the committed G10 plate (20 C, one scan,
+  60 draws x 1 chain): the posterior of ``species_scale_excitation`` settles at
+  1e-5 while the data are peak-normalised to O(1). ``prec_e = curv / s_e**2 + ridge``
+  then fixes the species at the prior mean, so the likelihood contributes almost
+  nothing to them - the fit is effectively conditioned on the least-squares species
+  instead of inferring them - and the conditional reconstruction returns species
+  spectra of order 5e6 (E0 median 4.8e6, max 1.2e7) against data of order 1.
+
+  Consequences, all observed: the marginal model's species spectra, and therefore
+  its panel figure, are wrong by about 1e7; the posterior predictive check cannot be
+  applied to it (observed RMS 5.6e6 against replicates 7e-4); and its reported K is
+  driven by the prefit species prior rather than by the spectra, which is consistent
+  with the undercoverage already noted in its docstring (0.25-0.70) and with the
+  single-scan fits that produced entirely negative species.
+
+  Fix before trusting anything else from this fitter: check the scaling of
+  ``s_e``/``rms`` against the data units (``top`` divides the species mean and rms
+  but not, apparently, what the reconstruction and the reported spectra expect),
+  and the conditioning of the conditional Gaussian in
+  ``_conditional_species_draws``. A regression test should assert that the reported
+  species peak is within an order of magnitude of the data peak.
