@@ -1303,13 +1303,21 @@ def _vanthoff_axis_tie(
     if dph_buffer is None:
         return None
     subset = note[note["Name"].astype(str) == name]
+    # keyed by temperature AND well: these notes reuse the same well labels at both
+    # temperatures, so a well-only key silently returns one temperature's pH for
+    # both and every offset comes out zero
     recorded = {
-        str(well): float(ph)
-        for well, ph in zip(subset["Well"], subset["pH"], strict=True)
+        (float(temp), str(well)): float(ph)
+        for temp, well, ph in zip(
+            subset["Temp"], subset["Well"], subset["pH"], strict=True
+        )
     }
     reference = temps[0]
     ph = {
-        t: np.array([recorded.get(str(w), np.nan) for w in wells[t]], dtype=np.float64)
+        t: np.array(
+            [recorded.get((float(t), str(w)), np.nan) for w in wells[t]],
+            dtype=np.float64,
+        )
         for t in temps
     }
     auto = dph_buffer.strip().lower() == "auto"

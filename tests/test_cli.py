@@ -970,3 +970,33 @@ def test_global_table_records_the_options_that_moved_it(
     result = runner.invoke(ppr, args)
     assert result.exit_code == 0, result.output
     assert (out / "NTT-G10_K_global.json").read_bytes() == first
+
+
+def test_dph_buffer_reads_the_ph_per_temperature_not_per_well() -> None:
+    """A note that reuses well labels at two temperatures must still give offsets.
+
+    These notes list the same wells (A01..) at 20 and at 37 C with different pH.
+    Keying the lookup by well alone returns one temperature's pH for both, every
+    offset comes out zero, and the tie then silently deletes the buffer's shift
+    from the axis instead of imposing it - which moved pKa(37) by 0.25 pH before
+    it was caught.
+    """
+    from clophfit.__main__ import _vanthoff_axis_tie  # ruff: ignore[import-outside-top-level, import-private-name]
+
+    note = pd.DataFrame({
+        "Well": ["A01", "A02", "A01", "A02"],
+        "pH": [8.85, 8.53, 8.70, 8.39],
+        "Cl": [0, 0, 0, 0],
+        "Name": ["X"] * 4,
+        "Temp": [20.0, 20.0, 37.0, 37.0],
+    })
+    wells = {20.0: ["A01", "A02"], 37.0: ["A01", "A02"]}
+    tie = _vanthoff_axis_tie(note, "X", wells, [20.0, 37.0], "auto")
+    assert tie is not None
+    pair, offset = tie[37.0]
+    assert list(pair) == [0, 1]
+    assert np.allclose(offset, [-0.15, -0.14]), offset
+    # a fixed offset ignores the note but keeps the pairing
+    fixed = _vanthoff_axis_tie(note, "X", wells, [20.0, 37.0], "0.25")
+    assert fixed is not None
+    assert np.allclose(fixed[37.0][1], [0.25, 0.25])
