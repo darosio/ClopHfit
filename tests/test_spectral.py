@@ -16,6 +16,7 @@ from clophfit.fitting.spectral import (
     fit_spectra_global_bayes,
     observed_fraction,
     paired_delta,
+    posterior_predictive_check,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
 from clophfit.prenspire.spectral import (
@@ -1037,3 +1038,39 @@ def test_column_axis_tie_pairs_the_two_temperatures_by_column() -> None:
         column_axis_tie(["A01"], np.array([8.0]), ["A01", "B01"], np.array([7.9, 7.8]))
         is None
     )
+
+
+def test_posterior_predictive_check_reports_scale_and_structure() -> None:
+    """The check must be able to say "noise scale fine, structure wrong".
+
+    On the committed G10 plate the residual RMS sits inside the replicate interval
+    while its lag-1 autocorrelation is far above it: the model's per-wavelength
+    independent errors cannot produce a residual that is smooth along wavelength.
+    That is exactly the diagnostic the check exists for, so both statistics are
+    pinned - a check that only ever returned a p-value near 0.5 would be useless.
+    """
+    eff = EnspireFile(DATA / "G10.csv")
+    note = Note(DATA / "NTT-G10_note.csv").note
+    one = note[(note["Name"] == "NTT-G10") & (note["Temp"] == 20.0)].drop_duplicates(
+        "Well"
+    )
+    spectra, _wells, x, _peaks = sample_spectra(
+        eff,
+        one["Well"].tolist(),
+        one["pH"].to_numpy(float),
+        20.0,
+        is_ph=True,
+        buffer_wells=note[note["Name"] == "buffer"]["Well"].tolist(),
+    )
+    fit = fit_spectra_global_bayes(
+        x, spectra, x_sigma=0.08, is_ph=True, draws=120, chains=2, tune=150, seed=0
+    )
+    table = posterior_predictive_check(fit, spectra, is_ph=True, draws=40, seed=0)
+    assert set(table["stat"]) == {"rms", "lag1"}
+    assert table["draws"].min() == 40
+    assert table["p_two_sided"].between(0.0, 1.0).all()
+    lag = table[table.stat == "lag1"].iloc[0]
+    assert lag.observed > lag.rep_hi, "the residual is smooth along wavelength"
+    assert lag.p_two_sided < 0.05
+    rms = table[table.stat == "rms"].iloc[0]
+    assert rms.rep_lo <= rms.observed <= rms.rep_hi, "the noise scale is about right"

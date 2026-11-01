@@ -38,9 +38,10 @@ without that column and limits the shift on a denatured plate to 0.13 pH (1.34 w
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+import pandas as pd
 import pymc as pm  # type: ignore[import-untyped]
 import pytensor.tensor as pt
 import xarray as xr
@@ -339,6 +340,127 @@ def _solve(
         )
         se = float(np.sqrt(cov[0, 0]))
     return theta, se, sigma
+
+
+def posterior_predictive_check(
+    idata: Any,  # ruff: ignore[any-type]
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    is_ph: bool = True,
+    draws: int = 200,
+    seed: int = 0,
+) -> pd.DataFrame:
+    r"""Compare simulated replicates of the fit with the data it was fitted to.
+
+    A posterior that describes the data must also be able to generate it. For a
+    sample of posterior draws this simulates each scan from the fitted model -
+    :math:`y = s_w \\sum_s f_s(x_w) E_s(lambda) + N(0, sigma)` - and compares two
+    statistics of the observed residual with the distribution of the same statistic
+    under the replicates:
+
+    ``rms``
+        Root-mean-square residual per wavelength, pooled. It is the scale check: if
+        the observed value sits far above the replicates the noise model is too
+        tight, far below and it is too loose.
+    ``lag1``
+        Lag-1 autocorrelation of the residual along wavelength, averaged over wells.
+        It is the shape check: independent per-wavelength noise predicts near zero,
+        and a systematic misspecification - a third species, a wavelength-dependent
+        gain, a scan artefact - leaves correlation the model does not allow for.
+
+    Both are computed against the same model prediction for the observed data and
+    for each replicate, so the comparison is like for like, and reported as a
+    two-sided Bayesian p-value: the fraction of replicates whose statistic is at
+    least as extreme.
+
+    Parameters
+    ----------
+    idata : Any
+        Posterior of :func:`fit_spectra_global_bayes` or its marginalized twin, with
+        ``E*_<scan>``, ``x_true``, ``amplitude`` and ``sigma_<scan>``.
+    spectra : Mapping[str, tuple[ArrayF, ArrayF]]
+        The scans the fit consumed, ``(wavelengths, Y[n_lambda, n_wells])``.
+    is_ph : bool
+        pH titration or ligand binding; it selects the titration curve.
+    draws : int
+        Posterior draws simulated; more makes the p-value finer at linear cost.
+    seed : int
+        Seed of the replicate noise, so the check reproduces.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per scan with ``rms`` and ``lag1``: the observed statistic, the
+        replicate mean and 94 % interval, and the two-sided p-value.
+    """
+    post = idata.posterior
+    chains, ndraw = int(post.sizes["chain"]), int(post.sizes["draw"])
+
+    def flat(name: str) -> np.ndarray:
+        arr = np.asarray(post[name].values, dtype=np.float64)
+        return arr.reshape(chains * ndraw, *arr.shape[2:])
+
+    total = chains * ndraw
+    take = np.linspace(0, total - 1, min(draws, total)).astype(int)
+    k = flat("K")[take]
+    x = flat("x_true")[take]
+    amp = flat("amplitude")[take]
+    rng = np.random.default_rng(seed)
+    rows: list[dict[str, object]] = []
+    for name, (_lam, values) in spectra.items():
+        y = np.asarray(values, dtype=np.float64).T  # (n_wells, n_lambda)
+        states = [
+            flat(var)[take]
+            for var in sorted(
+                v for v in post.data_vars if v.endswith(f"_{name}") and v[0] == "E"
+            )
+        ]
+        sigma = flat(f"sigma_{name}")[take]
+        obs: list[tuple[float, float]] = []
+        rep: list[tuple[float, float]] = []
+        for i in range(len(take)):
+            frac_basic = np.asarray(
+                binding_1site(x[i], k[i], 1.0, 0.0, is_ph=is_ph), dtype=np.float64
+            )
+            frac = np.column_stack([frac_basic, 1.0 - frac_basic])
+            species = np.vstack([states[s][i] for s in range(len(states))])
+            mu = amp[i][:, None] * (frac @ species)
+            for target, sample in (
+                (obs, y),
+                (rep, mu + rng.normal(0.0, sigma[i], mu.shape)),
+            ):
+                resid = sample - mu
+                target.append((
+                    float(np.sqrt(np.mean(resid**2))),
+                    float(np.mean([_lag1(resid[w]) for w in range(resid.shape[0])])),
+                ))
+        for j, stat in enumerate(("rms", "lag1")):
+            obs_v = float(np.mean([o[j] for o in obs]))
+            rep_v = np.array([r[j] for r in rep])
+            lo, hi = np.quantile(rep_v, [0.03, 0.97])
+            share = float(np.mean(rep_v >= obs_v))
+            rows.append({
+                "scan": name,
+                "stat": stat,
+                "observed": obs_v,
+                "rep_mean": float(np.mean(rep_v)),
+                "rep_lo": float(lo),
+                "rep_hi": float(hi),
+                "p_two_sided": float(min(1.0, 2.0 * min(share, 1.0 - share))),
+                "draws": len(take),
+            })
+    return pd.DataFrame(rows)
+
+
+def _lag1(values: ArrayF) -> float:
+    """Lag-1 autocorrelation of one residual trace, zero when it is degenerate."""
+    v = np.asarray(values, dtype=np.float64)
+    v = v[np.isfinite(v)]
+    if v.size < 3:  # ruff: ignore[magic-value-comparison]
+        return 0.0
+    v -= v.mean()
+    den = float(v @ v)
+    return float(v[:-1] @ v[1:] / den) if den > 0.0 else 0.0
 
 
 def paired_delta(

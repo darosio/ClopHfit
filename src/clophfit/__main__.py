@@ -60,6 +60,7 @@ from clophfit.fitting.spectral import (
     fit_spectra_global,
     fit_spectra_global_bayes,
     fit_spectra_global_bayes_marginal,
+    posterior_predictive_check,
 )
 from clophfit.prenspire import (
     EnspireFile,
@@ -820,6 +821,19 @@ def _dry_run_validation(inputs: _DryRunInputs) -> None:
     "censor the reported species draws, leaving the K posterior untouched.",
 )
 @click.option(
+    "--ppc",
+    "ppc",
+    is_flag=True,
+    default=False,
+    help="For --method global-bayes: also write <stem>_ppc.csv, a posterior "
+    "predictive check. Each scan is simulated from a sample of posterior draws and "
+    "the observed residual RMS and its lag-1 autocorrelation along wavelength are "
+    "compared with the same statistics under the replicates, as two-sided Bayesian "
+    "p-values. RMS far from the replicates means the noise scale is wrong; lag-1 "
+    "far above them means the model's independent per-wavelength errors cannot "
+    "describe the residual structure.",
+)
+@click.option(
     "--dpH-buffer",
     "dph_buffer",
     default=None,
@@ -905,6 +919,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     x_pool: str,
     x_groups: str,
     dph_buffer: str | None,
+    ppc: bool,
 ) -> None:
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
@@ -1003,6 +1018,11 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         ctx.fail(
             f"--x-pool and --x-groups shape the Bayesian latent axis "
             f"{sorted(bayes_methods)} (got --method {method})"
+        )
+    if ppc and method != "global-bayes":
+        ctx.fail(
+            f"--ppc simulates the whole-spectrum free-species posterior (got "
+            f"--method {method})"
         )
     if dph_buffer is not None and method != "vanthoff-bayes":
         ctx.fail(
@@ -1160,6 +1180,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
             x_pool=x_pool,
             x_groups=x_groups,
             provenance=run_provenance,
+            ppc=ppc,
         )
     if method == "global-bayes-marginal":
         if x_sigma is None:
@@ -2325,6 +2346,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
     x_pool: str = "partial",
     x_groups: str = "column",
     provenance: Mapping[str, object] | None = None,
+    ppc: bool = False,
 ) -> pd.DataFrame:
     """Fit whole spectra with a joint posterior over K, x and spectral noise."""
     return _enspire_global_bayes_core(
@@ -2349,6 +2371,7 @@ def fit_enspire_global_bayes(  # ruff: ignore[too-many-arguments]
         iso_band=iso_band,
         x_pool=x_pool,
         x_groups=x_groups,
+        ppc=ppc,
         provenance=provenance,
     )
 
@@ -2426,6 +2449,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     x_pool: str = "partial",
     x_groups: str = "column",
     provenance: Mapping[str, object] | None = None,
+    ppc: bool = False,
 ) -> pd.DataFrame:
     """Shared whole-spectrum Bayesian pipeline behind the two fitters.
 
@@ -2588,7 +2612,50 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     )
     pd.DataFrame(x_rows).to_csv(out_dir / f"{stem}_x_{suffix}.csv", index=False)
     _plot_global_bayes(figdata, out_dir / f"{stem}_{suffix}.pdf")
+    if ppc:
+        _write_ppc(figdata, out_dir, stem, suffix)
     return table
+
+
+def _flag(p_two_sided: float) -> bool:
+    """Whether a two-sided Bayesian p-value is small enough to print."""
+    return p_two_sided < 0.05  # ruff: ignore[magic-value-comparison]
+
+
+def _write_ppc(
+    figdata: Sequence[Any],
+    out_dir: Path,
+    stem: str,
+    suffix: str,
+) -> pd.DataFrame:
+    """Run and write the posterior predictive check for every fitted group.
+
+    ``figdata`` carries the trace and the spectra each group was fitted on, so the
+    check needs nothing else. One row per (group, scan, statistic); the console
+    line names the statistics whose observed value falls outside the replicate
+    interval, because those are the ones that say the model is misspecified rather
+    than merely noisy.
+    """
+    tables: list[pd.DataFrame] = []
+    for sample, temp, is_ph, _wells, _x, spectra, trace in figdata:
+        table = posterior_predictive_check(trace, spectra, is_ph=bool(is_ph), draws=200)
+        table.insert(0, "temp", temp)
+        table.insert(0, "sample", sample)
+        tables.append(table)
+        for rec in table.to_dict("records"):
+            if _flag(float(rec["p_two_sided"])):
+                print(
+                    f"ppc: {sample} at {temp} {rec['scan']} {rec['stat']} "
+                    f"observed {float(rec['observed']):.3g} vs replicates "
+                    f"[{float(rec['rep_lo']):.3g}, {float(rec['rep_hi']):.3g}] "
+                    f"p {float(rec['p_two_sided']):.3f}"
+                )
+    frame = pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
+    if not frame.empty:
+        frame.to_csv(out_dir / f"{stem}_ppc.csv", index=False)
+        print(f"ppc: wrote {out_dir / f'{stem}_ppc.csv'}")
+    del suffix
+    return frame
 
 
 def _plot_global_bayes(  # ruff: ignore[too-many-statements]
