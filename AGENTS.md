@@ -241,3 +241,15 @@ uv run pytest -v -m slow
 # Run all tests
 uv run pytest -v -m ""
 ```
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in the repo's GitHub Issues (`darosio/ClopHfit`), via the `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root (neither exists
+yet; created lazily). See `docs/agents/domain.md`.
