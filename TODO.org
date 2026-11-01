@@ -946,10 +946,32 @@ needed.
     two-temperature plate: the tie must narrow the Delta_H interval without moving
     its centre. If it moves the centre, the recorded axis is not the true one and
     the Delta_H correction (below) is the real task.
-  * Scope note: this is a *noise* constraint. It does not fix a systematic axis
-    offset. If the electrode was read at 20 C and the reading used at 37 C, the
-    recorded 37 C pH is high by |dPH| and Delta_H must be corrected instead: an
-    axis offset delta biases the van't Hoff slope by 2.303 R delta / d(1/T), which
-    at 0.28 pH is 28 kJ/mol against the 43 kJ/mol the G10 fit reported. Which case
-    applies is a question about the protocol, and the recorded dPH matching the
-    buffer curve suggests the electrode was read at temperature.
+  * Protocol, confirmed: the electrode was calibrated at room temperature and each
+    well read at its nominal temperature. That makes the recorded 20 C axis the
+    reference-quality one and leaves the 37 C axis carrying whatever the meter did
+    with its slope. An uncompensated Nernst slope would give a scale error
+    eps = (293.15/310.15 - 1)(pH - pH_cal) = -0.0548 per pH unit, linear in pH, zero
+    at the calibration point. Measured over the ten trusted plates (n = 80):
+
+        dPH = -0.0625 +/- 0.0342  -0.0264 +/- 0.0045 * pH    (residual sd 0.045)
+
+    so the slope is 5.9 sigma from zero and 6.3 sigma from the uncompensated
+    prediction - roughly half of it, i.e. the meter compensated part of the way or
+    the buffer contributes a pH dependence of its own. The two cannot be separated
+    with these data.
+  * Consequence for Delta_H, and a retraction of the 28 kJ/mol figure recorded
+    earlier: that assumed a temperature-dependent *offset*. A scale error does not
+    behave like one - only its value at the pKa matters, and it cancels with the
+    calibration point:
+
+        pKa 7.4, pH_cal 7.0 -> axis error -0.011 pH -> dH bias -1.1 kJ/mol
+        pKa 7.7, pH_cal 7.0 -> axis error -0.018 pH -> dH bias -1.9 kJ/mol
+
+    against the 43 kJ/mol fitted. So under this protocol the existing Delta_H values
+    are not contaminated in any way that matters, and the shared-Delta model is a
+    *precision and QC* device - it reduces axis noise and yields a per-plate axis
+    quality - not a rescue from a large systematic error.
+  * Design consequence: the tie must be a per-column offset (x_37 = x_20 + measured
+    dPH of that column), which is what the plan above says. It is not a pure
+    equality because the residual includes the scale term; the 0.034 width absorbs
+    that over a ladder of a few pH units.
