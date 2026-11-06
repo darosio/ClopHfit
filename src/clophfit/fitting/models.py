@@ -262,6 +262,62 @@ def binding_1site(  # ruff: ignore[too-many-arguments]
     return S0 + (S1 - S0) * (x / K) ** hill / (1 + (x / K) ** hill)
 
 
+def growth_fraction(
+    x: ArrayF, K: float | ArrayF, *, is_ph: bool = False, hill: float = 1.0  # ruff: ignore[invalid-argument-name]
+) -> ArrayF:  # fmt: skip
+    """Share of the state the titrant grows, one value per titrant level.
+
+    :func:`binding_1site` returns the *occupied* state (state 1): the protonated
+    form on a pH titration, the ligand-bound form on a binding one. Panels and
+    tables that report a fraction mean the state the titrant grows - the
+    deprotonated, anionic form as the pH rises, or the bound form as the ligand
+    rises - which is the complement on a pH titration and the same number on a
+    ligand one. Reporting the two interchangeably is the ``f_basic`` /
+    ``f_neutral`` confusion that :func:`~clophfit.fitting.spectral.observed_fraction`
+    exists to avoid, so the conversion lives here rather than at each call site.
+
+    Parameters
+    ----------
+    x : ArrayF
+        Titrant values (pH, or ligand concentration in the titrant's units).
+    K : float | ArrayF
+        pKa (pH titration) or Kd (ligand titration). An array is allowed so a
+        posterior of K can be evaluated against a grid or a set of wells in one
+        call: ``x`` of shape ``(n,)`` and ``K`` of shape ``(n_draws, 1)`` broadcast
+        to ``(n_draws, n)``, which is how the panel code gets the fraction of
+        every well for every draw without a Python loop.
+    is_ph : bool
+        pH titration (report the anionic share) or ligand binding (report the
+        bound share).
+    hill : float
+        Hill slope handed to :func:`binding_1site`; the fraction is 0.5 at
+        ``x = K`` whatever its value.
+
+    Returns
+    -------
+    ArrayF
+        Fraction in ``[0, 1]``, same shape as ``x``.
+
+    Examples
+    --------
+    Half-titration sits at K, and one pH unit above pKa is 10/11 of the
+    anionic form:
+
+    >>> import numpy as np
+    >>> growth_fraction(np.array([7.0, 8.0]), 7.0, is_ph=True).round(4)
+    array([0.5    , 0.9091])
+    >>> growth_fraction(np.array([10.0, 30.0]), 10.0).round(4)
+    array([0.5 , 0.75])
+    """
+    # binding_1site annotates K as a scalar; it broadcasts an array elementwise,
+    # which is exactly what the posterior grid relies on
+    occupied = np.asarray(
+        binding_1site(x, K, 0.0, 1.0, is_ph=is_ph, hill=hill),  # type: ignore[arg-type]
+        dtype=np.float64,
+    )
+    return 1.0 - occupied if is_ph else occupied
+
+
 def kd(kd1: float, pka: float, ph: ArrayF | float) -> ArrayF | float:
     r"""Calculate pH-dependent dissociation constant with infinite cooperativity.
 

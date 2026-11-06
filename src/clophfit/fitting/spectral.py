@@ -554,6 +554,9 @@ def observed_fraction(
 ) -> ArrayF | None:
     """Report the observed fraction of the state the titrant grows, one value per well.
 
+    Thin wrapper over :func:`observed_fraction_from_species` that takes the
+    species of a least-squares fit; see that function for the model.
+
     On a pH titration that state is the deprotonated, anionic (basic) one - the
     one that rises with pH, and the form that fluoresces - and on a ligand
     titration it is the bound one, which rises with the titrant. The fit's
@@ -590,7 +593,46 @@ def observed_fraction(
         The fraction per well, same well order as the data; ``None`` when no data
         label matches the fit's species, so a caller can skip its marker.
     """
-    labels = [label for label in spectra if label in fit.species]
+    return observed_fraction_from_species(
+        fit.species, spectra, is_ph=is_ph, n_grid=n_grid
+    )
+
+
+def observed_fraction_from_species(
+    species: Mapping[str, ArrayF],
+    spectra: Mapping[str, tuple[ArrayF, ArrayF]],
+    *,
+    is_ph: bool = True,
+    n_grid: int = 401,
+) -> ArrayF | None:
+    """Observed per-well fraction of the state the titrant grows, from any species pair.
+
+    The same unmixing :func:`observed_fraction` does, but taking the two species
+    spectra directly instead of reading them off a :class:`SpectralFit`, so the
+    posterior median spectra of a Bayesian fit can use it unchanged. ``species``
+    maps a scan label to an array of shape ``(2, n_lambda)``: row 0 is the state
+    present without the titrant (deprotonated on a pH plate, free on a ligand
+    one) and row 1 the occupied one, the order both fitters use.
+
+    Parameters
+    ----------
+    species : Mapping[str, ArrayF]
+        Per scan label, the two species spectra, shape ``(2, n_lambda)``.
+    spectra : Mapping[str, tuple[ArrayF, ArrayF]]
+        Per scan label, ``(wavelengths, Y[n_lambda, n_wells])`` in the well order
+        the caller wants the fractions in.
+    is_ph : bool
+        pH titration (report the deprotonated anionic state) or ligand binding
+        (report the bound state).
+    n_grid : int
+        Number of fraction values searched, from 1e-3 to 1 - 1e-3.
+
+    Returns
+    -------
+    ArrayF | None
+        One fraction per well, or ``None`` when no label matches.
+    """
+    labels = [label for label in spectra if label in species]
     if not labels:
         return None
     n_w = min(
@@ -599,10 +641,8 @@ def observed_fraction(
     frac = np.linspace(1e-3, 1.0 - 1e-3, n_grid)
     cost = np.zeros((n_grid, n_w), dtype=np.float64)
     for label in labels:
-        basic = np.asarray(fit.species[label][0], dtype=np.float64)
-        delta = np.asarray(
-            fit.species[label][1] - fit.species[label][0], dtype=np.float64
-        )
+        basic = np.asarray(species[label][0], dtype=np.float64)
+        delta = np.asarray(species[label][1] - species[label][0], dtype=np.float64)
         y = np.asarray(spectra[label][1], dtype=np.float64)[:, :n_w]
         a = basic @ y
         b = delta @ y
