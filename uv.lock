@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
@@ -803,7 +803,7 @@ requires-dist = [
     { name = "myst-nb", marker = "extra == 'docs'", specifier = ">=1.4.0" },
     { name = "numpyro", marker = "extra == 'gpu'", specifier = ">=0.22.0" },
     { name = "nutpie", specifier = ">=0.16.11" },
-    { name = "odrpack", specifier = ">=0.7.0" },
+    { name = "odrpack", specifier = ">=0.7.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=3.1.0" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.23.0" },
