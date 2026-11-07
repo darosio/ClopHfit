@@ -805,7 +805,7 @@ requires-dist = [
     { name = "nutpie", specifier = ">=0.16.11" },
     { name = "odrpack", specifier = ">=0.7.1" },
     { name = "openpyxl", specifier = ">=3.1.5" },
-    { name = "pandas", specifier = ">=3.1.0" },
+    { name = "pandas", specifier = ">=3.1.1" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.23.0" },
     { name = "pygments", marker = "extra == 'docs'", specifier = ">=2.21.0" },
     { name = "pymc", specifier = ">=6.4.0" },
