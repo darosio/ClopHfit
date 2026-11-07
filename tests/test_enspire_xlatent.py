@@ -277,6 +277,106 @@ def test_global_bayes_seed_reproducible() -> None:
 
 
 @pytest.mark.slow
+def test_cli_global_bayes_pools_columns_on_a_two_temperature_note(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """``--x-pool partial --x-groups column`` with both temperatures in one note.
+
+    Regression: the replicate groups were built from the note's wells before
+    :func:`sample_spectra` dropped the wells it cannot measure for a given
+    temperature, so a two-temperature note reached the sampler with "groups has
+    32 entries for 24 wells", the fit raised, and the CLI still wrote an *empty*
+    K table - a silent hole in a batch run. The group index must be built from
+    the wells that survived the correction and the QC screen.
+    """
+    data = tpath / "EnSpire"
+    out = tmp_path / "pooled"
+    out.mkdir()
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(out),
+            "enspire",
+            str(data / "G10.csv"),
+            str(data / "NTT-G10_note.csv"),  # both temperatures
+            "--method",
+            "global-bayes",
+            "--x-pool",
+            "partial",
+            "--x-groups",
+            "column",
+            "--x-sigma",
+            "auto",
+            "--draws",
+            "100",
+            "--chains",
+            "2",
+            "--cores",
+            "1",
+            "--seed",
+            "7",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    table = pd.read_csv(out / "NTT-G10_K_global_bayes.csv")
+    assert len(table) == 2, "one row per temperature"
+    assert table["K"].notna().all()
+    assert (table["x_pool"] == "partial").all()
+    assert table["x_axis_well_sd"].notna().all()
+
+
+@pytest.mark.slow
+def test_cli_global_bayes_ppc_runs_on_a_two_temperature_note(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    """``--ppc`` must survive the panel figure's extra field in the group tuple.
+
+    Regression: adding the per-scan peaks to the figure data made the posterior
+    predictive check unpack seven fields from an eight-field tuple, so every
+    ``--method global-bayes --ppc`` run crashed *after* the fit, losing the whole
+    output folder.
+    """
+    data = tpath / "EnSpire"
+    out = tmp_path / "ppc"
+    out.mkdir()
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(out),
+            "enspire",
+            str(data / "G10.csv"),
+            str(data / "NTT-G10_note.csv"),
+            "--method",
+            "global-bayes",
+            "--x-pool",
+            "partial",
+            "--x-groups",
+            "column",
+            "--x-sigma",
+            "auto",
+            "--draws",
+            "100",
+            "--chains",
+            "2",
+            "--cores",
+            "1",
+            "--seed",
+            "7",
+            "--ppc",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert list(out.glob("*_ppc.csv")), "the posterior predictive check must be written"
+    ppc = pd.read_csv(next(out.glob("*_ppc.csv")))
+    assert {"sample", "temp", "scan", "stat", "observed", "p_two_sided"} <= set(
+        ppc.columns
+    )
+    assert len(ppc) >= 2, "one row per group and scan at least"
+
+
+@pytest.mark.slow
 def test_cli_global_bayes_writes_posterior_outputs(
     tmp_path: Path, runner: CliRunner
 ) -> None:

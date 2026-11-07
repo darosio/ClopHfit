@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pymc as pm
+import pymc as pm  # type: ignore[import-untyped]
 import pytest
 
 from clophfit.fitting.bayes import create_x_true_pooled, well_groups
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.spectral import (
+    SpectralFit,
     fit_spectra_global,
     fit_spectra_global_bayes,
     observed_fraction,
@@ -787,7 +789,7 @@ def test_species_floor_does_not_change_which_wells_the_screen_drops() -> None:
     note = note[note["Temp"] == 20.0]
     scans = ("exc_anionic", "em_exc420", "em_exc278")
 
-    def run(species_min: float | None) -> tuple[str, object]:
+    def run(species_min: float | None) -> tuple[str, SpectralFit]:
         table, fits = fit_titrations_spectral(
             eff, note, bands=scans, qc=6.0, species_min=species_min
         )
@@ -828,16 +830,19 @@ def test_species_floor_censors_the_bayes_species_draws_only() -> None:
     y2 += rng.normal(0.0, 2e-3, y2.shape)
     spectra = {"excitation": (LAM, y), "emission 420": (LAM, y2)}
 
-    kw = {
-        "x_sigma": 0.08,
-        "is_ph": True,
-        "draws": 60,
-        "chains": 2,
-        "tune": 100,
-        "seed": 0,
-    }
-    free = fit_spectra_global_bayes(x, spectra, **kw)
-    bounded = fit_spectra_global_bayes(x, spectra, species_min=0.0, **kw)
+    fit = partial(
+        fit_spectra_global_bayes,
+        x,
+        spectra,
+        x_sigma=0.08,
+        is_ph=True,
+        draws=60,
+        chains=2,
+        tune=100,
+        seed=0,
+    )
+    free = fit()
+    bounded = fit(species_min=0.0)
 
     raw = np.asarray(free.posterior["E0_emission 420"].values)
     assert raw.min() < 0.0, f"the fixture no longer dips negative (min {raw.min():.3e})"
@@ -853,9 +858,7 @@ def test_species_floor_censors_the_bayes_species_draws_only() -> None:
 
 def _replicate_plate(
     recorded_shift: float, *, seed: int = 5
-) -> tuple[
-    np.ndarray, np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]], np.ndarray
-]:
+) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[np.ndarray, np.ndarray]], list[int]]:
     """Three replicate rows of one ladder, whose recorded axis is off by a shift.
 
     The wells of a column are one solution, so their true fraction is identical;
@@ -872,7 +875,7 @@ def _replicate_plate(
     y = np.outer(anionic, 1.0 - frac) + np.outer(neutral, frac)
     y += rng.normal(0.0, 2e-3, y.shape)
     wells = [f"{row}0{i + 1}" for row in "ABC" for i in range(8)]
-    return x_recorded, x_true, {"excitation": (LAM, y)}, well_groups(wells)
+    return x_recorded, x_true, {"excitation": (LAM, y)}, well_groups(wells).tolist()
 
 
 def test_pooled_axis_binds_the_wells_of_one_replicate_to_one_truth() -> None:
@@ -993,7 +996,7 @@ def test_pooling_the_axis_does_not_move_k_on_a_real_plate() -> None:
         is_ph=True,
         buffer_wells=note[note["Name"] == "buffer"]["Well"].tolist(),
     )
-    groups = well_groups(wells)
+    groups = well_groups(wells).tolist()
     ks: dict[str, float] = {}
     for pool in ("free", "shared", "partial"):
         idata = fit_spectra_global_bayes(
@@ -1023,12 +1026,14 @@ def test_column_axis_tie_pairs_the_two_temperatures_by_column() -> None:
     """
     from clophfit.fitting.bayes import column_axis_tie  # ruff: ignore[import-outside-top-level]
 
-    pair, offset = column_axis_tie(
+    got = column_axis_tie(
         ["A01", "A02", "B01", "B02"],
         np.array([8.85, 8.53, 8.86, 8.54]),
         ["A01", "A02", "B01", "B02"],
         np.array([8.70, 8.39, 8.71, 8.40]),
     )
+    assert got is not None
+    pair, offset = got
     assert list(pair) == [0, 1, 2, 3]
     assert np.allclose(offset, [-0.15, -0.14, -0.15, -0.14])
     # a well with no partner at the other temperature is refused, not guessed

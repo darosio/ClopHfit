@@ -12,6 +12,7 @@ import pytest
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import EnspireFile, Note, bands
 from clophfit.prenspire.bands import (
+    TitrationFits,
     _pooled_hdi,  # ruff: ignore[import-private-name]
     band_rho,
     blank_rows,
@@ -220,8 +221,8 @@ def test_isosbestic_normalisation_keeps_the_band_k_and_drops_the_scale(
     raw = fit_titrations(g10, note, screen="studentized:0.05:5")
     scaled = fit_titrations(g10, note, screen="studentized:0.05:5", isosbestic="auto")
 
-    def head(fits: object) -> pd.Series:
-        table = fits.table  # type: ignore[attr-defined]
+    def head(fits: TitrationFits) -> pd.Series:
+        table = fits.table
         rows = table[
             (table["band"] == "all (shared K)") & (table["subset"] == "screened")
         ]

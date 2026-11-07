@@ -990,13 +990,13 @@ def test_dph_buffer_reads_the_ph_per_temperature_not_per_well() -> None:
         "Name": ["X"] * 4,
         "Temp": [20.0, 20.0, 37.0, 37.0],
     })
-    wells = {20.0: ["A01", "A02"], 37.0: ["A01", "A02"]}
-    tie = _vanthoff_axis_tie(note, "X", wells, [20.0, 37.0], "auto")
+    wells = {"20": ["A01", "A02"], "37": ["A01", "A02"]}
+    tie = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "auto")
     assert tie is not None
-    pair, offset = tie[37.0]
+    pair, offset = tie["37"]
     assert list(pair) == [0, 1]
     assert np.allclose(offset, [-0.15, -0.14]), offset
     # a fixed offset ignores the note but keeps the pairing
-    fixed = _vanthoff_axis_tie(note, "X", wells, [20.0, 37.0], "0.25")
+    fixed = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "0.25")
     assert fixed is not None
-    assert np.allclose(fixed[37.0][1], [0.25, 0.25])
+    assert np.allclose(fixed["37"][1], [0.25, 0.25])
