@@ -110,7 +110,7 @@ def test_pooled_shares_gain_and_keeps_floors_per_plate() -> None:
     out = fit_gain_nnls(df, fit_floor=True).set_index("plate")
     assert out.loc["a", "sigma_floor"] == pytest.approx(10.0, rel=0.1)
     assert out.loc["b", "sigma_floor"] == pytest.approx(25.0, rel=0.05)
-    assert out.loc["a", "gain"] == out.loc["b", "gain"]
+    assert out.loc["a", "gain"] == pytest.approx(out.loc["b", "gain"], rel=1e-12)
     assert out.loc["a", "gain"] == pytest.approx(0.5, rel=0.1)
 
 

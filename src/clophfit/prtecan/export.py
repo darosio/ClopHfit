@@ -523,8 +523,12 @@ def _mark_figure(fr: FitResult, note: str) -> None:
 
 def _verdict_note(fit: pd.DataFrame, well: str, verdict: str) -> str:
     """One line saying what was concluded about a well's K, and its value."""
-    k = float(pd.to_numeric(fit.loc[well, "K"], errors="coerce"))
-    sk = float(pd.to_numeric(fit.loc[well, "sK"], errors="coerce"))
+    k, sk = (
+        fit[["K", "sK"]]
+        .apply(pd.to_numeric, errors="coerce")
+        .loc[well]
+        .to_numpy(dtype=float)
+    )
     se = "n/a" if np.isnan(sk) else f"{sk:.2g}"
     return f"{verdict}: K = {k:.3g} +/- {se}"
 
