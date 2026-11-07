@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     import arviz as az  # type: ignore[import-untyped]
+    from numpy.typing import ArrayLike
 
     from clophfit.clophfit_types import ArrayF
 
@@ -466,8 +467,8 @@ def _lag1(values: ArrayF) -> float:
 def paired_delta(
     value_a: float,
     value_b: float,
-    replicates_a: Sequence[float],
-    replicates_b: Sequence[float],
+    replicates_a: ArrayLike,
+    replicates_b: ArrayLike,
     *,
     z: float = 1.96,
 ) -> dict[str, float]:
@@ -492,9 +493,9 @@ def paired_delta(
         The first reported estimate (the fit's own K, not a replicate mean).
     value_b : float
         The second reported estimate, from the other scan of the same wells.
-    replicates_a : Sequence[float]
+    replicates_a : ArrayLike
         Replicate estimates of the first scan.
-    replicates_b : Sequence[float]
+    replicates_b : ArrayLike
         Replicate estimates of the second scan, in the same order: replicate ``i``
         of ``a`` and of ``b`` must come from the same resampled or deleted unit.
     z : float
