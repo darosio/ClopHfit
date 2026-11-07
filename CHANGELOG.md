@@ -3,6 +3,95 @@
 
 # Changelog
 
+## [0.16.0] - 2026-11-06
+
+### 🚀 Features
+
+- *(prenspire)* Drop Trp-normalisation, add --method bayes, fix x-error figures
+- *(prenspire)* --x-sigma per-well pH-axis prior for --method bayes
+- *(enspire)* Add whole-spectrum marginal-species Bayes fitter and keep mcr-constrained-bayes
+- *(enspire)* Acid state in the free whole-spectrum Bayes fit
+- *(enspire)* Van't Hoff across temperatures on a NUTS posterior
+- *(spectral)* Opt-in well screen for the whole-spectrum global fit
+- *(enspire)* Screen points before the band posterior, and switch its likelihood
+- *(prenspire)* Join exports split by temperature, and let the van't Hoff fit take them
+- *(prenspire)* Locate the isosbestic point and normalise spectra to it
+- *(prenspire)* Normalise every well to the isosbestic point, for every method
+- *(prenspire)* Keep the two temperatures on one amplitude scale when normalising
+- *(prenspire)* Drop the acid end from the isosbestic search
+- *(spectral)* Per-scan QC, per-scan residuals and a well-level interval
+- *(spectral)* Paired delta of two scans from the same wells
+- *(enspire)* --global-qc runs the per-scan screen before the whole-spectrum fit
+- *(spectral)* Screen wells against the fitted species, not against their neighbours
+- *(enspire)* --global-qc for the whole-spectrum Bayes fitters too
+- *(spectral)* Verify the screen against the refitted model
+- *(svd)* Let the whole-spectrum screen feed the legacy projection
+- *(enspire)* Echo the wells the screen drops, for every whole-spectrum method
+- *(prenspire)* Locate the crossing from the fitted species, and draw the global fit's panels
+- *(prenspire)* Correct every scan by one per-well coefficient, and draw it
+- *(spectral)* Keep the panels on the measured scale, band the crossing, dump --inspect
+- *(spectral)* [**breaking**] Bound the species spectra below, and name the fraction right
+- *(enspire)* [**breaking**] Pool the latent axis across replicate wells, off by default
+- *(vanthoff-bayes)* Tie the two temperatures' axes through the buffer offset
+- *(global-bayes)* Add a posterior predictive check that can fail
+- *(prenspire)* Add global Bayesian spectral panels
+
+### 🐛 Bug Fixes
+
+- *(prenspire)* Pooled HDI, per-sample titrant axis, unfitted-band tolerance
+- *(prenspire)* Reject degenerate MCR fits, one wavelength axis per scan, van't Hoff on its own axis
+- *(bayes)* Keep the chain count under the test harness
+- *(prenspire)* Fit each bayes band once, not twice
+- *(lint)* After manual pre-commit-config update
+- *(lock)* After manual cruft update
+- *(typing)* Carry the acid flag in the mcr-bayes plot tuple
+- *(enspire)* Name the vanthoff-bayes wells the curves actually used
+- *(spectral)* Sample the free-species Bayes spectra in a spline basis
+- *(prenspire)* Stop piling up timestamped measurement exports
+- *(spectral)* Do not test wells that sit at the instrument floor
+- *(enspire)* Refuse options the chosen method would silently ignore
+- *(spectral)* One badly-explained scan is enough when it is badly enough
+- Make --global-qc monotone, and refuse to write under data/raw
+- *(prenspire)* Reject an isosbestic point that is not one, and stop svd dying on lmfit's exception
+- *(vanthoff-bayes)* Read the tie's pH per temperature, not per well
+
+### 🚜 Refactor
+
+- *(bayes)* [**breaking**] Remove the unreachable x_prior
+- *(prenspire)* Drop the shared-wavelength isosbestic mode
+- [**breaking**] Retire the MCR Bayesian methods
+- [**breaking**] Retire the MCR method, and record what produced each table
+
+### 📚 Documentation
+
+- *(spectral)* Stop pointing at the removed benchmark artefacts
+- *(benchmarks)* Record that quadrature-marginalising the axis fails
+- Record the Bayesian follow-ups after the axis-pooling study
+- Record the buffer Delta_pH(20->37 C) as a shared constraint to exploit
+- Correct the buffer Delta_pH note - it is a function of pH, not a constant
+- Pair the separate temperature notes, and correct Delta_pH from 224 pairs
+- Refit Delta_pH without the set-up-phase plate, and plan the constraint
+- Fold the electrode protocol into the dpH plan, and retire the 28 kJ/mol scare
+- Attribute dPH to the buffer mixture, and close the correction question
+- Delta_H is per mutant, so compare mutants hierarchically, not point to point
+- Record the marginalized fitter's collapsing species prior
+
+### 🧪 Testing
+
+- Pin the panel scale, the isosbestic band and the inspect sidecar
+- Pin the species floor, the recorded options and the MCR removal
+- *(benchmarks)* Measure the latent-axis pooling recovery
+- Reduce warnings from edge cases and fixtures
+
+### 🦾 Build
+
+- *(deps)* Bump pandas from 3.0.6 to 3.1.0
+- *(deps)* Bump odrpack from 0.6.1 to 0.7.0
+- *(ci)* Manual upgrade pyproject.toml
+- *(ci)* Manual cruft update
+- Stay on py 3.14 until h5py wheel
+- *(deps)* Bump h5netcdf from 1.8.1 to 1.8.2
+
 ## [0.15.3] - 2026-10-08
 
 ### 🐛 Bug Fixes

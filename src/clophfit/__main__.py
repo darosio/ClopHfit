@@ -55,8 +55,6 @@ from clophfit.fitting.errors import (
 )
 from clophfit.fitting.model_validation import trace_diagnostics
 from clophfit.fitting.spectral import (
-    _fractions,
-    _Model,
     fit_spectra_global,
     fit_spectra_global_bayes,
     fit_spectra_global_bayes_marginal,
@@ -70,10 +68,12 @@ from clophfit.prenspire import (
 )
 from clophfit.prenspire.bands import ZERO_AT
 from clophfit.prenspire.spectral import (
+    BayesPanelGroup,
     fit_titrations_spectral,
     isosbestic_by_group,
     model_outliers,
     plate_isosbestic,
+    plot_global_bayes_panels,
     sample_spectra,
 )
 from clophfit.prenspire.thermo import (
@@ -2474,6 +2474,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             np.ndarray,
             dict[str, tuple[np.ndarray, np.ndarray]],
             Any,
+            dict[str, float],
         ]
     ] = []
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2484,7 +2485,6 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         wells = one["Well"].tolist()
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
-        groups = well_groups(wells) if x_groups == "column" else None
         lam = _lam_for(isosbestic, lam_map, name, temp)
         if isinstance(lam, str):
             # resolve "auto" here, as the least-squares path does, so the crossing
@@ -2502,7 +2502,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
                 if raw
                 else None
             )
-        spectra, wells, x, _peaks = sample_spectra(
+        spectra, wells, x, peaks = sample_spectra(
             ef,
             wells,
             x,
@@ -2530,6 +2530,12 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
                 }
                 wells = [w for w, k in zip(wells, mask, strict=True) if k]
                 x = x[mask]
+        # the replicate groups must follow the wells that survived the correction
+        # and the QC screen: sample_spectra drops the wells it cannot measure for
+        # this temperature, so groups built from the note's wells are too long and
+        # create_x_true_pooled refuses them (32 groups for 24 wells on a two
+        # temperature note)
+        groups = well_groups(wells) if x_groups == "column" else None
         sigma = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
         if sigma is None:
             msg = f"--method {suffix.removeprefix('global_').replace('_', '-')} requires a pH titration and resolvable x-sigma"
@@ -2578,7 +2584,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             "x_axis_well_sd": _axis_scale(trace, "x_true_well_sd"),
         })
         xdraw = np.asarray(trace.posterior["x_true"].values).reshape(-1, len(wells))
-        figdata.append((str(name), str(temp), is_ph, wells, x, spectra, trace))
+        figdata.append((str(name), str(temp), is_ph, wells, x, spectra, trace, peaks))
         for i, well in enumerate(wells):
             qlo, median, qhi = np.quantile(xdraw[:, i], [0.03, 0.5, 0.97])
             x_rows.append({
@@ -2637,7 +2643,9 @@ def _write_ppc(
     than merely noisy.
     """
     tables: list[pd.DataFrame] = []
-    for sample, temp, is_ph, _wells, _x, spectra, trace in figdata:
+    # the tuple carries the scan peaks as an eighth field since the panel figure
+    # needed them to restore measured units; the check ignores that field
+    for sample, temp, is_ph, _wells, _x, spectra, trace, _peaks in figdata:
         table = posterior_predictive_check(trace, spectra, is_ph=bool(is_ph), draws=200)
         table.insert(0, "temp", temp)
         table.insert(0, "sample", sample)
@@ -2658,7 +2666,7 @@ def _write_ppc(
     return frame
 
 
-def _plot_global_bayes(  # ruff: ignore[too-many-statements]
+def _plot_global_bayes(
     figdata: list[
         tuple[
             str,
@@ -2668,146 +2676,30 @@ def _plot_global_bayes(  # ruff: ignore[too-many-statements]
             np.ndarray,
             dict[str, tuple[np.ndarray, np.ndarray]],
             Any,
+            dict[str, float],
         ]
     ],
     pdf_path: Path,
 ) -> None:
-    """Plot posterior species spectra, fit lines, K, and per-well latent x."""
-    if not figdata:
-        return
-    fig, axes = plt.subplots(
-        len(figdata),
-        4,
-        figsize=(19.5, 4.2 * len(figdata)),
-        squeeze=False,
-        constrained_layout=True,
-    )
-    for row, (sample, temp, is_ph, wells, x, spectra, trace) in enumerate(figdata):
-        xname = "pH" if is_ph else "Kd"
-        species_ax, fit_ax, k_ax, x_ax = axes[row]
-        posterior = trace.posterior
-        e_med: dict[str, tuple[np.ndarray, ...]] = {}
-        for i, (scan, (wavelengths, _values)) in enumerate(spectra.items()):
-            styles: tuple[tuple[int, str, str], ...] = (
-                (0, "state 0", "-"),
-                (
-                    1,
-                    "state 1",
-                    "--",
-                ),
-            )
-            if f"E2_{scan}" in posterior:
-                styles = (*styles, (2, "state 2 (acid)", ":"))
-            for state, label, style in styles:
-                draws = np.asarray(posterior[f"E{state}_{scan}"].values).reshape(
-                    -1, wavelengths.size
-                )
-                median = np.median(draws, axis=0)
-                lo, hi = np.quantile(draws, [0.03, 0.97], axis=0)
-                color = f"C{i}"
-                species_ax.plot(
-                    wavelengths, median, style, color=color, label=f"{scan}: {label}"
-                )
-                species_ax.fill_between(wavelengths, lo, hi, color=color, alpha=0.12)
-            e_med[scan] = tuple(
-                np.median(
-                    np.asarray(posterior[f"E{st}_{scan}"].values).reshape(
-                        -1, wavelengths.size
-                    ),
-                    axis=0,
-                )
-                for st in range(2 + (1 if f"E2_{scan}" in posterior else 0))
-            )
-        species_ax.set_title(f"{sample} {temp} C: posterior species spectra")
-        species_ax.set_xlabel("wavelength (nm)")
-        species_ax.set_ylabel("normalized signal")
-        species_ax.legend(fontsize=7)
+    """Write the whole-spectrum Bayesian figure: data, two fractions, latent axis.
 
-        # fit lines: observed spectra against the posterior-median model
-        kdraw = np.asarray(posterior["K"].values).reshape(-1)
-        kmed = float(np.median(kdraw))
-        xdraw = np.asarray(posterior["x_true"].values).reshape(-1, len(wells))
-        xmed_wells = np.median(xdraw, axis=0)
-        amp = np.asarray(posterior["amplitude"].values).reshape(-1, len(wells))
-        amp_med = np.median(amp, axis=0)
-        if "delta" in posterior:
-            dmed = float(np.median(np.asarray(posterior["delta"].values).ravel()))
-            fr = _fractions(  # diprotic sequential softmax, columns S0, S1, S2
-                xmed_wells,
-                np.array([kmed, dmed]),
-                _Model(acid_state=True, fit_hill=False, well_scale=True),
-                is_ph=is_ph,
-            )
-        else:
-            # f1 is the state-1 (occupied) fraction: protonated for a pH
-            # plate (10^(K-x) falling weight), bound for a ligand one; fr
-            # is [state 0, state 1] matching the model's columns.
-            f1 = (
-                1 / (1 + 10 ** (xmed_wells - kmed))
-                if is_ph
-                else xmed_wells / (kmed + xmed_wells)
-            )
-            fr = np.column_stack([1 - f1, f1])
-        order_x = np.argsort(x)
-        sel = order_x[
-            np.linspace(0, len(order_x) - 1, min(3, len(order_x))).astype(int)
-        ]
-        for i_scan, (scan, (wavelengths, values)) in enumerate(spectra.items()):
-            fit_ax.plot(
-                wavelengths,
-                values,
-                color="0.82",
-                lw=0.6,
-                alpha=0.7,
-                label="_all wells observed" if i_scan == 0 else None,
-            )
-            e_ms = e_med[scan]
-            for w in sel:
-                curve = amp_med[w] * sum(fr[w, j] * e_ms[j] for j in range(len(e_ms)))
-                fit_ax.plot(wavelengths, curve, lw=1.2, label=str(wells[w]))
-        fit_ax.set_title(f"{sample} {temp} C: observed vs posterior-median fit")
-        fit_ax.set_xlabel("wavelength (nm)")
-        fit_ax.set_ylabel("normalized signal")
-        fit_ax.legend(fontsize=6, loc="best")
-
-        klo, khi = np.quantile(kdraw, [0.03, 0.97])
-        k_ax.hist(kdraw, bins=35, color="0.72")
-        k_ax.axvline(np.median(kdraw), color="black", lw=1)
-        k_ax.axvspan(klo, khi, color="orange", alpha=0.25)
-        rhat = float(az.rhat(trace, var_names=["K"])["K"].item())
-        ess = float(az.ess(trace, var_names=["K"])["K"].item())
-        k_ax.set_title(
-            f"K {kmed:.3f} [{klo:.3f}, {khi:.3f}]; R-hat {rhat:.3f}, ESS {ess:.0f}"
+    A thin adapter: the panels live in
+    :func:`clophfit.prenspire.spectral.plot_global_bayes_panels`, so the figure
+    and the fit cannot drift apart about which wells, scans or peaks were used.
+    """
+    groups = [
+        BayesPanelGroup(
+            label=f"{sample} at {temp}",
+            is_ph=bool(is_ph),
+            wells=wells,
+            x_note=np.asarray(x, dtype=np.float64),
+            spectra=spectra,
+            trace=trace,
+            peaks=peaks,
         )
-        k_ax.set_xlabel("pKa" if is_ph else "Kd")
-        k_ax.set_ylabel("draw count")
-
-        xdraw = np.asarray(posterior["x_true"].values).reshape(-1, len(wells))
-        med = np.median(xdraw, axis=0)
-        lo, hi = np.quantile(xdraw, [0.03, 0.97], axis=0)
-        order = np.argsort(x)
-        ypos = np.arange(len(wells))
-        x_ax.errorbar(
-            med[order],
-            ypos,
-            xerr=np.vstack([med[order] - lo[order], hi[order] - med[order]]),
-            fmt="o",
-            ms=3,
-            capsize=1.5,
-            color="#235789",
-            label=f"latent {xname}, 94% interval",
-        )
-        x_ax.scatter(
-            x[order], ypos, marker="|", s=55, color="#d1495b", label=f"note {xname}"
-        )
-        x_ax.set_yticks(ypos, np.asarray(wells)[order])
-        x_ax.set_xlabel(xname)
-        x_ax.set_ylabel("well")
-        x_ax.set_title(f"Latent {xname} by well")
-        x_ax.legend(fontsize=7)
-        x_ax.grid(axis="x", alpha=0.25)
-    fig.savefig(pdf_path, bbox_inches="tight")
-    plt.close(fig)
+        for sample, temp, is_ph, wells, x, spectra, trace, peaks in figdata
+    ]
+    plot_global_bayes_panels(pdf_path, groups)
 
 
 def fit_enspire_vanthoff(  # ruff: ignore[too-many-arguments]
