@@ -16,7 +16,6 @@ from click.testing import CliRunner
 from PIL import Image
 
 from clophfit.__main__ import (
-    _plot_bayes,  # ruff: ignore[import-private-name]
     clop,
     fit_titration,
     note2csv,
@@ -24,6 +23,7 @@ from clophfit.__main__ import (
 )
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import bands as bands_module
+from clophfit.prenspire.run import plot_bayes
 
 # tests path
 tpath = Path(__file__).parent
@@ -718,7 +718,7 @@ def test_plot_bayes_skips_a_sample_the_sampler_could_not_fit(
     unfitted = bands_module.BandBayes(nan, nan, nan, nan, nan, None)
     data = {"exc_anionic": (np.array([6.0, 7.0, 8.0]), np.array([0.9, 0.6, 0.2]))}
     # nothing drawable: no crash, and no empty figure either
-    _plot_bayes([("sample", "20", data, unfitted, True)], tmp_path / "none.pdf")
+    plot_bayes([("sample", "20", data, unfitted, True)], tmp_path / "none.pdf")
     assert not (tmp_path / "none.pdf").exists()
 
     # a fitted sample next to the unfitted one: the figure is written and
@@ -731,7 +731,7 @@ def test_plot_bayes_skips_a_sample_the_sampler_could_not_fit(
     )
     fitted = bands_module.fit_bands_bayes(ds, seed=1, draws=200, chains=1)
     out = tmp_path / "K_bayes.pdf"
-    _plot_bayes(
+    plot_bayes(
         [
             ("unfitted", "20", data, unfitted, True),
             ("fitted", "20", {"exc_anionic": (x, 0.05 + 0.95 * frac)}, fitted, True),

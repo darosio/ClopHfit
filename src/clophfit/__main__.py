@@ -19,7 +19,6 @@ import pandas as pd
 from click import Context, Path as cPath
 
 from clophfit.fitting.grid import model_signature
-from clophfit.fitting.models import binding_1site
 
 # Set unique pytensor compile dir per process to avoid atexit filelock race
 # when multi-chain MCMC spawns 4 subprocesses sharing ~/.pytensor/.lock.
@@ -68,13 +67,20 @@ from clophfit.prenspire.bands import ZERO_AT
 from clophfit.prenspire.provenance import write_provenance
 from clophfit.prenspire.run import (
     BandSummary,
+    EnspireInputError,
     EnspireMessage,
     EnspireRunResult,
     GlobalSummary,
+    lam_for,
+    posterior_columns,
+    posterior_screen,
+    resolve_x_sigma,
     result_report,
     run_bands,
+    run_bayes,
     run_global,
     run_svd,
+    shared_isosbestic,
 )
 from clophfit.prenspire.spectral import (
     BayesPanelGroup,
@@ -1081,153 +1087,149 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     run_provenance = _provenance(ctx)
     if iso is not None:
         _write_isosbestic_table(ef, Path(note_f), Path(out), isosbestic=iso)
-    if method in {"band", "both", "all"}:
-        _echo_band_summaries(
-            run_bands(
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
+        if method in {"band", "both", "all"}:
+            _echo_band_summaries(
+                run_bands(
+                    ef,
+                    Path(note_f),
+                    Path(out),
+                    buffer=buffer,
+                    screen=None if screen.lower() == "none" else screen,
+                    min_rho=min_rho,
+                    wanted=band_names or bands_module.DIRECT_BANDS,
+                    isosbestic=iso,
+                    provenance=run_provenance,
+                )
+            )
+        if method in {"svd", "both", "all"}:
+            _echo_messages(
+                run_svd(
+                    ef,
+                    Path(note_f),
+                    Path(out),
+                    list(bands),
+                    verbose,
+                    isosbestic=iso,
+                    qc=global_qc,
+                    provenance=run_provenance,
+                ).messages
+            )
+        if method in {"global", "all"}:
+            _echo_global_run(
+                run_global(
+                    ef,
+                    Path(note_f),
+                    Path(out),
+                    buffer=buffer,
+                    scans=scans,
+                    screen=global_screen,
+                    isosbestic=iso,
+                    iso_band=3.0 if iso_band is None else iso_band,
+                    species_min=species_min,
+                    n_boot=global_boot,
+                    strata=global_strata,
+                    qc=global_qc,
+                    inspect=inspect,
+                    provenance=run_provenance,
+                )
+            )
+        if method == "vanthoff":
+            fit_enspire_vanthoff(
                 ef,
                 Path(note_f),
                 Path(out),
                 buffer=buffer,
-                screen=None if screen.lower() == "none" else screen,
-                min_rho=min_rho,
-                wanted=band_names or bands_module.DIRECT_BANDS,
                 isosbestic=iso,
                 provenance=run_provenance,
             )
-        )
-    if method in {"svd", "both", "all"}:
-        _echo_messages(
-            run_svd(
+        if method == "vanthoff-bayes":
+            fit_enspire_vanthoff_bayes(
                 ef,
                 Path(note_f),
                 Path(out),
-                list(bands),
-                verbose,
+                buffer=buffer,
+                x_sigma=x_sigma,
+                seed=seed,
+                draws=draws,
+                chains=chains,
+                cores=cores,
+                target_accept=target_accept,
                 isosbestic=iso,
-                qc=global_qc,
                 provenance=run_provenance,
-            ).messages
-        )
-    if method in {"global", "all"}:
-        _echo_global_run(
-            run_global(
+                dph_buffer=dph_buffer,
+            )
+        if method == "bayes":
+            _echo_messages(
+                run_bayes(
+                    ef,
+                    Path(note_f),
+                    Path(out),
+                    buffer=buffer,
+                    band_names=band_names,
+                    seed=seed,
+                    draws=draws,
+                    chains=chains,
+                    cores=cores,
+                    target_accept=target_accept,
+                    x_sigma=x_sigma,
+                    robust=robust,
+                    screen=bayes_screen,
+                    isosbestic=iso,
+                    provenance=run_provenance,
+                ).messages
+            )
+        if method == "global-bayes":
+            if x_sigma is None:
+                ctx.fail("--method global-bayes requires --x-sigma (auto or a pH SD)")
+            fit_enspire_global_bayes(
                 ef,
                 Path(note_f),
                 Path(out),
                 buffer=buffer,
                 scans=scans,
-                screen=global_screen,
+                x_sigma=x_sigma,
+                acid_state=acid_state,
+                seed=seed,
+                draws=draws,
+                chains=chains,
+                cores=cores,
+                target_accept=target_accept,
                 isosbestic=iso,
-                iso_band=3.0 if iso_band is None else iso_band,
                 species_min=species_min,
-                n_boot=global_boot,
-                strata=global_strata,
-                qc=global_qc,
-                inspect=inspect,
+                iso_band=3.0 if iso_band is None else iso_band,
+                x_pool=x_pool,
+                x_groups=x_groups,
+                provenance=run_provenance,
+                ppc=ppc,
+            )
+        if method == "global-bayes-marginal":
+            if x_sigma is None:
+                ctx.fail(
+                    "--method global-bayes-marginal requires --x-sigma (auto or a pH SD)"
+                )
+            fit_enspire_global_bayes_marginal(
+                ef,
+                Path(note_f),
+                Path(out),
+                buffer=buffer,
+                scans=scans,
+                x_sigma=x_sigma,
+                acid_state=acid_state,
+                seed=seed,
+                draws=draws,
+                chains=chains,
+                cores=cores,
+                target_accept=target_accept,
+                isosbestic=iso,
+                species_min=species_min,
+                iso_band=3.0 if iso_band is None else iso_band,
+                x_pool=x_pool,
+                x_groups=x_groups,
                 provenance=run_provenance,
             )
-        )
-    if method == "vanthoff":
-        fit_enspire_vanthoff(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            isosbestic=iso,
-            provenance=run_provenance,
-        )
-    if method == "vanthoff-bayes":
-        fit_enspire_vanthoff_bayes(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            x_sigma=x_sigma,
-            seed=seed,
-            draws=draws,
-            chains=chains,
-            cores=cores,
-            target_accept=target_accept,
-            isosbestic=iso,
-            provenance=run_provenance,
-            dph_buffer=dph_buffer,
-        )
-    if method == "bayes":
-        fit_enspire_bayes(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            band_names=band_names,
-            seed=seed,
-            draws=draws,
-            chains=chains,
-            cores=cores,
-            target_accept=target_accept,
-            x_sigma=x_sigma,
-            robust=robust,
-            screen=bayes_screen,
-            isosbestic=iso,
-            provenance=run_provenance,
-        )
-    if method == "global-bayes":
-        if x_sigma is None:
-            ctx.fail("--method global-bayes requires --x-sigma (auto or a pH SD)")
-        fit_enspire_global_bayes(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            scans=scans,
-            x_sigma=x_sigma,
-            acid_state=acid_state,
-            seed=seed,
-            draws=draws,
-            chains=chains,
-            cores=cores,
-            target_accept=target_accept,
-            isosbestic=iso,
-            species_min=species_min,
-            iso_band=3.0 if iso_band is None else iso_band,
-            x_pool=x_pool,
-            x_groups=x_groups,
-            provenance=run_provenance,
-            ppc=ppc,
-        )
-    if method == "global-bayes-marginal":
-        if x_sigma is None:
-            ctx.fail(
-                "--method global-bayes-marginal requires --x-sigma (auto or a pH SD)"
-            )
-        fit_enspire_global_bayes_marginal(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            scans=scans,
-            x_sigma=x_sigma,
-            acid_state=acid_state,
-            seed=seed,
-            draws=draws,
-            chains=chains,
-            cores=cores,
-            target_accept=target_accept,
-            isosbestic=iso,
-            species_min=species_min,
-            iso_band=3.0 if iso_band is None else iso_band,
-            x_pool=x_pool,
-            x_groups=x_groups,
-            provenance=run_provenance,
-        )
-
-
-#: Screening floors for a posterior, not convergence criteria: they catch a
-#: posterior that is visibly unhealthy, and passing them proves nothing.
-_RHAT_SCREEN = 1.01
-_ESS_BULK_SCREEN = 400.0
-_BFMI_SCREEN = 0.3
-#: share of trajectories hitting the depth cap before the geometry is suspect
-_TREEDEPTH_SCREEN = 0.2
+    except EnspireInputError as err:
+        raise click.UsageError(str(err)) from err
 
 
 def _echo_band_summaries(run: EnspireRunResult[BandSummary]) -> None:
@@ -1255,18 +1257,6 @@ def _echo_global_run(run: EnspireRunResult[GlobalSummary]) -> None:
         )
 
 
-def _diag_number(diag: Mapping[str, object], key: str) -> float | None:
-    """Read one screening number, or ``None`` when the sampler did not record it."""
-    value = diag.get(key)
-    if value is None:
-        return None
-    try:
-        out = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return out if np.isfinite(out) else None
-
-
 def _axis_scale(trace: object, name: str) -> float:
     """Posterior median of an inferred axis scale, or NaN when the model has none.
 
@@ -1277,50 +1267,6 @@ def _axis_scale(trace: object, name: str) -> float:
     if post is None or name not in post:
         return float("nan")
     return float(np.median(np.asarray(post[name].values)))
-
-
-def _posterior_screen(diag: Mapping[str, object]) -> str:
-    """Say whether a posterior passed the sampler's screening floors.
-
-    The floors are screening values, not convergence criteria: no divergences,
-    rank r-hat below 1.01, bulk ESS above 400, energy BFMI above 0.3. Passing them
-    still does not establish that the model is identified or the priors sensible,
-    and the line stays silent when all four pass.
-    """
-    problems: list[str] = []
-    divergences = _diag_number(diag, "n_divergences")
-    if divergences:
-        problems.append(f"{divergences:.0f} divergences")
-    rhat = _diag_number(diag, "rhat_max")
-    if rhat is not None and rhat > _RHAT_SCREEN:
-        problems.append(f"r-hat {rhat:.3f}")
-    ess = _diag_number(diag, "ess_bulk_min")
-    if ess is not None and ess < _ESS_BULK_SCREEN:
-        problems.append(f"bulk ESS {ess:.0f}")
-    bfmi = _diag_number(diag, "bfmi")
-    if bfmi is not None and bfmi < _BFMI_SCREEN:
-        problems.append(f"BFMI {bfmi:.2f}")
-    depth = _diag_number(diag, "reached_max_treedepth_frac")
-    if depth is not None and depth > _TREEDEPTH_SCREEN:
-        problems.append(f"{100 * depth:.0f}% at max tree depth")
-    if not problems:
-        return ""
-    return "  ! screen: " + ", ".join(problems) + " (screening only, not proof)"
-
-
-def _posterior_columns(diag: Mapping[str, object]) -> dict[str, object]:
-    """Collect the screening numbers as table columns beside the estimate."""
-    return {
-        "n_divergences": diag.get("n_divergences", np.nan),
-        "rhat_max": diag.get("rhat_max", np.nan),
-        "ess_bulk_min": diag.get("ess_bulk_min", np.nan),
-        "ess_tail_min": diag.get("ess_tail_min", np.nan),
-        "bfmi": diag.get("bfmi", np.nan),
-        "max_treedepth": diag.get("max_treedepth", np.nan),
-        "n_reached_max_treedepth": diag.get("n_reached_max_treedepth", np.nan),
-        "reached_max_treedepth_frac": diag.get("reached_max_treedepth_frac", np.nan),
-        "sampler": diag.get("sampler", "unknown"),
-    }
 
 
 def _vanthoff_axis_tie(
@@ -1471,127 +1417,7 @@ def _plot_vanthoff(models: dict[str, VanthoffModel], pdf_path: Path) -> None:
     plt.close(fig)
 
 
-def _post_samples(trace: object, name: str) -> np.ndarray:
-    """Flattened posterior draws of one variable from an ArviZ trace."""
-    return np.asarray(
-        az.extract(trace, var_names=[name]).to_numpy(), dtype=float
-    ).ravel()
-
-
-def _plot_bayes(
-    figdata: list[
-        tuple[
-            str,
-            str,
-            dict[str, tuple[np.ndarray, np.ndarray]],
-            bands_module.BandBayes,
-            bool,
-        ]
-    ],
-    pdf_path: Path,
-) -> None:
-    """Per sample: bands with the posterior curve band, and the K posterior.
-
-    A sample whose sampler produced nothing carries a null trace; it is
-    skipped rather than drawn, so one unfitted sample does not cost the
-    others their figure.
-    """
-    drawable = [row for row in figdata if row[3].trace is not None]
-    if not drawable:
-        return
-    n = len(drawable)
-    fig, axes = plt.subplots(
-        n, 2, figsize=(10.8, 4.0 * n), squeeze=False, constrained_layout=True
-    )
-    for row, (sample, t, data, bb, is_ph) in enumerate(drawable):
-        left, right = axes[row]
-        ks = _post_samples(bb.trace, "K")
-        pick = ks[:: max(1, len(ks) // 200)]
-        for i, (nm, (x, y)) in enumerate(sorted(data.items())):
-            left.plot(x, y, "o", ms=4, color=f"C{i}", alpha=0.85, label=nm)
-            s0 = float(np.median(_post_samples(bb.trace, f"S0_{nm}")))
-            s1 = float(np.median(_post_samples(bb.trace, f"S1_{nm}")))
-            grid = np.linspace(float(x.min()), float(x.max()), 200)
-            # same binding_1site the likelihood used, so the drawn band is the
-            # fitted one (an independently-written fraction used here used to
-            # invert the curve relative to the data)
-            curves = np.array([
-                binding_1site(grid, kk, s0, s1, is_ph=is_ph) for kk in pick
-            ])
-            left.fill_between(
-                grid,
-                np.quantile(curves, 0.03, axis=0),
-                np.quantile(curves, 0.97, axis=0),
-                color=f"C{i}",
-                alpha=0.15,
-            )
-            left.plot(
-                grid, np.quantile(curves, 0.5, axis=0), "-", color=f"C{i}", lw=1.2
-            )
-        left.legend(fontsize=7)
-        left.set_title(
-            f"{sample} {t} C: K {bb.k:.2f} [{bb.hdi03:.2f}, {bb.hdi97:.2f}] 94% HDI"
-        )
-        left.set_xlabel("pH" if is_ph else "ligand (mM)")
-        left.set_ylabel("normalized signal")
-        right.hist(ks, bins=40, color="0.75")
-        right.axvline(bb.k, color="k", lw=1)
-        right.axvspan(bb.hdi03, bb.hdi97, color="orange", alpha=0.25)
-        right.set_title(f"posterior K, 94% HDI, rhat {bb.rhat:.3f}")
-        right.set_xlabel("K")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    plt.close(fig)
-
-
-# Prior SD (pH) floor for --x-sigma: strictly positive, and small enough to
-# keep the posterior honest instead of smearing every point onto its plateau.
-X_SIGMA_MIN_PH = 0.01
-_MIN_BAYES_WELLS_AFTER_SCREEN = 6  # below this the shared latent axis is not identified
 _MIN_VANTHOFF_TEMPS = 2  # one enthalpy needs a pair of temperatures
-
-
-def _shared_isosbestic(
-    ef: EnspireFile,
-    note: pd.DataFrame,
-    isosbestic: float | str | None,
-    *,
-    buffer: bool,
-) -> dict[tuple[str, float], float | None] | None:
-    """Resolve ``auto-scale`` into one crossing per (sample, temperature).
-
-    Parameters
-    ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
-    note : pd.DataFrame
-        The normalised note.
-    isosbestic : float | str | None
-        The option as parsed: a wavelength, ``"auto"``, ``"auto-scale"`` or
-        ``None``.
-    buffer : bool
-        Subtract the buffer wells before locating the crossings.
-
-    Returns
-    -------
-    dict[tuple[str, float], float | None] | None
-        The per-sample crossings, or ``None`` when the caller should let each
-        group locate its own.
-    """
-    if isinstance(isosbestic, str) and isosbestic == "auto-scale":
-        return isosbestic_by_group(ef, note, buffer=buffer)
-    return None
-
-
-def _lam_for(
-    isosbestic: float | str | None,
-    lam_map: dict[tuple[str, float], float | None] | None,
-    name: object,
-    temp: object,
-) -> float | str | None:
-    """Pick the crossing to hand to one (sample, temperature) group."""
-    if lam_map is None:
-        return isosbestic
-    return lam_map.get((str(name), float(str(temp))))
 
 
 def _parse_isosbestic(value: str | None) -> float | str | None:
@@ -1756,279 +1582,6 @@ def _write_isosbestic_table(
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv").removesuffix("_joined_note")
     table.to_csv(out_dir / f"{stem}_isosbestic.csv", index=False)
-    return table
-
-
-def _resolve_enspire_x_sigma(
-    x_sigma: str | None,
-    is_ph: bool,
-    one: object,
-    name: str,
-    t: str,
-) -> float | None:
-    """Resolve ``--x-sigma`` for one (sample, temperature) bayes fit.
-
-    ``None`` leaves the axis fixed at the note values. ``auto`` pools the
-    note's replicate-row spread per index column (rows A-C and D-F are the
-    same nominal targets at their temperature) into the prior sigma - on the
-    pH axis for a pH titration, on the Cl column (mM) for a ligand one; a
-    number passes through after bounds checking, in the axis's units.
-    """
-    if x_sigma is None:
-        return None
-    one = cast("pd.DataFrame", one)
-    xcol = "pH" if is_ph else "Cl"
-    if x_sigma.strip().lower() == "auto":
-        sigma = bands_module.estimate_x_error_sigma(one["Well"], one[xcol])
-        if sigma is None:
-            print(
-                f"warning: {name} at {t}: fewer than two index columns with two "
-                "or more replicates; using a fixed axis (note values)"
-            )
-            return None
-        return sigma
-    try:
-        sigma = float(x_sigma)
-    except ValueError:
-        msg = "--x-sigma must be 'auto' or a number, e.g. 0.15"
-        raise click.UsageError(msg) from None
-    if sigma < X_SIGMA_MIN_PH:
-        units = "pH" if is_ph else "mM"
-        msg = f"--x-sigma must be >= {X_SIGMA_MIN_PH} {units} (or 'auto')"
-        raise click.UsageError(msg)
-    return sigma
-
-
-def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, too-many-statements, complex-structure]
-    ef: EnspireFile,
-    note_fp: Path,
-    out_dir: Path,
-    *,
-    buffer: bool,
-    band_names: tuple[str, ...],
-    seed: int,
-    draws: int,
-    chains: int,
-    cores: int | None,
-    target_accept: float | None,
-    x_sigma: str | None,
-    robust: bool = True,
-    screen: str | None = None,
-    isosbestic: float | str | None = None,
-    provenance: Mapping[str, object] | None = None,
-) -> pd.DataFrame:
-    """Seeded posterior of the shared K per sample/temperature.
-
-    Parameters
-    ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
-    note_fp : Path
-        The note describing wells, titrant and samples.
-    out_dir : Path
-        Where the K table and the posterior figure go.
-    buffer : bool
-        Subtract the buffer wells of the same plate column.
-    band_names : tuple[str, ...]
-        Bands entering the shared-K posterior; default the direct readouts.
-    seed : int
-        NUTS seed, so the HDI reproduces.
-    draws : int
-        Posterior draws per chain.
-    chains : int
-        MCMC chains; reproducible for a fixed seed in either core mode.
-    cores : int | None
-        CPU cores for chain parallelism; None lets PyMC parallelise.
-    target_accept : float | None
-        NUTS target acceptance; None keeps the sampler default.
-    x_sigma : str | None
-        "auto" or a prior SD in pH on each well's true axis value
-        (x_true ~ N(note pH, sigma), independently); None fixes the axis at
-        the note values.
-    robust : bool
-        Student-t (nu = 3) likelihood when True, plain Normal when False.
-    screen : str | None
-        Point screen applied to the readouts before sampling, in the ``--screen``
-        form. A well flagged in any band is dropped from **every** band: the
-        posterior carries one latent axis per well shared by the bands, so the
-        bands must keep the same wells. ``None`` keeps every point.
-
-    isosbestic : float | str | None
-        Normalise every well by its signal at the isosbestic point before
-        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
-        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
-
-    provenance : Mapping[str, object] | None
-        The options this run was asked for, written beside the tables as JSON
-        together with the library version and the input files.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per (sample, temperature): K median, hdi03, hdi97, r_hat,
-        ess_bulk, n.
-    """
-    note_df = Note(note_fp).note
-    samples = note_df[note_df["Name"] != "buffer"]
-    buffers = note_df[note_df["Name"] == "buffer"]
-    wanted = tuple(band_names) if band_names else bands_module.DIRECT_BANDS
-    lam_map = _shared_isosbestic(ef, note_df, isosbestic, buffer=buffer)
-    rows: list[dict[str, object]] = []
-    figdata: list[
-        tuple[
-            str,
-            str,
-            dict[str, tuple[np.ndarray, np.ndarray]],
-            bands_module.BandBayes,
-            bool,
-        ]
-    ] = []
-    for (name, temp), group in samples.groupby(
-        ["Name", "Temp"], sort=True, dropna=False
-    ):
-        t = str(temp).split(".")[0]
-        one = group.drop_duplicates("Well")
-        wells = one["Well"].tolist()
-        is_ph = bool(one["pH"].nunique() > one["Cl"].nunique())
-        titrant = one["pH"] if is_ph else one["Cl"]
-        x = np.array(titrant.astype(float), dtype=np.float64)
-        bufw = (
-            buffers[np.isclose(buffers["Temp"].astype(float), float(t))][
-                "Well"
-            ].tolist()
-            if len(buffers)
-            else []
-        )
-        readouts = bands_module.classify(ef, t, is_ph=is_ph)
-        scale = None
-        lam = _lam_for(isosbestic, lam_map, name, temp)
-        if lam is not None:
-            excitation = next((r for r in readouts if r.name == "exc_anionic"), None)
-            if excitation is not None:
-                _lam_iso, scale = bands_module.isosbestic_readout_scale(
-                    ef,
-                    wells,
-                    x,
-                    excitation,
-                    bufw if buffer else (),
-                    isosbestic=lam,
-                    x_min=bands_module.PH_ACID_END if is_ph else None,
-                )
-        data: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        for r in readouts:
-            if r.name not in wanted:
-                continue
-            y = bands_module.band_values(ef, r, wells)
-            if bufw and buffer:
-                y = bands_module.subtract_buffer(
-                    y, bands_module.band_values(ef, r, bufw)
-                )
-            arr = np.array(y, dtype=np.float64)
-            if scale is not None:
-                arr /= scale
-            top = float(np.nanmax(np.abs(arr)))
-            if not np.isfinite(top) or top <= 0.0:
-                continue
-            data[r.name] = (x, arr / top)
-        if not data:
-            continue
-        n_kept = x.size
-        if screen is not None:
-            # One mask for every band: a well flagged in any band leaves all of
-            # them, because the posterior shares one latent axis across bands.
-            screened = bands_module.fit_bands(data, is_ph=is_ph, screen=screen)
-            if screened is not None:
-                keep = np.ones(x.size, dtype=bool)
-                for mask in screened.masks.values():
-                    flags = np.asarray(mask, dtype=bool)
-                    if flags.size == x.size:
-                        keep &= flags
-                if keep.sum() >= _MIN_BAYES_WELLS_AFTER_SCREEN:
-                    data = {nm: (xx[keep], yy[keep]) for nm, (xx, yy) in data.items()}
-                    x = x[keep]
-                    wells = [w for w, k in zip(wells, keep, strict=True) if k]
-                    n_kept = int(keep.sum())
-                else:  # a screen that eats the plate is not a screen
-                    print(
-                        f"warning: {name} at {t}: screen would leave "
-                        f"{int(keep.sum())} of {x.size} wells; keeping every well"
-                    )
-        ds = Dataset(
-            {nm: DataArray(xx, yy) for nm, (xx, yy) in data.items()}, is_ph=is_ph
-        )
-        x_res = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), t)
-        bb = bands_module.fit_bands_bayes(
-            ds,
-            seed=seed,
-            draws=draws,
-            chains=chains,
-            cores=cores,
-            target_accept=target_accept,
-            robust=robust,
-            x_sigma=x_res,
-        )
-        label = cast("str", name)
-        diag = trace_diagnostics(bb.trace, summary_var_names=["K"])
-        rows.append({
-            "sample": label,
-            "temp": t,
-            "K": bb.k,
-            "hdi03": bb.hdi03,
-            "hdi97": bb.hdi97,
-            "r_hat": bb.rhat,
-            "ess_bulk": bb.ess,
-            "n": n_kept,
-            "x_sigma": x_res,
-            **_posterior_columns(diag),
-        })
-        figdata.append((label, t, data, bb, is_ph))
-    table = pd.DataFrame(
-        rows,
-        columns=[
-            "sample",
-            "temp",
-            "K",
-            "hdi03",
-            "hdi97",
-            "r_hat",
-            "ess_bulk",
-            "n",
-            "x_sigma",
-            "n_divergences",
-            "rhat_max",
-            "ess_bulk_min",
-            "ess_tail_min",
-            "bfmi",
-            "max_treedepth",
-            "n_reached_max_treedepth",
-            "reached_max_treedepth_frac",
-            "sampler",
-        ],
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = note_fp.name.removesuffix("_note.csv")
-    table.to_csv(out_dir / f"{stem}_K_bayes.csv", index=False)
-    write_provenance(
-        out_dir / f"{stem}_K_bayes.json",
-        inputs={"data": str(ef.file), "note": str(note_fp)},
-        options=provenance,
-        outputs=[f"{stem}_K_bayes.csv", f"{stem}_K_bayes.pdf"],
-    )
-    if figdata:
-        _plot_bayes(figdata, out_dir / f"{stem}_K_bayes.pdf")
-    for row in table[table["K"].notna()].itertuples():
-        cell = str(row.x_sigma)
-        xsig = f" x_sigma {float(cell):.3f}" if cell not in {"nan", "None"} else ""
-        print(
-            f"{row.sample} at {row.temp}: K {row.K:.3f} HDI94 [{row.hdi03:.3f}, {row.hdi97:.3f}] "
-            f"rhat {row.r_hat:.3f} ess {row.ess_bulk:.0f} on {row.n} points{xsig}"
-            + _posterior_screen({
-                "n_divergences": row.n_divergences,
-                "rhat_max": row.rhat_max,
-                "ess_bulk_min": row.ess_bulk_min,
-                "bfmi": row.bfmi,
-            })
-        )
     return table
 
 
@@ -2236,7 +1789,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     samples = note[note["Name"] != "buffer"]
     buffers = note[note["Name"] == "buffer"]
     wanted = scans or ("exc_anionic",)
-    lam_map = _shared_isosbestic(ef, note, isosbestic, buffer=buffer)
+    lam_map = shared_isosbestic(ef, note, isosbestic, buffer=buffer)
     rows: list[dict[str, object]] = []
     x_rows: list[dict[str, object]] = []
     figdata: list[
@@ -2259,7 +1812,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         wells = one["Well"].tolist()
         x = np.asarray(one[xcol], dtype=np.float64)
         bwells = buffers[buffers["Temp"] == temp]["Well"].tolist() if buffer else []
-        lam = _lam_for(isosbestic, lam_map, name, temp)
+        lam = lam_for(isosbestic, lam_map, name, temp)
         if isinstance(lam, str):
             # resolve "auto" here, as the least-squares path does, so the crossing
             # that was actually used can go into the table instead of the word
@@ -2310,7 +1863,9 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
         # create_x_true_pooled refuses them (32 groups for 24 wells on a two
         # temperature note)
         groups = well_groups(wells) if x_groups == "column" else None
-        sigma = _resolve_enspire_x_sigma(x_sigma, is_ph, one, str(name), str(temp))
+        warned: list[EnspireMessage] = []
+        sigma = resolve_x_sigma(x_sigma, is_ph, one, str(name), str(temp), warned)
+        _echo_messages(warned)
         if sigma is None:
             msg = f"--method {suffix.removeprefix('global_').replace('_', '-')} requires a pH titration and resolvable x-sigma"
             raise click.ClickException(msg)
@@ -2346,7 +1901,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             "ess_bulk": float(az.ess(trace, var_names=["K"])["K"].item()),
             "n": len(wells),
             "x_sigma": sigma,
-            **_posterior_columns(diag),
+            **posterior_columns(diag),
             # the options that shape the numbers, as the least-squares global
             # table records them
             "scans": ";".join(spectra),
@@ -2373,8 +1928,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
             })
         print(
             f"{name} at {temp}: {label} K {np.median(kdraw):.3f} "
-            f"94% HDI [{lo:.3f}, {hi:.3f}] x_sigma {sigma:.3f}"
-            + _posterior_screen(diag)
+            f"94% HDI [{lo:.3f}, {hi:.3f}] x_sigma {sigma:.3f}" + posterior_screen(diag)
         )
     stem = note_fp.name.removesuffix("_note.csv")
     table = pd.DataFrame(rows)
@@ -2643,7 +2197,9 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
         # replicate spread of every temperature's wells, which is the same
         # error model the per-temperature fitters use
         one = note[note["Name"] == name]
-        sigma = _resolve_enspire_x_sigma(x_sigma, info.is_ph, one, str(name), temps[0])
+        warned: list[EnspireMessage] = []
+        sigma = resolve_x_sigma(x_sigma, info.is_ph, one, str(name), temps[0], warned)
+        _echo_messages(warned)
         if x_sigma is not None and sigma is None:
             msg = "--method vanthoff-bayes could not resolve --x-sigma for this note"
             raise click.ClickException(msg)
@@ -2680,12 +2236,12 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
                 "dS_J_molK": float(np.median(ds_draws)),
                 "n": n,
                 "x_sigma": np.nan if sigma is None else sigma,
-                **_posterior_columns(diag),
+                **posterior_columns(diag),
             })
             kind, unit = ("pKa", "") if info.is_ph else ("Kd", " mM")
             print(
                 f"{name} at {t}: {kind} {median:.3f}{unit} 94% HDI [{lo:.3f}, {hi:.3f}]"
-                + _posterior_screen(diag)
+                + posterior_screen(diag)
             )
             if sigma is None:
                 continue
