@@ -94,8 +94,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y plantuml libopenblas-dev
       - uses: r-lib/actions/setup-pandoc@v2
-        with:
-          pandoc-version: "3.1.12"
       - run: echo "# Test" | pandoc -t html
       - name: Checkout Repository
         uses: actions/checkout@v7
