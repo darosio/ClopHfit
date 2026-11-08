@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import importlib.metadata
 import json
 import logging
 import os
@@ -42,7 +41,6 @@ os.environ.setdefault("JAX_PLATFORM_NAME", "cpu")
 from clophfit import (
     __enspire_out_dir__,
     __tecan_out_dir__,
-    __version__,
     configure_logging,
     fitting,
 )
@@ -67,6 +65,8 @@ from clophfit.prenspire import (
     merge_enspire_files,
 )
 from clophfit.prenspire.bands import ZERO_AT
+from clophfit.prenspire.provenance import write_provenance
+from clophfit.prenspire.run import EnspireRunResult, run_bands
 from clophfit.prenspire.spectral import (
     BayesPanelGroup,
     fit_titrations_spectral,
@@ -1076,16 +1076,18 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     if iso is not None:
         _write_isosbestic_table(ef, Path(note_f), Path(out), isosbestic=iso)
     if method in {"band", "both", "all"}:
-        fit_enspire_bands(
-            ef,
-            Path(note_f),
-            Path(out),
-            buffer=buffer,
-            screen=None if screen.lower() == "none" else screen,
-            min_rho=min_rho,
-            wanted=band_names or bands_module.DIRECT_BANDS,
-            isosbestic=iso,
-            provenance=run_provenance,
+        _echo_band_summaries(
+            run_bands(
+                ef,
+                Path(note_f),
+                Path(out),
+                buffer=buffer,
+                screen=None if screen.lower() == "none" else screen,
+                min_rho=min_rho,
+                wanted=band_names or bands_module.DIRECT_BANDS,
+                isosbestic=iso,
+                provenance=run_provenance,
+            )
         )
     if method in {"svd", "both", "all"}:
         fit_enspire(
@@ -1216,6 +1218,15 @@ _ESS_BULK_SCREEN = 400.0
 _BFMI_SCREEN = 0.3
 #: share of trajectories hitting the depth cap before the geometry is suspect
 _TREEDEPTH_SCREEN = 0.2
+
+
+def _echo_band_summaries(run: EnspireRunResult) -> None:
+    """Print the shared-K line for each sample of a band run."""
+    for r in run.summaries:
+        print(
+            f"{r.sample} at {r.temp}: K {r.K:.3f} [{r.lo:.3f}, {r.hi:.3f}] "
+            f"on {r.n} points, {r.dropped} screened out"
+        )
 
 
 def _diag_number(diag: Mapping[str, object], key: str) -> float | None:
@@ -1626,52 +1637,6 @@ def _provenance(ctx: Context) -> dict[str, object]:
     return out
 
 
-def _bayes_run(options: Mapping[str, object] | None) -> bool:
-    """Whether this invocation sampled a posterior, i.e. needs its stack recorded."""
-    method = str((options or {}).get("method", "")).lower()
-    return "bayes" in method
-
-
-def _sampler_stack() -> dict[str, str]:
-    """Versions of the packages that determine a posterior, when they are installed."""
-    out: dict[str, str] = {}
-    for name in ("pymc", "pytensor", "arviz", "nutpie", "h5netcdf"):
-        try:
-            out[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            continue
-    return out
-
-
-def _write_provenance(
-    path: Path,
-    *,
-    inputs: Mapping[str, str],
-    options: Mapping[str, object] | None,
-    outputs: Sequence[str],
-) -> Path:
-    """Record how a result was produced, beside the result, as JSON.
-
-    The table's columns already carry the options that move its numbers; this
-    carries the rest - the library version and the whole invocation - so a folder
-    of results can be traced back to the command that made it. Sorted keys, no
-    timestamp: the same run writes the same bytes.
-    """
-    payload: dict[str, object] = {
-        "clophfit_version": __version__,
-        "inputs": dict(inputs),
-        "options": dict(options or {}),
-        "outputs": list(outputs),
-    }
-    if _bayes_run(options):
-        # a posterior is only reproducible against the sampler stack that made it
-        payload["environment"] = _sampler_stack()
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    return path
-
-
 def _write_isosbestic_table(
     ef: EnspireFile,
     note_fp: Path,
@@ -2017,7 +1982,7 @@ def fit_enspire_bayes(  # ruff: ignore[too-many-arguments, too-many-branches, to
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_bayes.csv", index=False)
-    _write_provenance(
+    write_provenance(
         out_dir / f"{stem}_K_bayes.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
@@ -2068,7 +2033,7 @@ def enspire_batch(
             continue
         tag = note_fp.parent.relative_to(root_dir).as_posix().replace("/", "_")
         try:
-            table = fit_enspire_bands(
+            band_run = run_bands(
                 EnspireFile(data),
                 note_fp,
                 out / tag,
@@ -2077,6 +2042,8 @@ def enspire_batch(
                 min_rho=min_rho,
                 wanted=bands_module.DIRECT_BANDS,
             )
+            _echo_band_summaries(band_run)
+            table = band_run.table
         except Exception as exc:  # ruff: ignore[blind-except] - a bad folder must not stop the walk
             failures.append({
                 "note": str(note_fp),
@@ -2104,95 +2071,6 @@ def _data_for(note_fp: Path) -> Path | None:
         p for p in note_fp.parent.glob("*.csv") if not p.name.endswith("_note.csv")
     ]
     return others[0] if len(others) == 1 else None
-
-
-def fit_enspire_bands(  # ruff: ignore[too-many-arguments]
-    ef: EnspireFile,
-    note_fp: Path,
-    out_dir: Path,
-    *,
-    buffer: bool,
-    screen: str | None,
-    min_rho: float,
-    wanted: Sequence[str],
-    isosbestic: float | str | None = None,
-    provenance: Mapping[str, object] | None = None,
-) -> pd.DataFrame:
-    """Fit a note's titrations from named bands and write the tables and figure.
-
-    Parameters
-    ----------
-    ef : EnspireFile
-        The parsed EnSpire export.
-    note_fp : Path
-        The note describing wells, titrant and samples.
-    out_dir : Path
-        Where the tables and the figure go.
-    buffer : bool
-        Subtract the buffer well of the same plate column.
-    screen : str | None
-        Point screen, e.g. ``studentized:0.05:5``; None keeps every point.
-    min_rho : float
-        Monotonicity gate below which a band carries no K.
-    wanted : Sequence[str]
-        Bands allowed into the shared K.
-
-    isosbestic : float | str | None
-        Normalise every well by its signal at the isosbestic point before
-        fitting: a wavelength [nm], ``"auto"`` to locate it per group, or
-        ``None`` (see :func:`~clophfit.prenspire.spectral.plate_isosbestic`).
-
-    provenance : Mapping[str, object] | None
-        The options this run was asked for, written beside the tables as JSON
-        together with the library version and the input files.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per (sample, temperature, band, subset).
-    """
-    note = Note(note_fp)
-    fits = bands_module.fit_titrations(
-        ef,
-        note.note,
-        buffer=buffer,
-        wanted=wanted,
-        min_rho=min_rho,
-        screen=screen,
-        isosbestic=isosbestic,
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stem = note_fp.name.removesuffix("_note.csv")
-    fits.table.to_csv(out_dir / f"{stem}_K.csv", index=False)
-    if not fits.screened.empty:
-        fits.screened.to_csv(out_dir / f"{stem}_screened.csv", index=False)
-    if fits.samples:
-        fig, axes = plt.subplots(
-            1,
-            len(fits.samples),
-            figsize=(5.4 * len(fits.samples), 4.3),
-            constrained_layout=True,
-            squeeze=False,
-        )
-        for ax, (title, sample) in zip(axes[0], fits.samples.items(), strict=True):
-            bands_module.plot_sample(ax, sample, title)
-        fig.savefig(out_dir / f"{stem}_bands.pdf", bbox_inches="tight")
-        plt.close(fig)
-    _write_provenance(
-        out_dir / f"{stem}_K.json",
-        inputs={"data": str(ef.file), "note": str(note_fp)},
-        options=provenance,
-        outputs=[f"{stem}_K.csv", f"{stem}_bands.pdf"],
-    )
-    head = fits.table[
-        (fits.table.band == "all (shared K)") & (fits.table.subset == "screened")
-    ]
-    for r in head.itertuples():
-        print(
-            f"{r.sample} at {r.temp}: K {r.K:.3f} [{r.lo:.3f}, {r.hi:.3f}] "
-            f"on {r.n} points, {r.dropped} screened out"
-        )
-    return fits.table
 
 
 def fit_enspire_global(  # ruff: ignore[too-many-arguments]
@@ -2306,7 +2184,7 @@ def fit_enspire_global(  # ruff: ignore[too-many-arguments]
     )[0]
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
-    _write_provenance(
+    write_provenance(
         out_dir / f"{stem}_K_global.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
@@ -2605,7 +2483,7 @@ def _enspire_global_bayes_core(  # ruff: ignore[too-many-arguments, too-many-sta
     stem = note_fp.name.removesuffix("_note.csv")
     table = pd.DataFrame(rows)
     table.to_csv(out_dir / f"{stem}_K_{suffix}.csv", index=False)
-    _write_provenance(
+    write_provenance(
         out_dir / f"{stem}_K_{suffix}.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
@@ -2753,7 +2631,7 @@ def fit_enspire_vanthoff(  # ruff: ignore[too-many-arguments]
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_vanthoff.csv", index=False)
-    _write_provenance(
+    write_provenance(
         out_dir / f"{stem}_K_vanthoff.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
@@ -2933,7 +2811,7 @@ def fit_enspire_vanthoff_bayes(  # ruff: ignore[too-many-arguments]
         figdata.append((str(name), info.is_ph, curves, trace, m))
     table = pd.DataFrame(rows)
     table.to_csv(out_dir / f"{stem}_K_vanthoff_bayes.csv", index=False)
-    _write_provenance(
+    write_provenance(
         out_dir / f"{stem}_K_vanthoff_bayes.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
@@ -3148,7 +3026,7 @@ def fit_enspire(  # ruff: ignore[complex-structure, too-many-arguments, too-many
                         _print_result(spectra_gres.bands, pdf_file, bands_str)
     # the legacy path writes one figure per (sample, temperature, label) and keeps
     # no K table of its own, so the record names the figures as its outputs
-    _write_provenance(
+    write_provenance(
         out_dir / f"{note_fp.name.removesuffix('_note.csv')}_svd.json",
         inputs={"data": str(ef.file), "note": str(note_fp)},
         options=provenance,
