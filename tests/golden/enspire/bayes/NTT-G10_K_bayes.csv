@@ -1,0 +1,2 @@
+sample,temp,K,hdi03,hdi97,r_hat,ess_bulk,n,x_sigma,n_divergences,rhat_max,ess_bulk_min,ess_tail_min,bfmi,max_treedepth,n_reached_max_treedepth,reached_max_treedepth_frac,sampler
+NTT-G10,20,7.97093066171117,7.915697043613021,8.025901542788032,1.0066453887291884,354.469274649073,24,,0,1.0066453887291884,354.469274649073,209.13581159254088,1.0233626131550042,,0,0.0,pymc

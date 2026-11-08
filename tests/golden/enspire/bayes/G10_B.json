@@ -1,0 +1,32 @@
+{
+  "Flash power": {
+    "0": "100"
+  },
+  "Max wavelength": {
+    "0": "650"
+  },
+  "Measurement height": {
+    "0": "5"
+  },
+  "Min wavelength": {
+    "0": "440"
+  },
+  "Monochromator": {
+    "0": "Emission"
+  },
+  "Number of flashes": {
+    "0": "200"
+  },
+  "Number of flashes integrated": {
+    "0": "200"
+  },
+  "Using of excitation filter": {
+    "0": "Top"
+  },
+  "Wavelength": {
+    "0": "420"
+  },
+  "temp": {
+    "0": "37"
+  }
+}

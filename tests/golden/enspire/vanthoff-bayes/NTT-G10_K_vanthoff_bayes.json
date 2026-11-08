@@ -1,0 +1,32 @@
+{
+  "inputs": {
+    "data": "G10.csv",
+    "note": "NTT-G10_note.csv"
+  },
+  "options": {
+    "acid_state": false,
+    "buffer": true,
+    "chains": 2,
+    "command": "enspire",
+    "csv_f": "G10.csv",
+    "draws": 200,
+    "export": "auto",
+    "global_boot": 0,
+    "global_strata": "none",
+    "inspect": false,
+    "method": "vanthoff-bayes",
+    "min_rho": 0.8,
+    "note_f": "NTT-G10_note.csv",
+    "ppc": false,
+    "robust": true,
+    "screen": "studentized:0.05:5",
+    "seed": 0,
+    "x_groups": "column",
+    "x_pool": "free",
+    "x_sigma": "0.1"
+  },
+  "outputs": [
+    "NTT-G10_K_vanthoff_bayes.csv",
+    "NTT-G10_K_vanthoff_bayes.pdf"
+  ]
+}

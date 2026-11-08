@@ -1,0 +1,5 @@
+sample,temp,qc_dropped,scans,isosbestic_nm,iso_window_nm,species_min,qc_passes,subset,K,se,se_naive,se_boot,ci_lo,ci_hi,hill,n,sv_ratio
+NTT-G10,20.0,-,excitation,,,,0,all,7.969778750911833,0.038503725291617275,0.0023811561363803455,,,,1.0,24,3.8265728937901526
+NTT-G10,20.0,-,excitation,,,,0,row D,8.070628034392309,,0.013452512657010246,,,,1.0,8,2.912923237859182
+NTT-G10,20.0,-,excitation,,,,0,row E,7.932324315421241,,0.003292149517676245,,,,1.0,8,3.728759883524294
+NTT-G10,20.0,-,excitation,,,,0,row F,7.921609745096164,,0.0009808569521923833,,,,1.0,8,1.4142813070828761
