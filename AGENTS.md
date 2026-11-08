@@ -59,6 +59,13 @@ with `>>>` examples.
 - Scientific code may use `# noqa: PLR0913` for functions with many physical
   parameters.
 
+## Git Workflow
+
+- Prefer linear history: squash PRs or rebase feature branches and fast-forward;
+  avoid merge commits and merging the base branch into feature branches.
+- Do not rewrite already-published history unless the user explicitly authorizes
+  it.
+
 ## Repository Layout
 
 ```
