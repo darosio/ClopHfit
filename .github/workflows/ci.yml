@@ -30,7 +30,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -60,7 +60,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -100,7 +100,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
@@ -173,7 +173,7 @@ jobs:
           if [[ " $labels " == *" dependencies "* ]] ||
              [[ " $labels " == *" update-template "* ]] ||
              [[ "$title" == "build(pre-commit): update hooks"* ]]; then
-            gh pr merge --auto --squash --delete-branch "$PR_URL"
+            gh pr merge --squash --delete-branch "$PR_URL"
           else
             echo "Not a dependency or template update; leaving PR open."
           fi
