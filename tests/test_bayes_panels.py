@@ -18,7 +18,7 @@ import xarray as xr
 
 from clophfit.fitting.models import growth_fraction
 from clophfit.fitting.spectral import observed_fraction_from_species
-from clophfit.prenspire.spectral import BayesPanelGroup, plot_global_bayes_panels
+from clophfit.prenspire.figures import BayesPanelGroup, plot_global_bayes_panels
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -129,12 +129,12 @@ def run_svd(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         # the detector is the whole-spectrum fit; the estimator stays this legacy
         # projection. One screen per (sample, temperature), over the same scans the
         # projection pools.
-        screen_table, _fits = fit_titrations_spectral(
+        screen_table = fit_titrations_spectral(
             ef,
             Note(note_fp).note,
             bands=("exc_anionic", "em_exc420", "em_exc278"),
             qc=qc,
-        )
+        ).table
         for row in screen_table[screen_table.subset == "all"].itertuples():
             gone = [w for w in str(row.qc_dropped).split(";") if w and w != "-"]
             if gone:

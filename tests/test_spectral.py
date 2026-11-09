@@ -21,11 +21,11 @@ from clophfit.fitting.spectral import (
     posterior_predictive_check,
 )
 from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire.figures import plot_global_panels
 from clophfit.prenspire.spectral import (
     fit_titrations_spectral,
     isosbestic_scale,
     normalise_to_isosbestic,
-    plot_global_panels,
     residual_table,
     sample_spectra,
     scan_outliers,
@@ -119,7 +119,8 @@ def test_enspire_g10_agrees_with_bands() -> None:
     """On the G10 plate the global K agrees with the shared band K."""
     ef = EnspireFile(DATA / "G10.csv")
     note = Note(DATA / "NTT-G10_note.csv").note
-    table, fits = fit_titrations_spectral(ef, note)
+    run = fit_titrations_spectral(ef, note)
+    table, fits = run.table, run.fits
     bands = bands_module.fit_titrations(ef, note).table
     shared = bands[(bands.band == "all (shared K)") & (bands.subset == "screened")]
     whole = table[table.subset == "all"]
@@ -663,33 +664,25 @@ def test_isosbestic_band_only_rescales_each_well_by_a_constant() -> None:
     assert not np.allclose(ratio[0], ratio[0, 0], rtol=1e-3)
 
 
-def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_inspect_text_is_returned_and_the_fit_writes_nothing(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``inspect=True`` dumps one text block per group and points at the file.
+    """``inspect=True`` returns one text block per group and writes nothing.
 
     The dump is the only place the per-well amplitudes and fractions are written
-    out; the panel figures are unchanged by it, and the screen's verdict stays in
-    the table rather than leaking into the figure.
+    out. The fit leaves the folder and the console alone; the caller writes the
+    text and draws the panels from what the run returns.
     """
+    monkeypatch.chdir(tmp_path)
     eff = EnspireFile(DATA / "G10.csv")
     note = Note(DATA / "NTT-G10_note.csv").note
     note = note[note["Temp"] == 20.0]
-    stem = tmp_path / "NTT-G10"
-    table, fits = fit_titrations_spectral(
-        eff,
-        note,
-        buffer=True,
-        qc=6.0,
-        inspect=True,
-        figure_stem=stem,
-    )
-    assert not table.empty
-    assert fits
-
-    sidecar = tmp_path / "NTT-G10_global_inspect.txt"
-    assert sidecar.exists(), sorted(p.name for p in tmp_path.iterdir())
-    text = sidecar.read_text()
+    run = fit_titrations_spectral(eff, note, buffer=True, qc=6.0, inspect=True)
+    assert not run.table.empty
+    assert run.fits
+    text = run.inspect_text
     assert "K = " in text
     assert "wells used:" in text
     assert "per-scan species peaks" in text
@@ -701,9 +694,21 @@ def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
     # one block per (sample, temperature) group, and the amplitudes are present
     assert text.count("==") >= 2
     assert "a = " in text
-    # the library stays quiet: the CLI reports the sidecar through run_global
+    # the library stays quiet and writes nothing: the caller owns the files
     assert not capsys.readouterr().out
-    # the panel figure is still written, and no separate species figure appears
+    assert list(tmp_path.iterdir()) == []
+    # every group carries what its panel figure needs
+    assert set(run.panels) == set(run.fits)
+    for panel in run.panels.values():
+        plot_global_panels(
+            tmp_path / f"NTT-G10_{panel.file_key}_panels.pdf",
+            panel.spectra,
+            panel.x,
+            panel.fit,
+            title=panel.title,
+            iso_nm=panel.iso_nm,
+            peaks=panel.peaks,
+        )
     assert sorted(p.name for p in tmp_path.glob("*_panels.pdf"))
     assert not sorted(tmp_path.glob("*_species.pdf"))
 
@@ -790,11 +795,11 @@ def test_species_floor_does_not_change_which_wells_the_screen_drops() -> None:
     scans = ("exc_anionic", "em_exc420", "em_exc278")
 
     def run(species_min: float | None) -> tuple[str, SpectralFit]:
-        table, fits = fit_titrations_spectral(
+        result = fit_titrations_spectral(
             eff, note, bands=scans, qc=6.0, species_min=species_min
         )
-        row = table[table.subset == "all"].iloc[0]
-        return str(row.qc_dropped), fits["NTT-G10 20.0"]
+        row = result.table[result.table.subset == "all"].iloc[0]
+        return str(row.qc_dropped), result.fits["NTT-G10 20.0"]
 
     dropped_free, free = run(None)
     dropped_bound, bounded = run(0.0)

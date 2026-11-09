@@ -16,12 +16,11 @@ from clophfit.prenspire import (
     Note,
     bands as bands_module,
 )
+from clophfit.prenspire.figures import BayesPanelGroup, plot_global_bayes_panels
 from clophfit.prenspire.provenance import write_provenance
 from clophfit.prenspire.spectral import (
-    BayesPanelGroup,
     model_outliers,
     plate_isosbestic,
-    plot_global_bayes_panels,
     sample_spectra,
 )
 
