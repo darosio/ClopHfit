@@ -19,9 +19,13 @@ from clophfit.fitting.bayes import (
     _pipetting_step_sigmas,  # ruff: ignore[import-private-name]
     create_parameter_priors,
     create_x_true,
+    extract as bayes_extract,
     extract_fit,
     fit_binding_pymc,
+    multi as bayes_multi,
+    priors as bayes_priors,
     process_trace,
+    single as bayes_single,
     weighted_stats,
     x_true_from_trace_df,
 )
@@ -393,7 +397,7 @@ def test_fit_binding_pymc_data_priors_skips_lmfit(
     def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(bayes_priors, "fit_binding_glob", fail_lmfit)
     monkeypatch.setattr(pm, "sample", stop_sample)
 
     with pytest.raises(_StopBayesBuildError):
@@ -437,7 +441,7 @@ def test_normalize_fit_inputs_data_priors_skips_lmfit(
         msg = "fit_binding_glob should not be called"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(bayes_priors, "fit_binding_glob", fail_lmfit)
 
     normalized, prefer_centered = bayes._normalize_fit_inputs(  # ruff: ignore[private-member-access]
         {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
@@ -466,7 +470,7 @@ def test_normalize_fit_inputs_data_priors_ignores_prefit_result(
         raise AssertionError(msg)
 
     prefit = fit_binding_glob(multi_dataset)
-    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(bayes_priors, "fit_binding_glob", fail_lmfit)
 
     normalized, prefer_centered = bayes._normalize_fit_inputs(  # ruff: ignore[private-member-access]
         {"A01": prefit},
@@ -499,7 +503,7 @@ def test_fit_binding_pymc_multi_data_priors_skips_lmfit(
     def stop_sample(*_args: object, **_kwargs: object) -> xr.DataTree:
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "fit_binding_glob", fail_lmfit)
+    monkeypatch.setattr(bayes_priors, "fit_binding_glob", fail_lmfit)
     monkeypatch.setattr(pm, "sample", stop_sample)
 
     with pytest.raises(_StopBayesBuildError):
@@ -1058,9 +1062,8 @@ def test_process_trace_scales_per_label_ye_mags(
         index=["K", "S0_1", "S1_1", "S0_2", "S1_2", "ye_mag_1", "ye_mag_2"],
     )
 
-    monkeypatch.setattr(bayes, "_trace_summary_df", lambda _trace: summary_df)
-    monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
-
+    monkeypatch.setattr(bayes_extract, "_trace_summary_df", lambda _trace: summary_df)
+    monkeypatch.setattr(bayes_extract, "plot_fit", _noop_plot_fit)
     fit_result = process_trace(xr.DataTree(), params.keys(), ds)
 
     assert fit_result.dataset is not None
@@ -1091,8 +1094,13 @@ def test_fit_binding_pymc_dataset_defaults_free_noise_modes(
         captured["alpha"] = alpha_mode
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             ph_dataset,
@@ -1127,8 +1135,13 @@ def test_fit_binding_pymc_fitresult_defaults_centered_noise_modes(
         captured["alpha"] = alpha_mode
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             fit_binding_glob(ph_dataset),
@@ -1162,8 +1175,13 @@ def test_fit_binding_pymc_passes_shared_noise_flags(
         captured["shared_gain"] = shared_gain
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             multi_dataset,
@@ -1197,8 +1215,13 @@ def test_fit_binding_pymc_passes_shared_floor(
         captured["shared_floor"] = shared_floor
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         fit_binding_pymc(
             multi_dataset,
@@ -1398,8 +1421,13 @@ def test_fit_binding_pymc_multi_dataset_mapping_defaults_free_noise_modes(
         captured["alpha"] = alpha_mode
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": copy.deepcopy(multi_dataset), "A02": copy.deepcopy(multi_dataset)},
@@ -1439,8 +1467,13 @@ def test_fit_binding_pymc_multi_fitresult_defaults_centered_noise_modes(
         captured["alpha"] = alpha_mode
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
@@ -1474,8 +1507,13 @@ def test_fit_binding_pymc_multi_filters_noise_model_to_active_labels(
         captured["labels"] = list(_noise_model.keys())
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", fake_build_pymc_noise_priors)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
 
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", fake_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
@@ -1526,7 +1564,7 @@ def test_fit_binding_pymc_multi_learn_ye_mags_defaults_to_per_well_with_noise_mo
         raise _StopBayesBuildError
 
     monkeypatch.setattr(
-        bayes, "_build_multi_ye_mag_priors", fake_build_multi_ye_mag_priors
+        bayes_multi, "_build_multi_ye_mag_priors", fake_build_multi_ye_mag_priors
     )
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
@@ -1755,8 +1793,9 @@ def test_fit_binding_pymc_multi_passes_unscaled_xerr_to_create_x_true(
         captured["n_xerr"] = n_xerr
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "create_x_true", fake_create_x_true)
+    monkeypatch.setattr(bayes_single, "create_x_true", fake_create_x_true)
 
+    monkeypatch.setattr(bayes_multi, "create_x_true", fake_create_x_true)
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
@@ -1826,9 +1865,15 @@ def test_fit_binding_pymc_multi_zero_xerr_keeps_per_well_x(
     ) -> dict[str, object]:
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "create_x_true", fail_create_x_true)
-    monkeypatch.setattr(bayes, "build_pymc_noise_priors", stop_build_pymc_noise_priors)
+    monkeypatch.setattr(bayes_single, "create_x_true", fail_create_x_true)
 
+    monkeypatch.setattr(bayes_multi, "create_x_true", fail_create_x_true)
+    monkeypatch.setattr(
+        bayes_single, "build_pymc_noise_priors", stop_build_pymc_noise_priors
+    )
+    monkeypatch.setattr(
+        bayes_multi, "build_pymc_noise_priors", stop_build_pymc_noise_priors
+    )
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": ds_a, "A02": ds_b},
@@ -2007,9 +2052,9 @@ def test_extract_fit_accepts_multifitresult_deterministic() -> None:
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            bayes, "_trace_summary_df", _summary_df_stub_factory(trace_df)
+            bayes_extract, "_trace_summary_df", _summary_df_stub_factory(trace_df)
         )
-        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        monkeypatch.setattr(bayes_extract, "plot_fit", _noop_plot_fit)
         fr = extract_fit("A01", "ctrl", multi, ds)
 
     assert fr.dataset is not None
@@ -2054,9 +2099,9 @@ def test_extract_fit_accepts_multifitresult_per_well() -> None:
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            bayes, "_trace_summary_df", _summary_df_stub_factory(trace_df)
+            bayes_extract, "_trace_summary_df", _summary_df_stub_factory(trace_df)
         )
-        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        monkeypatch.setattr(bayes_extract, "plot_fit", _noop_plot_fit)
         fr_a01 = extract_fit("A01", "ctrl", multi, copy.deepcopy(ds), well_key="A01")
         fr_a02 = extract_fit("A02", "ctrl", multi, copy.deepcopy(ds), well_key="A02")
 
@@ -2099,16 +2144,18 @@ def test_fit_binding_pymc_multi_reuses_one_summary_for_all_wells(
         return trace
 
     monkeypatch.setattr(
-        bayes,
+        bayes_multi,
         "_per_well_fit_results_from_trace",
         fake_per_well_fit_results_from_trace,
     )
     monkeypatch.setattr(pm, "sample", fake_pm_sample)
     monkeypatch.setattr(
-        bayes, "_compute_sample_log_likelihood", lambda sampled: sampled
+        bayes_single, "_compute_sample_log_likelihood", lambda sampled: sampled
     )
-    monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
-
+    monkeypatch.setattr(
+        bayes_multi, "_compute_sample_log_likelihood", lambda sampled: sampled
+    )
+    monkeypatch.setattr(bayes_extract, "plot_fit", _noop_plot_fit)
     multi = bayes.fit_binding_pymc_multi(
         fit_results,
         scheme,
@@ -2143,8 +2190,9 @@ def test_fit_binding_pymc_multi_passes_minimum_step_to_create_x_true(
         captured["min_x_step"] = min_x_step
         raise _StopBayesBuildError
 
-    monkeypatch.setattr(bayes, "create_x_true", fake_create_x_true)
+    monkeypatch.setattr(bayes_single, "create_x_true", fake_create_x_true)
 
+    monkeypatch.setattr(bayes_multi, "create_x_true", fake_create_x_true)
     with pytest.raises(_StopBayesBuildError):
         bayes.fit_binding_pymc_multi(
             {"A01": fr_init, "A02": fr_init},
@@ -2487,8 +2535,8 @@ def test_extract_fit_uses_raw_trace_not_broken_summary_for_x() -> None:
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(bayes, "_trace_summary_df", lambda _: broken_df)
-        monkeypatch.setattr(bayes, "plot_fit", _noop_plot_fit)
+        monkeypatch.setattr(bayes_extract, "_trace_summary_df", lambda _: broken_df)
+        monkeypatch.setattr(bayes_extract, "plot_fit", _noop_plot_fit)
         fr = extract_fit(
             "A01",
             "",
@@ -3090,8 +3138,7 @@ def test_multi_screened_refits_without_the_flagged_point(
             for well, ds in results.items()
         })
 
-    monkeypatch.setattr(bayes, "fit_binding_pymc_multi", fake_multi)
-
+    monkeypatch.setattr(bayes_multi, "fit_binding_pymc_multi", fake_multi)
     final = bayes.fit_binding_pymc_multi_screened(
         datasets,
         PlateScheme(),

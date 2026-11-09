@@ -26,7 +26,7 @@ from click.testing import CliRunner
 import clophfit.__main__ as cli
 from clophfit.__main__ import ppr
 from clophfit.fitting import bayes
-from clophfit.fitting.bayes import weighted_stats
+from clophfit.fitting.bayes import multi as bayes_multi, weighted_stats
 from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.prtecan import PlateScheme, export
@@ -185,7 +185,7 @@ def test_multi_fit_leaves_out_a_control_group_without_k(
         seen["wells"] = list(wells_list)
         raise _StopBuildError
 
-    monkeypatch.setattr(bayes, "_free_k_init", stop)
+    monkeypatch.setattr(bayes_multi, "_free_k_init", stop)
     with pytest.warns(UserWarning, match="V224Q"), pytest.raises(_StopBuildError):
         bayes.fit_binding_pymc_multi(
             {
