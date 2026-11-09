@@ -981,7 +981,7 @@ def test_dph_buffer_reads_the_ph_per_temperature_not_per_well() -> None:
     from the axis instead of imposing it - which moved pKa(37) by 0.25 pH before
     it was caught.
     """
-    from clophfit.__main__ import _vanthoff_axis_tie  # ruff: ignore[import-outside-top-level, import-private-name]
+    from clophfit.prenspire.run import _vanthoff_axis_tie  # ruff: ignore[import-outside-top-level, import-private-name]
 
     note = pd.DataFrame({
         "Well": ["A01", "A02", "A01", "A02"],
@@ -991,12 +991,12 @@ def test_dph_buffer_reads_the_ph_per_temperature_not_per_well() -> None:
         "Temp": [20.0, 20.0, 37.0, 37.0],
     })
     wells = {"20": ["A01", "A02"], "37": ["A01", "A02"]}
-    tie = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "auto")
+    tie = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "auto", [])
     assert tie is not None
     pair, offset = tie["37"]
     assert list(pair) == [0, 1]
     assert np.allclose(offset, [-0.15, -0.14]), offset
     # a fixed offset ignores the note but keeps the pairing
-    fixed = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "0.25")
+    fixed = _vanthoff_axis_tie(note, "X", wells, ["20", "37"], "0.25", [])
     assert fixed is not None
     assert np.allclose(fixed["37"][1], [0.25, 0.25])
