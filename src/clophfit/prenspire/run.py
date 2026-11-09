@@ -6,6 +6,7 @@ the CLI parses options and prints.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -21,7 +22,12 @@ from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.fitting.model_validation import trace_diagnostics
 from clophfit.fitting.models import binding_1site
 from clophfit.fitting.spectral import fit_spectra_global, posterior_predictive_check
-from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire import (
+    EnspireFile,
+    Note,
+    bands as bands_module,
+    merge_enspire_files,
+)
 from clophfit.prenspire.bands import ZERO_AT
 from clophfit.prenspire.provenance import write_provenance
 from clophfit.prenspire.spectral import (
@@ -2005,3 +2011,70 @@ def run_batch(
     return EnspireRunResult(
         written=tuple(written), table=every, summaries=(), messages=tuple(messages)
     )
+
+
+@dataclass(frozen=True)
+class EnspireInputs:
+    """The export to fit and the note to fit it with, after any ``--join``.
+
+    ``note`` is None when no note was given, in which case nothing is fitted.
+    """
+
+    ef: EnspireFile
+    note: Path | None
+    messages: tuple[EnspireMessage, ...] = ()
+
+
+def prepare_inputs(  # ruff: ignore[too-many-arguments]
+    csv_f: Path,
+    note_f: Path | None,
+    joins: Sequence[tuple[Path, Path]],
+    out: Path,
+    *,
+    export: str,
+    verbose: int,
+) -> EnspireInputs:
+    """Write the measurement tables and join the notes of a split titration.
+
+    Each ``joins`` pair is another export and its note, for a titration split
+    over several EnSpire files; the exports must carry disjoint labels. The
+    joined note is a derived input, so it is written next to the outputs and
+    ``data/`` is never touched.
+    """
+    exports = [EnspireFile(csv_f, verbose=verbose)]
+    exports.extend(EnspireFile(csv, verbose=verbose) for csv, _ in joins)
+    notes = [] if note_f is None else [note_f]
+    notes.extend(note for _, note in joins)
+    ef = merge_enspire_files(exports) if len(exports) > 1 else exports[0]
+    written: list[str] = []
+    for one in exports:
+        written += one.export_measurements(out, mode=export)
+    messages: list[EnspireMessage] = []
+    note_path = notes[0] if notes else None
+    if len(notes) > 1 and note_path is not None:
+        frames = [pd.read_csv(path) for path in notes]
+        joined = pd.concat(frames, ignore_index=True)
+        note_fp = out / f"{note_path.name.removesuffix('_note.csv')}_joined_note.csv"
+        joined.to_csv(note_fp, index=False)
+        provenance = {
+            "inputs": [str(path) for path in [csv_f, *(csv for csv, _ in joins)]],
+            "notes": [str(path) for path in notes],
+            "labels": sorted(ef.measurements),
+            "temperatures": sorted({
+                str(m["metadata"].get("temp")) for m in ef.measurements.values()
+            }),
+        }
+        note_fp.with_suffix(".json").write_text(json.dumps(provenance, indent=2) + "\n")
+        note_path = note_fp
+        if verbose:
+            messages.append(
+                EnspireMessage("info", f"joined {len(notes)} notes into {note_fp}")
+            )
+    if verbose and not written:
+        messages.append(
+            EnspireMessage(
+                "info",
+                f"measurement tables already up to date in {out}; nothing rewritten",
+            )
+        )
+    return EnspireInputs(ef=ef, note=note_path, messages=tuple(messages))

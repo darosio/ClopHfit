@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import logging
 import os
 import pprint
@@ -56,7 +55,6 @@ from clophfit.prenspire import (
     EnspireFile,
     Note,
     bands as bands_module,
-    merge_enspire_files,
 )
 from clophfit.prenspire.run import (
     EnspireInputError,
@@ -64,6 +62,7 @@ from clophfit.prenspire.run import (
     EnspireRunError,
     EnspireRunResult,
     GlobalSummary,
+    prepare_inputs,
     result_report,
     run_bands,
     run_batch,
@@ -908,46 +907,25 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
     """Save spectra as csv tables from EnSpire xls file."""
     verbose = ctx.obj.get("VERBOSE", 0)
     out = ctx.obj.get("OUT", __enspire_out_dir__)
-    exports = [EnspireFile(Path(csv_f), verbose=verbose)]
-    notes = [Path(note_f)] if note_f is not None else []
+    join_pairs: list[tuple[Path, Path]] = []
     for pair in joins:
         csv_part, _, note_part = pair.rpartition(":")
         if not csv_part or not note_part:
             ctx.fail(f"--join expects CSV:NOTE, got {pair!r}")
-        exports.append(EnspireFile(Path(csv_part), verbose=verbose))
-        notes.append(Path(note_part))
-    ef = merge_enspire_files(exports) if len(exports) > 1 else exports[0]
-    written: list[str] = []
-    for one in exports:
-        written += one.export_measurements(Path(out), mode=export)
-    note_f = str(notes[0]) if notes else ""
-    if len(notes) > 1:
-        # the joined note is a derived input: it lives with the outputs, not in data/
-        frames = [pd.read_csv(path) for path in notes]
-        joined = pd.concat(frames, ignore_index=True)
-        note_fp = (
-            Path(out) / f"{Path(note_f).name.removesuffix('_note.csv')}_joined_note.csv"
-        )
-        joined.to_csv(note_fp, index=False)
-        provenance = {
-            "inputs": [
-                str(path)
-                for path in [Path(csv_f), *(Path(j.rpartition(":")[0]) for j in joins)]
-            ],
-            "notes": [str(path) for path in notes],
-            "labels": sorted(ef.measurements),
-            "temperatures": sorted({
-                str(m["metadata"].get("temp")) for m in ef.measurements.values()
-            }),
-        }
-        note_fp.with_suffix(".json").write_text(json.dumps(provenance, indent=2) + "\n")
-        note_f = str(note_fp)
-        if verbose:
-            print(f"joined {len(notes)} notes into {note_fp}")
-    if verbose and not written:
-        print(f"measurement tables already up to date in {out}; nothing rewritten")
-    if not note_f:
+        join_pairs.append((Path(csv_part), Path(note_part)))
+    inputs = prepare_inputs(
+        Path(csv_f),
+        None if note_f is None else Path(note_f),
+        join_pairs,
+        Path(out),
+        export=export,
+        verbose=verbose,
+    )
+    _echo_messages(inputs.messages)
+    ef = inputs.ef
+    if inputs.note is None:
         return
+    note_f = str(inputs.note)
     if x_sigma is not None and method not in {
         "bayes",
         "global-bayes",
