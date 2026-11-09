@@ -3,6 +3,20 @@
 
 # Changelog
 
+## [0.16.1] - 2026-11-09
+
+### 🐛 Bug Fixes
+
+- Type errors
+
+### 🦾 Build
+
+- *(deps)* Bump pymc from 6.3.2 to 6.4.0
+- *(deps)* Bump odrpack from 0.7.0 to 0.7.1
+- *(deps)* Bump pandas from 3.1.0 to 3.1.1
+- Manual cruft update
+- *(agents)* Skills to refactor
+
 ## [0.16.0] - 2026-11-06
 
 ### 🚀 Features

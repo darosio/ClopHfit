@@ -3,10 +3,10 @@ revision = 5
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
@@ -716,7 +716,7 @@ wheels = [
 
 [[package]]
 name = "clophfit"
-version = "0.16.0"
+version = "0.16.1"
 source = { editable = "." }
 dependencies = [
     { name = "arviz" },
@@ -3044,6 +3044,7 @@ dependencies = [
     { name = "nvidia-cublas-cu12" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/a2/22732bccd338398ced3d02cdee97c351f0ff62f2717d677fce519479ee0c/nvidia_cudnn_cu12-9.28.1.4-py3-none-manylinux_2_27_aarch64.whl", hash = "sha256:ef24078b4d2f45e80b5ce425f9e4a190bc48806e8c9ea1467496f85ed9b0a1fe", size = 723285364, upload-time = "2026-11-09T07:59:55.695Z" },
     { url = "https://files.pythonhosted.org/packages/2a/16/be895437624ae0400bda2b4bb69336cdb43346545e54edb15389d193a3b3/nvidia_cudnn_cu12-9.28.1.4-py3-none-manylinux_2_27_x86_64.whl", hash = "sha256:cbcf6f33c77fef3aa61d3fec36f2e89b07eb27d65b9f369c1adf3cfee08c2c21", size = 716579350, upload-time = "2026-11-06T21:51:22.24Z" },
 ]
 
