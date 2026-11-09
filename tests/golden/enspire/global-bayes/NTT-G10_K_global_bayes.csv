@@ -1,0 +1,2 @@
+sample,temp,K,hdi03,hdi97,r_hat,qc_dropped,ess_bulk,n,x_sigma,n_divergences,rhat_max,ess_bulk_min,ess_tail_min,bfmi,max_treedepth,n_reached_max_treedepth,reached_max_treedepth_frac,sampler,scans,isosbestic_nm,iso_window_nm,species_min,x_pool,x_axis_group_sd,x_axis_well_sd
+NTT-G10,20.0,7.886942773136667,7.832878139936556,7.9626057242222075,1.9793847340430428,-,2.853894583829145,24,0.1,54,1.9793847340430428,2.853894583829145,10.437034368975329,0.4860106511668372,10,1,0.0025,nutpie,excitation,,,,free,,
