@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from clophfit.prenspire import EnspireFile
-from clophfit.prenspire.run import run_global
+from clophfit.prenspire.runs.global_fit import run_global
 
 DATA = Path(__file__).parent / "EnSpire"
 

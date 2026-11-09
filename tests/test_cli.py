@@ -23,7 +23,7 @@ from clophfit.__main__ import (
 )
 from clophfit.fitting.data_structures import DataArray, Dataset
 from clophfit.prenspire import bands as bands_module
-from clophfit.prenspire.run import plot_bayes
+from clophfit.prenspire.runs.bayes_band import plot_bayes
 
 # tests path
 tpath = Path(__file__).parent
@@ -981,7 +981,7 @@ def test_dph_buffer_reads_the_ph_per_temperature_not_per_well() -> None:
     from the axis instead of imposing it - which moved pKa(37) by 0.25 pH before
     it was caught.
     """
-    from clophfit.prenspire.run import _vanthoff_axis_tie  # ruff: ignore[import-outside-top-level, import-private-name]
+    from clophfit.prenspire.runs.vanthoff import _vanthoff_axis_tie  # ruff: ignore[import-outside-top-level, import-private-name]
 
     note = pd.DataFrame({
         "Well": ["A01", "A02", "A01", "A02"],

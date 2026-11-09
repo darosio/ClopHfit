@@ -54,24 +54,20 @@ from clophfit.fitting.spectral import (
 from clophfit.prenspire import (
     bands as bands_module,
 )
-from clophfit.prenspire.run import (
+from clophfit.prenspire.runs.band import run_bands
+from clophfit.prenspire.runs.batch import run_batch
+from clophfit.prenspire.runs.bayes_band import run_bayes
+from clophfit.prenspire.runs.common import (
     EnspireInputError,
     EnspireMessage,
     EnspireRunError,
     EnspireRunResult,
-    GlobalSummary,
-    prepare_inputs,
-    result_report,
-    run_bands,
-    run_batch,
-    run_bayes,
-    run_global,
-    run_global_bayes,
-    run_svd,
-    run_vanthoff,
-    run_vanthoff_bayes,
-    write_isosbestic_table,
 )
+from clophfit.prenspire.runs.global_bayes import run_global_bayes
+from clophfit.prenspire.runs.global_fit import GlobalSummary, run_global
+from clophfit.prenspire.runs.inputs import prepare_inputs, write_isosbestic_table
+from clophfit.prenspire.runs.svd import result_report, run_svd
+from clophfit.prenspire.runs.vanthoff import run_vanthoff, run_vanthoff_bayes
 from clophfit.prtecan import McmcSpec, TecanConfig, Titration, calculate_conc
 from clophfit.prtecan.export import export_data_fit
 
