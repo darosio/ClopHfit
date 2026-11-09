@@ -59,7 +59,6 @@ from clophfit.prenspire import (
     merge_enspire_files,
 )
 from clophfit.prenspire.run import (
-    BandSummary,
     EnspireInputError,
     EnspireMessage,
     EnspireRunError,
@@ -67,6 +66,7 @@ from clophfit.prenspire.run import (
     GlobalSummary,
     result_report,
     run_bands,
+    run_batch,
     run_bayes,
     run_global,
     run_global_bayes,
@@ -1061,7 +1061,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         _write_isosbestic_table(ef, Path(note_f), Path(out), isosbestic=iso)
     try:  # ruff: ignore[too-many-statements-in-try-clause]
         if method in {"band", "both", "all"}:
-            _echo_band_summaries(
+            _echo_messages(
                 run_bands(
                     ef,
                     Path(note_f),
@@ -1072,7 +1072,7 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
                     wanted=band_names or bands_module.DIRECT_BANDS,
                     isosbestic=iso,
                     provenance=run_provenance,
-                )
+                ).messages
             )
         if method in {"svd", "both", "all"}:
             _echo_messages(
@@ -1218,15 +1218,6 @@ def enspire(  # ruff: ignore[too-many-arguments, complex-structure, too-many-bra
         raise click.UsageError(str(err)) from err
     except EnspireRunError as err:
         raise click.ClickException(str(err)) from err
-
-
-def _echo_band_summaries(run: EnspireRunResult[BandSummary]) -> None:
-    """Print the shared-K line for each sample of a band run."""
-    for r in run.summaries:
-        print(
-            f"{r.sample} at {r.temp}: K {r.K:.3f} [{r.lo:.3f}, {r.hi:.3f}] "
-            f"on {r.n} points, {r.dropped} screened out"
-        )
 
 
 def _echo_messages(messages: Sequence[EnspireMessage]) -> None:
@@ -1426,55 +1417,14 @@ def enspire_batch(
     that fails is part of the result, not a silent gap.
     """
     out = Path(ctx.obj.get("OUT", __enspire_out_dir__))
-    out.mkdir(parents=True, exist_ok=True)
-    root_dir = Path(root)
-    collected: list[pd.DataFrame] = []
-    failures: list[dict[str, str]] = []
-    for note_fp in sorted(root_dir.rglob("*_note.csv")):
-        data = _data_for(note_fp)
-        if data is None:
-            failures.append({"note": str(note_fp), "why": "no unambiguous data csv"})
-            continue
-        tag = note_fp.parent.relative_to(root_dir).as_posix().replace("/", "_")
-        try:
-            band_run = run_bands(
-                EnspireFile(data),
-                note_fp,
-                out / tag,
-                buffer=buffer,
-                screen=None if screen.lower() == "none" else screen,
-                min_rho=min_rho,
-                wanted=bands_module.DIRECT_BANDS,
-            )
-            _echo_band_summaries(band_run)
-            table = band_run.table
-        except Exception as exc:  # ruff: ignore[blind-except] - a bad folder must not stop the walk
-            failures.append({
-                "note": str(note_fp),
-                "why": f"{type(exc).__name__}: {exc}",
-            })
-            continue
-        table.insert(0, "folder", note_fp.parent.relative_to(root_dir).as_posix())
-        table.insert(1, "file", data.name)
-        collected.append(table)
-    if collected:
-        every = pd.concat(collected, ignore_index=True)
-        every.to_csv(out / "enspire_batch_K.csv", index=False)
-        print(f"{len(collected)} files fitted -> {out / 'enspire_batch_K.csv'}")
-    if failures:
-        pd.DataFrame(failures).to_csv(out / "enspire_batch_failures.csv", index=False)
-        print(f"{len(failures)} not fitted -> {out / 'enspire_batch_failures.csv'}")
-
-
-def _data_for(note_fp: Path) -> Path | None:
-    """Return the EnSpire csv a note belongs to, or None when ambiguous."""
-    exact = note_fp.with_name(f"{note_fp.name.removesuffix('_note.csv')}.csv")
-    if exact.exists():
-        return exact
-    others = [
-        p for p in note_fp.parent.glob("*.csv") if not p.name.endswith("_note.csv")
-    ]
-    return others[0] if len(others) == 1 else None
+    run = run_batch(
+        Path(root),
+        out,
+        buffer=buffer,
+        screen=None if screen.lower() == "none" else screen,
+        min_rho=min_rho,
+    )
+    _echo_messages(run.messages)
 
 
 #############################
