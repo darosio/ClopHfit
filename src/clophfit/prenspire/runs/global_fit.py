@@ -8,10 +8,9 @@ from clophfit.prenspire import (
     EnspireFile,
     Note,
 )
+from clophfit.prenspire.figures import plot_global_panels
 from clophfit.prenspire.provenance import write_provenance
-from clophfit.prenspire.spectral import (
-    fit_titrations_spectral,
-)
+from clophfit.prenspire.spectral import fit_titrations_spectral
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -136,7 +135,7 @@ def run_global(  # ruff: ignore[too-many-arguments]
                 "the bound applies to the reported fit only",
             )
         )
-    table = fit_titrations_spectral(
+    run = fit_titrations_spectral(
         ef,
         Note(note_fp).note,
         buffer=buffer,
@@ -149,10 +148,21 @@ def run_global(  # ruff: ignore[too-many-arguments]
         strata=strata,
         qc=qc,
         inspect=inspect,
-        figure_stem=out_dir / stem_guess,
-    )[0]
+    )
+    table = run.table
+    for panel in run.panels.values():
+        plot_global_panels(
+            out_dir / f"{stem_guess}_{panel.file_key}_panels.pdf",
+            panel.spectra,
+            panel.x,
+            panel.fit,
+            title=panel.title,
+            iso_nm=panel.iso_nm,
+            peaks=panel.peaks,
+        )
     if inspect:
         insp_fp = out_dir / f"{stem_guess}_global_inspect.txt"
+        insp_fp.write_text(run.inspect_text)
         messages.append(EnspireMessage("info", f"inspect: wrote {insp_fp}"))
     stem = note_fp.name.removesuffix("_note.csv")
     table.to_csv(out_dir / f"{stem}_K_global.csv", index=False)
