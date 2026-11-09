@@ -26,6 +26,7 @@ from click.testing import CliRunner
 
 from clophfit.__main__ import ppr
 from clophfit.fitting import bayes, plate_lm
+from clophfit.fitting.bayes import multi as bayes_multi
 from clophfit.fitting.bayes_config import SamplerConfig
 from clophfit.fitting.core import fit_binding_glob
 from clophfit.fitting.data_structures import DataArray, Dataset, FitResult
@@ -192,7 +193,7 @@ def test_multi_fit_keeps_a_chloride_control_that_does_not_bind(
         seen.update(wells=list(wells_list), kd_range=kw.get("kd_range"))
         raise _StopBuildError
 
-    monkeypatch.setattr(bayes, "_free_k_init", stop)
+    monkeypatch.setattr(bayes_multi, "_free_k_init", stop)
     with pytest.raises(_StopBuildError):
         bayes.fit_binding_pymc_multi(
             _fit_results(),
