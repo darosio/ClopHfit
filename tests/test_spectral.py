@@ -701,8 +701,8 @@ def test_inspect_writes_a_sidecar_and_leaves_the_panels_alone(
     # one block per (sample, temperature) group, and the amplitudes are present
     assert text.count("==") >= 2
     assert "a = " in text
-    printed = capsys.readouterr().out
-    assert f"inspect: wrote {sidecar}" in printed
+    # the library stays quiet: the CLI reports the sidecar through run_global
+    assert not capsys.readouterr().out
     # the panel figure is still written, and no separate species figure appears
     assert sorted(p.name for p in tmp_path.glob("*_panels.pdf"))
     assert not sorted(tmp_path.glob("*_species.pdf"))

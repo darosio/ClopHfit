@@ -1,24 +1,24 @@
-"""EnSpire runs: fit a note's titrations and write what each method produces.
-
-The functions here do the fitting and the writing and return what happened;
-the CLI parses options and prints.
-"""
+"""Band runs: fit a note's titrations from named spectral windows and share K."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import matplotlib.pyplot as plt
 
-from clophfit.prenspire import EnspireFile, Note, bands as bands_module
+from clophfit.prenspire import (
+    EnspireFile,
+    Note,
+    bands as bands_module,
+)
 from clophfit.prenspire.provenance import write_provenance
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
-    import pandas as pd
+
+from clophfit.prenspire.runs.common import EnspireMessage, EnspireRunResult
 
 
 class BandSummary(NamedTuple):
@@ -33,16 +33,12 @@ class BandSummary(NamedTuple):
     dropped: Any
 
 
-@dataclass(frozen=True)
-class EnspireRunResult:
-    """What one EnSpire run wrote and found.
-
-    ``written`` lists every file produced, in the order they were written.
-    """
-
-    written: tuple[Path, ...]
-    table: pd.DataFrame
-    summaries: tuple[BandSummary, ...]
+def _band_line(r: BandSummary) -> str:
+    """Format the console line for one sample's shared K in a band run."""
+    return (
+        f"{r.sample} at {r.temp}: K {r.K:.3f} [{r.lo:.3f}, {r.hi:.3f}] "
+        f"on {r.n} points, {r.dropped} screened out"
+    )
 
 
 def run_bands(  # ruff: ignore[too-many-arguments]
@@ -56,7 +52,7 @@ def run_bands(  # ruff: ignore[too-many-arguments]
     wanted: Sequence[str],
     isosbestic: float | str | None = None,
     provenance: Mapping[str, object] | None = None,
-) -> EnspireRunResult:
+) -> EnspireRunResult[BandSummary]:
     """Fit a note's titrations from named bands and write the tables and figure.
 
     Parameters
@@ -87,7 +83,7 @@ def run_bands(  # ruff: ignore[too-many-arguments]
 
     Returns
     -------
-    EnspireRunResult
+    EnspireRunResult[BandSummary]
         The tables and figure written, the shared-K summaries, and the table.
     """
     note = Note(note_fp)
@@ -145,5 +141,8 @@ def run_bands(  # ruff: ignore[too-many-arguments]
         written.append(out_dir / f"{stem}_bands.pdf")
     written.append(json_path)
     return EnspireRunResult(
-        written=tuple(written), table=fits.table, summaries=summaries
+        written=tuple(written),
+        table=fits.table,
+        summaries=summaries,
+        messages=tuple(EnspireMessage("info", _band_line(s)) for s in summaries),
     )

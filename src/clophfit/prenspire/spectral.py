@@ -1058,7 +1058,6 @@ def fit_titrations_spectral(  # ruff: ignore[too-many-arguments, too-many-branch
     if inspect and figure_stem is not None:
         insp_fp = figure_stem.parent / f"{figure_stem.name}_global_inspect.txt"
         insp_fp.write_text("\n".join(inspect_lines).rstrip("\n") + "\n")
-        print(f"inspect: wrote {insp_fp}")
     return pd.DataFrame(rows), fits
 
 
