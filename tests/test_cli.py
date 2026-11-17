@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import tempfile
+import types
 from pathlib import Path
 from typing import IO, cast
 
@@ -15,6 +16,7 @@ import pytest
 from click.testing import CliRunner
 from PIL import Image
 
+from clophfit import __main__ as cli_module
 from clophfit.__main__ import (
     clop,
     fit_titration,
@@ -117,6 +119,53 @@ def test_prenspire(tmp_path: Path) -> None:
     # validate output file contents
     assert filecmp.cmp(out / "NTT_37C_pKa_A.csv", expected / "NTT_37C_pKa_A.csv")
     assert filecmp.cmp(out / "NTT_37C_pKa_B.csv", expected / "NTT_37C_pKa_B.csv")
+
+
+def test_prenspire_join_passes_additional_export_and_note(
+    tmp_path: Path, runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--join`` forwards each additional export:note pair to input preparation."""
+    calls: list[tuple[Path, Path | None, list[tuple[Path, Path]]]] = []
+
+    # Match prepare_inputs' interface so the test exercises CLI wiring.
+    def prepare_inputs(  # ruff: ignore[too-many-arguments]
+        csv_f: Path,
+        note_f: Path | None,
+        joins: list[tuple[Path, Path]],
+        out: Path,
+        *,
+        export: str,
+        verbose: int,
+    ) -> types.SimpleNamespace:
+        del out, export, verbose
+        calls.append((csv_f, note_f, joins))
+        return types.SimpleNamespace(ef=None, note=None, messages=())
+
+    monkeypatch.setattr(cli_module, "prepare_inputs", prepare_inputs)
+    data = tpath / "EnSpire"
+    extra_csv = tmp_path / "second.csv"
+    extra_note = tmp_path / "second_note.csv"
+    result = runner.invoke(
+        ppr,
+        [
+            "--out",
+            str(tmp_path),
+            "enspire",
+            str(data / "G10.csv"),
+            str(data / "NTT-G10_note.csv"),
+            "--join",
+            f"{extra_csv}:{extra_note}",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        (
+            data / "G10.csv",
+            data / "NTT-G10_note.csv",
+            [(extra_csv, extra_note)],
+        )
+    ]
 
 
 def test_prenspire_global(tmp_path: Path, runner: CliRunner) -> None:
